@@ -25,6 +25,21 @@ enum FrameFreshness {
     }
 }
 
+enum VideoReadinessError: LocalizedError, Equatable {
+    case boardDisconnected, mirroringDisconnected, decoderUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .boardDisconnected:
+            return String(localized: "The board is disconnected. Reconnect it before starting.")
+        case .mirroringDisconnected:
+            return String(localized: "Screen Mirroring is not streaming. Connect to ESP32 in Control Center, wait for the preview, then start again.")
+        case .decoderUnavailable:
+            return String(localized: "Screen Mirroring is connected, but no decodable screen is available. In Control Center, stop mirroring and select ESP32 again. Wait for the preview, then start again.")
+        }
+    }
+}
+
 /// How a run gets its frames: the live stream (`stream on`, the default: a frame in under a second), or one
 /// snap after each action (`stream off`; waits for the board's whole GOP, often 20-30 s).
 enum FrameMode: String {
@@ -107,6 +122,28 @@ extension ScreenSource {
     }
 
     var live: Bool { mirroring && frame != nil && !broken && (device?.connected ?? false) }
+
+    /// Safe metadata for early failures too: no screenshots, Wi-Fi credentials or video tokens.
+    var diagnostics: JObject {
+        let t = now()
+        return ["connected": .bool(device?.connected == true), "mirroring": .bool(mirroring),
+                "stream_on": .bool(streamOn), "has_frame": .bool(frame != nil), "broken": .bool(broken),
+                "decoded_ms": .int(decodedBoardMs), "latest_board_ms": latestBoardMs.map { .int($0) } ?? .null,
+                "status_age_s": statusAt > 0 ? .num(max(0, t - statusAt)) : .null,
+                "frame_age_s": capturedAt > 0 ? .num(max(0, t - capturedAt)) : .null,
+                "decoder_note": .str(String(note.prefix(200)))]
+    }
+
+    /// Run this in the foreground before going Home: a connected mirror may have no complete GOP
+    /// for a newly opened decoder. Streaming waits for a usable frame before attempting one snapshot.
+    @discardableResult
+    func prepareForRun(wait: Double = 3) async throws -> String {
+        try Task.checkCancellation()
+        guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+        guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
+        try await stream(true)
+        return try await currentFrame(wait: wait)
+    }
 
     func status(_ s: BoardStatus) {
         statusAt = now()
@@ -192,15 +229,25 @@ extension ScreenSource {
     /// from, for the log.
     @discardableResult
     func currentFrame(maxAge: Double = 1, wait: Double = 3) async throws -> String {
+        try Task.checkCancellation()
+        guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+        guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
         if streamOn && mirroring {
             if usable() { return "live" }
             if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
         }
         do {
-            try await snap()
-        } catch is BoardTimeout {
-            DebugLog.write("snap timed out; retrying once with a longer timeout")
-            try await snap(timeout: snapTimeout * 1.5)
+            do {
+                try await snap()
+            } catch is BoardTimeout {
+                DebugLog.write("snap timed out; retrying once with a longer timeout")
+                try await snap(timeout: snapTimeout * 1.5)
+            }
+        } catch let error as DeviceError where error.message.hasPrefix("err no video") {
+            // A live frame may have arrived while the snapshot command was in flight.
+            if usable() { return "live (recovered during snap)" }
+            guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+            throw mirroring ? VideoReadinessError.decoderUnavailable : VideoReadinessError.mirroringDisconnected
         }
         guard usable() else { throw BlindError(reason: "board replied but no verified current video frame was decoded") }
         return "snap"

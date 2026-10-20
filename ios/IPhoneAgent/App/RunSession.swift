@@ -41,29 +41,41 @@ extension AppModel {
             say("LLM: \(error.localizedDescription)")
             return
         }
-        // Start is tapped in this app, so: Live Activity, go Home, let the screen settle, THEN the first
-        // frame for the planner. Each sub-step is timed in the log.
+        // Verify the decoder while still in this app, then go Home and verify the planner's first frame.
+        // A fresh App can join an old mirror whose keyframe has already left the board's buffer.
         let t0 = now()
-        func mark(_ what: String) { DebugLog.write(String(format: "start: %@ (+%.0f ms)", what, (now() - t0) * 1000)) }
+        var startupStage = "video preflight"
+        var liveRequested = false
+        func mark(_ what: String) {
+            startupStage = what
+            let ms = (now() - t0) * 1000
+            DebugLog.write(String(format: "start: %@ (+%.0f ms)", what, ms))
+            traces.write(kind: "startup", ["stage": .str(what), "elapsed_ms": .num(ms), "video": .obj(feed.diagnostics)])
+        }
         traces.start(task: task)  // the run folder exists from here: a failed start keeps its log and video
         startVideo()
         FrameMode.fallback = nil  // each run starts in the chosen mode
         let snapMode = FrameMode.current == .snap
-        live.start(task: task, runID: runID, limit: agent.maxSteps)
-        mark("Live Activity requested")
         do {
+            mark("video preflight")
+            let source = try await feed.prepareForRun()
+            mark("foreground frame verified: " + source)
+            mark("configuring task frame mode")
             if snapMode {
                 if feed.streamOn { try await feed.stream(false) }
                 mark("snap-per-step mode (stream off)")
             } else {
-                try await feed.stream(true)  // the agent waits for the screen to settle: it needs every change
-                mark("stream on")
+                mark("stream on") // already enabled by the foreground preflight
             }
+            live.start(task: task, runID: runID, limit: agent.maxSteps)
+            liveRequested = true
+            mark("Live Activity requested")
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "agent") { [weak self] in
                 self?.say("iOS is ending background time; BLE status keeps the run going")
                 self?.endBackgroundTask()
             }
             let left = now()
+            mark("leaving app")
             var away = await leaveApp()
             if !away { away = await askUserToLeave() }
             guard away else {  // never let the agent start on its own app
@@ -75,7 +87,10 @@ extension AppModel {
                 await feed.settled()
                 mark(changed ? "screen changed and settled" : "no screen change seen in 3 s; settled")
             }
-            mark("first frame: " + (try await feed.currentFrame()))
+            mark("verifying first task frame")
+            let firstFrame = try await feed.currentFrame()
+            try await feed.requireFrame(after: left)
+            mark("first frame: " + firstFrame)
             try agent.start(task, traceStarted: true)
             mark("agent started")
             say("started: \(task)")
@@ -83,11 +98,15 @@ extension AppModel {
         } catch {
             say("cannot start: \(error.localizedDescription)")
             traces.write(feed.frame, kind: "step", ["action": .str("error"),
-                                                    "reason": .str("cannot start: \(error.localizedDescription)")])
+                                                    "reason": .str("cannot start: \(error.localizedDescription)"),
+                                                    "startup_stage": .str(startupStage), "video": .obj(feed.diagnostics)])
+            var failedMetrics = metrics.snapshot()
+            failedMetrics["startup_stage"] = startupStage
+            traces.writeMetrics(failedMetrics)
             videoSink = nil
             saveVideoFrame(feed.frame)
             videoDir = nil
-            live.end((.failure, String(localized: "Could not start")))
+            if liveRequested { live.end((.failure, String(localized: "Could not start"))) }
             endBackgroundTask()
             runs.reload()
             runMood = .failure

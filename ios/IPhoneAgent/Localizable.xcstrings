@@ -1,6 +1,36 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "The board is disconnected. Reconnect it before starting." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板已断开，请重新连接后再开始。"
+          }
+        }
+      }
+    },
+    "Screen Mirroring is not streaming. Connect to ESP32 in Control Center, wait for the preview, then start again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕镜像尚未开始传输。请在控制中心连接 ESP32，等预览出现后再开始。"
+          }
+        }
+      }
+    },
+    "Screen Mirroring is connected, but no decodable screen is available. In Control Center, stop mirroring and select ESP32 again. Wait for the preview, then start again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕镜像已连接，但当前画面无法解码。请在控制中心停止镜像，再重新选择 ESP32，等预览出现后再开始。"
+          }
+        }
+      }
+    },
     "The run is still active. Return to the Home Screen to continue." : {
       "localizations" : {
         "zh-Hans" : {
