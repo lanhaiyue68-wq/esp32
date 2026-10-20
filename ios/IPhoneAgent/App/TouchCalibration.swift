@@ -11,6 +11,7 @@ extension AutoCalibrator {
     static let targets: [(Double, Double)] = [(0.25, 0.25), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.75, 0.75)]
     static let check = (x: 0.5, y: 0.62)
     static let tapTimeout = 3.0
+    static let maxCheckError = 0.05  // a check tap this far off means the fit is wrong: fail, not "calibrated"
 
     func touchCalibrate(full: Bool) async throws -> TouchResult {
         let probe = app.probe, device = app.board.commands, pointer = app.pointer
@@ -127,6 +128,8 @@ extension AutoCalibrator {
         pointer.setQuality(error)
         app.say(String(format: "probe check at (%.2f, %.2f): landed (%.3f, %.3f), ±%.1f%%", Self.check.x, Self.check.y,
                        p.x, p.y, error * 100))
+        // A pinned axis can still fit two clean-looking points: a ±49.8% check once passed as "calibrated".
+        if error > Self.maxCheckError { return .failed(String(format: "check tap missed by ±%.1f%%", error * 100)) }
         return .done(error)
     }
 }

@@ -6,6 +6,12 @@ struct BlindError: LocalizedError {
     var errorDescription: String? { reason }
 }
 
+struct InputNeedsVerification: LocalizedError {
+    let expected: String
+    let remaining: String
+    var errorDescription: String? { "Inspect the Pinyin candidates for \(expected); do not assume the first candidate is correct." }
+}
+
 /// What AgentLoop does on the phone (Pointer, or a fake in tests).
 @MainActor protocol Gestures: AnyObject {
     var device: HIDDevice { get }
@@ -91,6 +97,9 @@ extension Pointer: Gestures {}
 
     func stop() {
         if let job { job.cancel() } else { running = false }  // a shown (demo) run has no job
+        if let device = phone?.device {
+            Task { do { try await device.abort() } catch { DebugLog.write("stop failed: \(error.localizedDescription)") } }
+        }
     }
 
     func clear() throws {
@@ -114,11 +123,21 @@ extension Pointer: Gestures {}
         guard let screen, !screen.live else { return nil }
         var recovery = Recovery(at: now(), limit: recoveryLimit)
         var shown: Recovery.Stage?
+        var lastProbe = -Double.infinity
         defer { if shown != nil { onRecover?(nil) } }
         while true {
             try Task.checkCancellation()
             let state = link?() ?? Recovery.Link(connected: phone?.device.connected ?? true, sta: nil,
                                         ap: screen.live ? "streaming" : nil, frameAt: screen.live ? now() : 0)
+            if state.connected, state.ap == "streaming", now() - lastProbe >= 10 {
+                lastProbe = now()
+                do {
+                    try await screen.requireFrame(after: recovery.started)
+                    try await restore?()
+                    return now() - recovery.started
+                } catch is CancellationError { throw CancellationError() }
+                catch { DebugLog.write("recover: frame not yet verified: \(error.localizedDescription)") }
+            }
             switch recovery.next(state, at: now()) {
             case .live where screen.live:
                 try await restore?()
@@ -144,6 +163,7 @@ extension Pointer: Gestures {}
             try await gate?()  // the user may have opened this app while it was paused
         }
         guard let screen, screen.live else { throw BlindError() }  // never let the model act blind
+        try await screen.requireFrame(after: nil)
         let frame = screen.frame, started = now()
         onDoing?(retryTimeout ? .waiting : .retrying)
         let reporting = llm as? ModelProgressReporting
@@ -187,7 +207,11 @@ extension Pointer: Gestures {}
                         continue
                     }
                     failures = 0
-                } catch let e where e is BlindError || e is CancellationError || Task.isCancelled {
+                } catch let e as BlindError {
+                    record(nil, ["action": .str("paused"), "reason": .str(e.reason)])
+                    guard try await askForHelp() else { return finish() }
+                    continue
+                } catch let e where e is CancellationError || Task.isCancelled {
                     throw e
                 } catch {  // a bad reply or a dropped link: recover, don't crash
                     record(nil, ["action": .str("hiccup"), "reason": .str(String(error.localizedDescription.prefix(300)))])
@@ -200,6 +224,13 @@ extension Pointer: Gestures {}
                         continue
                     }
                     await screen?.settled()
+                    if error is BoardTimeout || error is DeviceError {
+                        // An unacknowledged action may have completed. Observe its result before replanning;
+                        // reset tracking, but never replay the original relative move/click/text.
+                        if phone?.device.connected == true { try await phone?.device.abort() }
+                        try await screen?.requireFrame(after: nil)
+                        try await phone?.reset()
+                    }
                     try await replan(stuck: true)
                 }
             }
@@ -265,9 +296,21 @@ extension Pointer: Gestures {}
             }
             if name != "done" && name != "fail" {
                 try await gate?()
+                try await screen?.requireFrame(after: nil)
+                if i == 0, seen != screen?.frame, Vision.changed(seen, screen?.frame, ignore: spots) {
+                    record(screen?.frame, ["action": .str("stale plan"), "reason": .str("screen changed while the model was responding; inspect again")])
+                    return false
+                }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
-                try await perform(act)
+                do { try await perform(act) }
+                catch let input as InputNeedsVerification {
+                    lastActed = now()
+                    record(planned.shot, ["action": .str("compose"), "expected": .str(input.expected),
+                                          "remaining": .str(input.remaining), "reason": .str(input.localizedDescription)])
+                    timing.frameMs += try await settle()
+                    return false // inspect candidates before any further action in the batch
+                }
                 lastActed = now()
                 let s = lastActed - started
                 timing.hidMs += s * 1000
@@ -279,23 +322,24 @@ extension Pointer: Gestures {}
             if name == "done" || name == "fail" { return true }
             let following = i < acts.count - 1 ? acts[i + 1].act["action"]?.str : nil
             if name == "tap" && (following == "type" || following == "key") {  // a missed tap never opened the field
-                timing.frameMs += await settle()
+                timing.frameMs += try await settle()
                 if !Vision.changed(seen, screen?.frame, ignore: spots) {
                     steps[steps.count - 1]["changed"] = .bool(false)
                     return false  // skip the rest; the actor looks again
                 }
             }
         }
-        timing.frameMs += await settle()
+        timing.frameMs += try await settle()
         // feedback for the next round
         steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
         return false
     }
 
-    private func settle() async -> Double {
+    private func settle() async throws -> Double {
         let started = now()
         onDoing?(.looking)
         await screen?.afterAction(since: lastActed)
+        try await screen?.requireFrame(after: lastActed)
         return (now() - started) * 1000
     }
 
@@ -317,6 +361,8 @@ extension Pointer: Gestures {}
             let last = steps.last ?? JObject()
             prompt += "\n\nThe previous plan got stuck (last event: \(pyStr(last["action"])) \(last["reason"]?.str ?? "")):"
                 + "\n\(plan)\nLook at the current screen and plan from here, another way if needed."
+                + "\nKeep steps that already succeeded; resume from the current screen."
+                + "\n\nRecent actions:\n\(recentActions)"
         }
         let (reply, seconds, frame) = try await ask("planner", planner, Prompts.plannerApp + "\n" + AssistiveTouchSpots.rule, prompt)
         let (en, zh) = Actions.parsePlan(reply)
@@ -325,8 +371,7 @@ extension Pointer: Gestures {}
                        "think_s": .num(seconds)])
     }
 
-    func nextActions() async throws -> [Planned] {
-        guard let actor else { throw LLMError(message: "no actor model") }
+    private var recentActions: String {
         // actions and their effect only: echoing earlier thoughts makes the model repeat them instead of looking
         let hidden: Set<String> = ["t", "plan", "plan_zh", "think_s", "act_s", "shot", "thought", "thought_zh", "changed"]
         let history = steps.suffix(8).filter { $0["plan"] == nil }.map { s -> String in
@@ -334,13 +379,23 @@ extension Pointer: Gestures {}
                 : s["changed"] == .bool(false) ? " -> screen did NOT change" : ""
             return String(PyJSON.dumps(s.without(hidden)).prefix(300)) + effect
         }.joined(separator: "\n")
-        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(history.isEmpty ? "(none)" : history)\n\nNext action?"
+        return history.isEmpty ? "(none)" : history
+    }
+
+    func nextActions() async throws -> [Planned] {
+        guard let actor else { throw LLMError(message: "no actor model") }
+        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(recentActions)\n\nNext action?"
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
             reply = text
             var acts: [JObject]
-            do { acts = try Actions.parseActions(text) } catch { continue }
+            do { acts = try Actions.parseActions(text) } catch {
+                prompt += "\n\nYour previous reply could not be parsed (\(String(error.localizedDescription.prefix(160))))."
+                    + " No action from that reply was executed."
+                    + " Reply with one brief THINK line followed immediately by valid DO lines; no extra explanation."
+                continue
+            }
             if missed, let last = steps.last, Actions.key(acts[0]) == Actions.key(last) {  // same move that did nothing
                 prompt += "\n\nYou just proposed \(PyJSON.dumps(Actions.key(acts[0]))) again, but it changed nothing last "
                     + "time. Choose a different action (another position, a shorter swipe, or another way)."

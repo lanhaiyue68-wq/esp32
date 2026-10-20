@@ -35,6 +35,11 @@ extension BoardTransport {
     var connected: Bool { get }
     @discardableResult func send(_ command: String) async throws -> String
     func waitConnected(_ timeout: TimeInterval) async -> Bool
+    func abort() async throws
+}
+
+extension HIDDevice {
+    func abort() async throws { try await send("abort") }
 }
 
 /// A FIFO async mutex for main-actor code.
@@ -64,6 +69,8 @@ extension BoardTransport {
     /// "app <command>" lines relayed from the Mac harness.
     var onAppCommand: ((String) -> Void)?
     private var pending: [Int: CheckedContinuation<BoardReply, Error>] = [:]
+    private var epoch = 0
+    private var stopping = false
     private var last = 0.0, beat = 0.0
     var onTiming: ((String, Double) -> Void)?  // command name, ms
 
@@ -79,6 +86,7 @@ extension BoardTransport {
 
     /// The link dropped: fail everything in flight.
     func linkDown() {
+        epoch += 1
         let waiting = pending
         pending = [:]
         waiting.values.forEach { $0.resume(throwing: DeviceError(message: "board disconnected")) }
@@ -86,7 +94,12 @@ extension BoardTransport {
 
     func handleReply(_ line: String) {
         let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("app ") { return onAppCommand?(String(text.dropFirst(4))) ?? () }
+        if text.hasPrefix("app ") {
+#if DEBUG && ENABLE_APP_RELAY
+            onAppCommand?(String(text.dropFirst(4)))
+#endif
+            return
+        }
         if text.hasPrefix("log ") { return }  // our own log lines, relayed to the harness
         guard let reply = BoardReply.parse(line), let c = pending.removeValue(forKey: reply.id) else { return }
         c.resume(returning: reply)
@@ -105,6 +118,9 @@ extension BoardTransport {
         let name = parts.first ?? "", arg = parts.count > 1 ? parts[1] : ""
         switch name {
         case "move": return 5 + Double(arg.split(separator: " ").compactMap { Int($0) }.map(abs).max() ?? 0) / 10 * 0.012
+        case "stroke":  // the whole stroke runs on the board: allow for every segment, like a move each
+            let v = arg.split(separator: " ").compactMap { Int($0) }.map(abs)
+            return 5 + stride(from: 0, to: v.count - 1, by: 2).map { Double(max(v[$0], v[$0 + 1])) }.reduce(0, +) / 10 * 0.012
         case "type": return 5 + 0.1 * Double(arg.count)
         case "ping": return 8  // an idle check: tolerate a hiccup rather than drop a healthy board
         case "snap": return 15  // a whole GOP over BLE
@@ -114,7 +130,7 @@ extension BoardTransport {
     }
 
     /// Called once when a command times out (e.g. video starving control traffic): the app turns the
-    /// stream off, then the command is retried once.
+    /// stream off. The outcome is uncertain: never replay the command automatically.
     var onTimeout: ((String) async -> Void)?
 
     /// Send one command; returns the text after "ok" (e.g. bench's ms). Throws DeviceError on err/timeout.
@@ -123,10 +139,8 @@ extension BoardTransport {
         do {
             return try await send(command, timeout: nil)
         } catch let e as BoardTimeout {
-            guard command != "ping", !command.hasPrefix("stream"), let onTimeout else { throw e }
-            await onTimeout(command)
-            DebugLog.write("cmd retry after timeout: \(command.prefix(40))")
-            return try await send(command, timeout: nil)
+            if command != "ping", !command.hasPrefix("stream"), let onTimeout { await onTimeout(command) }
+            throw e
         }
     }
 
@@ -134,11 +148,34 @@ extension BoardTransport {
     /// BoardTimeout and keeps the connection; only a real CoreBluetooth disconnect fails as link lost.
     @discardableResult
     func send(_ command: String, timeout custom: Double?) async throws -> String {
+        let queuedAt = epoch
+        await lock.lock()
+        defer { lock.unlock() }
+        try Task.checkCancellation()
+        guard queuedAt == epoch, !stopping else { throw CancellationError() }
+        return try await exchange(command, timeout: custom)
+    }
+
+    /// Stop must reach the board while an earlier command is still executing.
+    func abort() async throws {
+        guard !stopping else { return }
+        stopping = true
+        epoch += 1
+        let waiting = pending; pending = [:]
+        waiting.values.forEach { $0.resume(throwing: CancellationError()) }
+        defer { stopping = false }
+        do { _ = try await exchange("abort", timeout: 3) }
+        catch { transport?.dropLink(); throw error }
+    }
+
+    private func exchange(_ command: String, timeout custom: Double?) async throws -> String {
+        try Task.checkCancellation()
         guard connected, let transport else { throw DeviceError(message: "board not connected") }
         let timeout = custom ?? Self.timeout(command)
         let name = String(command.split(separator: " ").first ?? "")
-        await lock.lock()
-        defer { lock.unlock() }
+        guard command.utf8.count <= 480, !command.contains("\n"), !command.contains("\r"), !command.contains("\0") else {
+            throw DeviceError(message: "command exceeds board limit or contains a line break")
+        }
         let started = now()
         let id = nextID
         nextID += 1
@@ -146,6 +183,7 @@ extension BoardTransport {
         do {
             reply = try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (c: CheckedContinuation<BoardReply, Error>) in
+                    guard !Task.isCancelled else { c.resume(throwing: CancellationError()); return }
                     pending[id] = c
                     do { try transport.write("\(id) \(command)") } catch {
                         pending[id] = nil

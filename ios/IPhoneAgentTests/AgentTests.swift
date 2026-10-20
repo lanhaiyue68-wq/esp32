@@ -87,6 +87,48 @@ import XCTest
         XCTAssertThrowsError(try Actions.parseActions("THINK: I am not sure what to do."))
     }
 
+    func testMalformedReplyGetsFeedbackBeforeRetryWithoutExecutingAGesture() async throws {
+        let actor = FakeModel { n in n == 1 ? "THINK: still explaining" : "THINK: I see Search.\nDO: tap 100 200" }
+        let phone = FakeGestures()
+        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        let acts = try await agent.nextActions()
+        XCTAssertEqual(acts.first?.act["action"], .str("tap"))
+        XCTAssertEqual(actor.prompts.count, 2)
+        XCTAssertTrue(actor.prompts[1].contains("no DO line"))
+        XCTAssertTrue(actor.prompts[1].contains("No action from that reply was executed"))
+        XCTAssertTrue(phone.calls.isEmpty)
+    }
+
+    func testStuckReplanReceivesRecentActionsAndTheirEffects() async throws {
+        let planner = FakeModel { _ in "1. Resume from the current screen" }
+        let agent = AgentLoop(phone: nil, screen: FakeScreen(), actor: planner, planner: planner, trace: nil)
+        agent.steps = [
+            ["action": .str("tap"), "x": .int(100), "y": .int(200), "changed": .bool(true)],
+            ["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(400),
+             "changed": .bool(false)],
+            ["action": .str("hiccup"), "reason": .str("board command timed out")],
+        ]
+        try await agent.replan(stuck: true)
+        let prompt = try XCTUnwrap(planner.prompts.first)
+        XCTAssertTrue(prompt.contains("Recent actions:"))
+        XCTAssertTrue(prompt.contains("\"action\": \"tap\""))
+        XCTAssertTrue(prompt.contains("-> screen changed"))
+        XCTAssertTrue(prompt.contains("-> screen did NOT change"))
+        XCTAssertTrue(prompt.contains("board command timed out"))
+        XCTAssertTrue(prompt.contains("Keep steps that already succeeded"))
+    }
+
+    func testStuckReplanKeepsOnlyBoundedHistory() async throws {
+        let planner = FakeModel { _ in "1. Continue" }
+        let agent = AgentLoop(phone: nil, screen: FakeScreen(), actor: planner, planner: planner, trace: nil)
+        agent.steps = (0..<12).map { ["action": .str("tap"), "x": .int($0), "y": .int(200)] }
+        try await agent.replan(stuck: true)
+        let prompt = try XCTUnwrap(planner.prompts.first)
+        XCTAssertFalse(prompt.contains("\"x\": 0,"))
+        XCTAssertTrue(prompt.contains("\"x\": 4,"))
+        XCTAssertTrue(prompt.contains("\"x\": 11,"))
+    }
+
     func testParsePlanWithAndWithoutLanguages() {
         XCTAssertTrue(Actions.parsePlan("EN:\n1. Tap Search\nZH:\n1. 点搜索") == ("1. Tap Search", "1. 点搜索"))
         XCTAssertTrue(Actions.parsePlan("1. Tap Search") == ("1. Tap Search", "1. Tap Search"))
@@ -146,14 +188,16 @@ import XCTest
             + "{\"action\": \"type\", \"text\": \"caf\\u00e9\"}\n\nNext action?"))
     }
 
-    func testPromptsAreVerbatimFromThePythonServer() throws {
-        let agentPy = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../server/hidagent/agent.py").standardized
-        guard let source = try? String(contentsOf: agentPy, encoding: .utf8) else {
-            throw XCTSkip("server source not reachable from the test runner")
+    func testBundledPromptsMatchCurrentPromptSources() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../prompts").standardized
+        for (name, bundled) in [("planner", Prompts.planner), ("actor", Prompts.actorServer), ("app-rules", Prompts.appRules)] {
+            let url = root.appendingPathComponent(name + ".md")
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+                throw XCTSkip("prompt sources not reachable from the test runner")
+            }
+            XCTAssertEqual(bundled, source.hasSuffix("\n") ? String(source.dropLast()) : source, name)
         }
-        XCTAssertTrue(source.contains("PLANNER_PROMPT = \"\"\"" + Prompts.planner + "\"\"\""))
-        XCTAssertTrue(source.contains("ACTOR_PROMPT = \"\"\"" + Prompts.actorServer + "\"\"\""))
     }
 
     func testRunStopsAfterThreeErrorsInARow() async {

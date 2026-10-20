@@ -27,7 +27,13 @@ enum Actions {
             let text = rest.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             return ["action": .str(name), first: .str(text)]
         }
-        let numbers = matches(#"-?\d+(?:\.\d+)?"#, in: rest).compactMap { Double($0) }.map { Int($0) }
+        let tokens = matches(#"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"#, in: rest)
+        let numbers = try tokens.map { token -> Int in
+            guard let value = Double(token), value.isFinite, (0...1000).contains(value) else {
+                throw ParseError(message: "coordinates must be finite and in 0...1000")
+            }
+            return Int(value) // bounded before conversion; huge model values cannot trap
+        }
         if keys == ["points"] {
             guard numbers.count >= 4, numbers.count % 2 == 0 else {
                 throw ParseError(message: "path needs 2+ x y pairs: \(line.prefix(100))")

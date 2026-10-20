@@ -46,6 +46,10 @@ struct ModelSettingsView: View {
                     }
                     TextField("Extra body JSON", text: $settings.extraBody, prompt: Text(verbatim: "{}"))
                         .font(.body.monospaced())
+                    if !settings.extraBodyValid {  // ignored as a whole otherwise, which used to fail silently
+                        Text(verbatim: "Not a JSON object: this field is ignored")
+                            .font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
         }

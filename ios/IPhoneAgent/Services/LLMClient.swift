@@ -64,7 +64,7 @@ struct LLMError: LocalizedError {
         self.session = session ?? {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30  // no byte for this long = hung; the agent retries
-            config.timeoutIntervalForResource = 90
+            config.timeoutIntervalForResource = 60  // a step answers in seconds with thinking off; a hang retries sooner
             return URLSession(configuration: config)
         }()
     }
@@ -121,6 +121,10 @@ struct LLMError: LocalizedError {
         DebugLog.write(String(format: "llm ← HTTP %d, first token %@, total %.1f s, %d chars", status,
                               result.firstToken.map { String(format: "%.1f s", $0) } ?? "-", result.total, result.text.count)
                        + " " + PyJSON.dumps(.obj(result.diagnostics)))
+        if result.reasoningChars > 2000 {  // the usual reason a step takes 30+ s
+            DebugLog.write("llm: \(model) reasoned \(result.reasoningChars) chars before answering; for speed turn "
+                           + "thinking off in Extra body JSON, e.g. {\"enable_thinking\": false}")
+        }
         return result
     }
 

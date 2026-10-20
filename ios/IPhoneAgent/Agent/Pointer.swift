@@ -24,6 +24,13 @@ import Foundation
     @Published private(set) var span: Span?  // mouse units needed to cross the full screen width / height
     private var pos: (Int, Int)?  // pointer position in mouse units; nil = unknown
     private var moves = 0
+    private var strokeCommand: Bool?  // does the firmware take `stroke` (v16+)? nil until the first drawing tries it
+    // A run of drawing strokes (circle/path) re-homes to the corner only at its start, then continues from the tracked
+    // position: no trip to the top-left between every stroke. Any tap or other gesture ends the run (clears drawChain),
+    // so the next drawing starts clean again. unitsSinceDrawHome bounds the drift that builds across a long run: once
+    // the strokes have moved more than the budget, the next one re-homes.
+    private var drawChain = false
+    private var unitsSinceDrawHome = 0
     private var link = 0  // device.links when the pointer was last homed
     /// where the pointer really landed (seen on screen) for the fraction we aimed at, per axis; a line fit
     /// through them corrects every later move, so taps get better as the agent works
@@ -152,9 +159,9 @@ import Foundation
         try? JSONEncoder().encode(saved).write(to: file)
     }
 
-    func point(_ x: Double, _ y: Double, aim: Bool = false) async throws {
+    func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
-        try await moveTo(dx(x), dy(y))
+        try await moveTo(dx(x), dy(y), rehome: rehome)
         if aim && screen != nil { try await self.aim(x, y) }
     }
 
@@ -252,6 +259,8 @@ import Foundation
     /// Let go of the button and re-home the pointer, whatever state a gesture left.
     func reset() async throws {
         pos = nil
+        drawChain = false
+        unitsSinceDrawHome = 0
         try await device.send("release")
         try await device.send("home")
         (pos, moves) = ((0, 0), 0)
@@ -259,6 +268,7 @@ import Foundation
 
     /// aim: find the pointer on screen first (slower); worth it when a tap just missed.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
+        drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
         try await point(x, y, aim: aim)
         try await device.send("click")
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
@@ -271,31 +281,185 @@ import Foundation
     /// Press at the first point, move through the rest, release: one continuous stroke. hold rests at the end
     /// first, so lists and pickers stop exactly there; system gestures (home, back) need the flick.
     func drag(_ points: [CGPoint], hold: Bool = true) async throws {
-        try await point(Double(points[0].x), Double(points[0].y))
+        guard points.count >= 2, points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
+            throw DeviceError(message: "drag needs at least two finite points")
+        }
+        let drawing = points.count > 2
+        // Re-home before a drawing stroke only when the run is starting (the first stroke after a tap or other
+        // gesture) or when it has drifted past the budget; otherwise keep the tracked position and move straight to
+        // the new start, so the pointer does not visit the corner between every stroke. A re-home at the run's start
+        // still clears the error carried in from earlier taps that used to shift the circle ~75 units.
+        let budget = span.map { 3 * max($0.w, $0.h) } ?? 800
+        let startFromHome = !drawing || !drawChain || unitsSinceDrawHome > budget
+        if drawing {
+            if startFromHome { pos = nil; unitsSinceDrawHome = 0 }
+            drawChain = true
+        } else {
+            drawChain = false
+        }
+        let previous = startFromHome ? (0, 0) : (pos ?? (0, 0))
+        let travel = hypot(Double(dx(Double(points[0].x)) - previous.0), Double(dy(Double(points[0].y)) - previous.1))
+        try await point(Double(points[0].x), Double(points[0].y), rehome: startFromHome)
         try await device.send("press")
         do {
-            for p in points.dropFirst() {
-                try await moveTo(dx(Double(p.x)), dy(Double(p.y)), rehome: false)  // never home mid-drag
+            if points.count > 2, strokeCommand != false, let start = pos {
+                var (x, y) = start
+                // The whole stroke in one command: the board streams it at the calibration's pace. Segment by segment,
+                // each short last report and round trip made iOS accelerate less and a circle came out ~10% small.
+                var deltas: [String] = []
+                for p in points.dropFirst() {
+                    let (tx, ty) = (dx(Double(p.x)), dy(Double(p.y)))
+                    deltas.append("\(tx - x) \(ty - y)")
+                    (x, y) = (tx, ty)
+                }
+                do {
+                    try await device.send("stroke " + deltas.joined(separator: " "))
+                    (pos, strokeCommand) = ((x, y), true)
+                } catch let e as DeviceError where e.message.contains("unknown command") {
+                    strokeCommand = false  // older firmware: move point by point below
+                }
+            }
+            if strokeCommand != true || points.count <= 2 {
+                for p in points.dropFirst() {
+                    try await moveTo(dx(Double(p.x)), dy(Double(p.y)), rehome: false)  // never home mid-drag
+                }
             }
             if hold { try await Task.sleep(nanoseconds: UInt64(Self.hold * 1e9)) }
         } catch {
+            pos = nil; drawChain = false
             _ = try? await device.send("release")
             throw error
         }
         try await device.send("release")
+        // A 2-point swipe is not part of a drawing run: re-home before whatever comes next, as before. A drawing
+        // stroke keeps its tracked end position so the next stroke continues from it; the path length moved is
+        // added to the drift budget, so a long run still re-homes once it has gone far enough.
+        if drawing {
+            var len = 0.0
+            var prev = CGPoint(x: dx(Double(points[0].x)), y: dy(Double(points[0].y)))
+            for p in points.dropFirst() {
+                let q = CGPoint(x: dx(Double(p.x)), y: dy(Double(p.y)))
+                len += hypot(q.x - prev.x, q.y - prev.y)
+                prev = q
+            }
+            unitsSinceDrawHome += Int(len + travel)
+        } else {
+            pos = nil
+        }
     }
 
     func scroll(_ x: Double, _ y: Double, lines: Int) async throws {
+        drawChain = false
         try await point(x, y)
         try await device.send("scroll \(lines) 0")
     }
 
-    func type(_ text: String) async throws { try await device.send("type \(text)") }
-    func key(_ combo: String) async throws { try await device.send("key \(combo)") }
+    /// The board only has US keys. Chinese (simplified or traditional: whichever pinyin keyboard the phone has on)
+    /// goes in as toneless pinyin left open for the actor to inspect and select the exact candidate. A run with
+    /// Latin letters goes in between two Caps Lock presses, which switch the pinyin keyboard to English and back.
+    /// Assumes the phone's keyboard is a pinyin keyboard in Chinese mode, and leaves it that way.
+    func type(_ text: String) async throws {
+        drawChain = false
+        let runs = Self.typingRuns(text)
+        // Validate every run before the first side effect; never silently skip an emoji or unsupported script.
+        for run in runs {
+            if run.kind == .chinese {
+                guard !Self.pinyin(run.text).isEmpty else { throw DeviceError(message: "cannot transliterate this Han text") }
+            } else { _ = try Self.keyboardChunks(run.text) }
+        }
+        for (index, run) in runs.enumerated() {
+            try Task.checkCancellation()
+            switch run.kind {
+            case .chinese:
+                let phrase = String(run.text.prefix(12))
+                try await sendKeyboard(Self.pinyin(phrase))
+                try await Task.sleep(nanoseconds: 400_000_000)  // let the candidates come up
+                let remaining = String(run.text.dropFirst(phrase.count)) + runs.dropFirst(index + 1).map { $0.text }.joined()
+                // Keep the composition open. The model must inspect candidates before choosing/committing.
+                throw InputNeedsVerification(expected: phrase, remaining: remaining)
+            case .latin:
+                try await device.send("key capslock")
+                try await Task.sleep(nanoseconds: 300_000_000)
+                try await sendKeyboard(run.text)
+                try await device.send("key capslock")
+                try await Task.sleep(nanoseconds: 300_000_000)
+            case .other:
+                try await sendKeyboard(run.text)
+            }
+        }
+    }
+
+    static func keyboardChunks(_ text: String) throws -> [String] {
+        guard text.unicodeScalars.allSatisfy({ (32...126).contains($0.value) || $0 == "\n" || $0 == "\t" }) else {
+            throw DeviceError(message: "unsupported keyboard text; use the on-screen keyboard for this character")
+        }
+        var chunks: [String] = [], chunk = ""
+        for ch in text {
+            if chunk.utf8.count + ch.utf8.count > 400 { chunks.append(chunk); chunk = "" }
+            chunk.append(ch)
+        }
+        if !chunk.isEmpty { chunks.append(chunk) }
+        return chunks
+    }
+
+    private func sendKeyboard(_ text: String) async throws {
+        for chunk in try Self.keyboardChunks(text) {
+            var printable = ""
+            for ch in chunk {
+                if ch == "\n" || ch == "\t" {
+                    if !printable.isEmpty { try await device.send("type \(printable)"); printable = "" }
+                    try await device.send(ch == "\n" ? "key enter" : "key tab")
+                } else { printable.append(ch) }
+            }
+            if !printable.isEmpty { try await device.send("type \(printable)") }
+        }
+    }
+
+    enum TypingRunKind: Equatable { case chinese, latin, other }
+
+    /// Splits text into runs of Chinese characters and of everything else; a non-Chinese run with a Latin letter is
+    /// .latin (typed in English mode, so its punctuation stays ASCII), otherwise .other (digits, spaces and
+    /// punctuation, which the pinyin keyboard turns into full width). Full-width punctuation is typed as its ASCII key.
+    static func typingRuns(_ text: String) -> [(kind: TypingRunKind, text: String)] {
+        let keys: [Character: Character] = ["，": ",", "。": ".", "！": "!", "？": "?", "：": ":", "；": ";",
+                                            "（": "(", "）": ")", "、": "\\", "“": "\"", "”": "\"", "‘": "'", "’": "'"]
+        var runs: [(chinese: Bool, text: String)] = []
+        for raw in text {
+            let ch = keys[raw] ?? raw
+            let chinese = ch.unicodeScalars.contains { Self.isHan($0) }
+            if let last = runs.last, last.chinese == chinese { runs[runs.count - 1].text.append(ch) }
+            else { runs.append((chinese, String(ch))) }
+        }
+        return runs.map { run -> (kind: TypingRunKind, text: String) in
+            if run.chinese { return (.chinese, run.text) }
+            return (run.text.contains { $0.isASCII && $0.isLetter } ? .latin : .other, run.text)
+        }
+    }
+
+    static func isHan(_ s: Unicode.Scalar) -> Bool {
+        switch s.value {
+        case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x2FA1F: return true
+        default: return false
+        }
+    }
+
+    /// "无边记" -> "wubianji", "绿"/"綠" -> "lv" (the pinyin keyboard's v for ü); traditional characters work too.
+    static func pinyin(_ han: String) -> String {
+        let latin = han.applyingTransform(.mandarinToLatin, reverse: false) ?? han
+        let v = latin.replacingOccurrences(of: "[ǖǘǚǜü]", with: "v", options: .regularExpression)
+        let plain = v.applyingTransform(.stripDiacritics, reverse: false) ?? v
+        return plain.lowercased().filter { $0.isASCII && $0.isLetter }
+    }
+    func key(_ combo: String) async throws { drawChain = false; try await device.send("key \(combo)") }
     /// The board's consumer-control Home key ("AC Home"), which iOS treats like a keyboard's home key. Boards
     /// without it (older firmware) answer an error: then Cmd+H and the flick up from the home bar (a flick, not
     /// a rest: resting opens the app switcher).
     func goHome() async throws {
+        // Firmware v14+: the board flicks up from the home bar by itself, press to release with no pause (sent as
+        // separate commands, the ~130 ms before `release` read as a rest and opened the app switcher). It moves
+        // the pointer, so re-home before the next gesture. Older boards answer an error: fall through.
+        drawChain = false
+        if (try? await device.send("flickhome")) != nil { pos = nil; return }
         if (try? await device.send("homescreen")) != nil { return }
         try await key("cmd+h")
         try await Task.sleep(nanoseconds: 350_000_000)

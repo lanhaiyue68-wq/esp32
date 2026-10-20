@@ -35,6 +35,7 @@ extension AppModel {
     /// Live again: the board may have rebooted (stream off, button state unknown) and the screen moved on.
     func restoreRun() async throws {
         DebugLog.write(String(format: "recover: live again after %.0f s", Date().timeIntervalSince(recoverySince)))
+        try await board.commands.abort() // clear interrupted work before asking for video or re-homing
         if FrameMode.current == .stream && !feed.streamOn { try await feed.stream(true) }
         DebugLog.write("recover: fresh frame (" + (try await feed.currentFrame()) + ")")
         try await pointer.reset()  // a gesture cut off mid-way may have left the button down

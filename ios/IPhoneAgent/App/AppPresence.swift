@@ -7,10 +7,11 @@ extension AppModel {
 
     private var inBackground: Bool { UIApplication.shared.applicationState == .background }
 
-    /// Leaves our own app without touching the screen: the board's Cmd+H, then its home flick as a fallback.
+    /// Leaves our own app without touching the screen: the board's home flick (goHome). Cmd+H is not tried first
+    /// any more: an iPhone ignores it from a keyboard (tested on iOS 26), so it only cost two seconds.
     /// The model is never asked to do this.
     func leaveApp() async -> Bool {
-        for method in ["cmd+h", "home swipe"] {
+        for method in ["home swipe"] {
             if inBackground { return true }
             do {
                 switch method {

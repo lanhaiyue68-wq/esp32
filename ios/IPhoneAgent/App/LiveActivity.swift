@@ -18,6 +18,11 @@ import Foundation
 
     func start(task: String, runID: String, limit: Int, phase: AgentActivityAttributes.Phase = .running) {
         end(nil)
+        // An app killed mid-run (relaunched, reinstalled from Xcode) never ends its activity: it sits on the Lock
+        // Screen at "0/40, reading the screen" for hours, in front of the live one. Clear any leftovers.
+        for orphan in Activity<AgentActivityAttributes>.activities {
+            Task { await orphan.end(nil, dismissalPolicy: .immediate) }
+        }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return DebugLog.write("Live Activity: disabled in Settings") }
         let line = phase == .recording ? String(localized: "Do the task yourself. I'm watching.")
             : String(localized: "Reading the screen…")

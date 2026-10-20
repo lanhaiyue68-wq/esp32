@@ -19,6 +19,7 @@ struct BoardStatus: Codable, Equatable {
         var mtu: Int?, phy: Int?, kbps: Double?, drop: Int?
     }
     var up: Int?
+    var fw: String?, proto: Int?, curve: Bool?, curve_rev: Int?, video_ms: Int?
     var rst: String?
     var heap: Int?
     var psram: Int?
@@ -37,6 +38,8 @@ struct BoardStatus: Codable, Equatable {
     /// the full one. Newer fields win, missing ones keep their last value.
     func merged(with n: BoardStatus) -> BoardStatus {
         var m = n
+        m.fw = n.fw ?? fw; m.proto = n.proto ?? proto; m.curve = n.curve ?? curve
+        m.curve_rev = n.curve_rev ?? curve_rev; m.video_ms = n.video_ms ?? video_ms
         m.up = n.up ?? up; m.rst = n.rst ?? rst; m.heap = n.heap ?? heap; m.psram = n.psram ?? psram
         m.usb = n.usb ?? usb; m.net = n.net ?? net; m.ip = n.ip ?? ip; m.sta = n.sta ?? sta; m.ap = n.ap ?? ap
         m.w = n.w ?? w; m.h = n.h ?? h; m.kbps = n.kbps ?? kbps; m.fps = n.fps ?? fps; m.idr = n.idr ?? idr
@@ -53,6 +56,7 @@ struct NetConfig: Codable, Equatable {
     var ssid: String?
     var pass: String?
     var ip: String?
+    var video_token: String?
 }
 
 /// A `reply` notify: `<id> ok [extra]` or `<id> err <reason>`.

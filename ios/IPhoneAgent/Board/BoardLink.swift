@@ -233,11 +233,15 @@ import Foundation
     // MARK: - BoardTransport
 
     func write(_ line: String) throws {
+        guard line.utf8.count <= 511 else { throw DeviceError(message: "board command too long") }
         if mock, connected { return mockReply(line) }
         guard let peripheral, let c = chars[BoardUUID.cmd], connected else {
             throw DeviceError(message: "board not connected")
         }
         let data = Data(line.utf8)
+        guard data.count <= peripheral.maximumWriteValueLength(for: .withResponse) else {
+            throw DeviceError(message: "command exceeds negotiated BLE write limit")
+        }
         let fast = data.count <= peripheral.maximumWriteValueLength(for: .withoutResponse)
             && c.properties.contains(.writeWithoutResponse) && peripheral.canSendWriteWithoutResponse
         peripheral.writeValue(data, for: c, type: fast ? .withoutResponse : .withResponse)  // long writes need a response

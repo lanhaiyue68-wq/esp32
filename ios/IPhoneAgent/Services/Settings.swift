@@ -144,13 +144,30 @@ import UIKit
         }
     }
 
+    /// The Extra body JSON. The iOS keyboard's Smart Punctuation types curly quotes, which made the whole object
+    /// unparsable and silently empty: they are straightened first.
     var extra: [String: Any] {
-        (try? JSONSerialization.jsonObject(with: Data(extraBody.utf8))) as? [String: Any] ?? [:]
+        (try? JSONSerialization.jsonObject(with: Data(Self.straightQuotes(extraBody).utf8))) as? [String: Any] ?? [:]
+    }
+
+    var extraBodyValid: Bool {
+        let s = extraBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty || (try? JSONSerialization.jsonObject(with: Data(Self.straightQuotes(s).utf8))) is [String: Any]
+    }
+
+    static func straightQuotes(_ s: String) -> String {
+        s.replacingOccurrences(of: "\u{201C}", with: "\"").replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{201E}", with: "\"").replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
     }
 
     /// role "planner" or "actor": its own model if set, else the shared one.
     func client(_ role: String) async throws -> LLMClient {
         let own = role == "planner" ? plannerModel : actorModel
+        var extra = self.extra
+        // Qwen on DashScope (Bailian) thinks by default: thousands of reasoning tokens on a busy screen, 30-90 s per
+        // step and timeouts. The agent needs quick answers, so thinking is off unless the Extra body sets it.
+        if baseURL.lowercased().contains("dashscope"), extra["enable_thinking"] == nil { extra["enable_thinking"] = false }
         return LLMClient(baseURL: baseURL, model: own.isEmpty ? try await resolvedModel() : own, apiKey: apiKey,
                          extra: extra, tokenParam: tokenParam)
     }

@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import UIKit
 
 /// What the agent and the pointer need from the screen (VideoFeed, or a fake in tests). Port of screen.py.
@@ -10,6 +11,18 @@ import UIKit
     var aspect: Double { get }
     /// After a gesture that ended at `since`: wait until the screen shows its result (and fetch it, in snap mode).
     func afterAction(since: Double) async
+    func requireFrame(after: Double?) async throws
+}
+
+enum FrameFreshness {
+    static func usable(frameAt: Double, decodedMs: Int, latestMs: Int?, statusAt: Double,
+                       at: Double, after: Double?, broken: Bool) -> Bool {
+        guard !broken, frameAt > 0, at - statusAt <= 3 else { return false }
+        let boundary = after ?? (at - 1)
+        if frameAt >= boundary && at - frameAt <= 1 { return true }
+        // A quiet screen is valid only when a new heartbeat proves we decoded the board's latest AU.
+        return statusAt >= boundary && decodedMs > 0 && latestMs == decodedMs
+    }
 }
 
 /// How a run gets its frames: the live stream (`stream on`, the default: a frame in under a second), or one
@@ -27,6 +40,10 @@ enum FrameMode: String {
 
 extension ScreenSource {
     func afterAction(since: Double) async { await settled() }
+    func requireFrame(after: Double? = nil) async throws {
+        try Task.checkCancellation()
+        guard live, frame != nil else { throw BlindError() }
+    }
 
     /// Wait until the screen stops changing (AirPlay only sends frames on change). Mid-animation frames are big and
     /// can reach us late over BLE, so a gap is only "quiet" once it also covers the last frame's transport lag.
@@ -34,6 +51,7 @@ extension ScreenSource {
         let started = now()
         try? await Task.sleep(nanoseconds: UInt64(least * 1e9))
         while now() - updated < quiet + lag && now() - started < most {
+            if Task.isCancelled { return }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
@@ -45,6 +63,7 @@ extension ScreenSource {
     func fresh(since: Double, timeout: Double = 0.8) async -> Data? {
         let deadline = now() + timeout
         while (capturedAt > 0 ? capturedAt : updated) <= since {
+            if Task.isCancelled { return nil }
             if now() > deadline { return nil }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -63,14 +82,19 @@ extension ScreenSource {
     /// A decode error or a lost chunk since the last good frame: the shown frame is stale until the next IDR.
     private(set) var broken = false
     private var clockOffset: Double?  // local s − board s, the smallest seen (≈ the link latency)
+    private var statusAt = 0.0
+    private var latestBoardMs: Int?
+    private var decodedBoardMs = 0
     var mirroring = false  // board status says ap == streaming
     var metrics: Metrics?
     weak var device: HIDDevice?
 
     private var assembler = VideoAssembler()
     private let decoder = H264Decoder()
+    let tcp = VideoTCP()  // video over the board's Wi-Fi when it is reachable
 
     init() {
+        tcp.onChunk = { [weak self] in self?.receive($0) }
         decoder.onFrame = { [weak self] f in DispatchQueue.main.async { self?.publish(f) } }
         decoder.onError = { [weak self] msg in
             DispatchQueue.main.async {
@@ -82,7 +106,26 @@ extension ScreenSource {
         }
     }
 
-    var live: Bool { mirroring && frame != nil && (device?.connected ?? false) }
+    var live: Bool { mirroring && frame != nil && !broken && (device?.connected ?? false) }
+
+    func status(_ s: BoardStatus) {
+        statusAt = now()
+        latestBoardMs = s.video_ms
+        if let up = s.up { boardClock(ms: up) }
+    }
+
+    private func usable(after: Double? = nil) -> Bool {
+        live && FrameFreshness.usable(frameAt: capturedAt, decodedMs: decodedBoardMs, latestMs: latestBoardMs,
+                                     statusAt: statusAt, at: now(), after: after, broken: broken)
+    }
+
+    func requireFrame(after: Double? = nil) async throws {
+        try Task.checkCancellation()
+        guard device?.connected == true, mirroring else { throw BlindError() }
+        if usable(after: after) { return }
+        try await currentFrame()
+        guard usable(after: after) else { throw BlindError(reason: "screen freshness could not be verified; reconnect Screen Mirroring") }
+    }
 
     /// Frame width / height (portrait iPhone as a fallback).
     var aspect: Double { size.width > 0 && size.height > 0 ? size.width / size.height : 9 / 19.5 }
@@ -100,7 +143,10 @@ extension ScreenSource {
     }
 
     /// The link (re)connected: chunk numbering starts over.
-    func resetStream() { assembler.reset(); clockOffset = nil }  // the board may have rebooted: its clock too
+    func resetStream() {
+        assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
+        decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false
+    }
 
     /// A board timestamp (status `up`, or a streamed unit) just arrived: keep the smallest offset.
     func boardClock(ms: Int) {
@@ -116,6 +162,7 @@ extension ScreenSource {
 
     private func publish(_ f: H264Decoder.Frame) {
         frame = f.jpeg
+        decodedBoardMs = Int(f.unit.boardMs)
         updated = now()
         capturedAt = clockOffset.map { Double(f.unit.boardMs) / 1000 + $0 } ?? updated
         broken = false
@@ -135,14 +182,19 @@ extension ScreenSource {
         return max(8, gopBytes * 8 / 1000 / kbps * 2 + 3)
     }
 
-    /// A current frame for the model. While the board streams, the live stream has it (an IDR comes every
-    /// ~2 s): use a frame younger than `maxAge`, or wait for the next one. Snap only as a fallback, retried
-    /// once with a longer timeout. Returns where the frame came from, for the log.
+    /// A current frame for the model. While the board streams, the live stream has it: use a frame younger than
+    /// `maxAge`, or wait for the next one. AirPlay only sends frames on change, so when none comes, the board says
+    /// the phone isn't sending either (status fps ~0) and nothing was lost since the last good frame, the screen
+    /// is unchanged and the last frame is still current. If the phone IS sending but nothing reaches us, the
+    /// board-to-app path is stuck: never hand the model that stale frame. Snap only as a fallback, retried once
+    /// with a longer timeout: it resends the whole GOP since the last IDR, and some iPhones (iOS 26 here) send
+    /// an IDR only every few minutes, so that GOP is huge or gone ("err no video"). Returns where the frame came
+    /// from, for the log.
     @discardableResult
     func currentFrame(maxAge: Double = 1, wait: Double = 3) async throws -> String {
         if streamOn && mirroring {
-            if frame != nil && now() - updated < maxAge { return "live" }
-            if await fresh(since: now() - maxAge, timeout: wait) != nil { return "live (waited)" }
+            if usable() { return "live" }
+            if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
         }
         do {
             try await snap()
@@ -150,6 +202,7 @@ extension ScreenSource {
             DebugLog.write("snap timed out; retrying once with a longer timeout")
             try await snap(timeout: snapTimeout * 1.5)
         }
+        guard usable() else { throw BlindError(reason: "board replied but no verified current video frame was decoded") }
         return "snap"
     }
 
@@ -165,6 +218,8 @@ extension ScreenSource {
         }
         await withCheckedContinuation { c in decoder.queue.async { c.resume() } }  // the GOP is decoded
         try? await Task.sleep(nanoseconds: 30_000_000)  // let the last frame reach the main queue
+        try Task.checkCancellation()
+        guard updated >= started, !broken else { throw BlindError(reason: "snapshot did not decode a new frame") }
         let ms = (now() - started) * 1000
         metrics?.snapLatency(ms)
         return ms
@@ -191,11 +246,12 @@ extension ScreenSource {
             } else {
                 await settled()
                 if await newer(than: since, timeout: 1.5) { return }
-                guard broken || !streamOn else { return DebugLog.write("frame: none after the action; screen unchanged") }
+                if usable(after: since) { return DebugLog.write("frame: latest board image verified unchanged") }
                 DebugLog.write("frame: stream stale (waiting for an IDR); snapping")
                 try await snap()
             }
         } catch {
+            broken = true
             DebugLog.write("frame after action failed: \(error.localizedDescription)")
         }
         if capturedAt < since { DebugLog.write(String(format: "frame: still %.1f s older than the action", since - capturedAt)) }
@@ -205,6 +261,7 @@ extension ScreenSource {
     private func newer(than t: Double, timeout: Double) async -> Bool {
         let deadline = now() + timeout
         while capturedAt < t {
+            if Task.isCancelled { return false }
             if now() > deadline { return false }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
@@ -212,5 +269,78 @@ extension ScreenSource {
     }
 
     /// The link dropped: the board forgets `stream on`.
-    func linkLost() { streamOn = false }
+    func linkLost() { streamOn = false; statusAt = 0; broken = true }
+}
+
+
+/// Video over the board's Wi-Fi (TCP port 7001, firmware v12+): the same chunks as the BLE video notifies, each
+/// with its u16 LE length in front. Far more bandwidth than BLE (a busy screen mirrors at ~450 kbps, BLE carries
+/// ~250-300), so frames stop arriving seconds late. The board sends video here while a client is connected and over
+/// BLE otherwise; chunks from either go to the same VideoFeed.receive. Needs the phone on the board's network and
+/// the Local Network permission (asked once).
+final class VideoTCP: @unchecked Sendable {
+    var onChunk: (@MainActor (Data) -> Void)?
+    private let queue = DispatchQueue(label: "video-tcp")
+    private var conn: NWConnection?  // on `queue` only
+    private var host: String?
+    private var token: String?
+    private var failedAt = Date.distantPast
+
+    /// The board's IP from each status (about once a second): connects, or reconnects after a drop or a new IP.
+    func update(ip: String?, token: String? = nil) {
+        queue.async {
+            if self.token != token { self.conn?.cancel(); self.conn = nil; self.host = nil; self.token = token }
+            self.connect(ip)
+        }
+    }
+
+    private func connect(_ ip: String?) {
+        guard let ip, !ip.isEmpty, ip != "0.0.0.0", let token, token.count == 32 else {
+            conn?.cancel()
+            (conn, host) = (nil, nil)
+            return
+        }
+        if ip == host, conn != nil { return }
+        if conn == nil, Date().timeIntervalSince(failedAt) < 5 { return }  // the phone may not be on that network
+        conn?.cancel()
+        host = ip
+        let c = NWConnection(host: NWEndpoint.Host(ip), port: 7001, using: .tcp)
+        c.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                c.send(content: Data((token + "\n").utf8), completion: .contentProcessed { [weak self] error in
+                    if error != nil { self?.drop(c) }
+                })
+                DebugLog.write("video tcp: connected to \(ip):7001")
+            case .failed(let error): DebugLog.write("video tcp: failed: \(error)"); self?.drop(c)
+            case .waiting(let error): DebugLog.write("video tcp: waiting: \(error)"); self?.drop(c)
+            default: break
+            }
+        }
+        conn = c
+        c.start(queue: queue)
+        read(c)
+    }
+
+    /// On `queue`. The next status update reconnects (after a 5 s pause).
+    private func drop(_ c: NWConnection) {
+        c.cancel()
+        guard conn === c else { return }
+        (conn, host, failedAt) = (nil, nil, Date())
+    }
+
+    private func read(_ c: NWConnection) {
+        c.receive(minimumIncompleteLength: 2, maximumLength: 2) { [weak self] head, _, done, error in
+            guard let self else { return }
+            guard let head, head.count == 2, error == nil, !done else { return self.drop(c) }
+            let n = Int(head[head.startIndex]) | Int(head[head.startIndex + 1]) << 8
+            c.receive(minimumIncompleteLength: n, maximumLength: n) { [weak self] body, _, done, error in
+                guard let self else { return }
+                guard let body, body.count == n, error == nil else { return self.drop(c) }
+                let deliver = self.onChunk
+                Task { @MainActor in deliver?(body) }
+                if done { self.drop(c) } else { self.read(c) }
+            }
+        }
+    }
 }

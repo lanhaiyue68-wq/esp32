@@ -52,6 +52,8 @@ struct DiagnosticsView: View {
                 row("Suspensions", "\(metrics.suspensions)")
             }
             SwiftUI.Section("Board") {
+                row("Firmware / protocol", "\(board.status?.fw ?? "unknown") / \(board.status?.proto.map(String.init) ?? "–")")
+                row("Motion curve", "\(board.status?.curve == true ? "on" : "off") / rev \(board.status?.curve_rev.map(String.init) ?? "–")")
                 row("Uptime", board.status?.up.map { "\($0 / 1000) s" } ?? "–")
                 row("Reset reason", board.status?.rst ?? "–")
                 row("Heap", board.status?.heap.map { "\($0 / 1024) KB" } ?? "–")
