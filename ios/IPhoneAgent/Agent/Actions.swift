@@ -75,6 +75,11 @@ enum Actions {
     /// The action itself, without thoughts, timings and other bookkeeping.
     static func key(_ step: JObject) -> JObject { step.without(meta) }
 
+    /// Precision changes how a tap is delivered, not the target or the intent.
+    static func sameTarget(_ lhs: JObject, _ rhs: JObject) -> Bool {
+        key(lhs).without(["precise"]) == key(rhs).without(["precise"])
+    }
+
     // MARK: - helpers
 
     private static func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }

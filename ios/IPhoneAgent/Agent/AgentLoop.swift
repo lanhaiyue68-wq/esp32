@@ -289,9 +289,15 @@ extension Pointer: Gestures {}
         for (i, planned) in acts.enumerated() {
             var act = planned.act
             let name = act["action"]?.str ?? ""
+            if i > 0, ["tap", "done", "fail"].contains(name) {
+                // Inspect drawing/typing before a later UI tap or a terminal claim about its result.
+                timing.frameMs += try await settle()
+                steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                return false
+            }
             if name == "replan" || stuck {
                 record(planned.shot, act)
-                try await replan(stuck: stuck)
+                try await replan(stuck: true) // preserve recovery reason and completed work in the planner context
                 return false
             }
             if name != "done" && name != "fail" {
@@ -303,6 +309,7 @@ extension Pointer: Gestures {}
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
+                if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used
                 do { try await perform(act) }
                 catch let input as InputNeedsVerification {
                     lastActed = now()
@@ -321,12 +328,13 @@ extension Pointer: Gestures {}
             record(planned.shot, act)
             if name == "done" || name == "fail" { return true }
             let following = i < acts.count - 1 ? acts[i + 1].act["action"]?.str : nil
-            if name == "tap" && (following == "type" || following == "key") {  // a missed tap never opened the field
+            if name == "tap", following != nil {
+                // A tap may open a page, change tools or undo content. The rest of this plan was made on the
+                // pre-tap screenshot; inspect its result before issuing another tap, typing or drawing.
+                // Independent strokes and type-then-key batches still run together.
                 timing.frameMs += try await settle()
-                if !Vision.changed(seen, screen?.frame, ignore: spots) {
-                    steps[steps.count - 1]["changed"] = .bool(false)
-                    return false  // skip the rest; the actor looks again
-                }
+                steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                return false
             }
         }
         timing.frameMs += try await settle()
@@ -350,7 +358,7 @@ extension Pointer: Gestures {}
     /// Repeating a move that still changes the screen (e.g. scrolling down a long list) is progress, not a loop.
     func repeating(_ act: JObject, limit: Int = 3) -> Bool {
         let moves = steps.filter { $0["plan"] == nil }.suffix(limit - 1)
-        return moves.count == limit - 1 && moves.allSatisfy { Actions.key($0) == Actions.key(act) }
+        return moves.count == limit - 1 && moves.allSatisfy { Actions.sameTarget($0, act) }
             && moves.last?["changed"] != .bool(true)
     }
 
@@ -396,7 +404,18 @@ extension Pointer: Gestures {}
                     + " Reply with one brief THINK line followed immediately by valid DO lines; no extra explanation."
                 continue
             }
-            if missed, let last = steps.last, Actions.key(acts[0]) == Actions.key(last) {  // same move that did nothing
+            if missed, let last = steps.last, Actions.sameTarget(acts[0], last) {
+                if acts[0]["action"] == .str("tap") {
+                    if last["precise"] == .bool(true) {
+                        let reason = "tap target unchanged after a precision retry; inspect another route, keep completed work"
+                        return [Planned(act: ["action": .str("replan"), "reason": .str(reason), "think_s": .num(seconds)], shot: frame)]
+                    }
+                    // The reply is syntactically valid. Spend one closed-loop aim attempt rather than asking
+                    // the model the same question three times and misreporting it as a parsing failure.
+                    acts[0]["precise"] = .bool(true)
+                    acts[0]["think_s"] = .num(seconds)
+                    return [Planned(act: acts[0], shot: frame)]
+                }
                 prompt += "\n\nYou just proposed \(PyJSON.dumps(Actions.key(acts[0]))) again, but it changed nothing last "
                     + "time. Choose a different action (another position, a shorter swipe, or another way)."
                 continue

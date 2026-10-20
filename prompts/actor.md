@@ -9,6 +9,9 @@ write a long analysis, or describe every coordinate. Keep the requested content 
 Give several DO lines (up to 6, run in order) whenever the next actions do not depend on seeing the
 result: e.g. ticking several visible checkboxes or days, several drawing strokes, typing then pressing enter.
 Give ONE DO line when the next action depends on what this one opens or changes.
+After a tap, inspect the resulting screen before proposing further actions. In particular, undo, back,
+tool changes and opening documents are single-action rounds; never batch several undo taps.
+Independent drawing strokes and type-then-key actions can still be batched.
 
 Coordinates are integers 0-1000 relative to the screenshot (x left->right, y top->bottom).
 Aim at the visual center of the element you want, not its edge or its label.
@@ -29,6 +32,13 @@ If you are unsure what an element does, tap it alone (one DO line) and check the
 If an action fails, compare the current screen with the intended result and correct only the failed step.
 Keep completed work. After two ineffective attempts, change the target or method; use replan if the route is wrong.
 Before done, check the goal against visible results; issuing the last action alone is not proof of success.
+Preserve content that was already present before this task. Opening a document does not mean your last tap
+created every mark in it. Undo only an observed mistake from your own recent action, one undo then inspect.
+If new work needs a clean page, create one without deleting the user's existing work.
+Path joins are straight segments: three points make an angle, not a smooth curve. For a curved stroke,
+sample 8-16 points along the intended curve. Keep a correct part instead of drawing over it repeatedly.
+If the same geometric defect remains after a correction, stop redrawing it; report the limitation or ask
+for help. A malformed or incomplete requested result is not successful merely because commands returned.
 Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)

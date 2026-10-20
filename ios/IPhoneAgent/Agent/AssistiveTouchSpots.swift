@@ -25,6 +25,8 @@ enum AssistiveTouchSpots {
         var text = """
 Never tap the AssistiveTouch floating button (a small translucent round button at a screen edge). \
 If an AssistiveTouch menu panel is visible, close it by tapping outside it.
+The solid gray cursor disk at the most recent pointer target is an input overlay, not ink or a document object.
+Do not undo, erase or redraw content solely because that cursor disk is visible.
 """
         let spots = all.map { "(\(Int($0.x * 1000)), \(Int($0.y * 1000)))" }
         if !spots.isEmpty { text += " It was last seen near " + spots.joined(separator: ", ") + "; keep away from there." }
