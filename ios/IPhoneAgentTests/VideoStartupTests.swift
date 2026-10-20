@@ -94,6 +94,27 @@ import XCTest
         XCTAssertEqual(state["latest_board_ms"], .int(0))
         XCTAssertNotNil(state["status_age_s"]?.double)
     }
+
+    func testSnapModePreflightKeepsStreamOff() async throws {
+        let device = StartupDevice(), feed = VideoFeed(); feed.device = device; feed.mirroring = true
+        device.onSnap = {
+            feed.status(BoardStatus(up: 0, video_ms: 0))
+            feed.show(Data([0xff, 0xd8]), width: 360, height: 780)
+        }
+        let source = try await feed.prepareForRun(snapMode: true, wait: 0)
+        XCTAssertEqual(source, "snap")
+        XCTAssertEqual(device.sent, ["snap"])  // the user's snap mode: no "stream on"
+        XCTAssertFalse(feed.streamOn)
+    }
+
+    func testLostBoardOrMirrorIsNotCountedAsAnAgentFailure() {
+        XCTAssertTrue(AgentLoop.isLinkLoss(VideoReadinessError.boardDisconnected, screenLive: true))
+        XCTAssertTrue(AgentLoop.isLinkLoss(VideoReadinessError.mirroringDisconnected, screenLive: true))
+        XCTAssertFalse(AgentLoop.isLinkLoss(VideoReadinessError.decoderUnavailable, screenLive: false))
+        XCTAssertTrue(AgentLoop.isLinkLoss(DeviceError(message: "link lost"), screenLive: false))  // as before
+        XCTAssertFalse(AgentLoop.isLinkLoss(DeviceError(message: "err busy"), screenLive: true))  // as before
+        XCTAssertFalse(AgentLoop.isLinkLoss(URLError(.timedOut), screenLive: nil))
+    }
 }
 
 @MainActor private final class StartupDevice: HIDDevice {

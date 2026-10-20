@@ -135,13 +135,18 @@ extension ScreenSource {
     }
 
     /// Run this in the foreground before going Home: a connected mirror may have no complete GOP
-    /// for a newly opened decoder. Streaming waits for a usable frame before attempting one snapshot.
+    /// for a newly opened decoder. Streaming waits for a usable frame before attempting one snapshot;
+    /// snap-per-step mode keeps the stream off, as the user chose, and goes straight to a snapshot.
     @discardableResult
-    func prepareForRun(wait: Double = 3) async throws -> String {
+    func prepareForRun(snapMode: Bool = false, wait: Double = 3) async throws -> String {
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
-        try await stream(true)
+        if snapMode {
+            if streamOn { try await stream(false) }
+        } else {
+            try await stream(true)
+        }
         return try await currentFrame(wait: wait)
     }
 

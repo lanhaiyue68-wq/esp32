@@ -18,14 +18,18 @@ extension AppModel {
         currentIntent = intent
         lastTask = task
         agent.hints = intent?.checklist ?? []
-        departing = true
-        try? await Task.sleep(nanoseconds: 800_000_000)  // "See you later" (DepartureOverlay)
-        departing = false
         await startAgent(task)
     }
 
+    /// "See you later" (DepartureOverlay): the character takes off just before the phone goes Home.
+    private func depart() async {
+        departing = true
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        departing = false
+    }
+
     func startAgent(_ task: String) async {
-        if MockMode.on { return mockRun(task) }
+        if MockMode.on { await depart(); return mockRun(task) }
         guard settings.isConfigured else {
             say(String(localized: "Set up the model in Settings first."))
             return
@@ -58,8 +62,9 @@ extension AppModel {
         let snapMode = FrameMode.current == .snap
         do {
             mark("video preflight")
-            let source = try await feed.prepareForRun()
+            let source = try await feed.prepareForRun(snapMode: snapMode)
             mark("foreground frame verified: " + source)
+            await depart()  // take off only once the screen is known to be readable
             mark("configuring task frame mode")
             if snapMode {
                 if feed.streamOn { try await feed.stream(false) }

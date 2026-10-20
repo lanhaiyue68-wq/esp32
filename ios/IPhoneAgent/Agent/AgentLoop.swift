@@ -218,6 +218,13 @@ extension Pointer: Gestures {}
         return (reply.text, seconds, frame)
     }
 
+    /// A lost board or mirror is not the agent's fault. VideoReadinessError says so directly; a bare
+    /// DeviceError counts only once the screen is gone. A connected but undecodable mirror still counts.
+    static func isLinkLoss(_ error: Error, screenLive: Bool?) -> Bool {
+        if let video = error as? VideoReadinessError { return video != .decoderUnavailable }
+        return error is DeviceError && screenLive == false
+    }
+
     func run() async {
         var failures = 0
         do {
@@ -237,7 +244,7 @@ extension Pointer: Gestures {}
                     throw e
                 } catch {  // a bad reply or a dropped link: recover, don't crash
                     record(nil, ["action": .str("hiccup"), "reason": .str(String(error.localizedDescription.prefix(300)))])
-                    let linkLost = error is DeviceError && screen?.live == false  // the next look waits for it (waitForScreen)
+                    let linkLost = Self.isLinkLoss(error, screenLive: screen?.live)  // the next look waits for it (waitForScreen)
                     failures += linkLost ? 0 : 1  // a lost link is not the agent's fault
                     if failures >= maxFailures {
                         record(nil, ["action": .str("fail"), "reason": .str("\(failures) errors in a row")])
