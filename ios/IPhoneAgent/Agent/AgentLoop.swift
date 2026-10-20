@@ -40,6 +40,8 @@ extension Pointer: Gestures {}
     let trace: TraceStore?
     let maxSteps: Int, maxFailures: Int
     var metrics: Metrics?
+    var experience: ExperienceStore?
+    private var learnedThrough = -1
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
@@ -85,6 +87,7 @@ extension Pointer: Gestures {}
         self.task = task; plan = ""; steps = []; shots = [:]
         pointerAt = .zero
         lastActed = 0
+        learnedThrough = -1
         helpAsked = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -165,6 +168,25 @@ extension Pointer: Gestures {}
         guard let screen, screen.live else { throw BlindError() }  // never let the model act blind
         try await screen.requireFrame(after: nil)
         let frame = screen.frame, started = now()
+        // Retrieve against the very frame sent with this request, after freshness/recovery checks.
+        if let frame, let scene = Vision.experienceScene(frame), let image = Vision.image(frame) {
+            let aspect = Double(image.width) / Double(image.height)
+            prompt += experience?.context(goal: task, scene: scene, aspect: aspect) ?? ""
+            if role == "actor" {
+                let example: JObject = ["action": .str("circle"), "x": .int(500), "y": .int(450), "r": .int(180)]
+                if let bounds = Actions.drawingBounds(example, aspect: aspect) {
+                    prompt += String(format: "\n\nScreen width/height = %.4f. Circle R is in width units; vertical radius = R * %.4f."
+                        + " For example, circle 500 450 180 covers x 320..680, y %.0f..%.0f. Place parts using these actual bounds.",
+                        aspect, aspect, bounds.minY, bounds.maxY)
+                }
+                for step in steps.suffix(8) {
+                    if let b = Actions.drawingBounds(step, aspect: aspect) {
+                        prompt += String(format: "\nRecent circle %@ has bounds x %.0f..%.0f, y %.0f..%.0f (0-1000 screen units).",
+                            PyJSON.dumps(Actions.key(step)), b.minX, b.maxX, b.minY, b.maxY)
+                    }
+                }
+            }
+        }
         onDoing?(retryTimeout ? .waiting : .retrying)
         let reporting = llm as? ModelProgressReporting
         reporting?.onProgress = { [weak self] progress in
@@ -285,6 +307,9 @@ extension Pointer: Gestures {}
         let seen = acts[0].shot
         var spots = [pointerAt]  // where the pointer was and goes: pointer moves are not screen changes
         let stuck = repeating(acts[0].act)
+        let drawing = Set(["circle", "path"])
+        let startsDrawing = drawing.contains(acts[0].act["action"]?.str ?? "")
+            && !drawing.contains(steps.last?["action"]?.str ?? "")
         defer { metrics?.step(timing) }
         for (i, planned) in acts.enumerated() {
             var act = planned.act
@@ -327,6 +352,13 @@ extension Pointer: Gestures {}
             }
             record(planned.shot, act)
             if name == "done" || name == "fail" { return true }
+            if startsDrawing, drawing.contains(name) {
+                // A first stroke may pan a canvas if the drawing tool was not actually active.
+                // Observe it before spending the rest of the batch on the same mistaken state.
+                timing.frameMs += try await settle()
+                steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                return false
+            }
             let following = i < acts.count - 1 ? acts[i + 1].act["action"]?.str : nil
             if name == "tap", following != nil {
                 // A tap may open a page, change tools or undo content. The rest of this plan was made on the
@@ -357,6 +389,10 @@ extension Pointer: Gestures {}
     /// True when the actor picks the same action as its last limit-1 moves and the last one did nothing.
     /// Repeating a move that still changes the screen (e.g. scrolling down a long list) is progress, not a loop.
     func repeating(_ act: JObject, limit: Int = 3) -> Bool {
+        if act["action"] == .str("tap"), act["precise"] == .bool(true),
+           steps.last?["precise"] != .bool(true) {
+            return false // this bounded delivery-mode retry must execute before the generic loop guard
+        }
         let moves = steps.filter { $0["plan"] == nil }.suffix(limit - 1)
         return moves.count == limit - 1 && moves.allSatisfy { Actions.sameTarget($0, act) }
             && moves.last?["changed"] != .bool(true)
@@ -392,6 +428,14 @@ extension Pointer: Gestures {}
 
     func nextActions() async throws -> [Planned] {
         guard let actor else { throw LLMError(message: "no actor model") }
+        let index = steps.count - 1
+        if index > learnedThrough, let last = steps.last {
+            learnedThrough = index
+            if let frame = shots[index] ?? screen?.frame, let scene = Vision.experienceScene(frame), let image = Vision.image(frame) {
+                experience?.observeUnconfirmedTap(goal: task, scene: scene,
+                    aspect: Double(image.width) / Double(image.height), action: last)
+            }
+        }
         var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(recentActions)\n\nNext action?"
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically

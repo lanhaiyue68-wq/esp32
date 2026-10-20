@@ -45,6 +45,7 @@ import XCTest
         let actor = FakeModel { _ in "DO: circle 448 405 25\nDO: circle 552 405 25" }
         let phone = FakeGestures()
         let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.steps = [["action": .str("circle"), "x": .int(500), "y": .int(450), "r": .int(150), "changed": .bool(true)]]
         _ = try await agent.step()
         XCTAssertEqual(phone.calls, ["drag", "drag"])
     }

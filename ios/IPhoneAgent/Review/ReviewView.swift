@@ -104,6 +104,7 @@ struct ReviewView: View {
         .safeAreaInset(edge: .bottom) { if !draft.readOnly && outcome != .running { bottomBar } }
         .task(id: [playing, showVideo]) { await autoplay() }
         .onChange(of: showVideo) { playing = false }
+        .onChange(of: draft.steps) { _, _ in app.agent.experience?.learnReview(draft) }
         .onChange(of: videoTime) { _, t in  // the step follows the video
             guard showVideo, let i = steps.lastIndex(where: { ($0.t ?? 0) <= t }), i != index else { return }
             index = i

@@ -81,6 +81,11 @@ import UIKit
         pointer = Pointer(device: board.commands, calibrationFile: support.appendingPathComponent("calibration.json"),
                           screen: feed)
         agent = AgentLoop(phone: pointer, screen: feed, actor: nil, planner: nil, trace: traces)
+        if !MockMode.on {
+            let memory = ExperienceStore(file: support.appendingPathComponent("experience-v1.json"))
+            memory.enabled = UserDefaults.standard.object(forKey: ExperienceStore.enabledKey) as? Bool ?? true
+            agent.experience = memory
+        }
         agent.metrics = metrics
         feed.device = board.commands
         feed.metrics = metrics

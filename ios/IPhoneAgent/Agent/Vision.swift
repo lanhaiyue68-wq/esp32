@@ -4,6 +4,12 @@ import ImageIO
 
 /// Small image checks on screen frames: did the screen change, and where is the pointer. Port of vision.py.
 enum Vision {
+    /// A coarse local page signature. Keep neither screenshots nor readable text in case memory.
+    static func experienceScene(_ data: Data) -> [UInt8]? {
+        guard let image = image(data) else { return nil }
+        return gray(image, 8, 8).px.map { $0 / 16 }
+    }
+
     /// Top share of the frame never compared: the status bar, where the Dynamic Island shows our Live Activity.
     static let topMask = 0.06
 

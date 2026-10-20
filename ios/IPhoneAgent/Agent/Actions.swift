@@ -80,6 +80,13 @@ enum Actions {
         key(lhs).without(["precise"]) == key(rhs).without(["precise"])
     }
 
+    /// x and y use different screen scales; the circle radius is measured against width only.
+    static func drawingBounds(_ action: JObject, aspect: Double) -> CGRect? {
+        guard aspect.isFinite, aspect > 0, action["action"] == .str("circle"),
+              let x = action["x"]?.double, let y = action["y"]?.double, let r = action["r"]?.double else { return nil }
+        return CGRect(x: x-r, y: y-r*aspect, width: 2*r, height: 2*r*aspect)
+    }
+
     // MARK: - helpers
 
     private static func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }

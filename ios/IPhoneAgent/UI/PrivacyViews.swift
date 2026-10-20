@@ -51,6 +51,8 @@ struct PrivacySettingsView: View {
     @ObservedObject var app: AppModel
     @ObservedObject var runs: RunStore
     @AppStorage(RunShare.keepKey) private var keep = false
+    @AppStorage(ExperienceStore.enabledKey) private var learning = true
+    @State private var learnedCount = 0
     @State private var picked = Set<String>()
     @State private var package: RunShare.Package?
     @State private var working = false
@@ -60,10 +62,20 @@ struct PrivacySettingsView: View {
         List {
             PrivacyLists()
             Section { Toggle("Keep run data for sharing", isOn: $keep) }
+            Section {
+                Toggle("Learn from operation feedback", isOn: $learning)
+                Text("Remembered cases: \(learnedCount)").foregroundStyle(.secondary)
+                Button("Clear learned cases", role: .destructive) {
+                    app.agent.experience?.clear(); learnedCount = 0
+                }
+            } footer: {
+                Text("Stored on this iPhone: up to 128 cases and 256 KB. Screenshots and typed text are excluded. Live screens are always checked before acting.")
+            }
             if keep { export }
         }
         .navigationTitle("Privacy")
-        .onAppear { runs.reload() }
+        .onAppear { runs.reload(); learnedCount = app.agent.experience?.count ?? 0 }
+        .onChange(of: learning) { _, enabled in app.agent.experience?.enabled = enabled }
         .onChange(of: picked) { package = nil }
     }
 

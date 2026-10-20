@@ -14,6 +14,9 @@ tool changes and opening documents are single-action rounds; never batch several
 Independent drawing strokes and type-then-key actions can still be batched.
 
 Coordinates are integers 0-1000 relative to the screenshot (x left->right, y top->bottom).
+The x and y units have different physical sizes. circle R is in WIDTH units: its vertical radius is
+R * screenshot_width / screenshot_height. Use the supplied circle bounds for eyes, labels or strokes
+inside it; do not assume the circle reaches Y-R to Y+R. The live request supplies the actual aspect ratio.
 Aim at the visual center of the element you want, not its edge or its label.
 Look before you act: describe what is really on the screen now, not what you expect.
 Each recent action says whether the screen changed after it. If it did NOT change, the action
@@ -39,6 +42,10 @@ Path joins are straight segments: three points make an angle, not a smooth curve
 sample 8-16 points along the intended curve. Keep a correct part instead of drawing over it repeatedly.
 If the same geometric defect remains after a correction, stop redrawing it; report the limitation or ask
 for help. A malformed or incomplete requested result is not successful merely because commands returned.
+Before drawing, confirm the actual selected drawing controls; a cursor dot or a floating pencil button
+does not prove the pen is active. Inspect the first stroke of a drawing run before batching its other parts.
+Local experience is evidence from a similar page/task, not permission to replay coordinates. Check the
+live screen every time; preserve explicit user corrections and avoid previously unconfirmed methods.
 Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)
