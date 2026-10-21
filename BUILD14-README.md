@@ -28,7 +28,7 @@
    `UIBackgroundModes` 新增 `audio`。只适用于自签名/企业分发，上架 App Store 会被拒。
 8. build 号改为 14；新增 21 条简体中文界面文字。
 
-以下 9–14 是用 build 13 实测日志（traces(25)–(29)、esp32-agent-logs(5)）找到的问题，第二个提交：
+以下 9–14 是用 build 13 实测日志（traces(25)–(29)、esp32-agent-logs(5)）找到的问题（第二个提交），15–16 是自学经验的存法（第三个提交）：
 
 9. **App 退到后台后主动重建视频解码器**：iOS 一进后台就作废硬件解码会话（日志 -12903），以前要等下一帧解码失败才发现；
    回到主屏幕画面静止时没有下一帧，就一直拿不到画面。现在进后台 1.5 秒后、以及取画面时发现不是最新，都先用 App 自己缓存的整段画面重建解码器（比让小板重发快得多）。
@@ -40,6 +40,12 @@
 13. **画图更像样**：三个点、弯度平缓的笔画（嘴巴、弧线）自动画成平滑曲线，不再是 V 字；模型也可以写 `path smooth …`。
     半径小于 60 的圆（眼睛）多画四分之一圈，首尾重叠，不再变成开口的小弧。
 14. **丢包计数修正**：同一段数据经蓝牙和 Wi-Fi 各收到一次、或 Wi-Fi 重连后序号从头开始，以前会被算成丢了 6 万多包；现在不算丢包，只等下一个关键帧。
+
+15. **自学经验不再按“最旧”淘汰**：自学经验最多 60 条，超过时先删“最久没被任务用到、也没被重新学到”的；
+    每次任务开始带进去的经验会记下使用时间，一直有用的经验不会因为旧而被挤掉。用户自己写的备注不受这 60 条限制。
+16. **同一条经验不重复存**：新学到的经验和已存的几乎一样（只差标点、多一两个字）就合并成一条，记次数（`seen`），常学到的优先；
+    和用户写过的备注一样就不再存。改写幅度大的会分开存，宁可多一条，也不把两条不同的经验并在一起。
+    用户在回顾里把某次任务标错，那次学到或强化过的自学经验都会作废。
 
 新增 3 条简体中文界面文字（共 24 条）。
 
@@ -77,7 +83,7 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 ```
 
 - 新测试：`SameWiFiTests`（3 项）、`BackgroundAudioTests`（1 项）、`LessonBookTests`（8 项）；`ReviewTests` 里提示测试改名为 `testIntentHintsReachThePlannerAndTheActor`。
-- 第二个提交的测试：`DrawingDoneTests`（8 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`。
+- 第二个提交的测试：`DrawingDoneTests`（8 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）。
 - 编译错误：只做最小修正，不改行为，记下“文件:行号＋原因”。
 - 测试失败：照实回报原文，不要改测试去迁就。
 
@@ -100,6 +106,7 @@ Xcode 里选手机直接 Run 即可（或照 build13 说明出 IPA）。
    嘴巴是平滑弧线（trace 里该步有 `"smooth": true`），眼睛是闭合的小圆。
 10. **不是画图的任务**也要跑一个（例如“打开设置，看看现在连的 Wi-Fi 叫什么”），确认能正常完成，不会被驳回。
 11. `metrics.json` 的 `drops` 不应再出现 65538 这类数字。
+12. 第 15、16 项（经验淘汰与合并）由 `LessonBookTests` 覆盖，真机不用专门测；照常跑任务即可。
 
 ## 不要做
 

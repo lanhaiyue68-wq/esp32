@@ -9,6 +9,8 @@ import Foundation
 /// most three concrete lessons drawn from evidence (no screen change, retries, replans, errors, the route
 /// that worked), never a claim that the task succeeded. They rank below the human ones, and marking a step
 /// of that run wrong in Review drops them: the user's correction replaces what the model believed.
+/// A lesson learned again is not stored twice: the kept one is reinforced (`seen`). At the cap, the self-learned
+/// lessons that no run has used or re-learned for longest go first, not simply the oldest.
 @MainActor final class LessonBook {
     struct Lesson: Codable, Equatable {
         var id: String      // "<run>:review:<step>", "<run>:hint:<n>", "<run>:auto:<n>": re-learning a run replaces them
@@ -17,6 +19,9 @@ import Foundation
         var general: Bool
         var updated: Date
         var auto: Bool?     // self-learned; nil in files from before self-learning
+        var used: Date? = nil      // when a run was last given it
+        var seen: Int? = nil       // how many runs drew it (nil = 1)
+        var from: [String]? = nil  // the runs (groups) that drew it; correcting any of them drops it
     }
 
     static let limit = 200
@@ -43,21 +48,60 @@ import Foundation
         for (key, raw) in items {
             let (text, general) = auto ? (raw.trimmingCharacters(in: .whitespacesAndNewlines), false) : Self.parse(raw)
             guard !text.isEmpty else { continue }
-            lessons.insert(Lesson(id: "\(group):\(key)", task: task, text: String(text.prefix(400)), general: general,
-                                  updated: clock(), auto: auto ? true : nil), at: 0)
+            let clipped = String(text.prefix(400))
+            if auto, let i = lessons.firstIndex(where: { Self.sameLesson($0.text, clipped) }) {
+                // Learned again, or the user already said it: reinforce the kept one instead of storing a copy.
+                guard lessons[i].auto == true, !(lessons[i].from ?? []).contains(group) else { continue }  // or this run said it twice
+                lessons[i].text = clipped  // the latest wording
+                lessons[i].updated = clock()
+                lessons[i].seen = (lessons[i].seen ?? 1) + 1
+                var runs = lessons[i].from ?? []
+                if !runs.contains(group) { runs.append(group) }
+                lessons[i].from = runs
+                continue
+            }
+            lessons.insert(Lesson(id: "\(group):\(key)", task: task, text: clipped, general: general,
+                                  updated: clock(), auto: auto ? true : nil, from: auto ? [group] : nil), at: 0)
         }
-        // Self-learned lessons never crowd out the user's: at most autoLimit of them, newest kept.
-        var autos = 0
-        lessons.removeAll { l in
-            guard l.auto == true else { return false }
-            autos += 1
-            return autos > Self.autoLimit
+        // Self-learned lessons never crowd out the user's: at most autoLimit of them. Those kept are the ones a run
+        // used or learned again most recently, so a lesson that keeps helping outlives one that never came up.
+        let autos = lessons.filter { $0.auto == true }
+        if autos.count > Self.autoLimit {
+            let keep = Set(autos.sorted(by: Self.fresher).prefix(Self.autoLimit).map(\.id))
+            lessons.removeAll { $0.auto == true && !keep.contains($0.id) }
         }
         lessons = Array(lessons.prefix(Self.limit))
         save()
     }
 
     static let autoLimit = 60
+
+    /// The lessons a run was given: they count as in use, so the cap drops the ones nobody needs any more first.
+    func markUsed(_ picked: [Lesson]) {
+        let ids = Set(picked.map(\.id))
+        guard enabled, !ids.isEmpty else { return }
+        let t = clock()
+        for i in lessons.indices where ids.contains(lessons[i].id) { lessons[i].used = t }
+        save()
+    }
+
+    /// Most recently learned, re-learned or used first; then the most often learned.
+    static func fresher(_ a: Lesson, _ b: Lesson) -> Bool {
+        let (ta, tb) = (max(a.updated, a.used ?? .distantPast), max(b.updated, b.used ?? .distantPast))
+        return ta != tb ? ta > tb : (a.seen ?? 1) > (b.seen ?? 1)
+    }
+
+    /// The same lesson in slightly other words: character pairs without spaces and punctuation, mostly shared.
+    /// A changed comma or a word more is recognised; lessons about different things stay apart.
+    static func sameLesson(_ a: String, _ b: String) -> Bool {
+        func pairs(_ s: String) -> Set<String> {
+            let c = Array(s.lowercased().filter { $0.isLetter || $0.isNumber })
+            return c.count < 2 ? Set([String(c)]) : Set((0..<(c.count - 1)).map { String(c[$0...$0 + 1]) })
+        }
+        let (x, y) = (pairs(a), pairs(b))
+        guard !x.isEmpty, !y.isEmpty, x != [""], y != [""] else { return false }
+        return Double(x.intersection(y).count) / Double(x.union(y).count) >= 0.7
+    }
 
     /// The user's notes and added steps in a reviewed run.
     func learnReview(_ draft: ReviewDraft) {
@@ -79,7 +123,7 @@ import Foundation
 
     func forget(group: String) {
         let before = lessons.count
-        lessons.removeAll { $0.id.hasPrefix(group + ":") }
+        lessons.removeAll { $0.id.hasPrefix(group + ":") || ($0.from ?? []).contains(group) }
         if lessons.count != before { save() }
     }
 
@@ -147,7 +191,7 @@ import Foundation
             return shared >= need ? (l, shared) : nil
         }
         var seen = Set<String>(), out: [Lesson] = []
-        for (l, _) in scored.sorted(by: { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.updated > $1.0.updated })
+        for (l, _) in scored.sorted(by: { $0.1 != $1.1 ? $0.1 > $1.1 : Self.fresher($0.0, $1.0) })
         where seen.insert(l.text).inserted {
             out.append(l)
             if out.count == max { break }

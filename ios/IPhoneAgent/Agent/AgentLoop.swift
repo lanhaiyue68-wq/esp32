@@ -272,6 +272,7 @@ extension Pointer: Gestures {}
         var failures = 0
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
+        lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
         if !applied.isEmpty || !Prompts.userRules.isEmpty {
             trace?.write(kind: "lessons", ["lessons": .arr(applied.map { .str($0.text) }), "rules_md": .bool(!Prompts.userRules.isEmpty)])
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
