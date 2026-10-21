@@ -67,6 +67,14 @@
 25. **补齐约 40 句缺少简体的界面文字**：恢复提示、找／连开发板、模型设置、隐私页、示例任务、蓝牙解除配对说明等。
     其余没有翻译的是程序内部错误代码（例如 `pointer not calibrated`），保留英文以便排查。
 
+26–28 来自 Mac 上第一次编译和测试（Xcode 26.3、iOS 26.2 SDK）：
+
+26. **Xcode 26.3 的三处编译修正**（commit 308a50a，Mac 上的 234f624）：`AgentFace.swift`、`StepFrame.swift` 的 Double/CGFloat 类型，
+    `BoardCommands.swift` 一行太长的式子拆开。只改类型写法，行为不变；build 13 当时在 Mac 上改过同样三处，现在合并回唯一来源。
+27. **动作后刚好断线，不再直接暂停求助**：动作做完、等画面稳定时屏幕刚好断了，以前直接报错停在 paused；
+    现在交给下一步的恢复流程，等重连后从同一步继续（`RecoveryTests.testRunPausesForALostScreenAndGoesOnFromTheSameStep`）。
+28. **测试不再依赖模拟器语言**：6 个测试原本写死英文，在简体中文环境会失败；现在和 App 用同一个翻译比对，两种语言都应通过。
+
 第二到第五个提交共补了 52 条简体中文界面文字（第一部分另有 21 条）。
 
 ## 以后不用 Mac 的更新方式
@@ -103,7 +111,8 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 ```
 
 - 新测试：`SameWiFiTests`（3 项）、`BackgroundAudioTests`（1 项）、`LessonBookTests`（8 项）；`ReviewTests` 里提示测试改名为 `testIntentHintsReachThePlannerAndTheActor`。
-- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）；`Build14ReviewTests`（8 项，新文件）；`VisionTests` 新增 2 项。
+- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）；`Build14ReviewTests`（7 项，新文件）；`VisionTests` 新增 2 项。
+- Mac 第一次测试（49a5b84＋编译修正）：英文 162 项通过 161 项，简体 162 项通过 155 项；差的就是第 27、28 项，已修正，待重新测试。
 - 编译错误：只做最小修正，不改行为，记下“文件:行号＋原因”。
 - 测试失败：照实回报原文，不要改测试去迁就。
 

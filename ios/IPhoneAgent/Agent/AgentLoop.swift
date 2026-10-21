@@ -472,7 +472,13 @@ extension Pointer: Gestures {}
         let started = now()
         onDoing?(.looking)
         await screen?.afterAction(since: lastActed)
-        try await screen?.requireFrame(after: lastActed)
+        do {
+            try await screen?.requireFrame(after: lastActed)
+        } catch where screen?.live == false && !(error is CancellationError) {
+            // The screen dropped right after the move: not this step's failure. The next look pauses for it
+            // (waitForScreen), then goes on from here.
+            DebugLog.write("frame after the move: the screen is gone; the next look waits for it")
+        }
         return (now() - started) * 1000
     }
 
