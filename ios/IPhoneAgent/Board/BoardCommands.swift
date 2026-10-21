@@ -119,8 +119,10 @@ extension HIDDevice {
         switch name {
         case "move": return 5 + Double(arg.split(separator: " ").compactMap { Int($0) }.map(abs).max() ?? 0) / 10 * 0.012
         case "stroke":  // the whole stroke runs on the board: allow for every segment, like a move each
-            let v = arg.split(separator: " ").compactMap { Int($0) }.map(abs)
-            return 5 + stride(from: 0, to: v.count - 1, by: 2).map { Double(max(v[$0], v[$0 + 1])) }.reduce(0, +) / 10 * 0.012
+            let v: [Int] = arg.split(separator: " ").compactMap { Int($0) }.map(abs)
+            var units = 0  // the longer axis of each segment, summed
+            for i in stride(from: 0, to: v.count - 1, by: 2) { units += max(v[i], v[i + 1]) }
+            return 5 + Double(units) / 10 * 0.012
         case "type": return 5 + 0.1 * Double(arg.count)
         case "ping": return 8  // an idle check: tolerate a hiccup rather than drop a healthy board
         case "snap": return 15  // a whole GOP over BLE
