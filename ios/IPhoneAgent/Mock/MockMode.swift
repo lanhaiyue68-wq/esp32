@@ -48,9 +48,9 @@ extension AppModel {
     func mockReady() {
         if !board.connected {
             board.mockConnect(name: "ESP32 Agent 7C3E",
-                              net: NetConfig(mode: "ap", ssid: "ESP32Agent-7C3E", pass: nil, ip: "192.168.4.1"))
+                              net: NetConfig(mode: "sta", ssid: "Home Wi-Fi", pass: nil, ip: "192.168.1.23"))
         }
-        hotspotSSID = "ESP32Agent-7C3E"
+        hotspotSSID = "Home Wi-Fi"
         mockMirroring = true
         modelOK = true
         if feed.frame == nil { showMockFrame() }
@@ -157,10 +157,10 @@ extension AppModel {
 
     private static func status(up: Int, n: Int, mirroring: Bool) -> BoardStatus {
         BoardStatus(up: up, rst: "power-on", heap: 81_234 - n % 7 * 120, psram: 6_200_000, usb: "ok",
-                    net: "ap", ip: "192.168.4.1", sta: 1, ap: mirroring ? "streaming" : "idle", w: 480, h: 1040,
+                    net: "sta", ip: "192.168.1.23", sta: 1, ap: mirroring ? "streaming" : "idle", w: 480, h: 1040,
                     kbps: Double.random(in: 150...230), fps: Double.random(in: 4.4...5), idr: 2000,
                     gop: 42_000 + n % 5 * 3000,
-                    ble: .init(mtu: 247, phy: 2, kbps: Double.random(in: 320...380), drop: n / 30))
+                    ble: .init(mtu: 247, phy: 2, kbps: Double.random(in: 320...380), drop: n / 30), tcp: 1)
     }
 
     static let mockPlan = """

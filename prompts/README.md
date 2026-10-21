@@ -8,5 +8,7 @@ The model prompts the app sends, as plain text. They are bundled into the app at
 - `app-rules.md`: rules for running inside the phone (never touch this app, toggles, home screen icons); appended
   to both.
 
-Edit, rebuild, and compare runs in the app's Runs tab. Keep the action list in `actor.md` in sync with
+No Mac at hand: put an edited copy in the app's Documents folder (Files › On My iPhone › the app ›
+`prompts/<name>.md`; it wins from the next app launch) or add rules to `Documents/rules.md` (every run). The
+app also learns the user's Review notes by itself (`LessonBook`). Otherwise edit, rebuild, and compare runs in the app's Runs tab. Keep the action list in `actor.md` in sync with
 `ios/IPhoneAgent/Agent/Actions.swift`. Each file's final newline is not part of the prompt.

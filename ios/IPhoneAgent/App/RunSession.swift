@@ -10,14 +10,15 @@ extension AppModel {
     var moveCount: Int { agent.steps.filter { !StepText.notMoves.contains($0["action"]?.str ?? "") }.count }
     var runID: String { traces.dir?.lastPathComponent ?? "" }
 
-    /// Start a task (or a saved intent: its checklist goes to the actor as hints).
-    func run(_ task: String, intent: SavedTask? = nil) async {
+    /// Start a task (or a saved intent: its checklist goes to the planner and actor as hints). `hints` from a
+    /// reviewed run win over the intent's.
+    func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
         currentIntent = intent
         lastTask = task
-        agent.hints = intent?.checklist ?? []
+        agent.hints = hints.flatMap { $0.isEmpty ? nil : $0 } ?? intent?.checklist ?? []
         await startAgent(task)
     }
 
@@ -75,8 +76,9 @@ extension AppModel {
             live.start(task: task, runID: runID, limit: agent.maxSteps)
             liveRequested = true
             mark("Live Activity requested")
+            mark(keepAwake.start() ? "background audio on" : "background audio failed (BLE wake-ups only)")
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "agent") { [weak self] in
-                self?.say("iOS is ending background time; BLE status keeps the run going")
+                self?.say("iOS is ending background time; background audio keeps the run going")
                 self?.endBackgroundTask()
             }
             let left = now()
@@ -112,6 +114,7 @@ extension AppModel {
             saveVideoFrame(feed.frame)
             videoDir = nil
             if liveRequested { live.end((.failure, String(localized: "Could not start"))) }
+            keepAwake.stop()
             endBackgroundTask()
             runs.reload()
             runMood = .failure
@@ -219,6 +222,30 @@ extension AppModel {
         if let last = agent.steps.last { say("finished: \(last["action"]?.str ?? "") \(last["reason"]?.str ?? last["answer"]?.str ?? "")") }
         Task { try? await feed.stream(false) }
         endBackgroundTask()
+        let run = runID, task = agent.task, steps = agent.steps
+        Task { [weak self] in
+            await self?.learnFromRun(run, task: task, steps: steps)  // background audio keeps the app up for this call
+            guard let self, !self.agent.running, !self.startingAgent else { return }
+            self.keepAwake.stop()
+        }
+    }
+
+    /// Self-learning after every run: the planner model reviews the run's own steps and keeps up to three lessons
+    /// for similar tasks (LessonBook), shown in the trace as a "learned" record.
+    func learnFromRun(_ run: String, task: String, steps: [JObject]) async {
+        guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty,
+              steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }) else { return }
+        do {
+            let reply = try await settings.client("planner").chat(system: LessonBook.reflectionPrompt,
+                                                                  text: LessonBook.reflectionInput(task: task, steps: steps),
+                                                                  image: nil, maxTokens: 600, temperature: 0.2)
+            let found = LessonBook.parseLessons(reply.text)
+            lessons.learnFromRun(run, task: task, lessons: found)
+            if runID == run { traces.write(kind: "learned", ["lessons": .arr(found.map { .str($0) })]) }
+            DebugLog.write("learned: \(found.count) lesson(s) from run \(run)")
+        } catch {
+            DebugLog.write("learning after the run failed: \(error.localizedDescription)")
+        }
     }
 
     func endBackgroundTask() {

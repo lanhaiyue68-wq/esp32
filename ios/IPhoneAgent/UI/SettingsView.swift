@@ -122,25 +122,14 @@ struct BoardSettingsView: View {
                 }
             }
             Section {
-                Button { app.startJoin() } label: {
-                    HStack {
-                        Text("Join the Board's Wi-Fi")
-                        Spacer()
-                        if app.join.busy { ProgressView() }
-                    }
-                }
-                .disabled(app.join.busy)
-                if let ssid = app.hotspotSSID { ValueRow(title: "Network", value: ssid) }
-                if let net = app.manualHotspot, let pass = net.pass {
-                    if let ssid = net.ssid { ValueRow(title: "Network", value: ssid) }
-                    ValueRow(title: "Password", value: pass)
-                    Button { UIPasteboard.general.string = pass; Haptics.success() } label: { Text("Copy Wi-Fi Password") }
-                    Button { UIPasteboard.general.string = pass; Hotspot.openWiFiSettings() } label: { Text("Open Settings") }
-                }
+                ValueRow(title: "Board Wi-Fi", value: board.net?.ssid.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Not set"))
+                ValueRow(title: "Status", value: app.join == .joining ? String(localized: "Sending…")
+                         : app.sameWiFiProblem ?? String(localized: "Same Wi-Fi as this iPhone"))
+                SendWiFiForm(app: app, board: board)
             } header: {
                 Text("Wi-Fi")
             } footer: {
-                Text("While joined, the internet goes over cellular data. Switch back in Settings › Wi-Fi when you are done.")
+                Text("The board never opens its own hotspot. It joins the Wi-Fi sent here and waits while that Wi-Fi is out of range. Keep this iPhone on the same Wi-Fi for Screen Mirroring.")
             }
             if board.pairedID != nil {
                 Section {

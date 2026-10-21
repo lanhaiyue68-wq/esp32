@@ -196,35 +196,9 @@ enum Keychain {
     }
 }
 
-/// Joins the board's SoftAP with the credentials read over BLE (never shown or logged).
+/// The phone's Wi-Fi. The app never joins a network (no NEHotspotConfiguration): the board has no hotspot
+/// since firmware v22, and the phone stays on its own Wi-Fi, which the board joins too.
 enum Hotspot {
-    static func join(_ net: NetConfig) async throws {
-        guard let ssid = net.ssid, let pass = net.pass else { throw DeviceError(message: "board sent no hotspot credentials") }
-        let config = NEHotspotConfiguration(ssid: ssid, passphrase: pass, isWEP: false)
-        config.joinOnce = false
-        do {
-            try await NEHotspotConfigurationManager.shared.apply(config)
-        } catch let e as NSError where e.domain == NEHotspotConfigurationErrorDomain
-                    && e.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
-            return
-        }
-    }
-
-    /// For the debug log: domain, code, the NEHotspotConfigurationError name and the message.
-    static func describe(_ e: NSError) -> String {
-        guard e.domain == NEHotspotConfigurationErrorDomain else { return "\(e.domain) \(e.code): \(e.localizedDescription)" }
-        let names = ["invalid", "invalidSSID", "invalidWPAPassphrase", "invalidWEPPassphrase", "invalidEAPSettings",
-                     "invalidHS20Settings", "invalidHS20DomainName", "userDenied", "internal", "pending",
-                     "systemConfiguration", "unknown", "joinOnceNotSupported", "alreadyAssociated",
-                     "applicationIsNotInForeground", "invalidSSIDPrefix", "userUnauthorized", "systemDenied"]
-        let name = names.indices.contains(e.code) ? names[e.code] : "?"
-        return "\(e.domain) \(e.code) \(name): \(e.localizedDescription)"
-    }
-
-    static func userDenied(_ e: NSError) -> Bool {
-        e.domain == NEHotspotConfigurationErrorDomain && e.code == NEHotspotConfigurationError.userDenied.rawValue
-    }
-
     /// Settings › Wi-Fi when iOS allows the deep link, else this app's page in Settings.
     @MainActor static func openWiFiSettings() {
         let app = UIApplication.shared
@@ -240,7 +214,7 @@ enum Hotspot {
         next()
     }
 
-    /// The SSID the phone is on, if it is one of ours (needs the hotspot entitlement).
+    /// The SSID the phone is on, when iOS lets the app read it (wifi-info entitlement; may be nil).
     static func currentSSID() async -> String? {
         await NEHotspotNetwork.fetchCurrent()?.ssid
     }

@@ -104,7 +104,10 @@ struct ReviewView: View {
         .safeAreaInset(edge: .bottom) { if !draft.readOnly && outcome != .running { bottomBar } }
         .task(id: [playing, showVideo]) { await autoplay() }
         .onChange(of: showVideo) { playing = false }
-        .onChange(of: draft.steps) { _, _ in app.agent.experience?.learnReview(draft) }
+        .onChange(of: draft.steps) { _, _ in
+            app.agent.experience?.learnReview(draft)
+            app.agent.lessons?.learnReview(draft)  // notes and added steps reach every similar task from now on
+        }
         .onChange(of: videoTime) { _, t in  // the step follows the video
             guard showVideo, let i = steps.lastIndex(where: { ($0.t ?? 0) <= t }), i != index else { return }
             index = i
@@ -379,7 +382,8 @@ struct ReviewView: View {
             do {
                 try await app.board.refreshStatus()
                 dismiss()
-                await app.run(run.task, intent: intent)
+                // The reviewed (maybe AI-optimized) instruction and checklist, saved as an intent or not.
+                await app.run(draft.prompt.isEmpty ? run.task : draft.prompt, intent: intent, hints: draft.hints)
             } catch {
                 retryError = error.localizedDescription
             }
@@ -402,7 +406,7 @@ struct ReviewView: View {
         let intent = app.intents.item(draft.intentID)
         let task = draft.prompt + "\n\n" + String(localized: "Start from this step: \(StepText.title(step.action)). The steps before it are already done.")
         dismiss()
-        Task { await app.run(task, intent: intent) }
+        Task { await app.run(task, intent: intent, hints: draft.hints) }
     }
 }
 

@@ -1,9 +1,10 @@
 import Foundation
 import NetworkExtension
 
-/// Joining the board's Wi-Fi: idle → joining (the system prompt) → verifying (≤ 10 s) → joined, or
-/// failed(reason) with Try Again and the manual fallback. A new start cancels the old task, so a re-tap
-/// always restarts cleanly and the spinner never sticks.
+/// Being on one Wi-Fi with the board. Firmware v22+ never opens a hotspot and this app never joins a
+/// network by itself: idle → joining (sending the phone's Wi-Fi to the board) → verifying (waiting for the
+/// board to show up on it) → joined, or failed(reason) while the board waits for its Wi-Fi or the phone is
+/// on another one. A new start cancels the old task, so a re-tap always restarts cleanly.
 enum JoinState: Equatable {
     case idle, joining, verifying, joined
     case failed(String)
@@ -11,93 +12,98 @@ enum JoinState: Equatable {
     var busy: Bool { self == .joining || self == .verifying }
 }
 
+enum SameWiFi {
+    /// Why the phone and the board are not on one Wi-Fi yet; nil when they are. "Same Wi-Fi" is what the
+    /// board reports: it is a connected station and this phone's video TCP reached it.
+    static func problem(connected: Bool, status: BoardStatus?, boardSSID: String?) -> String? {
+        guard connected, let status else { return String(localized: "The board isn't connected over Bluetooth yet.") }
+        let ssid = boardSSID ?? ""
+        switch status.net ?? "" {
+        case "sta" where (status.tcp ?? 0) > 0:
+            return nil
+        case "sta":
+            return String(localized: "The board is on “\(ssid)”. Connect this iPhone to the same Wi-Fi.")
+        case "ap":
+            return String(localized: "The board still runs old firmware that opens its own hotspot. Update the board to v22; this app no longer joins it.")
+        case "off":
+            return String(localized: "The board's Wi-Fi is switched off. Send it the Wi-Fi this iPhone is on.")
+        default:
+            return ssid.isEmpty ? String(localized: "The board has no Wi-Fi yet. Send it the Wi-Fi this iPhone is on.")
+                : String(localized: "The board is waiting for “\(ssid)”. Turn that Wi-Fi on or bring the board in range; it joins by itself.")
+        }
+    }
+}
+
 extension AppModel {
-    /// Start (or restart) the join. `auto`: the page appeared; skipped once it was tried or is done.
+    var sameWiFiProblem: String? { SameWiFi.problem(connected: board.connected, status: board.status, boardSSID: board.net?.ssid) }
+    var onSameWiFi: Bool { sameWiFiProblem == nil }
+
+    /// Start (or restart) the check. `auto`: the page appeared; skipped once it was tried or is done.
     func startJoin(auto: Bool = false) {
         if auto && join != .idle { return }
         joinTask?.cancel()
-        joinTask = Task { [weak self] in await self?.runJoin() }
+        joinTask = Task { [weak self] in await self?.runJoin(seconds: 10) }
     }
 
-    private func runJoin() async {
-        if MockMode.on {
+    /// The board joins the phone's Wi-Fi (sent over the encrypted BLE link), then the app waits for it there.
+    func sendWiFi(ssid: String, pass: String) {
+        joinTask?.cancel()
+        joinTask = Task { [weak self] in
+            guard let self else { return }
             join = .joining
+            do {
+                try board.writeNet(NetConfig(mode: "sta", ssid: ssid, pass: pass))
+            } catch {
+                join = .failed(error.localizedDescription)
+                return
+            }
+            say("wifi: sent \(ssid) to the board (password \(pass.count) chars)")
+            await runJoin(seconds: 30)  // association, DHCP and the video TCP retry take a while
+        }
+    }
+
+    private func runJoin(seconds: Int) async {
+        if MockMode.on {
+            join = .verifying
             try? await Task.sleep(nanoseconds: 800_000_000)
-            hotspotSSID = board.net?.ssid ?? "ESP32Agent-7C3E"
+            hotspotSSID = board.net?.ssid ?? "Home Wi-Fi"
             join = .joined
             return mockStartMirroring()
         }
-        join = .joining
-        let net: NetConfig
-        do { net = try await board.readNet() } catch {
-            say("hotspot: could not read the board's Wi-Fi: \(error.localizedDescription)")
-            join = .failed(String(localized: "Couldn't read the board's Wi-Fi. Is the board connected?"))
-            return
-        }
-        guard !Task.isCancelled else { return }
-        let ssid = net.ssid ?? "?"
-        if await onBoardWiFi(ssid) {  // already there: iOS would show no prompt
-            say("hotspot: already on \(ssid)")
-            return joined(ssid)
-        }
-        say("hotspot: NEHotspotConfigurationManager.apply(\(ssid), password \(net.pass?.count ?? 0) chars, joinOnce false)")
-        let started = now()
-        do {
-            try await Hotspot.join(net)
-            say(String(format: "hotspot: apply → ok after %.1f s", now() - started))
-        } catch let e as NSError {
-            say(String(format: "hotspot: apply → %@ after %.1f s", Hotspot.describe(e), now() - started))
-            guard !Task.isCancelled else { return }
-            if Hotspot.userDenied(e) {
-                join = .failed(String(localized: "Join was cancelled."))
-            } else {
-                manualHotspot = net
-                join = .failed(String(localized: "iOS couldn't join automatically. Join by hand with the password below."))
-            }
-            return
-        }
-        // apply() can succeed (or show no prompt) without the phone really joining: confirm for up to 10 s.
         join = .verifying
-        for _ in 0..<20 {
+        for _ in 0..<(seconds * 2) {
             guard !Task.isCancelled else { return }
-            if await onBoardWiFi(ssid) { return joined(ssid) }
+            if onSameWiFi { return joined(board.net?.ssid ?? "") }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
-        let current = await Hotspot.currentSSID()
-        say("hotspot: applied, but after 10 s the phone is on \(current ?? "no readable network"), not \(ssid)")
-        manualHotspot = net
-        join = .failed(String(localized: "The iPhone didn't switch to the board's Wi-Fi. Join by hand with the password below."))
+        let why = sameWiFiProblem ?? ""
+        say("wifi: not on one Wi-Fi with the board after \(seconds) s: \(why)")
+        join = .failed(why)
     }
 
     private func joined(_ ssid: String) {
         manualHotspot = nil
         hotspotSSID = ssid
         join = .joined
-        say("hotspot: joined \(ssid)")
+        say("wifi: same network as the board (\(ssid))")
     }
 
-    /// On the board's network: the current SSID matches, or the board counts a client.
-    private func onBoardWiFi(_ ssid: String) async -> Bool {
-        if await Hotspot.currentSSID() == ssid { return true }
-        return board.connected && (board.status?.sta ?? 0) > 0
-    }
-
-    /// Poll while the See page is up (and when the app comes back): the user may have joined in Settings.
+    /// Poll while the See page is up (and when the app comes back): the phone or the board may have moved.
     func refreshHotspot() async {
         guard !MockMode.on else { return }
-        let current = await Hotspot.currentSSID()
+        let current = await Hotspot.currentSSID()  // nil without Wi-Fi info access: then only the board can tell
         let ours = board.net?.ssid
-        let on = current != nil && (current == ours || (ours == nil && (current?.hasPrefix("ESP32Agent") == true || current?.hasPrefix("iPhoneAgent") == true)))
-        let other = on ? nil : current
+        let same = onSameWiFi
+        let other = !same && current != nil && current != ours ? current : nil
         if otherWiFi != other { otherWiFi = other }
-        if on, hotspotSSID != current {
-            hotspotSSID = current
+        if same, hotspotSSID != ours {
+            hotspotSSID = ours
             if !join.busy { join = .joined }
-            DebugLog.write("hotspot: detected on \(current ?? "")")
-        } else if !on, current != nil, hotspotSSID != nil || join == .joined {
-            hotspotSSID = nil  // on another network: not joined, whatever was true before
+            DebugLog.write("wifi: same network as the board (\(ours ?? ""))")
+        } else if !same, hotspotSSID != nil || join == .joined {
+            hotspotSSID = nil
             if join == .joined { join = .idle }
-            DebugLog.write("hotspot: on another network, not the board's")
+            DebugLog.write("wifi: not on the board's network")
         }
     }
 }

@@ -228,6 +228,8 @@ import Foundation
     func writeNet(_ config: NetConfig) throws {
         guard let peripheral, let c = chars[BoardUUID.net] else { throw DeviceError(message: "board not connected") }
         peripheral.writeValue(try JSONEncoder().encode(config), for: c, type: .withResponse)
+        // readNet() serves this cache while connected: keep it on the new Wi-Fi (same video token).
+        net = NetConfig(mode: config.mode, ssid: config.ssid, pass: config.pass, ip: nil, video_token: net?.video_token)
     }
 
     // MARK: - BoardTransport

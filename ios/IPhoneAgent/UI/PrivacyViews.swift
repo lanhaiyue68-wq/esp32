@@ -66,7 +66,7 @@ struct PrivacySettingsView: View {
                 Toggle("Learn from operation feedback", isOn: $learning)
                 Text("Remembered cases: \(learnedCount)").foregroundStyle(.secondary)
                 Button("Clear learned cases", role: .destructive) {
-                    app.agent.experience?.clear(); learnedCount = 0
+                    app.agent.experience?.clear(); app.agent.lessons?.clear(); learnedCount = 0
                 }
             } footer: {
                 Text("Stored on this iPhone: up to 128 cases and 256 KB. Screenshots and typed text are excluded. Live screens are always checked before acting.")
@@ -74,8 +74,8 @@ struct PrivacySettingsView: View {
             if keep { export }
         }
         .navigationTitle("Privacy")
-        .onAppear { runs.reload(); learnedCount = app.agent.experience?.count ?? 0 }
-        .onChange(of: learning) { _, enabled in app.agent.experience?.enabled = enabled }
+        .onAppear { runs.reload(); learnedCount = (app.agent.experience?.count ?? 0) + (app.agent.lessons?.count ?? 0) }
+        .onChange(of: learning) { _, enabled in app.agent.experience?.enabled = enabled; app.agent.lessons?.enabled = enabled }
         .onChange(of: picked) { package = nil }
     }
 

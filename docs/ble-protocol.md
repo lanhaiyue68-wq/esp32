@@ -57,9 +57,12 @@ board timestamp (ms) for latency stats, followed by the Annex-B data.
 `seq` increments per notify; the app counts gaps as drops and waits for the next IDR/CONFIG after a gap.
 
 ## net (JSON)
-Read: `{"mode":"ap","ssid":"ESP32Agent-1A2B","pass":"<random 12 chars>","ip":"192.168.4.1"}`
-(SoftAP credentials are generated once at first boot and kept in NVS).
-Write `{"mode":"ap"}` or `{"mode":"sta","ssid":"...","pass":"..."}` — stored in NVS, board restarts Wi-Fi.
+Firmware v22+ is station only: the board never opens a hotspot. It joins the Wi-Fi the phone is on and,
+while that Wi-Fi is out of reach or not set, keeps waiting for it (retries back off to 30 s).
+Read: `{"mode":"sta","ssid":"<Wi-Fi>","pass":"...","ip":"192.168.1.23","video_token":"...","admin":"<admin page password>"}`
+(`ip` is `0.0.0.0` while waiting; `admin` is the former hotspot password, kept in NVS).
+Write `{"mode":"sta","ssid":"...","pass":"..."}` (stored in NVS, board restarts Wi-Fi), `{"mode":"sta"}` (back on
+from `off` with the stored Wi-Fi) or `{"mode":"off"}`. `{"mode":"ap"}` from older apps is ignored.
 
 ## AirPlay
 Receiver name `ESP32 Agent`, mirroring only (no audio), H.264 only, resolution/fps from NVS.
@@ -67,7 +70,8 @@ Receiver name `ESP32 Agent`, mirroring only (no audio), H.264 only, resolution/f
 ## Deviations (firmware notes)
 - `status`: if the negotiated MTU is too small for the full JSON (MTU-3 < ~255 bytes), the notify carries a
   reduced object `{"up","rst","usb","net","ap","ble":{"mtu"}}`; a `status` read always returns the last full JSON.
-- `sta` in `status` = number of stations on the board's hotspot (mode `ap`), or 1/0 = connected (mode `sta`).
+- `net` in `status` = `sta` (connected) | `none` (waiting for its Wi-Fi) | `off`; `sta` = 1/0 connected; `tcp` = 1 when
+  the phone's video TCP reached the board, i.e. both are on one Wi-Fi.
 - `net` read in `sta` mode returns the station network's `ssid`/`pass`.
 - `snap` while mirroring has stopped returns the last buffered GOP (check `"ap"` in status); `snap` without
   any video replies `err no video ...`.

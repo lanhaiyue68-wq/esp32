@@ -5637,6 +5637,216 @@
           }
         }
       }
+    },
+    "Screen Mirroring reaches the board over the Wi-Fi you both use." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕镜像通过你和开发板共用的 Wi-Fi 连到开发板。"
+          }
+        }
+      }
+    },
+    "Same Wi-Fi as the board" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和开发板连同一个 Wi-Fi"
+          }
+        }
+      }
+    },
+    "Sending the Wi-Fi to the board…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在把 Wi-Fi 发给开发板…"
+          }
+        }
+      }
+    },
+    "Waiting for the board on this Wi-Fi…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等开发板连上这个 Wi-Fi…"
+          }
+        }
+      }
+    },
+    "The board never opens its own hotspot. Without a shared Wi-Fi it waits." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板不会开自己的热点；没有共同的 Wi-Fi 时，它会一直等待。"
+          }
+        }
+      }
+    },
+    "We're already on the same Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我们已经在同一个 Wi-Fi 上"
+          }
+        }
+      }
+    },
+    "Wi-Fi name (2.4 GHz)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi 名称（2.4 GHz）"
+          }
+        }
+      }
+    },
+    "Send This Wi-Fi to the Board" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把这个 Wi-Fi 发给开发板"
+          }
+        }
+      }
+    },
+    "Board Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板 Wi-Fi"
+          }
+        }
+      }
+    },
+    "Not set" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置"
+          }
+        }
+      }
+    },
+    "Sending…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在发送…"
+          }
+        }
+      }
+    },
+    "Same Wi-Fi as this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和这台 iPhone 在同一个 Wi-Fi"
+          }
+        }
+      }
+    },
+    "The board never opens its own hotspot. It joins the Wi-Fi sent here and waits while that Wi-Fi is out of range. Keep this iPhone on the same Wi-Fi for Screen Mirroring." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板不会开自己的热点。它会连上这里发送的 Wi-Fi，这个 Wi-Fi 不在范围内时就一直等待。屏幕镜像需要这台 iPhone 连同一个 Wi-Fi。"
+          }
+        }
+      }
+    },
+    "Check Again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再检查一次"
+          }
+        }
+      }
+    },
+    "Check the Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查 Wi-Fi"
+          }
+        }
+      }
+    },
+    "The board isn't connected over Bluetooth yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板还没通过蓝牙连上。"
+          }
+        }
+      }
+    },
+    "The board is on “%@”. Connect this iPhone to the same Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板在“%@”上。请把这台 iPhone 连到同一个 Wi-Fi。"
+          }
+        }
+      }
+    },
+    "The board still runs old firmware that opens its own hotspot. Update the board to v22; this app no longer joins it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板还是会开热点的旧固件。请把开发板更新到 v22；这个 App 不会再连它的热点。"
+          }
+        }
+      }
+    },
+    "The board's Wi-Fi is switched off. Send it the Wi-Fi this iPhone is on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板的 Wi-Fi 已关闭。请把这台 iPhone 正在用的 Wi-Fi 发给它。"
+          }
+        }
+      }
+    },
+    "The board has no Wi-Fi yet. Send it the Wi-Fi this iPhone is on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板还没设置 Wi-Fi。请把这台 iPhone 正在用的 Wi-Fi 发给它。"
+          }
+        }
+      }
+    },
+    "The board is waiting for “%@”. Turn that Wi-Fi on or bring the board in range; it joins by itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板正在等“%@”。打开这个 Wi-Fi，或把开发板放到信号范围内，它会自己连上。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

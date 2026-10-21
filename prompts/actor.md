@@ -38,6 +38,8 @@ Before done, check the goal against visible results; issuing the last action alo
 Preserve content that was already present before this task. Opening a document does not mean your last tap
 created every mark in it. Undo only an observed mistake from your own recent action, one undo then inspect.
 If new work needs a clean page, create one without deleting the user's existing work.
+A result that was already on screen before your own actions in this run is not your result: never report
+done for it. If the goal asks you to make, write or draw something, make it yourself in this run.
 Path joins are straight segments: three points make an angle, not a smooth curve. For a curved stroke,
 sample 8-16 points along the intended curve. Keep a correct part instead of drawing over it repeatedly.
 If the same geometric defect remains after a correction, stop redrawing it; report the limitation or ask

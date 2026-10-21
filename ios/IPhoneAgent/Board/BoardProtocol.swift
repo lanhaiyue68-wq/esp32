@@ -24,13 +24,14 @@ struct BoardStatus: Codable, Equatable {
     var heap: Int?
     var psram: Int?
     var usb: String?   // ok | asleep | off
-    var net: String?   // ap | sta | none
+    var net: String?   // sta | none (waiting for its Wi-Fi) | off; ap only on firmware before v22
     var ip: String?
     var sta: Int?
     var ap: String?    // idle | connected | streaming
     var w: Int?, h: Int?
     var kbps: Double?, fps: Double?, idr: Int?, gop: Int?
     var ble: BLE?
+    var tcp: Int?      // 1: this phone's video TCP reached the board, so both are on one Wi-Fi
 
     static func decode(_ data: Data) -> BoardStatus? { try? JSONDecoder().decode(BoardStatus.self, from: data) }
 
@@ -43,14 +44,15 @@ struct BoardStatus: Codable, Equatable {
         m.up = n.up ?? up; m.rst = n.rst ?? rst; m.heap = n.heap ?? heap; m.psram = n.psram ?? psram
         m.usb = n.usb ?? usb; m.net = n.net ?? net; m.ip = n.ip ?? ip; m.sta = n.sta ?? sta; m.ap = n.ap ?? ap
         m.w = n.w ?? w; m.h = n.h ?? h; m.kbps = n.kbps ?? kbps; m.fps = n.fps ?? fps; m.idr = n.idr ?? idr
-        m.gop = n.gop ?? gop
+        m.gop = n.gop ?? gop; m.tcp = n.tcp ?? tcp
         let a = ble ?? BLE(), b = n.ble ?? BLE()
         m.ble = BLE(mtu: b.mtu ?? a.mtu, phy: b.phy ?? a.phy, kbps: b.kbps ?? a.kbps, drop: b.drop ?? a.drop)
         return m
     }
 }
 
-/// The `net` characteristic: SoftAP credentials (read) or Wi-Fi mode (write).
+/// The `net` characteristic: the Wi-Fi the board is on or waits for (read), or a new one (write). Firmware v22+
+/// never opens a hotspot, so the app never joins the board; it only sends the board the phone's Wi-Fi.
 struct NetConfig: Codable, Equatable {
     var mode: String
     var ssid: String?

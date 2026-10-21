@@ -41,7 +41,12 @@ extension Pointer: Gestures {}
     let maxSteps: Int, maxFailures: Int
     var metrics: Metrics?
     var experience: ExperienceStore?
+    /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
+    var lessons: LessonBook?
     private var learnedThrough = -1
+    /// Plans dropped in a row because the screen moved while the model answered: after two, act on the
+    /// latest look (a clock, a Live Activity or video noise can keep a screen "changing" forever).
+    private var staleRun = 0
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
@@ -89,6 +94,7 @@ extension Pointer: Gestures {}
         lastActed = 0
         learnedThrough = -1
         helpAsked = 0
+        staleRun = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -227,6 +233,12 @@ extension Pointer: Gestures {}
 
     func run() async {
         var failures = 0
+        // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
+        let applied = lessons?.relevant(to: task) ?? []
+        if !applied.isEmpty || !Prompts.userRules.isEmpty {
+            trace?.write(kind: "lessons", ["lessons": .arr(applied.map { .str($0.text) }), "rules_md": .bool(!Prompts.userRules.isEmpty)])
+            DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
+        }
         do {
             try await replan()
             for _ in 0..<maxSteps {
@@ -296,10 +308,15 @@ extension Pointer: Gestures {}
         return true
     }
 
-    /// The actor's system prompt: the original, plus an intent's checklist as hints.
-    var actorPrompt: String {
-        let base = Prompts.actor + "\n" + AssistiveTouchSpots.rule
-        return hints.isEmpty ? base : base + "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n")
+    /// The actor's system prompt: the original, plus this task's hints, the user's lessons and rules.md.
+    var actorPrompt: String { Prompts.actor + "\n" + AssistiveTouchSpots.rule + taught }
+
+    /// The planner gets the same: a plan that ignores them makes the actor ignore them too.
+    var plannerPrompt: String { Prompts.plannerApp + "\n" + AssistiveTouchSpots.rule + taught }
+
+    private var taught: String {
+        (hints.isEmpty ? "" : "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n"))
+            + (lessons?.context(task: task) ?? "") + Prompts.userRules
     }
 
     private func finish() {
@@ -336,9 +353,14 @@ extension Pointer: Gestures {}
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
                 if i == 0, seen != screen?.frame, Vision.changed(seen, screen?.frame, ignore: spots) {
-                    record(screen?.frame, ["action": .str("stale plan"), "reason": .str("screen changed while the model was responding; inspect again")])
-                    return false
+                    staleRun += 1
+                    if staleRun <= 2 {
+                        record(screen?.frame, ["action": .str("stale plan"), "reason": .str("screen changed while the model was responding; inspect again")])
+                        return false
+                    }
+                    DebugLog.write("stale plan \(staleRun) in a row: the screen keeps changing, acting on the latest look")
                 }
+                staleRun = 0
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used
@@ -415,7 +437,7 @@ extension Pointer: Gestures {}
                 + "\nKeep steps that already succeeded; resume from the current screen."
                 + "\n\nRecent actions:\n\(recentActions)"
         }
-        let (reply, seconds, frame) = try await ask("planner", planner, Prompts.plannerApp + "\n" + AssistiveTouchSpots.rule, prompt)
+        let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
         plan = en
         record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),

@@ -97,7 +97,11 @@ struct OptimizeSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Keep Editing") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Accept") {
-                        if let result { draft.prompt = result.prompt; draft.hints = result.hints; draft.saveEdits() }
+                        if let result {
+                            draft.prompt = result.prompt; draft.hints = result.hints; draft.saveEdits()
+                            // Not only for this intent: every similar task from now on gets these hints.
+                            app.agent.lessons?.learnHints(result.hints, task: result.prompt, run: draft.runID)
+                        }
                         Haptics.success()
                         dismiss()
                     }

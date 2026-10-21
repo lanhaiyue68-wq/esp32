@@ -29,16 +29,16 @@ import XCTest
         XCTAssertEqual(agent.steps.last?["action"], .str("stopped"))
     }
 
-    func testIntentHintsAreAppendedToTheActorPromptOnly() async {
+    func testIntentHintsReachThePlannerAndTheActor() async {
         let model = SystemRecorder { n in n == 1 ? "1. go" : "THINK: there\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: model, planner: model, trace: nil)
         agent.hints = ["Type the time instead of scrolling"]
         await agent.run()
-        let rule = "\n" + AssistiveTouchSpots.rule
-        XCTAssertEqual(model.systems[0], Prompts.plannerApp + rule)
-        XCTAssertEqual(model.systems[1], Prompts.actor + rule + "\n\nHints for this task:\n- Type the time instead of scrolling")
+        let rule = "\n" + AssistiveTouchSpots.rule, hints = "\n\nHints for this task:\n- Type the time instead of scrolling"
+        XCTAssertEqual(model.systems[0], Prompts.plannerApp + rule + hints + Prompts.userRules)
+        XCTAssertEqual(model.systems[1], Prompts.actor + rule + hints + Prompts.userRules)
         agent.hints = []
-        XCTAssertEqual(agent.actorPrompt, Prompts.actor + rule)
+        XCTAssertEqual(agent.actorPrompt, Prompts.actor + rule + Prompts.userRules)
     }
 
     func testOptimizerReplyIsParsed() {

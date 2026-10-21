@@ -138,9 +138,9 @@ struct OnboardingView: View {
     /// The mouse and mirroring are up: calibration can run.
     private var actReady: Bool { MockMode.on || (calibrator.boardReady && calibrator.mirroring) }
 
-    /// On the board's hotspot: joined in-app, confirmed by hand, or the board reports a client.
+    /// On one Wi-Fi with the board: confirmed in-app, by hand, or the board sees this phone's video TCP.
     private var onHotspot: Bool {
-        app.otherWiFi == nil && (onWiFi || app.join == .joined || app.hotspotSSID != nil || (board.connected && (board.status?.sta ?? 0) > 0))
+        app.otherWiFi == nil && (onWiFi || app.join == .joined || app.hotspotSSID != nil || app.onSameWiFi)
     }
 
     private var primaryTitle: LocalizedStringKey {
@@ -151,10 +151,10 @@ struct OnboardingView: View {
             if streaming { return "Continue" }
             if onHotspot { return "Waiting for mirroring…" }
             switch app.join {
-            case .joining: return "Joining…"
+            case .joining: return "Sending…"
             case .verifying: return "Checking…"
-            case .failed: return "Try Again"
-            default: return "Join the Board's Wi-Fi"
+            case .failed: return "Check Again"
+            default: return "Check the Wi-Fi"
             }
         case .act:
             if pointer.calibrated { return "Continue" }

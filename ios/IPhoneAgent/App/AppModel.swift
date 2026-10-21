@@ -73,6 +73,8 @@ import UIKit
     private var lastStreamLog = 0.0
     private var timers: [Task<Void, Never>] = []
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// Silence during a run, so iOS never suspends the app (and its Wi-Fi video) while it works in the background.
+    let keepAwake = BackgroundAudio()
     var lastWidgetReload = 0.0
 
     init() {
@@ -85,6 +87,9 @@ import UIKit
             let memory = ExperienceStore(file: support.appendingPathComponent("experience-v1.json"))
             memory.enabled = UserDefaults.standard.object(forKey: ExperienceStore.enabledKey) as? Bool ?? true
             agent.experience = memory
+            let lessons = LessonBook(file: support.appendingPathComponent("lessons-v1.json"))
+            lessons.enabled = memory.enabled  // one switch: Settings › Privacy › Learn from operation feedback
+            agent.lessons = lessons
         }
         agent.metrics = metrics
         feed.device = board.commands
