@@ -4,7 +4,7 @@
 
 ## 这一版改了什么
 
-1. **只走同一个 Wi-Fi，不再连小板热点**（配合固件 v22 以上，小板现在是 v23）
+1. **只走同一个 Wi-Fi，不再连小板热点**（配合固件 v22 以上，小板现在是 v24）
    - 删除 App 自动加入小板热点（NEHotspotConfiguration）的全部代码。
    - “同一个 Wi-Fi”的判断：小板报告已连上 Wi-Fi，并且手机的视频 TCP 已连到小板（状态里的 `tcp`=1）。不需要读取 Wi-Fi 名称的权限。
    - 引导页和 设置 › 开发板 里新增“把这个 Wi-Fi 发给开发板”：填 Wi-Fi 名称和密码，经加密蓝牙发给小板。小板连不上就一直等，不开热点。
@@ -27,6 +27,21 @@
    来电时让出、挂断后才恢复；铃声、通知、闹钟、其他 App 的音乐照常；不申请麦克风、不录音、不用听筒、不改输出路线；扬声器不独占（数字静音＋混音器音量 0，与其他声音混音）；任务开始时若正在通话，启动失败后每 5 秒重试。
    `UIBackgroundModes` 新增 `audio`。只适用于自签名/企业分发，上架 App Store 会被拒。
 8. build 号改为 14；新增 21 条简体中文界面文字。
+
+以下 9–14 是用 build 13 实测日志（traces(25)–(29)、esp32-agent-logs(5)）找到的问题，第二个提交：
+
+9. **App 退到后台后主动重建视频解码器**：iOS 一进后台就作废硬件解码会话（日志 -12903），以前要等下一帧解码失败才发现；
+   回到主屏幕画面静止时没有下一帧，就一直拿不到画面。现在进后台 1.5 秒后、以及取画面时发现不是最新，都先用 App 自己缓存的整段画面重建解码器（比让小板重发快得多）。
+10. **不再误报“请重开镜像”**：小板回答 `err no video`、或抓到的画面不是最新时，先等最多 8 秒让画面自己恢复，恢复不了才提示用户。
+    （11:29 那次就是误报：6 秒后 App 自己已经恢复。）
+11. **开始前检查画面有提示、有上限**：显示“正在确认镜像画面…”；这一步抓画面最多 10 秒、不重试，超时显示明确的中文提示，不再无声卡几十秒。
+12. **没画就不能说完成**：任务要求画图（“画一个…”“draw…”），这次却一笔都没画就报完成，程序直接驳回并告诉模型“屏幕上的旧画不算，先新建空白画板”；
+    连续 3 次就判失败并请用户帮忙。输入文字的任务同理（要求“输入…”却没打字）。其他任务不受影响。
+13. **画图更像样**：三个点、弯度平缓的笔画（嘴巴、弧线）自动画成平滑曲线，不再是 V 字；模型也可以写 `path smooth …`。
+    半径小于 60 的圆（眼睛）多画四分之一圈，首尾重叠，不再变成开口的小弧。
+14. **丢包计数修正**：同一段数据经蓝牙和 Wi-Fi 各收到一次、或 Wi-Fi 重连后序号从头开始，以前会被算成丢了 6 万多包；现在不算丢包，只等下一个关键帧。
+
+新增 3 条简体中文界面文字（共 24 条）。
 
 ## 以后不用 Mac 的更新方式
 
@@ -62,6 +77,7 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 ```
 
 - 新测试：`SameWiFiTests`（3 项）、`BackgroundAudioTests`（1 项）、`LessonBookTests`（8 项）；`ReviewTests` 里提示测试改名为 `testIntentHintsReachThePlannerAndTheActor`。
+- 第二个提交的测试：`DrawingDoneTests`（8 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`。
 - 编译错误：只做最小修正，不改行为，记下“文件:行号＋原因”。
 - 测试失败：照实回报原文，不要改测试去迁就。
 
@@ -69,7 +85,7 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 
 Xcode 里选手机直接 Run 即可（或照 build13 说明出 IPA）。
 
-## 真机验收（小板已是固件 v23，不用再烧）
+## 真机验收（小板已是固件 v24，不用再烧）
 
 1. 手机和小板连同一个 Wi-Fi：引导页“和开发板连同一个 Wi-Fi”打勾，屏幕镜像能选到 ESP32 Agent。
 2. 关掉这个 Wi-Fi：小板状态显示在等这个 Wi-Fi；手机**不会**跳去连 ESP32Agent 热点；Wi-Fi 恢复后小板自己连回。
@@ -78,6 +94,12 @@ Xcode 里选手机直接 Run 即可（或照 build13 说明出 IPA）。
    在回顾里给某一步写备注；再跑一次类似任务，导出 trace：`steps.jsonl` 开头应有一条 `"kind": "lessons"`，列出这条备注；`debug.log` 有 `lessons: N applied`。
 5. 在“文件”App 里放一个 `rules.md`，下一次任务生效。
 6. **后台保活**：跑一次任务后导出日志，`debug.log` 应有 `background audio: playing silence`；trace 的 `metrics.json` 里 `background_alive_s` 接近整个任务时长、`suspensions` 为 0、`ble_kbps_app` 很低（画面走 Wi-Fi）。任务中途来电挂断后应看到 `background audio: restarting`。
+7. **开始前检查**：按开始后马上看到“正在确认镜像画面…”；正常时一两秒内就离开 App。
+8. **不误报**：把 App 划掉重开、不重开镜像，直接开始：不应提示“重开镜像”；`debug.log` 里可能看到 `decoder: refreshed (...)`。
+9. **画笑脸**：“打开无边记新建白板画一个笑脸”。如果打开的是上次的旧白板，trace 里应看到 `done rejected`（没画就说完成被驳回），之后它会新建白板再画；
+   嘴巴是平滑弧线（trace 里该步有 `"smooth": true`），眼睛是闭合的小圆。
+10. **不是画图的任务**也要跑一个（例如“打开设置，看看现在连的 Wi-Fi 叫什么”），确认能正常完成，不会被驳回。
+11. `metrics.json` 的 `drops` 不应再出现 65538 这类数字。
 
 ## 不要做
 
