@@ -17,7 +17,8 @@ import UIKit
 enum FrameFreshness {
     static func usable(frameAt: Double, decodedMs: Int, latestMs: Int?, statusAt: Double,
                        at: Double, after: Double?, broken: Bool) -> Bool {
-        guard !broken, frameAt > 0, at - statusAt <= 3 else { return false }
+        // A frame "from the future" pairs an old stream's board time with a new clock offset (the board rebooted).
+        guard !broken, frameAt > 0, frameAt <= at + 0.5, at - statusAt <= 3 else { return false }
         let boundary = after ?? (at - 1)
         if frameAt >= boundary && at - frameAt <= 1 { return true }
         // A quiet screen is valid only when a new heartbeat proves we decoded the board's latest AU.
@@ -221,11 +222,18 @@ extension ScreenSource {
         decoder.queue.async { [decoder] in decoder.decode(unit) }
     }
 
-    /// The link (re)connected: chunk numbering starts over.
+    /// The link (re)connected: chunk numbering starts over, and nothing of the old stream may come back, neither
+    /// a decode still in the queue nor its cached GOP (refreshDecoder would replay it as if it were current).
     func resetStream() {
         assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
         decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false
+        generation += 1
+        let g = generation
+        decoder.queue.async { [decoder] in decoder.reset(generation: g) }
     }
+
+    /// Bumped by resetStream; a decoded frame from an earlier stream is dropped in publish.
+    private var generation = 0
 
     /// A board timestamp (status `up`, or a streamed unit) just arrived: keep the smallest offset.
     func boardClock(ms: Int) {
@@ -236,10 +244,12 @@ extension ScreenSource {
     /// Show a still frame (demo data).
     func show(_ jpeg: Data, width: Int, height: Int) {
         publish(H264Decoder.Frame(jpeg: jpeg, width: width, height: height, decodeMs: 4.2,
-                                  unit: AccessUnit(data: Data(), idr: false, config: false, snap: false, boardMs: 0)))
+                                  unit: AccessUnit(data: Data(), idr: false, config: false, snap: false, boardMs: 0),
+                                  generation: generation))
     }
 
     private func publish(_ f: H264Decoder.Frame) {
+        guard f.generation == generation else { return }  // decoded from the stream before the last reconnect
         frame = f.jpeg
         decodedBoardMs = Int(f.unit.boardMs)
         updated = now()

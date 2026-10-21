@@ -80,6 +80,18 @@ final class VisionTests: XCTestCase {
                                       ignore: [p(100, 500), p(300, 500)]))
     }
 
+    func testAChangeElsewhereIsNotNearTheTarget() {
+        let before = screen(), after = screen(checked: true)  // a checkmark appears near (440, 495)
+        XCTAssertTrue(Vision.changed(before, after))
+        XCTAssertFalse(Vision.changedNear(before, after, around: [p(250, 800)]))
+        XCTAssertTrue(Vision.changedNear(before, after, around: [p(440, 495)]))
+    }
+
+    func testAChangeUnderTheTargetCounts() {
+        XCTAssertTrue(Vision.changedNear(screen(), screen(button: true), around: [p(250, 500)]))
+        XCTAssertTrue(Vision.changedNear(nil, screen(), around: [p(250, 500)]))  // no frame: never "unchanged"
+    }
+
     func testPointerFarFromTheTargetIsFoundWithAFullScreenSearch() throws {
         let before = screen(pointer: (354, 136)), after = screen(pointer: (366, 136))
         XCTAssertNil(Vision.pointer(before, after, near: CGPoint(x: 0.9, y: 0.1), shift: 12 / W))  // outside the window

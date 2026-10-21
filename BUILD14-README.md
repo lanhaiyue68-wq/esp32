@@ -53,7 +53,21 @@
 18. **恢复提示改成同一个 Wi-Fi 的说法**：小板断了 Wi-Fi 时，以前提示“去设置里加入开发板的 Wi-Fi”（热点时代的说法，现在根本没有热点），
     现在提示“开发板断开了 Wi-Fi，正在等它重新连上”，久了再请用户检查 Wi-Fi 是否开着、手机是否连着同一个 Wi-Fi。
 
-第二到第四个提交新增 15 条简体中文界面文字（这一版共 36 条）。
+19–25 是 Codex 审查 build 14 后指出、已核实并修正的问题（第五个提交）：
+
+19. **画面一直在变时不再拿旧坐标去点**：以前连续两次“模型回复时画面变了”之后，第三次直接用旧画面算出的坐标执行。
+    现在只有动作落点附近没变（只是时钟、动画在别处动）才执行；落点附近变了就等画面稳定再看，连续 5 次就重新规划。
+20. **重连后不会把上一段连接的旧画面当成最新**：重连时清空解码器缓存的整段画面和参数，旧连接晚到的画面直接丢弃；
+    “来自未来时间”的画面（小板重启后，旧的小板时间配上新的时钟换算）一律不算最新。
+21. **标错或清除后，晚到的自动复盘不会把经验写回**：复盘开始后，用户标错该次任务、点清除或切换学习开关，模型的回复都不再保存。
+22. **完成判断不误伤**：“切换输入法”“输入框”“app drawer”等不再被当成要求输入或画图的任务。
+23. **经验档永远读得回来**：存档时控制在 400 KB 内（超过就先删最少用到的），任务文字只存前 200 字、来源记录最多 8 条；
+    读不了的旧档会另存为 `lessons-v1.json.unreadable-…`，不会被下一次存档覆盖。
+24. **隐私页照实说明**：两种学习各存多少、经验会连同任务文字一起保存、类似任务时会随请求发给模型。
+25. **补齐约 40 句缺少简体的界面文字**：恢复提示、找／连开发板、模型设置、隐私页、示例任务、蓝牙解除配对说明等。
+    其余没有翻译的是程序内部错误代码（例如 `pointer not calibrated`），保留英文以便排查。
+
+第二到第五个提交共补了 52 条简体中文界面文字（第一部分另有 21 条）。
 
 ## 以后不用 Mac 的更新方式
 
@@ -89,7 +103,7 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 ```
 
 - 新测试：`SameWiFiTests`（3 项）、`BackgroundAudioTests`（1 项）、`LessonBookTests`（8 项）；`ReviewTests` 里提示测试改名为 `testIntentHintsReachThePlannerAndTheActor`。
-- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）。
+- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）；`Build14ReviewTests`（8 项，新文件）；`VisionTests` 新增 2 项。
 - 编译错误：只做最小修正，不改行为，记下“文件:行号＋原因”。
 - 测试失败：照实回报原文，不要改测试去迁就。
 
@@ -116,6 +130,8 @@ Xcode 里选手机直接 Run 即可（或照 build13 说明出 IPA）。
 13. **提示是简体白话**：任务卡住求助、或“未完成”通知里，不应再出现 `board replied…`、`errors in a row` 这类英文；
     （可选）跑任务时关掉路由器几十秒再打开，灵动岛应显示“开发板断开了 Wi-Fi…”，而不是叫你加入开发板的 Wi-Fi；
     之后如果镜像没有自己恢复，照提示重新开启屏幕镜像即可。
+14. **界面全是简体**：找开发板、连接、模型设置、隐私页、示例任务里不应再出现英文句子（Wi-Fi、ESP32、API Key 这类名称除外）。
+15. 第 19–23 项由 `Build14ReviewTests` 和 `VisionTests` 覆盖；真机照常跑任务，留意不再有“点到旧位置”的情况。
 
 ## 不要做
 

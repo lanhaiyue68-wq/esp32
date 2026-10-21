@@ -236,12 +236,13 @@ extension AppModel {
     func learnFromRun(_ run: String, task: String, steps: [JObject]) async {
         guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty,
               steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }) else { return }
+        let epoch = lessons.epoch  // a clear, the switch or a correction while the model answers wins over the reply
         do {
             let reply = try await settings.client("planner").chat(system: LessonBook.reflectionPrompt,
                                                                   text: LessonBook.reflectionInput(task: task, steps: steps),
                                                                   image: nil, maxTokens: 600, temperature: 0.2)
             let found = LessonBook.parseLessons(reply.text)
-            lessons.learnFromRun(run, task: task, lessons: found)
+            lessons.learnFromRun(run, task: task, lessons: found, epoch: epoch)
             if runID == run { traces.write(kind: "learned", ["lessons": .arr(found.map { .str($0) })]) }
             DebugLog.write("learned: \(found.count) lesson(s) from run \(run)")
         } catch {

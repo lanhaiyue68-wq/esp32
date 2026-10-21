@@ -28,18 +28,34 @@ import Foundation
     private let file: URL?
     private let clock: () -> Date
     private(set) var lessons: [Lesson] = []
-    var enabled = true
+    var enabled = true { didSet { epoch += 1 } }
     var count: Int { lessons.count }
+    /// Bumped by clear() and the learning switch: a run review that started before cannot write afterwards.
+    private(set) var epoch = 0
+    /// Runs (groups) the user corrected: a run review that arrives late is not stored for them.
+    private var revoked = Set<String>()
+
+    /// save() never writes more than this, so the next launch can always read it back.
+    static let maxBytes = 400_000
+    /// Larger files (from before the cap) are still read and trimmed at the next save.
+    static let readLimit = 2_000_000
+    /// The task is kept only to find similar tasks; this much of it is enough.
+    static let taskChars = 200
 
     init(file: URL?, clock: @escaping () -> Date = Date.init) {
         self.file = file; self.clock = clock
-        if let file, let data = try? Data(contentsOf: file), data.count <= 512_000,
-           let saved = try? JSONDecoder().decode([Lesson].self, from: data) {
+        guard let file, let data = try? Data(contentsOf: file) else { return }
+        if data.count <= Self.readLimit, let saved = try? JSONDecoder().decode([Lesson].self, from: data) {
             lessons = Array(saved.sorted { $0.updated > $1.updated }.prefix(Self.limit))
+        } else {
+            // Unreadable or far too big: set it aside, so the next save does not silently replace it.
+            let aside = file.appendingPathExtension("unreadable-\(Int(clock().timeIntervalSince1970))")
+            try? FileManager.default.moveItem(at: file, to: aside)
+            DebugLog.write("lessons: \(file.lastPathComponent) unreadable (\(data.count) bytes), kept as \(aside.lastPathComponent)")
         }
     }
 
-    func clear() { lessons = []; save() }
+    func clear() { lessons = []; epoch += 1; save() }
 
     /// Replace everything learned from one run (`group`, usually the run ID) with `items` (id suffix, text).
     func learn(group: String, task: String, items: [(String, String)], auto: Bool = false) {
@@ -57,10 +73,10 @@ import Foundation
                 lessons[i].seen = (lessons[i].seen ?? 1) + 1
                 var runs = lessons[i].from ?? []
                 if !runs.contains(group) { runs.append(group) }
-                lessons[i].from = runs
+                lessons[i].from = Array(runs.suffix(8))  // bounded: the latest runs that drew it
                 continue
             }
-            lessons.insert(Lesson(id: "\(group):\(key)", task: task, text: clipped, general: general,
+            lessons.insert(Lesson(id: "\(group):\(key)", task: String(task.prefix(Self.taskChars)), text: clipped, general: general,
                                   updated: clock(), auto: auto ? true : nil, from: auto ? [group] : nil), at: 0)
         }
         // Self-learned lessons never crowd out the user's: at most autoLimit of them. Those kept are the ones a run
@@ -122,6 +138,7 @@ import Foundation
     }
 
     func forget(group: String) {
+        revoked.insert(group)
         let before = lessons.count
         lessons.removeAll { $0.id.hasPrefix(group + ":") || ($0.from ?? []).contains(group) }
         if lessons.count != before { save() }
@@ -166,8 +183,12 @@ import Foundation
     }
 
     /// After a run: keep what the model learned from its own steps (replacing an earlier review of the same run).
-    func learnFromRun(_ run: String, task: String, lessons found: [String]) {
-        learn(group: run + ":auto", task: task, items: found.enumerated().map { ("\($0.offset)", $0.element) }, auto: true)
+    /// `epoch`: the book's epoch when the review started; a clear or the learning switch since then drops it, and
+    /// so does the user correcting that run meanwhile.
+    func learnFromRun(_ run: String, task: String, lessons found: [String], epoch: Int? = nil) {
+        let group = run + ":auto"
+        guard epoch == nil || epoch == self.epoch, !revoked.contains(group) else { return }
+        learn(group: group, task: task, items: found.enumerated().map { ("\($0.offset)", $0.element) }, auto: true)
     }
 
     /// Accepted "Optimize with AI" hints: they now reach every similar task, saved as an intent or not.
@@ -248,6 +269,15 @@ import Foundation
 
     private func save() {
         guard let file else { return }
-        try? JSONEncoder().encode(lessons).write(to: file, options: .atomic)
+        let encoder = JSONEncoder()
+        var data = (try? encoder.encode(lessons)) ?? Data()
+        // Never write more than the next launch reads: drop what is least in use, self-learned first, until it fits.
+        while data.count > Self.maxBytes, !lessons.isEmpty {
+            let pool = lessons.contains { $0.auto == true } ? lessons.filter { $0.auto == true } : lessons
+            guard let stalest = pool.max(by: Self.fresher) else { break }
+            lessons.removeAll { $0.id == stalest.id }
+            data = (try? encoder.encode(lessons)) ?? Data()
+        }
+        try? data.write(to: file, options: .atomic)
     }
 }

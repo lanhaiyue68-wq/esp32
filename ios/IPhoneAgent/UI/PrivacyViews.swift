@@ -69,7 +69,7 @@ struct PrivacySettingsView: View {
                     app.agent.experience?.clear(); app.agent.lessons?.clear(); learnedCount = 0
                 }
             } footer: {
-                Text("Stored on this iPhone: up to 128 cases and 256 KB. Screenshots and typed text are excluded. Live screens are always checked before acting.")
+                Text("Stored on this iPhone only: up to 128 tap positions (256 KB) and up to 200 lessons in words (400 KB): your notes, accepted AI hints and the app's own review of each run, each kept with the task it came from, so words from a task stay too. Lessons for similar tasks are sent to the model with the request. No screenshots are kept. Live screens are always checked before acting.")
             }
             if keep { export }
         }

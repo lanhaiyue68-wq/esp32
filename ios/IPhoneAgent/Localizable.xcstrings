@@ -1806,7 +1806,16 @@
         }
       }
     },
-    "Found %@" : {},
+    "Found %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到 %@"
+          }
+        }
+      }
+    },
     "GOP buffered" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5994,6 +6003,366 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开发板正在等“%@”。打开这个 Wi-Fi，或把开发板放到信号范围内，它会自己连上。"
+          }
+        }
+      }
+    },
+    "the board did not come back in 5 minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 分钟内开发板没有回来"
+          }
+        }
+      }
+    },
+    "Screen Mirroring did not come back in 5 minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 分钟内屏幕镜像没有恢复"
+          }
+        }
+      }
+    },
+    "Reconnecting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重新连接…"
+          }
+        }
+      }
+    },
+    "Mirroring…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待镜像…"
+          }
+        }
+      }
+    },
+    "Start Mirroring" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启镜像"
+          }
+        }
+      }
+    },
+    "Tap Screen Mirroring → ESP32 Agent to continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点 屏幕镜像 → ESP32 Agent 后继续"
+          }
+        }
+      }
+    },
+    "Lost the board. Reconnecting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与开发板断开，正在重新连接…"
+          }
+        }
+      }
+    },
+    "The board is still gone. Check that it is plugged in; the run goes on when it is back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板还没回来。请确认它已通电；连上后任务会继续。"
+          }
+        }
+      }
+    },
+    "Board is back. Waiting for Screen Mirroring to resume…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板已连上，正在等屏幕镜像恢复…"
+          }
+        }
+      }
+    },
+    "Open Control Center, tap Screen Mirroring → ESP32 Agent; the run goes on from here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开控制中心，点 屏幕镜像 → ESP32 Agent；任务会从这里继续。"
+          }
+        }
+      }
+    },
+    "Back online. Going on from here…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已恢复连接，从这里继续…"
+          }
+        }
+      }
+    },
+    "Start Screen Mirroring to continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启屏幕镜像后继续"
+          }
+        }
+      }
+    },
+    "Reconnected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已重新连上"
+          }
+        }
+      }
+    },
+    "Help" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "求助"
+          }
+        }
+      }
+    },
+    "Connection lost, run paused" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接中断，任务已暂停"
+          }
+        }
+      }
+    },
+    "No board found. Check its power, keep it nearby, and scan again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到开发板。请检查电源，放近一点再重新搜索。"
+          }
+        }
+      }
+    },
+    "Connection timed out. Keep the board nearby and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接超时。请把开发板放近一点再试。"
+          }
+        }
+      }
+    },
+    "Board service missing. Check the board firmware." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板缺少服务，请检查固件。"
+          }
+        }
+      }
+    },
+    "Board firmware is missing required features. Update the firmware." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板固件缺少必要功能，请更新固件。"
+          }
+        }
+      }
+    },
+    "Connecting to the board…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在连接开发板…"
+          }
+        }
+      }
+    },
+    "Choose your board:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择你的开发板："
+          }
+        }
+      }
+    },
+    "Searching for the board over Bluetooth…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在通过蓝牙搜索开发板…"
+          }
+        }
+      }
+    },
+    "Choose a vision model or enter its model ID before testing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试前请先选择视觉模型或填写模型 ID。"
+          }
+        }
+      }
+    },
+    "Use Default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用默认"
+          }
+        }
+      }
+    },
+    "Model ID" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型 ID"
+          }
+        }
+      }
+    },
+    "Choose Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择模型"
+          }
+        }
+      }
+    },
+    "Refresh Models" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刷新模型列表"
+          }
+        }
+      }
+    },
+    "Model Provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型服务商"
+          }
+        }
+      }
+    },
+    "Get an API key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "获取 API Key"
+          }
+        }
+      }
+    },
+    "Provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务商"
+          }
+        }
+      }
+    },
+    "8 AM Mon & Tue alarm" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "周一周二早上 8 点闹钟"
+          }
+        }
+      }
+    },
+    "Set an alarm for 8:00 AM that repeats every Monday and Tuesday, then save it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置一个早上 8:00 的闹钟，每周一和周二重复，然后保存"
+          }
+        }
+      }
+    },
+    "Learn from operation feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从操作反馈中学习"
+          }
+        }
+      }
+    },
+    "Remembered cases: %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已记住：%lld 条"
+          }
+        }
+      }
+    },
+    "Clear learned cases" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除学到的内容"
+          }
+        }
+      }
+    },
+    "Stored on this iPhone only: up to 128 tap positions (256 KB) and up to 200 lessons in words (400 KB): your notes, accepted AI hints and the app's own review of each run, each kept with the task it came from, so words from a task stay too. Lessons for similar tasks are sent to the model with the request. No screenshots are kept. Live screens are always checked before acting." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只保存在这台 iPhone 上：最多 128 个点按位置（256 KB），以及最多 200 条文字经验（400 KB），包括你的备注、接受的 AI 优化提示和 App 对每次任务的自动复盘。每条经验会连同它来自的任务一起保存，所以任务里的文字也会留下。遇到类似任务时，相关经验会随请求发给模型。不保存截图。每次操作前都会先确认实时画面。"
           }
         }
       }

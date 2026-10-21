@@ -11,6 +11,19 @@ final class H264Decoder: @unchecked Sendable {  // confined to `queue`
         let width: Int, height: Int
         let decodeMs: Double
         let unit: AccessUnit
+        var generation = 0  // the stream it came from (see reset): frames of an earlier one are dropped
+    }
+
+    /// The stream the decoded units belong to; frames carry it.
+    private var generation = 0
+
+    /// A new stream (the link reconnected, the board may have rebooted): forget the old GOP, parameter sets and
+    /// session, so nothing of the old stream can be decoded again as if it were current. Call on `queue`.
+    func reset(generation: Int) {
+        self.generation = generation
+        (gop, gopBytes) = ([], 0)
+        (sps, pps) = (nil, nil)
+        resetSession()
     }
 
     var onFrame: ((Frame) -> Void)?
@@ -158,6 +171,7 @@ final class H264Decoder: @unchecked Sendable {  // confined to `queue`
         }
         CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
-        return Frame(jpeg: out as Data, width: image.width, height: image.height, decodeMs: ms, unit: unit)
+        return Frame(jpeg: out as Data, width: image.width, height: image.height, decodeMs: ms, unit: unit,
+                     generation: generation)
     }
 }

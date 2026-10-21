@@ -44,8 +44,9 @@ extension Pointer: Gestures {}
     /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
     var lessons: LessonBook?
     private var learnedThrough = -1
-    /// Plans dropped in a row because the screen moved while the model answered: after two, act on the
-    /// latest look (a clock, a Live Activity or video noise can keep a screen "changing" forever).
+    /// Plans dropped in a row because the screen moved while the model answered. After two, a plan goes ahead
+    /// when nothing changed where it lands (a clock, a Live Activity or video noise can keep a screen "changing"
+    /// forever); after five, the planner looks again.
     private var staleRun = 0
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
@@ -243,13 +244,14 @@ extension Pointer: Gestures {}
         let t = task.lowercased()
         let draws = t.range(of: #"[画畫](?=[一个個两兩三几幾只隻张張条條朵幅颗顆棵出上下画畫圆圓圈线線笑星心])"#,
                             options: .regularExpression) != nil
-            || t.range(of: #"\b(draw|sketch)"#, options: .regularExpression) != nil
+            || t.range(of: #"\b(draw|sketch)\b"#, options: .regularExpression) != nil  // not "drawer"
         if draws, did.isDisjoint(with: ["circle", "path"]) {
             return "Nothing has been drawn in this run yet; a drawing already on screen is from before and does not count. "
                 + "Open a new blank board (Freeform: back to the board list, then New Board) and draw it."
         }
-        let types = ["输入", "輸入", "打字"].contains { t.contains($0) }
-            || t.range(of: #"\btype\b"#, options: .regularExpression) != nil
+        // "输入法" (input method), "输入框" (a field) and "type of" are nouns, not a request to type something.
+        let types = t.range(of: #"(输入|輸入)(?![法框栏欄])|打字"#, options: .regularExpression) != nil
+            || t.range(of: #"\btype\s+["“'「]"#, options: .regularExpression) != nil
         if types, !did.contains("type") {
             return "Nothing has been typed in this run yet; text already on screen is not this task's result. Type it."
         }
@@ -401,11 +403,23 @@ extension Pointer: Gestures {}
                 try await screen?.requireFrame(after: nil)
                 if i == 0, seen != screen?.frame, Vision.changed(seen, screen?.frame, ignore: spots) {
                     staleRun += 1
-                    if staleRun <= 2 {
+                    // After two looks the screen may never hold still (a clock, a video, the Live Activity): act then
+                    // only if nothing changed where this action lands. Coordinates read off a screen that moved under
+                    // them are never sent.
+                    let safe = staleRun > 2 && !Vision.changedNear(seen, screen?.frame, around: pointerPath(act))
+                    if !safe {
+                        if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh
+                            staleRun = 0
+                            record(screen?.frame, ["action": .str("stale plan"),
+                                                   "reason": .str("the screen keeps changing where the action would land; planning again")])
+                            try await replan(stuck: true)
+                            return false
+                        }
                         record(screen?.frame, ["action": .str("stale plan"), "reason": .str("screen changed while the model was responding; inspect again")])
+                        if staleRun > 2 { await screen?.settled() }
                         return false
                     }
-                    DebugLog.write("stale plan \(staleRun) in a row: the screen keeps changing, acting on the latest look")
+                    DebugLog.write("stale plan \(staleRun) in a row: nothing changed where this action lands; acting")
                 }
                 staleRun = 0
                 onDoing?(.acting(act))  // the thought (on the first act) names the target

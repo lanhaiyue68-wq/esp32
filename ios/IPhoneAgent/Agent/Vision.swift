@@ -66,6 +66,25 @@ enum Vision {
         return hits >= 6
     }
 
+    /// True when the screen changed near `points` (fractions): where an action would land. Changes elsewhere (a
+    /// clock, an animation, a banner) do not count; a missing frame does.
+    static func changedNear(_ before: Data?, _ after: Data?, around points: [CGPoint], radius: Double = 0.08) -> Bool {
+        guard let before, let after, let a = image(before), let b = image(after) else { return true }
+        if a.width != b.width || a.height != b.height { return true }
+        let w = a.width / 2, h = a.height / 2
+        let fa = gray(a, w, h), fb = gray(b, w, h)
+        let centers = points.map { (Double($0.x) * Double(w), Double($0.y) * Double(h)) }
+        let r2 = pow(radius * Double(w), 2)
+        var hits = 0
+        for i in 0..<(w * h) where abs(Int(fa.px[i]) - Int(fb.px[i])) > 25 {
+            let x = Double(i % w), y = Double(i / w)
+            if y > topMask * Double(h) && centers.contains(where: { pow(x - $0.0, 2) + pow(y - $0.1, 2) <= r2 }) {
+                hits += 1
+            }
+        }
+        return hits >= 6
+    }
+
     /// Where the pointer is in `before`, given it moved right by `shift` (fraction of width) in `after`.
     ///
     /// Only the pointer moved between the two frames, so the changed pixels within `reach` of `near` are the
