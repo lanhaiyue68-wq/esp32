@@ -55,7 +55,7 @@ extension AppModel {
     private func title(_ part: Recovery.Part) -> String {
         switch part {
         case .board: return String(localized: "Board disconnected")
-        case .hotspot: return String(localized: "iPhone left the board's Wi-Fi")
+        case .hotspot: return String(localized: "The board lost its Wi-Fi")
         case .mirroring: return String(localized: "Start Screen Mirroring to continue")
         }
     }

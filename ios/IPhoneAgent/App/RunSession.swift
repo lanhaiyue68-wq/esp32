@@ -202,7 +202,7 @@ extension AppModel {
             let answer = last?["answer"]?.str ?? agent.task
             notifier.post(.done, title: String(localized: "Done: \(answer)"), body: summary, run: runID)
         case .failed:
-            let why = last?["reason"]?.str ?? ""
+            let why = StepText.userReason(last?["reason"]?.str ?? "")
             notifier.post(.failed, title: String(localized: "Not finished: \(why)"), body: summary, run: runID)
         default: break
         }
@@ -290,7 +290,7 @@ extension AppModel {
 
     /// The agent is stuck: pause, tell the user (Live Activity + notification) and wait for their choice.
     func needsHelp(_ reason: String) async -> AgentLoop.HelpChoice {
-        help = reason.isEmpty ? String(localized: "I'm stuck on this step.") : reason
+        help = reason.isEmpty ? String(localized: "I'm stuck on this step.") : StepText.userReason(reason)
         runMood = .failure
         let line = String(localized: "Needs your help: \(help ?? "")")
         live.update(mood: .failure, step: moveCount, line: line, phase: .help, status: .help)

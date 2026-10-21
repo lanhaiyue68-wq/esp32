@@ -62,6 +62,19 @@ import XCTest
         XCTAssertTrue(Actions.sameTarget(plain, plain.merging(["smooth": .bool(true)])))  // still a repeat
     }
 
+    func testInternalReasonsReachTheUserInPlainWords() {
+        let blind = StepText.userReason("board replied but no verified current video frame was decoded")
+        XCTAssertTrue(blind.contains("ESP32"))  // tells the user what to do, not the decoder's state
+        XCTAssertEqual(StepText.userReason("lost the phone screen: reconnect Screen Mirroring"), blind)
+        XCTAssertEqual(StepText.userReason("3 errors in a row"), String(localized: "Went wrong \(3) times in a row."))
+        XCTAssertNotEqual(StepText.userReason("claimed done 3 times without doing it: Nothing has been drawn"),
+                          "claimed done 3 times without doing it: Nothing has been drawn")
+        XCTAssertEqual(StepText.userReason("密码弹窗挡住了"), "密码弹窗挡住了")  // the model's own words stay
+        let fail: JObject = ["action": .str("fail"), "reason": .str("3 errors in a row")]
+        XCTAssertFalse(StepText.line(fail).contains("errors in a row"))
+        XCTAssertEqual(fail["reason"], .str("3 errors in a row"))  // the trace keeps the original
+    }
+
     func testSmallCircleGoesPastItsStartSoTheEndsOverlap() {
         let aspect = 0.46
         let eye = circle(0.437, 0.425, 0.025, aspect: aspect, extra: 0.25)

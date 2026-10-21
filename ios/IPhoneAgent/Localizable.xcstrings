@@ -1,6 +1,126 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select ESP32 again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看不清 iPhone 画面。请检查屏幕镜像；如果一直这样，请在控制中心停止镜像，再重新选择 ESP32。"
+          }
+        }
+      }
+    },
+    "It said it was done three times without doing it in this run. Look at the screen, then go on or stop." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它三次说已完成，但这次其实还没做。请看一下画面，再决定继续还是停止。"
+          }
+        }
+      }
+    },
+    "Went wrong %lld times in a row." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连续出错 %lld 次。"
+          }
+        }
+      }
+    },
+    "Reached the step limit." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已到步数上限。"
+          }
+        }
+      }
+    },
+    "the board was not back on its Wi-Fi within 5 minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 分钟内开发板没有重新连上 Wi-Fi"
+          }
+        }
+      }
+    },
+    "Board Wi-Fi…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待 Wi-Fi…"
+          }
+        }
+      }
+    },
+    "The board is reconnecting to Wi-Fi…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板正在重新连接 Wi-Fi…"
+          }
+        }
+      }
+    },
+    "Check Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查 Wi-Fi"
+          }
+        }
+      }
+    },
+    "Check the Wi-Fi to continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请检查 Wi-Fi 后继续"
+          }
+        }
+      }
+    },
+    "The board lost its Wi-Fi. Waiting for it to reconnect…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板断开了 Wi-Fi，正在等它重新连上…"
+          }
+        }
+      }
+    },
+    "The board is still off its Wi-Fi. Make sure the Wi-Fi is on and in range, and keep this iPhone on the same Wi-Fi; the run goes on when the board is back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板还没连上 Wi-Fi。请确认 Wi-Fi 开着、离开发板不远，并让 iPhone 连着同一个 Wi-Fi；开发板连上后任务会继续。"
+          }
+        }
+      }
+    },
+    "The board lost its Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发板断开了 Wi-Fi"
+          }
+        }
+      }
+    },
     "Checking the mirrored screen…" : {
       "localizations" : {
         "zh-Hans" : {

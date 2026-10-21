@@ -34,8 +34,27 @@ enum StepText {
     /// The model's own words if it gave any, else the action.
     static func line(_ s: JObject) -> String {
         if let t = s["thought"]?.str, !t.isEmpty { return t }
-        if let a = s["answer"]?.str ?? s["reason"]?.str, !a.isEmpty { return "\(title(s)): \(a)" }
+        if let a = s["answer"]?.str ?? s["reason"]?.str.map(userReason), !a.isEmpty { return "\(title(s)): \(a)" }
         return title(s)
+    }
+
+    /// What the user reads for a reason (help, notifications, the Live Activity): the agent's own English
+    /// diagnostics become plain words in the app's language. The trace keeps the original. Anything else (the
+    /// model's own words, recovery reasons that are localized already) is shown as it is.
+    static func userReason(_ reason: String) -> String {
+        let blind = ["lost the phone screen", "screen freshness could not be verified", "board replied but no verified",
+                     "snapshot did not decode"]
+        if blind.contains(where: { reason.hasPrefix($0) }) {
+            return String(localized: "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select ESP32 again.")
+        }
+        if reason.hasPrefix("claimed done 3 times") {
+            return String(localized: "It said it was done three times without doing it in this run. Look at the screen, then go on or stop.")
+        }
+        if reason.hasSuffix(" errors in a row"), let n = Int(reason.prefix { $0.isNumber }) {
+            return String(localized: "Went wrong \(n) times in a row.")
+        }
+        if reason == "step limit reached" { return String(localized: "Reached the step limit.") }
+        return reason
     }
 
     static func symbol(_ name: String?) -> String {

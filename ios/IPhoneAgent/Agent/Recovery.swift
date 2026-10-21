@@ -51,7 +51,7 @@ struct Recovery {
     static func reason(_ part: Part) -> String {
         switch part {
         case .board: return String(localized: "the board did not come back in 5 minutes")
-        case .hotspot: return String(localized: "the iPhone did not rejoin the board's Wi-Fi in 5 minutes")
+        case .hotspot: return String(localized: "the board was not back on its Wi-Fi within 5 minutes")
         case .mirroring: return String(localized: "Screen Mirroring did not come back in 5 minutes")
         }
     }
@@ -63,9 +63,9 @@ extension Recovery.Stage {
         switch (part, ask) {
         case (.board, false): return "BLE link lost; reconnecting"
         case (.board, true): return "board still gone; asked the user to check it"
-        case (.hotspot, false): return "board up, iPhone not on its hotspot (sta 0); waiting for iOS to rejoin"
-        case (.hotspot, true): return "iPhone still off the hotspot; asked the user to join it"
-        case (.mirroring, false): return "board and hotspot up, no mirrored frame; waiting for iOS to resume mirroring"
+        case (.hotspot, false): return "board up but off its Wi-Fi (sta 0); waiting for it to reconnect"
+        case (.hotspot, true): return "board still off its Wi-Fi; asked the user to check the Wi-Fi"
+        case (.mirroring, false): return "board and Wi-Fi up, no mirrored frame; waiting for iOS to resume mirroring"
         case (.mirroring, true): return "mirroring still off; asked the user to start it"
         }
     }
@@ -76,9 +76,9 @@ extension Recovery.Stage {
         case (.board, _):
             return IslandStatus(short: String(localized: "Reconnecting…"), full: String(localized: "Reconnecting…"), look: nil)
         case (.hotspot, false):
-            return IslandStatus(short: String(localized: "Joining Wi-Fi…"), full: String(localized: "Rejoining the board's Wi-Fi…"), look: nil)
+            return IslandStatus(short: String(localized: "Board Wi-Fi…"), full: String(localized: "The board is reconnecting to Wi-Fi…"), look: nil)
         case (.hotspot, true):
-            return IslandStatus(short: String(localized: "Join Wi-Fi"), full: String(localized: "Join the board's Wi-Fi to continue"), look: nil)
+            return IslandStatus(short: String(localized: "Check Wi-Fi"), full: String(localized: "Check the Wi-Fi to continue"), look: nil)
         case (.mirroring, false):
             return IslandStatus(short: String(localized: "Mirroring…"), full: String(localized: "Waiting for mirroring…"), look: nil)
         case (.mirroring, true):
@@ -92,8 +92,8 @@ extension Recovery.Stage {
         switch (part, ask) {
         case (.board, false): return String(localized: "Lost the board. Reconnecting…")
         case (.board, true): return String(localized: "The board is still gone. Check that it is plugged in; the run goes on when it is back.")
-        case (.hotspot, false): return String(localized: "The board restarted. Waiting for the iPhone to rejoin its Wi-Fi…")
-        case (.hotspot, true): return String(localized: "Join the board's Wi-Fi in Settings › Wi-Fi; the run goes on when it is back.")
+        case (.hotspot, false): return String(localized: "The board lost its Wi-Fi. Waiting for it to reconnect…")
+        case (.hotspot, true): return String(localized: "The board is still off its Wi-Fi. Make sure the Wi-Fi is on and in range, and keep this iPhone on the same Wi-Fi; the run goes on when the board is back.")
         case (.mirroring, false): return String(localized: "Board is back. Waiting for Screen Mirroring to resume…")
         case (.mirroring, true): return String(localized: "Open Control Center, tap Screen Mirroring → ESP32 Agent; the run goes on from here.")
         }
