@@ -75,6 +75,14 @@
     现在交给下一步的恢复流程，等重连后从同一步继续（`RecoveryTests.testRunPausesForALostScreenAndGoesOnFromTheSameStep`）。
 28. **测试不再依赖模拟器语言**：6 个测试原本写死英文，在简体中文环境会失败；现在和 App 用同一个翻译比对，两种语言都应通过。
 
+29–30 来自真机实测 traces(30)（设置闹钟失败）：
+
+29. **会动的目标不再卡死**：“时钟”图标本身是走动的时钟，秒针一直在变，第 19 项的保护因此一直不敢点，40 步用完失败。
+    现在只要模型看着更新后的画面仍选同一个位置（相差 3% 以内）就执行；真正换页或滚动时模型会改选别处，仍然不会拿旧坐标去点。
+30. **不从“卡在等待”的任务里学经验**：那次失败后自学写下了错的经验（“不要用搜索找时钟，直接在主屏幕点”）。
+    现在一次任务若一半以上的步骤都在等画面（stale plan、重新规划），就不复盘；复盘提示也写明经验只能是关于手机上的 App，不能是关于程序自己的等待机制。
+    手机上已经学到的那两条：在回顾里打开那次任务，把任一步标成错，就会作废。
+
 第二到第五个提交共补了 52 条简体中文界面文字（第一部分另有 21 条）。
 
 ## 以后不用 Mac 的更新方式
@@ -111,7 +119,7 @@ xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
 ```
 
 - 新测试：`SameWiFiTests`（3 项）、`BackgroundAudioTests`（1 项）、`LessonBookTests`（8 项）；`ReviewTests` 里提示测试改名为 `testIntentHintsReachThePlannerAndTheActor`。
-- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）；`Build14ReviewTests`（7 项，新文件）；`VisionTests` 新增 2 项。
+- 第二、三个提交的测试：`DrawingDoneTests`（9 项，新文件）；`VideoStartupTests` 共 14 项（新增 2 项，另有 3 项设了 `noVideoGrace = 0`）；`VideoTests` 新增 `testRestartedOrRepeatedSeqIsNotCountedAsDrops`；`LessonBookTests` 新增 4 项（共 12 项）；`Build14ReviewTests`（10 项，新文件）；`VisionTests` 新增 2 项。
 - Mac 第一次测试（49a5b84＋编译修正）：英文 162 项通过 161 项，简体 162 项通过 155 项；差的就是第 27、28 项，已修正，待重新测试。
 - 编译错误：只做最小修正，不改行为，记下“文件:行号＋原因”。
 - 测试失败：照实回报原文，不要改测试去迁就。

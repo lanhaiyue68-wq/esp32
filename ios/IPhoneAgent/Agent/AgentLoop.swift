@@ -44,10 +44,13 @@ extension Pointer: Gestures {}
     /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
     var lessons: LessonBook?
     private var learnedThrough = -1
-    /// Plans dropped in a row because the screen moved while the model answered. After two, a plan goes ahead
-    /// when nothing changed where it lands (a clock, a Live Activity or video noise can keep a screen "changing"
-    /// forever); after five, the planner looks again.
+    /// Plans dropped in a row because the screen moved while the model answered. A plan goes ahead when the
+    /// model, looking at a newer screen, chose the same spot again (a live clock icon, a video or an animated
+    /// background never hold still), or after two drops when nothing changed where it lands; after five, the
+    /// planner looks again.
     private var staleRun = 0
+    /// The plan dropped last time, to see whether the next look chose the same spot.
+    private var lastStale: JObject?
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
 
@@ -98,6 +101,7 @@ extension Pointer: Gestures {}
         learnedThrough = -1
         helpAsked = 0
         staleRun = 0
+        lastStale = nil
         doneRejected = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -258,6 +262,16 @@ extension Pointer: Gestures {}
         return nil
     }
 
+    /// Two plans aim at the same place: the same action landing within 3% of the screen of each other (a model
+    /// rarely names the exact same pixel twice), or the same text or key for actions without a place.
+    static func sameSpot(_ a: JObject, _ b: JObject) -> Bool {
+        guard a["action"] == b["action"] else { return false }
+        let (pa, pb) = (pointerPath(a), pointerPath(b))
+        guard pa.count == pb.count else { return false }
+        if pa.isEmpty { return Actions.sameTarget(a, b) }
+        return zip(pa, pb).allSatisfy { abs($0.x - $1.x) <= 0.03 && abs($0.y - $1.y) <= 0.03 }
+    }
+
     /// A 3-point path with one wide, roughly even bend (a smile, an arc) is drawn as a smooth curve: models keep
     /// sending three points for a curve, and the straight joins came out as a V. Sharp or lopsided bends stay.
     static func isGentleBend(_ pts: [CGPoint], aspect: Double) -> Bool {
@@ -403,13 +417,17 @@ extension Pointer: Gestures {}
                 try await screen?.requireFrame(after: nil)
                 if i == 0, seen != screen?.frame, Vision.changed(seen, screen?.frame, ignore: spots) {
                     staleRun += 1
-                    // After two looks the screen may never hold still (a clock, a video, the Live Activity): act then
-                    // only if nothing changed where this action lands. Coordinates read off a screen that moved under
-                    // them are never sent.
-                    let safe = staleRun > 2 && !Vision.changedNear(seen, screen?.frame, around: pointerPath(act))
+                    // Coordinates read off a screen that moved under them are never sent. But some screens never hold
+                    // still (a live clock icon, a video, an animated background): when the model, looking again at a
+                    // newer screen, picks the same spot, the change did not move the target; after two drops, a spot
+                    // where nothing changed is fine too.
+                    let again = lastStale.map { Self.sameSpot($0, act) } ?? false
+                    let safe = again || (staleRun > 2 && !Vision.changedNear(seen, screen?.frame, around: pointerPath(act)))
                     if !safe {
+                        lastStale = act
                         if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh
                             staleRun = 0
+                            lastStale = nil
                             record(screen?.frame, ["action": .str("stale plan"),
                                                    "reason": .str("the screen keeps changing where the action would land; planning again")])
                             try await replan(stuck: true)
@@ -419,9 +437,11 @@ extension Pointer: Gestures {}
                         if staleRun > 2 { await screen?.settled() }
                         return false
                     }
-                    DebugLog.write("stale plan \(staleRun) in a row: nothing changed where this action lands; acting")
+                    DebugLog.write(again ? "stale plan \(staleRun) in a row: the newer look chose the same spot; acting"
+                                         : "stale plan \(staleRun) in a row: nothing changed where this action lands; acting")
                 }
                 staleRun = 0
+                lastStale = nil
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used

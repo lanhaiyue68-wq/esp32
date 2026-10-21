@@ -235,7 +235,8 @@ extension AppModel {
     /// for similar tasks (LessonBook), shown in the trace as a "learned" record.
     func learnFromRun(_ run: String, task: String, steps: [JObject]) async {
         guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty,
-              steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }) else { return }
+              steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }),
+              LessonBook.worthReviewing(steps) else { return }
         let epoch = lessons.epoch  // a clear, the switch or a correction while the model answers wins over the reply
         do {
             let reply = try await settings.client("planner").chat(system: LessonBook.reflectionPrompt,

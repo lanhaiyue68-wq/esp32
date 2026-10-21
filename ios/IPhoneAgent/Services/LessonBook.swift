@@ -154,7 +154,9 @@ import Foundation
     "<app> <screen or control>: do not <what went wrong>; instead <what to do>". When the run itself fixed the \
     mistake later, the "instead" part is the fix that worked. Never turn a mistake into a rule: a lesson must not \
     tell the agent to repeat what went wrong. Never state that the task succeeded or looked right: the agent's own \
-    "done" is not proof. Do not invent screens or buttons that are not in the steps. If there was no deviation, \
+    "done" is not proof. Do not invent screens or buttons that are not in the steps. Lessons are about the apps \
+    and screens on the phone, never about this agent's own mechanics ("stale plan", replanning, step limits, \
+    timeouts): those are not the user's apps and a lesson about them misleads. If there was no deviation, \
     you may keep one lesson about the route through the apps that worked. Write in the language of the task, at \
     most 3 lessons, one line each, starting with "LESSON:"; reply NONE if nothing reliable can be learned.
     """
@@ -170,6 +172,14 @@ import Foundation
             lines.append(line)
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// A run that spent most of its steps waiting for the screen (dropped stale plans, stuck replans) says little
+    /// about the apps, and a review of it drew lessons that blamed the route: skip it.
+    static func worthReviewing(_ steps: [JObject]) -> Bool {
+        let moves = steps.filter { $0["plan"] == nil }
+        let waiting = moves.filter { ["stale plan", "replan (stuck)"].contains($0["action"]?.str ?? "") }.count
+        return waiting * 2 <= moves.count
     }
 
     static func parseLessons(_ reply: String) -> [String] {

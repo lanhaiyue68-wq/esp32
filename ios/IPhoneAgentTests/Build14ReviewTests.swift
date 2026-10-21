@@ -25,35 +25,66 @@ import XCTest
         return out as Data
     }
 
-    /// The model answers "tap 500 500" while the screen switches to the next of `frames` on every request.
-    private func run(frames: [Data], steps: Int) async -> (AgentLoop, FakeGestures) {
+    /// The model answers a tap at the next of `targets` while the screen switches to the next of `frames` on every
+    /// request (it moves while the model answers).
+    private func run(frames: [Data], targets: [String], steps: Int) async -> (AgentLoop, FakeGestures) {
         let screen = FakeScreen(), phone = FakeGestures()
         screen.frame = frames[0]
-        var shown = 0
+        var shown = 0, asked = 0
         let model = FakeModel { n in
             shown += 1
-            screen.frame = frames[shown % frames.count]  // the screen moves while the model answers
-            return n == 1 ? "1. tap the middle" : "THINK: tap it\nDO: tap 500 500"
+            screen.frame = frames[shown % frames.count]
+            if n == 1 { return "1. tap the middle" }
+            asked += 1
+            return "THINK: tap it\nDO: tap " + targets[(asked - 1) % targets.count]
         }
         let agent = AgentLoop(phone: phone, screen: screen, actor: model, planner: model, trace: nil, maxSteps: steps)
         await agent.run()
         return (agent, phone)
     }
 
+    private func stale(_ agent: AgentLoop) -> Int { agent.steps.filter { $0["action"]?.str == "stale plan" }.count }
+
     func testCoordinatesFromAScreenThatMovedUnderThemAreNeverSent() async {
-        // Three different layouts right where the tap would land.
+        // Three different layouts right where the tap would land, and the model picks a different spot each time.
         let frames = [frame(square: nil), frame(square: (220, 510, 60)), frame(square: (200, 490, 100))]
-        let (agent, phone) = await run(frames: frames, steps: 4)
+        let (agent, phone) = await run(frames: frames, targets: ["500 500", "545 500", "500 545"], steps: 4)
         XCTAssertFalse(phone.calls.contains("tap"))
-        XCTAssertEqual(agent.steps.filter { $0["action"]?.str == "stale plan" }.count, 4)
+        XCTAssertEqual(stale(agent), 4)
     }
 
     func testAChangeAwayFromTheTargetDoesNotBlockTheRunForever() async {
-        // Only a corner keeps changing (a clock-like spot), far from 500 500.
+        // Only a corner keeps changing, far from where the model taps (two spots, so never "the same spot again").
         let frames = [frame(square: nil), frame(square: (400, 150, 40))]
-        let (agent, phone) = await run(frames: frames, steps: 3)
-        XCTAssertEqual(phone.calls, ["tap"])  // two looks dropped, the third acts
-        XCTAssertEqual(agent.steps.filter { $0["action"]?.str == "stale plan" }.count, 2)
+        let (agent, phone) = await run(frames: frames, targets: ["500 500", "500 560"], steps: 3)
+        XCTAssertEqual(phone.calls, ["tap"])  // two looks dropped, the third acts: nothing changed where it lands
+        XCTAssertEqual(stale(agent), 2)
+    }
+
+    func testALiveTargetChosenAgainOnTheNewerScreenIsTapped() async {
+        // traces(30): the Clock icon's second hand moves right under the tap, and the run ran out of steps.
+        let frames = [frame(square: nil), frame(square: (240, 530, 16))]
+        let (agent, phone) = await run(frames: frames, targets: ["500 500", "505 498"], steps: 2)
+        XCTAssertEqual(phone.calls, ["tap"])  // dropped once; the newer look chose the same spot, so it acts
+        XCTAssertEqual(stale(agent), 1)
+    }
+
+    func testSameSpotAllowsAFewUnitsButNotAnotherTarget() {
+        func tap(_ x: Int, _ y: Int) -> JObject { ["action": .str("tap"), "x": .int(x), "y": .int(y)] }
+        XCTAssertTrue(AgentLoop.sameSpot(tap(160, 165), tap(169, 166)))
+        XCTAssertFalse(AgentLoop.sameSpot(tap(167, 237), tap(160, 165)))
+        XCTAssertFalse(AgentLoop.sameSpot(tap(160, 165), ["action": .str("swipe"), "x1": .int(160), "y1": .int(165),
+                                                         "x2": .int(160), "y2": .int(300)]))
+        let type: JObject = ["action": .str("type"), "text": .str("时钟")]
+        XCTAssertTrue(AgentLoop.sameSpot(type, type))
+        XCTAssertFalse(AgentLoop.sameSpot(type, ["action": .str("type"), "text": .str("闹钟")]))
+    }
+
+    func testARunSpentWaitingForTheScreenTeachesNothing() {
+        let tap: JObject = ["action": .str("tap"), "x": .int(1), "y": .int(2)]
+        let wait: JObject = ["action": .str("stale plan"), "reason": .str("screen changed")]
+        XCTAssertFalse(LessonBook.worthReviewing([tap, wait, wait, wait]))  // traces(30): it blamed the route
+        XCTAssertTrue(LessonBook.worthReviewing([tap, tap, tap, wait]))
     }
 
     func testAFrameFromAnEarlierBoardBootIsNotCurrent() {
