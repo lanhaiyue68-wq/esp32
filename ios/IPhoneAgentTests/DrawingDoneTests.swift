@@ -20,9 +20,11 @@ import XCTest
         }
     }
 
-    func testTypingTaskNeedsTypingInThisRun() {
-        XCTAssertNotNil(AgentLoop.unmadeResult(task: "在备忘录里输入你好", steps: [tap]))
-        XCTAssertNil(AgentLoop.unmadeResult(task: "在备忘录里输入你好", steps: [tap, ["action": .str("type"), "text": .str("你好")]]))
+    func testTypingTasksAreNeverHeldBack() {
+        // traces(32): "你好" went in as a compose step, "done" was turned down, and it sent the message again.
+        XCTAssertNil(AgentLoop.unmadeResult(task: "在备忘录里输入你好", steps: [tap]))
+        let compose: JObject = ["action": .str("compose"), "expected": .str("你好")]
+        XCTAssertNil(AgentLoop.unmadeResult(task: "打开微信，直接打字发送一句“你好”", steps: [tap, compose, tap]))
     }
 
     func testRepeatedDoneWithoutDrawingIsRejectedThenAsksForHelp() async {

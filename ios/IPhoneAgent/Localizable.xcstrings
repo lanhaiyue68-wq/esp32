@@ -6366,6 +6366,26 @@
           }
         }
       }
+    },
+    "Stayed instead of going back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有返回，留在当前画面"
+          }
+        }
+      }
+    },
+    "It kept going back and forth between two screens. Look at the screen, then go on or stop." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它一直在两个画面之间来回切换。请看一下画面，再决定继续还是停止。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

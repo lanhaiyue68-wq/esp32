@@ -80,6 +80,57 @@ import XCTest
         XCTAssertFalse(AgentLoop.sameSpot(type, ["action": .str("type"), "text": .str("闹钟")]))
     }
 
+    /// The model taps the given targets in turn on a screen that never changes between looks.
+    private func taps(_ targets: [String], steps: Int) async -> AgentLoop {
+        let model = FakeModel { n in n == 1 ? "1. send it" : "THINK: go\nDO: tap " + targets[(n - 2) % targets.count] }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: model, planner: model, trace: nil, maxSteps: steps)
+        await agent.run()
+        return agent
+    }
+
+    private func actions(_ agent: AgentLoop) -> [String] { agent.steps.compactMap { $0["action"]?.str }.filter { $0 != "plan" } }
+
+    func testGoingBackAgainAfterTwoRoundsIsRefusedThenHandedToTheUser() async {
+        // traces(33): back (57 89), into the chat (264 225), back, into the chat, then it wants to go back again.
+        let agent = await taps(["57 89", "264 225", "57 89", "264 225", "57 89", "57 89", "57 89"], steps: 8)
+        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "tap", "loop", "loop", "fail"])
+    }
+
+    func testTheLeavingMoveIsRefusedWhenItClosesTheCircle() async {
+        let agent = await taps(["264 225", "57 89", "264 225", "57 89"], steps: 4)  // in, back, in, back
+        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "loop"])  // stays in the chat
+    }
+
+    func testMovingOnEndsTheGuard() async {
+        let agent = await taps(["57 89", "264 225", "57 89", "264 225", "450 920", "57 89"], steps: 6)
+        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "tap", "tap", "tap"])  // a new target: the circle is over
+    }
+
+    func testTheUsersNoteReplacesTheModelsGuessesAboutThatKindOfTask() {
+        let book = LessonBook(file: nil)
+        let task = "去微信给哆啦A梦头像的蓝海乐发一句你好"
+        book.learnFromRun("r1", task: task, lessons: ["微信 聊天界面：头像是风景照就返回重新选择"])
+        book.learnFromRun("r9", task: "设置一个早上 8:00 的闹钟", lessons: ["时钟：先点闹钟标签"])
+        let draft = ReviewDraft(source: .run, folder: nil, runID: "r2", outcome: .done,
+                                steps: [DraftStep(action: ["action": .str("tap")], verdict: nil, note: "进去以后不要返回")],
+                                name: "", prompt: task)
+        book.learnReview(draft)
+        XCTAssertFalse(book.context(task: task).contains("风景照"))       // its guess about this task is gone
+        XCTAssertTrue(book.context(task: "设置一个早上 9:00 的闹钟").contains("闹钟标签"))  // other tasks keep theirs
+    }
+
+    func testNewerCorrectionsComeFirstAndWin() {
+        var now = Date(timeIntervalSince1970: 0)
+        let book = LessonBook(file: nil, clock: { now })
+        let task = "去微信给蓝海乐发一句你好"
+        book.learn(group: "r1:review", task: task, items: [("a", "先返回看看是不是这个人")])
+        now = Date(timeIntervalSince1970: 100)
+        book.learn(group: "r2:review", task: task, items: [("a", "进去以后绝对不要返回")])
+        let context = book.context(task: task)
+        XCTAssertLessThan(context.range(of: "绝对不要返回")!.lowerBound, context.range(of: "先返回看看")!.lowerBound)
+        XCTAssertTrue(context.contains("newer one"))
+    }
+
     func testARunSpentWaitingForTheScreenTeachesNothing() {
         let tap: JObject = ["action": .str("tap"), "x": .int(1), "y": .int(2)]
         let wait: JObject = ["action": .str("stale plan"), "reason": .str("screen changed")]
@@ -112,8 +163,8 @@ import XCTest
         for task in ["打开设置，切换输入法", "查看输入法列表", "Open the app drawer", "把键盘的输入框调大"] {
             XCTAssertNil(AgentLoop.unmadeResult(task: task, steps: []), task)
         }
-        XCTAssertNotNil(AgentLoop.unmadeResult(task: "在输入框里输入你好", steps: []))
-        XCTAssertNotNil(AgentLoop.unmadeResult(task: "Open Notes and type \"hello\"", steps: []))
+        XCTAssertNil(AgentLoop.unmadeResult(task: "在输入框里输入你好", steps: []))  // typing is not checked at all
+        XCTAssertNil(AgentLoop.unmadeResult(task: "Open Notes and type \"hello\"", steps: []))
         XCTAssertNotNil(AgentLoop.unmadeResult(task: "draw a house", steps: []))
     }
 

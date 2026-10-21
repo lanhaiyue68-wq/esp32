@@ -135,6 +135,20 @@ import Foundation
         if draft.steps.contains(where: { $0.verdict == false }) {
             forget(group: run + ":auto")  // the user corrected this run: what the model drew from it may be wrong
         }
+        if !items.isEmpty { dropGuesses(similarTo: draft.prompt) }
+    }
+
+    /// The user taught something about this kind of task: what the model guessed from its own runs of it gives way
+    /// (traces(33): its own "wrong avatar, go back" kept the loop going against the user's notes).
+    private func dropGuesses(similarTo task: String) {
+        let words = Self.tokens(task)
+        let before = lessons.count
+        lessons.removeAll { l in
+            guard l.auto == true else { return false }
+            let theirs = Self.tokens(l.task)
+            return words.intersection(theirs).count >= Swift.max(2, Swift.min(words.count, theirs.count) / 3)
+        }
+        if lessons.count != before { save() }
     }
 
     func forget(group: String) {
@@ -233,10 +247,14 @@ import Foundation
     /// Appended to the planner's and the actor's system prompts.
     func context(task: String) -> String {
         let picked = relevant(to: task)
-        let human = picked.filter { $0.auto != true }, own = picked.filter { $0.auto == true }
+        // Newest first: corrections pile up over runs and can disagree (traces(32): "go back and check" and "never go
+        // back"); the latest one is what the user wants now.
+        let human = picked.filter { $0.auto != true }.sorted { $0.updated > $1.updated }
+        let own = picked.filter { $0.auto == true }.sorted { $0.updated > $1.updated }
         var out = ""
         if !human.isEmpty {
-            out += "\n\nLessons from this user's corrections of earlier runs. Follow them; they override your habits:\n"
+            out += "\n\nLessons from this user's corrections of earlier runs, newest first. Follow them; they override your "
+                + "habits. When two of them disagree, the newer one (higher in this list) wins:\n"
                 + human.map { "- " + $0.text }.joined(separator: "\n")
         }
         if !own.isEmpty {

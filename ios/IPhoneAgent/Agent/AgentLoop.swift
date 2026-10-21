@@ -51,6 +51,10 @@ extension Pointer: Gestures {}
     private var staleRun = 0
     /// The plan dropped last time, to see whether the next look chose the same spot.
     private var lastStale: JObject?
+    /// After a back-and-forth (see bounce): the move that would start it again (`stop`, refused) and its partner.
+    /// Any other move ends it; refusing `stop` three times hands the run to the user.
+    private var bounceGuard: (stop: JObject, other: JObject)?
+    private var bounceRefused = 0
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
 
@@ -102,6 +106,8 @@ extension Pointer: Gestures {}
         helpAsked = 0
         staleRun = 0
         lastStale = nil
+        bounceGuard = nil
+        bounceRefused = 0
         doneRejected = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -253,13 +259,34 @@ extension Pointer: Gestures {}
             return "Nothing has been drawn in this run yet; a drawing already on screen is from before and does not count. "
                 + "Open a new blank board (Freeform: back to the board list, then New Board) and draw it."
         }
-        // "输入法" (input method), "输入框" (a field) and "type of" are nouns, not a request to type something.
-        let types = t.range(of: #"(输入|輸入)(?![法框栏欄])|打字"#, options: .regularExpression) != nil
-            || t.range(of: #"\btype\s+["“'「]"#, options: .regularExpression) != nil
-        if types, !did.contains("type") {
-            return "Nothing has been typed in this run yet; text already on screen is not this task's result. Type it."
-        }
+        // No such check for typing: Chinese goes in through pinyin candidates (a "compose" step, not "type"), and a
+        // turned-down "done" after a message was sent made it send the message again (traces(32)).
         return nil
+    }
+
+    /// Actions that move the screen somewhere (a back-and-forth is made of these).
+    private static let moving: Set<String> = ["tap", "swipe", "back", "home", "key"]
+
+    /// The plan closes a back-and-forth: the last moves went A, B, A and this one is B again (enter a chat, go back,
+    /// enter, go back). Each of them changes the screen, so `repeating` never sees it. Returns A.
+    static func bounce(_ act: JObject, after steps: [JObject]) -> JObject? {
+        guard moving.contains(act["action"]?.str ?? "") else { return nil }
+        let moves = Array(steps.filter { moving.contains($0["action"]?.str ?? "") }.suffix(3))
+        guard moves.count == 3, sameSpot(act, moves[1]), sameSpot(moves[2], moves[0]), !sameSpot(moves[0], moves[1])
+        else { return nil }
+        return moves[0]
+    }
+
+    static let loopReason = "this move starts again a back-and-forth this run already went through twice; the move that "
+        + "left was the mistake. Stay on this screen and do the task here."
+
+    /// A move that leaves the current screen: back, home, or a tap on the back arrow at the top left.
+    static func leaves(_ act: JObject) -> Bool {
+        switch act["action"]?.str {
+        case "back", "home": return true
+        case "tap": return (act["x"]?.double ?? 1000) <= 150 && (act["y"]?.double ?? 1000) <= 130
+        default: return false
+        }
     }
 
     /// Two plans aim at the same place: the same action landing within 3% of the screen of each other (a model
@@ -403,6 +430,29 @@ extension Pointer: Gestures {}
                 try await replan(stuck: true) // preserve recovery reason and completed work in the planner context
                 return false
             }
+            if i == 0 {
+                // traces(33): enter the chat, decide the avatar is wrong, go back, enter, go back... twice is enough.
+                // The leaving move (back) is the one refused, so the run stays where it can do the task.
+                if let guarded = bounceGuard, Self.sameSpot(guarded.stop, act) {
+                    bounceRefused += 1
+                    if bounceRefused >= 3 {
+                        record(planned.shot, ["action": .str("fail"), "reason": .str("kept going back and forth between two screens")])
+                        return true
+                    }
+                    record(planned.shot, ["action": .str("loop"), "reason": .str(Self.loopReason)])
+                    return false
+                }
+                if bounceGuard == nil, let first = Self.bounce(act, after: steps) {
+                    if Self.leaves(act) {  // this move restarts the circle: refuse it now
+                        bounceGuard = (stop: act, other: first)
+                        bounceRefused = 1
+                        record(planned.shot, ["action": .str("loop"), "reason": .str(Self.loopReason)])
+                        return false
+                    }
+                    bounceGuard = (stop: first, other: act)  // go ahead, but not back again
+                    DebugLog.write("loop: back and forth twice; going on, the move back is refused from now on")
+                }
+            }
             if name == "done", let missing = Self.unmadeResult(task: task, steps: steps) {
                 doneRejected += 1
                 if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
@@ -462,6 +512,9 @@ extension Pointer: Gestures {}
                 act["act_s"] = .num((s * 100).rounded() / 100)
                 spots += pointerPath(act)
                 pointerAt = spots.last!
+                if let guarded = bounceGuard, !Self.sameSpot(guarded.stop, act), !Self.sameSpot(guarded.other, act) {
+                    (bounceGuard, bounceRefused) = (nil, 0)  // the run moved on from the back-and-forth
+                }
             }
             record(planned.shot, act)
             if name == "done" || name == "fail" { return true }

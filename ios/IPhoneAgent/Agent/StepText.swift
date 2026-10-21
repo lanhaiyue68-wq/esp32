@@ -18,6 +18,7 @@ enum StepText {
         case "wait": return String(localized: "Wait")
         case "done": return String(localized: "Done")
         case "done rejected": return String(localized: "Not done yet")
+        case "loop": return String(localized: "Stayed instead of going back")
         case "fail": return String(localized: "Gave up")
         case "stopped": return String(localized: "Stopped")
         case "hiccup": return String(localized: "Hiccup, retrying")
@@ -46,6 +47,9 @@ enum StepText {
                      "snapshot did not decode"]
         if blind.contains(where: { reason.hasPrefix($0) }) {
             return String(localized: "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select ESP32 again.")
+        }
+        if reason == "kept going back and forth between two screens" {
+            return String(localized: "It kept going back and forth between two screens. Look at the screen, then go on or stop.")
         }
         if reason.hasPrefix("claimed done 3 times") {
             return String(localized: "It said it was done three times without doing it in this run. Look at the screen, then go on or stop.")
@@ -78,7 +82,7 @@ enum StepText {
     }
 
     static let notMoves: Set<String> = ["plan", "replan (stuck)", "hiccup", "stopped", "error", "fail", "done", "help",
-                                        "takeover", "skipped", "note", "reconnected", "done rejected"]
+                                        "takeover", "skipped", "note", "reconnected", "done rejected", "loop"]
 }
 
 /// How a run ended.
