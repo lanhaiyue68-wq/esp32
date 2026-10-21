@@ -162,7 +162,10 @@ import UIKit
         })
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.metrics.enteredBackground(); DebugLog.write("app: background") }
+            MainActor.assumeIsolated {
+                self?.metrics.enteredBackground(); DebugLog.write("app: background")
+                self?.refreshDecoderSoon()
+            }
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.metrics.enteredForeground(); DebugLog.write("app: foreground") }
@@ -224,6 +227,17 @@ import UIKit
     var modelReady: Bool {
         MockMode.on || (settings.isConfigured && settings.currentModel != nil
             && (settings.provider == .others || !settings.apiKey.isEmpty))
+    }
+
+    /// iOS drops the video decoder when the app goes to the background and says so only at the next frame, which a
+    /// still Home Screen never sends. During a run, rebuild it from the cached GOP shortly after leaving.
+    private func refreshDecoderSoon() {
+        guard agent.running || startingAgent else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, self.agent.running || self.startingAgent else { return }
+            await self.feed.refreshDecoder("app in background")
+        }
     }
 
     func say(_ text: String) {

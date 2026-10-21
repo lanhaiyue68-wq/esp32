@@ -17,6 +17,7 @@ enum StepText {
         case "back": return String(localized: "Go back")
         case "wait": return String(localized: "Wait")
         case "done": return String(localized: "Done")
+        case "done rejected": return String(localized: "Not done yet")
         case "fail": return String(localized: "Gave up")
         case "stopped": return String(localized: "Stopped")
         case "hiccup": return String(localized: "Hiccup, retrying")
@@ -58,7 +59,7 @@ enum StepText {
     }
 
     static let notMoves: Set<String> = ["plan", "replan (stuck)", "hiccup", "stopped", "error", "fail", "done", "help",
-                                        "takeover", "skipped", "note", "reconnected"]
+                                        "takeover", "skipped", "note", "reconnected", "done rejected"]
 }
 
 /// How a run ended.

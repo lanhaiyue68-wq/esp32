@@ -40,7 +40,9 @@ enum Actions {
             }
             let points = stride(from: 0, to: numbers.count, by: 2).prefix(20)
                 .map { JValue.arr([.int(numbers[$0]), .int(numbers[$0 + 1])]) }
-            return ["action": .str(name), "points": .arr(Array(points))]
+            var action: JObject = ["action": .str(name), "points": .arr(Array(points))]
+            if rest.lowercased().contains("smooth") { action["smooth"] = .bool(true) }  // a curve through the points
+            return action
         }
         guard numbers.count == keys.count else {
             throw ParseError(message: "\(name) needs \(keys.count) numbers: \(line.prefix(100))")
@@ -75,9 +77,9 @@ enum Actions {
     /// The action itself, without thoughts, timings and other bookkeeping.
     static func key(_ step: JObject) -> JObject { step.without(meta) }
 
-    /// Precision changes how a tap is delivered, not the target or the intent.
+    /// Precision changes how a tap is delivered and smoothing how a path is drawn, not the target or the intent.
     static func sameTarget(_ lhs: JObject, _ rhs: JObject) -> Bool {
-        key(lhs).without(["precise"]) == key(rhs).without(["precise"])
+        key(lhs).without(["precise", "smooth"]) == key(rhs).without(["precise", "smooth"])
     }
 
     /// x and y use different screen scales; the circle radius is measured against width only.
@@ -144,10 +146,33 @@ func points(_ act: JObject) -> [CGPoint] {
     }
 }
 
-/// Points around a circle; r is a fraction of the width, aspect = width / height.
-func circle(_ x: Double, _ y: Double, _ r: Double, aspect: Double, n: Int = 24) -> [CGPoint] {
-    (0...n).map { i in
+/// Points around a circle; r is a fraction of the width, aspect = width / height. `extra` goes on past the start
+/// by that fraction of a turn, so ends the drawing app loses still overlap.
+func circle(_ x: Double, _ y: Double, _ r: Double, aspect: Double, n: Int = 24, extra: Double = 0) -> [CGPoint] {
+    (0...(n + Int((Double(n) * max(extra, 0)).rounded()))).map { i in
         let a = 2 * Double.pi * Double(i) / Double(n)
         return CGPoint(x: x + r * cos(a), y: y + r * aspect * sin(a))
     }
+}
+
+/// A smooth stroke through every point (Catmull-Rom), in the points' own units. At most about 40 points, so the
+/// whole stroke still fits one board command.
+func smoothCurve(_ pts: [CGPoint]) -> [CGPoint] {
+    guard pts.count > 2 else { return pts }
+    let segments = pts.count - 1
+    let per = max(2, min(8, 32 / segments))
+    var out = [pts[0]]
+    for i in 0..<segments {
+        let (p0, p1, p2, p3) = (pts[max(i - 1, 0)], pts[i], pts[i + 1], pts[min(i + 2, segments)])
+        for s in 1...per {
+            let t = Double(s) / Double(per)
+            func blend(_ v0: CGFloat, _ v1: CGFloat, _ v2: CGFloat, _ v3: CGFloat) -> CGFloat {
+                let (a, b, c, d) = (Double(v0), Double(v1), Double(v2), Double(v3))
+                return CGFloat(0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t
+                                      + (3 * b - a - 3 * c + d) * t * t * t))
+            }
+            out.append(CGPoint(x: blend(p0.x, p1.x, p2.x, p3.x), y: blend(p0.y, p1.y, p2.y, p3.y)))
+        }
+    }
+    return out
 }

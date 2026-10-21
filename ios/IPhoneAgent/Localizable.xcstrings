@@ -1,6 +1,36 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Checking the mirrored screen…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在确认镜像画面…"
+          }
+        }
+      }
+    },
+    "Checking the mirrored screen took too long. Wait a few seconds and start again; if it keeps happening, stop mirroring in Control Center and select ESP32 again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认镜像画面超时。请等几秒再开始；如果一直这样，请在控制中心停止镜像，再重新选择 ESP32。"
+          }
+        }
+      }
+    },
+    "Not done yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没完成"
+          }
+        }
+      }
+    },
     "The board is disconnected. Reconnect it before starting." : {
       "localizations" : {
         "zh-Hans" : {

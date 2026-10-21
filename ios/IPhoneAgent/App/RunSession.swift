@@ -63,6 +63,7 @@ extension AppModel {
         let snapMode = FrameMode.current == .snap
         do {
             mark("video preflight")
+            say(String(localized: "Checking the mirrored screen…"))  // can take a few seconds; capped in prepareForRun
             let source = try await feed.prepareForRun(snapMode: snapMode)
             mark("foreground frame verified: " + source)
             await depart()  // take off only once the screen is known to be readable

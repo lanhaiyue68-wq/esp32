@@ -47,6 +47,15 @@ final class H264Decoder: @unchecked Sendable {  // confined to `queue`
         resetSession()  // rebuilt at the next IDR/config
     }
 
+    /// iOS drops the session when the app goes to the background but says so only at the next decode, and a still
+    /// Home Screen sends nothing to decode. Rebuild now from the cached GOP (call on `queue`); returns how many
+    /// units were decoded again, 0 when there is no complete GOP or it failed.
+    func refresh() -> Int {
+        guard gop.first?.idr == true else { return 0 }
+        resetSession()
+        return replay() ? gop.count : 0
+    }
+
     /// Decode the cached GOP into a fresh session; only its last frame is shown.
     private func replay() -> Bool {
         for (i, u) in gop.enumerated() where decodeOne(u, emit: i == gop.count - 1) != noErr { return false }

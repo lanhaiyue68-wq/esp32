@@ -25,6 +25,7 @@ struct VideoAssembler {
     }
 
     private(set) var drops = 0         // chunks lost (seq gaps)
+    private(set) var restarts = 0      // seq jumped back: the sender started over (e.g. a new TCP connection)
     private(set) var bytes = 0         // all chunk bytes received, bench included
     private(set) var benchBytes = 0
     private(set) var waitingForKey = true  // until the first IDR/CONFIG
@@ -45,7 +46,10 @@ struct VideoAssembler {
         let seq = UInt16(c[0]) | UInt16(c[1]) << 8
         let flags = Flags(rawValue: c[2])
         if let last = lastSeq, seq != last &+ 1 {
-            drops += Int(seq &- last &- 1)
+            if seq == last { return nil }  // the same chunk again (BLE and TCP both carried it): already have it
+            // A forward gap is lost chunks; a jump back is a restarted sender, not 65 000 lost chunks.
+            let gap = seq &- last &- 1
+            if gap < 0x8000 { drops += Int(gap) } else { restarts += 1 }
             current = nil
             waitingForKey = true
         }

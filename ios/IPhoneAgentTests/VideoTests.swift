@@ -49,6 +49,17 @@ final class VideoTests: XCTestCase {
         XCTAssertEqual(unit?.snap, true)
     }
 
+    func testRestartedOrRepeatedSeqIsNotCountedAsDrops() {
+        var a = VideoAssembler()
+        _ = a.add(chunk(500, [.start, .end, .idr], idr, ms: 1))
+        XCTAssertNil(a.add(chunk(500, [.start, .end, .idr], idr, ms: 1)))  // the same chunk again: skipped
+        XCTAssertNotNil(a.add(chunk(501, [.start, .end], p, ms: 2)))       // and the stream goes on
+        XCTAssertNil(a.add(chunk(3, [.start, .end], p, ms: 3)))            // the sender started over
+        XCTAssertEqual(a.drops, 0)
+        XCTAssertEqual(a.restarts, 1)
+        XCTAssertNotNil(a.add(chunk(4, [.start, .end, .idr], idr, ms: 4)))  // decodable again from its IDR
+    }
+
     func testWaitsForAKeyUnitAtStartAndIgnoresBench() {
         var a = VideoAssembler()
         XCTAssertNil(a.add(chunk(0, [.start, .end], p, ms: 1)))

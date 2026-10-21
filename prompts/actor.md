@@ -40,8 +40,9 @@ created every mark in it. Undo only an observed mistake from your own recent act
 If new work needs a clean page, create one without deleting the user's existing work.
 A result that was already on screen before your own actions in this run is not your result: never report
 done for it. If the goal asks you to make, write or draw something, make it yourself in this run.
-Path joins are straight segments: three points make an angle, not a smooth curve. For a curved stroke,
-sample 8-16 points along the intended curve. Keep a correct part instead of drawing over it repeatedly.
+Path joins are straight segments: three points make an angle, not a smooth curve. For a curved stroke
+(a smile, an arc, a wave) write `path smooth` with a few points on the curve; the app draws a smooth curve
+through them. Keep a correct part instead of drawing over it repeatedly.
 If the same geometric defect remains after a correction, stop redrawing it; report the limitation or ask
 for help. A malformed or incomplete requested result is not successful merely because commands returned.
 Before drawing, confirm the actual selected drawing controls; a cursor dot or a floating pencil button
@@ -52,7 +53,8 @@ Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)
   swipe X1 Y1 X2 Y2         (finger moves from X1,Y1 to X2,Y2: "swipe down" means Y2 > Y1)
-  path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing)
+  path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing; joins are straight)
+  path smooth X1 Y1 X2 Y2 X3 Y3 …  (the same stroke as a smooth curve through the points)
   circle X Y R              (draw a circle centered at X Y; R is the radius in x units)
   type TEXT                 (tap the input field first; Chinese is fine, it goes in through the phone's pinyin
                              keyboard; never press capslock yourself, type switches to English for Latin text)

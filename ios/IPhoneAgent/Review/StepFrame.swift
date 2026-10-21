@@ -87,7 +87,8 @@ struct ActionOverlay: View {
             case "swipe":
                 Trail(points: [p(n("x1"), n("y1")), p(n("x2"), n("y2"))], t: t)
             case "path":
-                Trail(points: points(action).map { p($0.x, $0.y) }, t: t)
+                Trail(points: (action["smooth"]?.bool == true ? smoothCurve(points(action)) : points(action))
+                    .map { p($0.x, $0.y) }, t: t)
             case "circle":
                 let r = n("r") / 1000 * size.width
                 Circle().trim(from: 0, to: t)

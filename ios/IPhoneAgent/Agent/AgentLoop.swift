@@ -47,6 +47,8 @@ extension Pointer: Gestures {}
     /// Plans dropped in a row because the screen moved while the model answered: after two, act on the
     /// latest look (a clock, a Live Activity or video noise can keep a screen "changing" forever).
     private var staleRun = 0
+    /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
+    private var doneRejected = 0
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
@@ -95,6 +97,7 @@ extension Pointer: Gestures {}
         learnedThrough = -1
         helpAsked = 0
         staleRun = 0
+        doneRejected = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -227,8 +230,42 @@ extension Pointer: Gestures {}
     /// A lost board or mirror is not the agent's fault. VideoReadinessError says so directly; a bare
     /// DeviceError counts only once the screen is gone. A connected but undecodable mirror still counts.
     static func isLinkLoss(_ error: Error, screenLive: Bool?) -> Bool {
-        if let video = error as? VideoReadinessError { return video != .decoderUnavailable }
+        if let video = error as? VideoReadinessError { return [.boardDisconnected, .mirroringDisconnected].contains(video) }
         return error is DeviceError && screenLive == false
+    }
+
+    /// A drawing or typing task is not done until this run has drawn or typed: a picture or text already on the
+    /// screen (an old board, an earlier note, an app's opening animation) is not this run's result. nil = may finish.
+    /// Only clear drawing/typing requests are checked, so other tasks are never held back.
+    static func unmadeResult(task: String, steps: [JObject]) -> String? {
+        let did = Set(steps.compactMap { $0["action"]?.str })
+        if did.contains("takeover") { return nil }  // the user did part of it by hand
+        let t = task.lowercased()
+        let draws = t.range(of: #"[画畫](?=[一个個两兩三几幾只隻张張条條朵幅颗顆棵出上下画畫圆圓圈线線笑星心])"#,
+                            options: .regularExpression) != nil
+            || t.range(of: #"\b(draw|sketch)"#, options: .regularExpression) != nil
+        if draws, did.isDisjoint(with: ["circle", "path"]) {
+            return "Nothing has been drawn in this run yet; a drawing already on screen is from before and does not count. "
+                + "Open a new blank board (Freeform: back to the board list, then New Board) and draw it."
+        }
+        let types = ["输入", "輸入", "打字"].contains { t.contains($0) }
+            || t.range(of: #"\btype\b"#, options: .regularExpression) != nil
+        if types, !did.contains("type") {
+            return "Nothing has been typed in this run yet; text already on screen is not this task's result. Type it."
+        }
+        return nil
+    }
+
+    /// A 3-point path with one wide, roughly even bend (a smile, an arc) is drawn as a smooth curve: models keep
+    /// sending three points for a curve, and the straight joins came out as a V. Sharp or lopsided bends stay.
+    static func isGentleBend(_ pts: [CGPoint], aspect: Double) -> Bool {
+        guard pts.count == 3, aspect.isFinite, aspect > 0 else { return false }
+        let sy = 1 / aspect  // a y unit is this many x units tall
+        let (ax, ay) = (Double(pts[0].x - pts[1].x), Double(pts[0].y - pts[1].y) * sy)
+        let (bx, by) = (Double(pts[2].x - pts[1].x), Double(pts[2].y - pts[1].y) * sy)
+        let (la, lb) = (hypot(ax, ay), hypot(bx, by))
+        guard la > 0, lb > 0, max(la, lb) / min(la, lb) <= 2 else { return false }
+        return (ax * bx + ay * by) / (la * lb) <= 0  // the bend is 90° or wider
     }
 
     func run() async {
@@ -349,6 +386,15 @@ extension Pointer: Gestures {}
                 try await replan(stuck: true) // preserve recovery reason and completed work in the planner context
                 return false
             }
+            if name == "done", let missing = Self.unmadeResult(task: task, steps: steps) {
+                doneRejected += 1
+                if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
+                    record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])
+                    return true
+                }
+                record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
+                return false
+            }
             if name != "done" && name != "fail" {
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
@@ -364,6 +410,9 @@ extension Pointer: Gestures {}
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used
+                if name == "path", act["smooth"] == nil, Self.isGentleBend(points(act), aspect: screen?.aspect ?? 9 / 19.5) {
+                    act["smooth"] = .bool(true)  // recorded, so the review and the next look know it was a curve
+                }
                 do { try await perform(act) }
                 catch let input as InputNeedsVerification {
                     lastActed = now()
@@ -505,8 +554,14 @@ extension Pointer: Gestures {}
         switch a["action"]?.str {
         case "tap": try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed)
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
-        case "path": try await phone.drag(points(a).map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)
-        case "circle": try await phone.drag(circle(p("x"), p("y"), p("r"), aspect: screen?.aspect ?? 9 / 19.5), hold: true)
+        case "path":
+            let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
+            try await phone.drag(pts.map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)
+        case "circle":
+            // A small circle (an eye) came out as an open arc, its first or last bit lost: go a quarter turn
+            // further so the ends overlap.
+            try await phone.drag(circle(p("x"), p("y"), p("r"), aspect: screen?.aspect ?? 9 / 19.5,
+                                        extra: p("r") < 0.06 ? 0.25 : 0), hold: true)
         case "type": try await phone.type(a["text"]?.str ?? "")
         case "key": try await phone.key(a["combo"]?.str ?? "")
         case "home": try await phone.goHome()

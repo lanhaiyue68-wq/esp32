@@ -19,7 +19,7 @@ import XCTest
 
     func testConnectedMirrorWithoutDecodableGOPHasDistinctFailure() async {
         let device = StartupDevice(); device.snapError = DeviceError(message: "err no video (start screen mirroring)")
-        let feed = VideoFeed(); feed.device = device; feed.mirroring = true
+        let feed = VideoFeed(); feed.device = device; feed.mirroring = true; feed.noVideoGrace = 0
         do { _ = try await feed.prepareForRun(wait: 0); XCTFail("Missing GOP cannot authorize a run") }
         catch { XCTAssertEqual(error as? VideoReadinessError, .decoderUnavailable) }
         XCTAssertEqual(device.sent, ["stream on", "snap"]) // no repeated snap, reset or experimental kick
@@ -36,7 +36,7 @@ import XCTest
 
     func testOldFrameBehindBoardDoesNotPassPreflight() async {
         let device = StartupDevice(); device.snapError = DeviceError(message: "err no video (start screen mirroring)")
-        let feed = VideoFeed(); feed.device = device; feed.mirroring = true
+        let feed = VideoFeed(); feed.device = device; feed.mirroring = true; feed.noVideoGrace = 0
         feed.status(BoardStatus(up: 100_000, video_ms: 1234))
         feed.show(Data([0xff, 0xd8]), width: 360, height: 780) // boardMs=0, older than current status
         do { _ = try await feed.prepareForRun(wait: 0); XCTFail("Cached old pixels must not authorize actions") }
@@ -66,7 +66,7 @@ import XCTest
 
     func testMirrorLostDuringSnapshotDoesNotReportConnectedDecoderProblem() async {
         let device = StartupDevice(); device.snapError = DeviceError(message: "err no video (start screen mirroring)")
-        let feed = VideoFeed(); feed.device = device; feed.mirroring = true
+        let feed = VideoFeed(); feed.device = device; feed.mirroring = true; feed.noVideoGrace = 0
         device.onSnap = { feed.mirroring = false }
         do { _ = try await feed.prepareForRun(wait: 0); XCTFail("Mirror dropped during startup") }
         catch { XCTAssertEqual(error as? VideoReadinessError, .mirroringDisconnected) }
@@ -114,6 +114,32 @@ import XCTest
         XCTAssertTrue(AgentLoop.isLinkLoss(DeviceError(message: "link lost"), screenLive: false))  // as before
         XCTAssertFalse(AgentLoop.isLinkLoss(DeviceError(message: "err busy"), screenLive: true))  // as before
         XCTAssertFalse(AgentLoop.isLinkLoss(URLError(.timedOut), screenLive: nil))
+        XCTAssertFalse(AgentLoop.isLinkLoss(VideoReadinessError.checkTimedOut, screenLive: true))
+    }
+
+    // build 14: trace(25-29) showed "restart mirroring" while the stream recovered by itself seconds later.
+
+    func testNoVideoWaitsForTheStreamToRecoverBeforeBlamingMirroring() async throws {
+        let device = StartupDevice(); device.snapError = DeviceError(message: "err no video (start screen mirroring)")
+        let feed = VideoFeed(); feed.device = device; feed.mirroring = true; feed.noVideoGrace = 3
+        device.onSnap = {
+            Task { @MainActor in  // the stream comes back a moment after the board said "no video"
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                feed.status(BoardStatus(up: 0, video_ms: 0))
+                feed.show(Data([0xff, 0xd8]), width: 360, height: 780)
+            }
+        }
+        let source = try await feed.prepareForRun(wait: 0)
+        XCTAssertEqual(source, "live (recovered)")
+        XCTAssertEqual(device.sent, ["stream on", "snap"])
+    }
+
+    func testSlowSnapshotInPreflightIsCappedWithAClearError() async {
+        let device = StartupDevice(); device.snapError = BoardTimeout(command: "snap", seconds: 1)
+        let feed = VideoFeed(); feed.device = device; feed.mirroring = true; feed.noVideoGrace = 0
+        do { _ = try await feed.prepareForRun(wait: 0, snapLimit: 1); XCTFail("A capped snapshot must not be retried") }
+        catch { XCTAssertEqual(error as? VideoReadinessError, .checkTimedOut) }
+        XCTAssertEqual(device.sent, ["stream on", "snap"])  // one snapshot, no longer second try
     }
 }
 

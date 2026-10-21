@@ -26,10 +26,12 @@ enum FrameFreshness {
 }
 
 enum VideoReadinessError: LocalizedError, Equatable {
-    case boardDisconnected, mirroringDisconnected, decoderUnavailable
+    case boardDisconnected, mirroringDisconnected, decoderUnavailable, checkTimedOut
 
     var errorDescription: String? {
         switch self {
+        case .checkTimedOut:
+            return String(localized: "Checking the mirrored screen took too long. Wait a few seconds and start again; if it keeps happening, stop mirroring in Control Center and select ESP32 again.")
         case .boardDisconnected:
             return String(localized: "The board is disconnected. Reconnect it before starting.")
         case .mirroringDisconnected:
@@ -137,8 +139,9 @@ extension ScreenSource {
     /// Run this in the foreground before going Home: a connected mirror may have no complete GOP
     /// for a newly opened decoder. Streaming waits for a usable frame before attempting one snapshot;
     /// snap-per-step mode keeps the stream off, as the user chose, and goes straight to a snapshot.
+    /// The user is looking at the app meanwhile, so the snapshot gets `snapLimit` s and no second try.
     @discardableResult
-    func prepareForRun(snapMode: Bool = false, wait: Double = 3) async throws -> String {
+    func prepareForRun(snapMode: Bool = false, wait: Double = 3, snapLimit: Double = 10) async throws -> String {
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
@@ -147,7 +150,40 @@ extension ScreenSource {
         } else {
             try await stream(true)
         }
-        return try await currentFrame(wait: wait)
+        do {
+            return try await currentFrame(wait: wait, snapLimit: snapLimit)
+        } catch is BoardTimeout {
+            throw VideoReadinessError.checkTimedOut
+        }
+    }
+
+    /// Seconds to keep watching for a usable frame after the board answers "no video" or a snapshot ends
+    /// before the latest image, before giving up: the stream or the next status usually settles it.
+    var noVideoGrace: Double = 8
+    private var refreshedAt = -Double.infinity
+
+    /// Decode the cached GOP again in a fresh session (see H264Decoder.refresh): far faster than a snapshot,
+    /// and it works when the board's own buffer has overflowed. True when that gives a usable frame.
+    @discardableResult
+    func refreshDecoder(_ why: String) async -> Bool {
+        guard now() - refreshedAt > 2 else { return usable() }  // the app's background hook may just have done it
+        refreshedAt = now()
+        let n = await withCheckedContinuation { c in decoder.queue.async { [decoder] in c.resume(returning: decoder.refresh()) } }
+        try? await Task.sleep(nanoseconds: 30_000_000)  // let the replayed frame reach the main queue
+        if n > 0 { DebugLog.write("decoder: refreshed (\(why)); decoded the GOP again (\(n) units)") }
+        return n > 0 && usable()
+    }
+
+    /// Waits (bounded) for a usable frame: new live frames, or the next status proving the decoded image is the
+    /// board's latest.
+    private func recovered(within seconds: Double) async -> Bool {
+        let deadline = now() + seconds
+        while now() < deadline {
+            if Task.isCancelled { return false }
+            if usable() { return true }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return usable()
     }
 
     func status(_ s: BoardStatus) {
@@ -175,9 +211,10 @@ extension ScreenSource {
     /// One `video` notify from BoardLink.
     func receive(_ chunk: Data) {
         metrics?.videoBytes(chunk.count)
-        let dropsBefore = assembler.drops
+        let (dropsBefore, restartsBefore) = (assembler.drops, assembler.restarts)
         let unit = assembler.add(chunk)
         if assembler.drops > dropsBefore { metrics?.videoDrops(assembler.drops - dropsBefore); broken = true }
+        if assembler.restarts > restartsBefore { broken = true }  // waits for the next key unit; nothing was lost
         guard let unit else { return }
         if !unit.snap { boardClock(ms: Int(unit.boardMs)) }  // snap units are resent late: their ages say nothing
         if unit.idr { metrics?.idrSeen() }
@@ -232,30 +269,37 @@ extension ScreenSource {
     /// with a longer timeout: it resends the whole GOP since the last IDR, and some iPhones (iOS 26 here) send
     /// an IDR only every few minutes, so that GOP is huge or gone ("err no video"). Returns where the frame came
     /// from, for the log.
+    /// Before snapping, the cached GOP is decoded again: after the app went to the background iOS has dropped the
+    /// decoder, and a still screen sends nothing that would reveal it. "err no video" or a snapshot that ends before
+    /// the latest image get `noVideoGrace` s for the stream to catch up before the user is told to restart mirroring.
+    /// `snapLimit` caps the snapshot (no second try) when someone is waiting on screen.
     @discardableResult
-    func currentFrame(maxAge: Double = 1, wait: Double = 3) async throws -> String {
+    func currentFrame(maxAge: Double = 1, wait: Double = 3, snapLimit: Double? = nil) async throws -> String {
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
         if streamOn && mirroring {
             if usable() { return "live" }
             if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
+            if await refreshDecoder("frame not current") { return "cached GOP" }
         }
         do {
             do {
-                try await snap()
-            } catch is BoardTimeout {
+                try await snap(timeout: snapLimit.map { min(snapTimeout, $0) })
+            } catch is BoardTimeout where snapLimit == nil {
                 DebugLog.write("snap timed out; retrying once with a longer timeout")
                 try await snap(timeout: snapTimeout * 1.5)
             }
         } catch let error as DeviceError where error.message.hasPrefix("err no video") {
             // A live frame may have arrived while the snapshot command was in flight.
             if usable() { return "live (recovered during snap)" }
+            if await recovered(within: noVideoGrace) { return "live (recovered)" }
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
             throw mirroring ? VideoReadinessError.decoderUnavailable : VideoReadinessError.mirroringDisconnected
         }
-        guard usable() else { throw BlindError(reason: "board replied but no verified current video frame was decoded") }
-        return "snap"
+        if usable() { return "snap" }
+        if await recovered(within: noVideoGrace) { return "snap, then live" }
+        throw BlindError(reason: "board replied but no verified current video frame was decoded")
     }
 
     /// Ask the board for the current GOP and wait until it is decoded. Returns the latency in ms.
@@ -299,6 +343,7 @@ extension ScreenSource {
                 await settled()
                 if await newer(than: since, timeout: 1.5) { return }
                 if usable(after: since) { return DebugLog.write("frame: latest board image verified unchanged") }
+                if await refreshDecoder("stale after an action"), usable(after: since) { return }
                 DebugLog.write("frame: stream stale (waiting for an IDR); snapping")
                 try await snap()
             }
