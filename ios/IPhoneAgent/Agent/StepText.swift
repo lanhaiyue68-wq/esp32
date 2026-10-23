@@ -46,7 +46,7 @@ enum StepText {
         let blind = ["lost the phone screen", "screen freshness could not be verified", "board replied but no verified",
                      "snapshot did not decode"]
         if blind.contains(where: { reason.hasPrefix($0) }) {
-            return String(localized: "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select ESP32 again.")
+            return String(localized: "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select Lan Agent again.")
         }
         if reason == "kept going back and forth between two screens" {
             return String(localized: "It kept going back and forth between two screens. Look at the screen, then go on or stop.")
@@ -82,7 +82,7 @@ enum StepText {
     }
 
     static let notMoves: Set<String> = ["plan", "replan (stuck)", "hiccup", "stopped", "error", "fail", "done", "help",
-                                        "takeover", "skipped", "note", "reconnected", "done rejected", "loop"]
+                                        "takeover", "skipped", "note", "reconnected", "done rejected", "loop", "blocked"]
 }
 
 /// How a run ended.

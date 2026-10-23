@@ -41,7 +41,7 @@ extension AppModel {
     func holdWhileInFront() async throws {
         guard UIApplication.shared.applicationState == .active, agent.running, !MockMode.on else { return }
         let ours = now() - agent.lastActed < 3 || now() - resumeAsked < 5
-        DebugLog.write("run: ESP32 Agent is in front (\(ours ? "after an agent action" : "opened by the user")); holding")
+        DebugLog.write("run: Lan Agent is in front (\(ours ? "after an agent action" : "opened by the user")); holding")
         let since = now()
         var away = false
         if ours { away = await leaveApp() }

@@ -25,7 +25,7 @@ struct AboutView: View {
         **Steps**
         1.
 
-        ESP32 Agent \(version) · \(device.systemName) \(device.systemVersion) · \(Self.model)
+        Lan Agent \(version) · \(device.systemName) \(device.systemVersion) · \(Self.model)
         (Attach the zip from Settings › About › Logs › Export all logs.)
         """
         var c = URLComponents(url: Self.repo.appendingPathComponent("issues/new"), resolvingAgainstBaseURL: false)!
@@ -46,7 +46,7 @@ struct AboutView: View {
                 VStack(spacing: Space.m) {
                     Image("Logo").resizable().scaledToFit().frame(width: 96, height: 96)
                         .accessibilityHidden(true)
-                    Text(verbatim: "ESP32 Agent").font(.title2.bold())
+                    Text(verbatim: "Lan Agent").font(.title2.bold())
                     Text("Version \(version)").font(.subheadline).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)

@@ -5,12 +5,12 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>ESP32 Agent</string>
+	<string>Lan Agent</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>ESP32 Agent runs</string>
+			<string>Lan Agent runs</string>
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
@@ -62,9 +62,9 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ESP32 Agent receives the mirrored screen from its board over the board's Wi-Fi.</string>
+	<string>Lan Agent receives the mirrored screen from its board over the board's Wi-Fi.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>ESP32 Agent talks to its USB board over Bluetooth to see the screen and move the pointer.</string>
+	<string>Lan Agent talks to its USB board over Bluetooth to see the screen and move the pointer.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

@@ -84,6 +84,12 @@ extension Pointer: Gestures {}
     enum Doing { case looking, waiting, planning, thinking, retrying, acting(JObject) }
     /// Hints from a saved intent's checklist, appended to the actor's system prompt (empty = the original prompt).
     var hints: [String] = []
+    /// Reference text the user chose for this run (WeChat watch: the selected knowledge files), appended to the
+    /// planner and actor prompts. Empty for ordinary runs.
+    var reference = ""
+    /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
+    /// model rewrites it. WeChat watch uses it so private details never leave the phone.
+    var outgoingGuard: ((String) -> String?)?
     /// "Needs your help": asked when the actor gives up or errors repeat; nil = end the run as before.
     var onHelp: ((String) async -> HelpChoice)?
     private var helpAsked = 0
@@ -398,6 +404,9 @@ extension Pointer: Gestures {}
     private var taught: String {
         (hints.isEmpty ? "" : "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n"))
             + (lessons?.context(task: task) ?? "") + Prompts.userRules
+            + (reference.isEmpty ? "" : "\n\nKnowledge base chosen by the user. Base every reply on it; when it does not "
+               + "cover the question, use the user's fallback reply instead of guessing. Never send anything from "
+               + "outside it about the user, and never copy one chat's content into another chat:\n" + reference)
     }
 
     private func finish() {
@@ -492,6 +501,10 @@ extension Pointer: Gestures {}
                 }
                 staleRun = 0
                 lastStale = nil
+                if name == "type", let refused = outgoingGuard?(act["text"]?.str ?? "") {
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(refused)])  // never typed
+                    return false
+                }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used

@@ -27,7 +27,7 @@ targets:
     info:
       path: IPhoneAgent/Info.plist
       properties:
-        CFBundleDisplayName: ESP32 Agent
+        CFBundleDisplayName: Lan Agent
         CFBundleDevelopmentRegion: en
         CFBundleLocalizations: [en, zh-Hans]
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -42,13 +42,13 @@ targets:
             CFBundleURLSchemes: [iphoneagent]
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSBluetoothAlwaysUsageDescription: ESP32 Agent talks to its USB board over Bluetooth to see the screen and move the pointer.
-        NSLocalNetworkUsageDescription: ESP32 Agent receives the mirrored screen from its board over the board's Wi-Fi.
+        NSBluetoothAlwaysUsageDescription: Lan Agent talks to its USB board over Bluetooth to see the screen and move the pointer.
+        NSLocalNetworkUsageDescription: Lan Agent receives the mirrored screen from its board over the board's Wi-Fi.
         UIBackgroundModes: [bluetooth-central, audio]  # audio: silence during a run keeps the app running (BackgroundAudio)
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         CFBundleDocumentTypes:  # shared run archives (Settings › Privacy › Export) open as imported runs
-          - CFBundleTypeName: ESP32 Agent runs
+          - CFBundleTypeName: Lan Agent runs
             LSHandlerRank: Alternate
             LSItemContentTypes: [public.zip-archive]
         # Optional build-time LLM preset from Config/Local.xcconfig (empty in the open-source build)
@@ -74,7 +74,7 @@ targets:
     info:
       path: AgentActivity/Info.plist
       properties:
-        CFBundleDisplayName: ESP32 Agent
+        CFBundleDisplayName: Lan Agent
         CFBundleDevelopmentRegion: en
         CFBundleLocalizations: [en, zh-Hans]
         CFBundleShortVersionString: $(MARKETING_VERSION)

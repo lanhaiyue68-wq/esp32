@@ -75,6 +75,11 @@ import UIKit
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     /// Silence during a run, so iOS never suspends the app (and its Wi-Fi video) while it works in the background.
     let keepAwake = BackgroundAudio()
+    /// WeChat watch (WatchMode.swift): waiting on WeChat, a short run whenever new messages show up.
+    @Published var watching = false
+    @Published var watchStatus = ""
+    @Published var watchHandled = 0
+    var watchJob: Task<Void, Never>?
     var lastWidgetReload = 0.0
 
     init() {

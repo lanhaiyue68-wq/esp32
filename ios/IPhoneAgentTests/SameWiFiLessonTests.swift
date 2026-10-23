@@ -15,7 +15,7 @@ final class SameWiFiTests: XCTestCase {
         let waiting = SameWiFi.problem(connected: true, status: status(#"{"net":"none","ip":"0.0.0.0","sta":0,"tcp":0}"#), boardSSID: "Home")
         XCTAssertTrue(waiting?.contains("Home") == true)
         XCTAssertNotNil(SameWiFi.problem(connected: true, status: status(#"{"net":"none","sta":0}"#), boardSSID: ""))
-        XCTAssertNotNil(SameWiFi.problem(connected: true, status: status(#"{"net":"ap","ip":"192.168.4.1","sta":1}"#), boardSSID: "ESP32Agent-CEED"))
+        XCTAssertNotNil(SameWiFi.problem(connected: true, status: status(#"{"net":"ap","ip":"192.168.4.1","sta":1}"#), boardSSID: "LanAgent-CEED"))
         XCTAssertNotNil(SameWiFi.problem(connected: false, status: nil, boardSSID: "Home"))
     }
 

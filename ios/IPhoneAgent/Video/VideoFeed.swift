@@ -32,13 +32,13 @@ enum VideoReadinessError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .checkTimedOut:
-            return String(localized: "Checking the mirrored screen took too long. Wait a few seconds and start again; if it keeps happening, stop mirroring in Control Center and select ESP32 again.")
+            return String(localized: "Checking the mirrored screen took too long. Wait a few seconds and start again; if it keeps happening, stop mirroring in Control Center and select Lan Agent again.")
         case .boardDisconnected:
             return String(localized: "The board is disconnected. Reconnect it before starting.")
         case .mirroringDisconnected:
-            return String(localized: "Screen Mirroring is not streaming. Connect to ESP32 in Control Center, wait for the preview, then start again.")
+            return String(localized: "Screen Mirroring is not streaming. Connect to Lan Agent in Control Center, wait for the preview, then start again.")
         case .decoderUnavailable:
-            return String(localized: "Screen Mirroring is connected, but no decodable screen is available. In Control Center, stop mirroring and select ESP32 again. Wait for the preview, then start again.")
+            return String(localized: "Screen Mirroring is connected, but no decodable screen is available. In Control Center, stop mirroring and select Lan Agent again. Wait for the preview, then start again.")
         }
     }
 }

@@ -18,6 +18,7 @@ struct HomeView: View {
     @FocusState private var editing: Bool
     @State private var renaming = false
     @State private var pullingToRefresh = false
+    @State private var watchSheet = false
 
     var body: some View {
         NavigationStack {
@@ -62,6 +63,13 @@ struct HomeView: View {
                     }
                     .accessibilityLabel(Text("Rename \(settings.agentName)"))
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { watchSheet = true } label: {
+                        Image(systemName: app.watching ? "eye.fill" : "message.badge")
+                            .symbolEffect(.pulse, options: .repeating, isActive: app.watching)
+                    }
+                    .accessibilityLabel(Text("WeChat Watch"))
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { recordSheet = true } label: {
                         Image(systemName: recorder.recording ? "record.circle.fill" : "record.circle")
@@ -73,6 +81,7 @@ struct HomeView: View {
                 }
             }
             .sheet(isPresented: $recordSheet) { RecordSheet(app: app, recorder: recorder) }
+            .sheet(isPresented: $watchSheet) { WatchView(app: app) }
             .sheet(isPresented: $renaming) { RenameSheet(settings: settings) }
             .alert("Get notified?", isPresented: $askNotifications) {
                 Button("Continue") { Task { await app.notifier.requestPermission(); go() } }

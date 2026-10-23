@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "IPhoneAgent" / "Localizable.xcstrings"
-SAME = {" ", "BLE", "USB", "PHY", "PSRAM", "Wi-Fi", "{}", "ESP32 Agent", "https://your-endpoint/v1", "HID %@"}
+SAME = {" ", "BLE", "USB", "PHY", "PSRAM", "Wi-Fi", "{}", "Lan Agent", "https://your-endpoint/v1", "HID %@"}
 
 
 def load():

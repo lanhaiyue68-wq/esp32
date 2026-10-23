@@ -9,7 +9,7 @@ enum AgentRequest {
 @MainActor enum AgentRequests {
     /// Returns the line to say or show.
     static var handle: ((AgentRequest) async -> String)?
-    nonisolated static var unavailable: String { String(localized: "Open ESP32 Agent once, then try again.") }
+    nonisolated static var unavailable: String { String(localized: "Open Lan Agent once, then try again.") }
 }
 
 /// A saved intent (My Intents), as Siri and Shortcuts see it.
@@ -50,7 +50,7 @@ struct SavedIntentQuery: EntityStringQuery {
 /// and may start the Live Activity from the background.
 struct RunSavedIntentIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Run a Saved Intent"
-    static let description = IntentDescription("Runs one of your saved intents on ESP32 Agent.")
+    static let description = IntentDescription("Runs one of your saved intents on Lan Agent.")
 
     @Parameter(title: "Intent") var intent: SavedIntentEntity
 
@@ -68,7 +68,7 @@ struct RunSavedIntentIntent: LiveActivityIntent {
 /// Runs the intent run last (else the first saved one): the Control Center button.
 struct RunLastIntentIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Run Last Intent"
-    static let description = IntentDescription("Runs the saved intent you ran last on ESP32 Agent.")
+    static let description = IntentDescription("Runs the saved intent you ran last on Lan Agent.")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let line = await AgentRequests.handle?(.runSaved(nil)) ?? AgentRequests.unavailable

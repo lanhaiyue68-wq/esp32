@@ -83,7 +83,7 @@ extension Recovery.Stage {
             return IslandStatus(short: String(localized: "Mirroring…"), full: String(localized: "Waiting for mirroring…"), look: nil)
         case (.mirroring, true):
             return IslandStatus(short: String(localized: "Start Mirroring"),
-                                full: String(localized: "Tap Screen Mirroring → ESP32 Agent to continue"), look: nil)
+                                full: String(localized: "Tap Screen Mirroring → Lan Agent to continue"), look: nil)
         }
     }
 
@@ -95,7 +95,7 @@ extension Recovery.Stage {
         case (.hotspot, false): return String(localized: "The board lost its Wi-Fi. Waiting for it to reconnect…")
         case (.hotspot, true): return String(localized: "The board is still off its Wi-Fi. Make sure the Wi-Fi is on and in range, and keep this iPhone on the same Wi-Fi; the run goes on when the board is back.")
         case (.mirroring, false): return String(localized: "Board is back. Waiting for Screen Mirroring to resume…")
-        case (.mirroring, true): return String(localized: "Open Control Center, tap Screen Mirroring → ESP32 Agent; the run goes on from here.")
+        case (.mirroring, true): return String(localized: "Open Control Center, tap Screen Mirroring → Lan Agent; the run goes on from here.")
         }
     }
 }

@@ -112,7 +112,7 @@ import Foundation
         }
         // A board already connected by another app may no longer advertise.
         for p in central.retrieveConnectedPeripherals(withServices: [BoardUUID.service]) {
-            discovered(p, name: p.name ?? "ESP32 Agent", rssi: 0)
+            discovered(p, name: p.name ?? "Lan Agent", rssi: 0)
         }
     }
 
@@ -138,7 +138,7 @@ import Foundation
     }
 
     /// Ask the board to erase its bonds, then forget it here. iOS keeps its own bond: the user removes
-    /// "ESP32 Agent" in Settings > Bluetooth (apps cannot do that).
+    /// "Lan Agent" in Settings > Bluetooth (apps cannot do that).
     func unpair() async {
         _ = try? await commands.send("unpair")
         forget()
@@ -271,7 +271,7 @@ import Foundation
     func mockFound() {
         state = .poweredOn
         pairedID = nil
-        found = [Found(id: UUID(), name: "ESP32 Agent 7C3E", rssi: -58)]
+        found = [Found(id: UUID(), name: "Lan Agent 7C3E", rssi: -58)]
     }
 
     private func mockPair(_ id: UUID) {
@@ -279,8 +279,8 @@ import Foundation
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             scanning = false
-            mockConnect(name: "ESP32 Agent 7C3E",
-                        net: NetConfig(mode: "ap", ssid: "ESP32Agent-7C3E", pass: "demo-pass", ip: "192.168.4.1"))
+            mockConnect(name: "Lan Agent 7C3E",
+                        net: NetConfig(mode: "ap", ssid: "LanAgent-7C3E", pass: "demo-pass", ip: "192.168.4.1"))
         }
     }
 
@@ -290,7 +290,7 @@ import Foundation
         self.name = name
         self.net = net
         pairedID = pairedID ?? UUID()
-        found = [Found(id: UUID(), name: "ESP32 Agent 7C3E", rssi: -71)]
+        found = [Found(id: UUID(), name: "Lan Agent 7C3E", rssi: -71)]
         connected = true
         commands.linkUp()
         onLinkUp?()
@@ -373,7 +373,7 @@ extension BoardLink: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral,
                                     advertisementData: [String: Any], rssi: NSNumber) {
         MainActor.assumeIsolated {
-            let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? p.name ?? "ESP32 Agent"
+            let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? p.name ?? "Lan Agent"
             discovered(p, name: name, rssi: rssi.intValue)
         }
     }

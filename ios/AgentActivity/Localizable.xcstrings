@@ -111,12 +111,12 @@
         }
       }
     },
-    "Open ESP32 Agent once, then try again." : {
+    "Open Lan Agent once, then try again." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先打开一次 ESP32 Agent，然后再试。"
+            "value" : "请先打开一次 Lan Agent，然后再试。"
           }
         }
       }
@@ -181,22 +181,22 @@
         }
       }
     },
-    "Runs one of your saved intents on ESP32 Agent." : {
+    "Runs one of your saved intents on Lan Agent." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 ESP32 Agent 上运行一个已保存的意图。"
+            "value" : "在 Lan Agent 上运行一个已保存的意图。"
           }
         }
       }
     },
-    "Runs the saved intent you ran last on ESP32 Agent." : {
+    "Runs the saved intent you ran last on Lan Agent." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 ESP32 Agent 上运行你上次运行的意图。"
+            "value" : "在 Lan Agent 上运行你上次运行的意图。"
           }
         }
       }
@@ -291,12 +291,12 @@
         }
       }
     },
-    "Stop ESP32 Agent" : {
+    "Stop Lan Agent" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "停止 ESP32 Agent"
+            "value" : "停止 Lan Agent"
           }
         }
       }
@@ -383,7 +383,7 @@
         }
       }
     },
-    "ESP32 Agent" : {
+    "Lan Agent" : {
       "shouldTranslate" : false
     },
     "idle" : {

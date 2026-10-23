@@ -39,7 +39,7 @@ struct AgentFace: View {
         .aspectRatio(showsTab ? 1 / 1.12 : 1, contentMode: .fit)
         .onChange(of: mood) { _, m in react(to: m) }
         .accessibilityElement()
-        .accessibilityLabel(Text("ESP32 Agent"))
+        .accessibilityLabel(Text("Lan Agent"))
         .accessibilityValue(Text(LocalizedStringKey(mood.rawValue)))
     }
 

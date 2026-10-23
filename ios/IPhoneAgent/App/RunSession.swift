@@ -12,13 +12,17 @@ extension AppModel {
 
     /// Start a task (or a saved intent: its checklist goes to the planner and actor as hints). `hints` from a
     /// reviewed run win over the intent's.
-    func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil) async {
+    /// `reference` and `outgoing` come from WeChat watch (knowledge files, the privacy check); other runs clear them.
+    func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
+             reference: String = "", outgoing: ((String) -> String?)? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
         currentIntent = intent
         lastTask = task
         agent.hints = hints.flatMap { $0.isEmpty ? nil : $0 } ?? intent?.checklist ?? []
+        agent.reference = reference
+        agent.outgoingGuard = outgoing
         await startAgent(task)
     }
 
@@ -87,7 +91,7 @@ extension AppModel {
             var away = await leaveApp()
             if !away { away = await askUserToLeave() }
             guard away else {  // never let the agent start on its own app
-                throw DeviceError(message: String(localized: "ESP32 Agent is still on screen"))
+                throw DeviceError(message: String(localized: "Lan Agent is still on screen"))
             }
             mark("app in background")
             if !snapMode {
@@ -115,18 +119,21 @@ extension AppModel {
             saveVideoFrame(feed.frame)
             videoDir = nil
             if liveRequested { live.end((.failure, String(localized: "Could not start"))) }
-            keepAwake.stop()
+            if !watching { keepAwake.stop() }  // WeChat watch keeps it on between checks
             endBackgroundTask()
             runs.reload()
             runMood = .failure
-            notifier.post(.failed, title: String(localized: "Could not start"),
-                          body: error.localizedDescription, run: runID)
-            openReview(run: runID)
+            if !watching {  // watch counts failed checks itself and tells the user once it gives up
+                notifier.post(.failed, title: String(localized: "Could not start"),
+                              body: error.localizedDescription, run: runID)
+                openReview(run: runID)
+            }
         }
     }
 
     /// Emergency stop: cancel the agent and release the mouse button.
     func stopAgent() async {
+        stopWatch(String(localized: "stopped by you"))  // a stop from anywhere also ends WeChat watch
         answerHelp(.stop)
         mockJob?.cancel()
         agent.stop()
@@ -196,7 +203,7 @@ extension AppModel {
         live.end((outcome.mood, last.map(StepText.line) ?? ""))
         runs.reload()
         let summary = String(localized: "\(moveCount) steps · \(seconds.durationText)")
-        switch outcome {
+        switch watching ? Outcome.running : outcome {  // WeChat watch: no notification per check
         case .done:
             Haptics.success()
             let answer = last?["answer"]?.str ?? agent.task
@@ -209,7 +216,7 @@ extension AppModel {
         if let intent = currentIntent {
             intents.record(intent.id, RunStat(run: runID, ok: outcome == .done, seconds: seconds))
         }
-        if outcome != .stopped || UIApplication.shared.applicationState == .active { openReview(run: runID) }
+        if !watching && (outcome != .stopped || UIApplication.shared.applicationState == .active) { openReview(run: runID) }
         moodReset?.cancel()
         moodReset = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -226,7 +233,7 @@ extension AppModel {
         let run = runID, task = agent.task, steps = agent.steps
         Task { [weak self] in
             await self?.learnFromRun(run, task: task, steps: steps)  // background audio keeps the app up for this call
-            guard let self, !self.agent.running, !self.startingAgent else { return }
+            guard let self, !self.agent.running, !self.startingAgent, !self.watching else { return }
             self.keepAwake.stop()
         }
     }
