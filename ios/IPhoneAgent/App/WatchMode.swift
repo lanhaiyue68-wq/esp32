@@ -8,7 +8,7 @@ import Foundation
 /// remember and answer lost track and went back and forth until it gave up):
 /// 1. an agent run opens the chat (the one chosen chat, or the first unread one in scope);
 /// 2. one vision call reads the screen into messages (WatchReport.screen);
-/// 3. code keeps what is new (watchSeen), and decides by plain text matching whether a reply is due: a whitelisted
+/// 3. code keeps what is new since the previous look (watchLast), and decides by plain text matching whether a reply is due: a whitelisted
 ///    sender's @mention of one of the user's own names, or a passphrase (WatchSettings.fires); interject mode may
 ///    add one light remark to small talk, at most every ten minutes per chat;
 /// 4. one text call writes the reply from the recent chat, the user's rules and the chosen knowledge;
@@ -137,7 +137,8 @@ enum WatchSettings {
         {"group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
         规则：group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
         左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，
-        语音写 [语音]，文件写 [文件]。时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
+        语音写 [语音]，文件写 [文件]。气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
+        时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
         """
     }
 
@@ -276,13 +277,30 @@ enum WatchReport {
         return words.isEmpty || answer.contains("{") ? nil : (words, "")
     }
 
-    /// The lines after the last one already seen: what is new on screen. Everything, when none was seen before.
-    static func new(_ lines: [Line], seen: Set<String>) -> [Line] {
-        guard let last = lines.lastIndex(where: { seen.contains(key($0)) }) else { return lines }
-        return Array(lines[(last + 1)...])
+    /// What is new on screen since the previous look: the lines after the place where the previous look's last lines
+    /// (three, else two, else one) show up again, its last occurrence when there are several. Matching a run of lines
+    /// rather than single texts catches a message repeated word for word (traces(35): the owner asked the same thing
+    /// twice and the second was taken as already read). When the previous lines are gone (scrolled far), every line
+    /// not on the previous screen.
+    static func new(_ lines: [Line], after previous: [Line]) -> [Line] {
+        guard !previous.isEmpty else { return lines }
+        let cur = lines.map(key), prev = previous.map(key)
+        for n in stride(from: min(3, prev.count), through: 1, by: -1) {
+            let tail = Array(prev.suffix(n))
+            for start in stride(from: cur.count - n, through: 0, by: -1) where Array(cur[start..<(start + n)]) == tail {
+                return Array(lines[(start + n)...])
+            }
+        }
+        let seen = Set(prev)
+        return lines.filter { !seen.contains(key($0)) }
     }
 
-    static func key(_ l: Line) -> String { (l.mine ? "我" : l.sender) + "\u{1F}" + l.text }
+    /// Sender and the first line of the text without spaces: a quote under a message, read differently from one look
+    /// to the next, does not make the same message look new.
+    static func key(_ l: Line) -> String {
+        let first = l.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? l.text
+        return (l.mine ? "我" : l.sender) + "\u{1F}" + first.filter { !$0.isWhitespace }
+    }
 }
 
 /// What watch read, one JSON line per message in Documents/readlog/<day>.jsonl (visible in Files), and the summaries
@@ -424,7 +442,7 @@ extension AppModel {
         watching = true
         watchHandled = 0
         watchRead = 0
-        watchSeen = [:]
+        watchLast = [:]
         watchInterjectedAt = [:]
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
@@ -442,7 +460,10 @@ extension AppModel {
         chatTool.disconnect()
         watchStatus = String(localized: "Stopped: \(why)")
         DebugLog.write("watch: stopped (\(why))")
-        if !agent.running && !startingAgent { keepAwake.stop() }
+        if !agent.running && !startingAgent {
+            keepAwake.stop()
+            Task { try? await feed.stream(false) }  // kept on between checks while watching
+        }
     }
 
     private var watchIdleLine: String { String(localized: "Watching WeChat · handled \(watchHandled) times") }
@@ -508,9 +529,9 @@ extension AppModel {
         guard let chat = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
         guard let screen = await readChat(chat) else { return false }
 
-        let firstLook = watchSeen[chat] == nil
-        let fresh = firstLook ? [] : WatchReport.new(screen.lines, seen: watchSeen[chat] ?? [])
-        watchSeen[chat, default: []].formUnion(screen.lines.map(WatchReport.key))
+        let firstLook = watchLast[chat] == nil
+        let fresh = firstLook ? [] : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
+        watchLast[chat] = screen.lines
         if firstLook { DebugLog.write("watch: first look at \(chat): \(screen.lines.count) message(s) taken as already seen") }
         var read = fresh.filter { !$0.mine }.map { line in
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
@@ -543,7 +564,6 @@ extension AppModel {
                 DebugLog.write("watch: reply withheld: \(why)")
             } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single)) != nil {
                 if let i = read.indices.last { read[i].replied = text }
-                watchSeen[chat, default: []].insert(WatchReport.key(.init(sender: "我", text: text, mine: true)))
             }
         } else if !rules.single {
             try? await pointer.goBack()  // back to the chat list, for the other chats' badges
@@ -559,6 +579,7 @@ extension AppModel {
     /// Step 2: one vision call on the open chat; logged into the check's trace.
     private func readChat(_ chat: String) async -> WatchReport.Screen? {
         do {
+            if !feed.streamOn { try await feed.stream(true) }  // the screen as it is now, not the last frame of the run
             _ = try await feed.currentFrame()
             guard let frame = feed.frame else { return nil }
             let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),

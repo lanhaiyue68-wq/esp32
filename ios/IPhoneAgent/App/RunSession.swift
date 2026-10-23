@@ -228,7 +228,7 @@ extension AppModel {
     func agentFinished() {
         ended()
         if let last = agent.steps.last { say("finished: \(last["action"]?.str ?? "") \(last["reason"]?.str ?? last["answer"]?.str ?? "")") }
-        Task { try? await feed.stream(false) }
+        if !watching { Task { try? await feed.stream(false) } }  // WeChat watch reads the live screen next
         endBackgroundTask()
         let run = runID, task = agent.task, steps = agent.steps
         Task { [weak self] in

@@ -55,12 +55,23 @@ import XCTest
         let screen = try XCTUnwrap(WatchReport.screen(reply))
         XCTAssertTrue(screen.group)
         XCTAssertEqual(screen.lines.map(\.text), ["@蓝 你人呢", "在的", "妈的还得调试"])
-        let seen = Set(screen.lines.prefix(2).map(WatchReport.key))
-        XCTAssertEqual(WatchReport.new(screen.lines, seen: seen).map(\.text), ["妈的还得调试"])
-        XCTAssertEqual(WatchReport.new(screen.lines, seen: Set(screen.lines.map(WatchReport.key))), [])
+        XCTAssertEqual(WatchReport.new(screen.lines, after: Array(screen.lines.prefix(2))).map(\.text), ["妈的还得调试"])
+        XCTAssertEqual(WatchReport.new(screen.lines, after: screen.lines), [])
         XCTAssertNil(WatchReport.screen("看不清"))
         XCTAssertEqual(WatchReport.openedChat(#"{"chat":"张三"}"#), "张三")
         XCTAssertNil(WatchReport.openedChat(#"{"chat":""}"#))
+    }
+
+    func testARepeatedQuestionIsNewAndAQuoteReadTwoWaysIsNot() {
+        // traces(35): the owner asked "@蓝 你告诉我群主是谁" a second time, word for word; the quote under "+1" was
+        // read once inside the message and once without it.
+        let line = { (sender: String, text: String) in WatchReport.Line(sender: sender, text: text, mine: false) }
+        let before = [line("蓝海乐", "妈的还得调试"), line("良三", "+1"), line("蓝海乐", "@蓝 你告诉我群主是谁")]
+        let now = [line("蓝海乐", "妈的还得调试"), line("良三", "+1 \n江南芳言 admin：个微用的怎么样"), line("蓝海乐", "@蓝 你告诉我群主是谁"),
+                   line("蓝海乐", "@蓝 你告诉我群主是谁")]
+        XCTAssertEqual(WatchReport.new(now, after: before).map(\.text), ["@蓝 你告诉我群主是谁"])
+        let scrolled = [line("新人", "大家好"), line("蓝海乐", "@蓝 你在不在")]  // nothing of the previous look is left
+        XCTAssertEqual(WatchReport.new(scrolled, after: before).map(\.text), ["大家好", "@蓝 你在不在"])
     }
 
     func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {

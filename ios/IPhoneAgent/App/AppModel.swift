@@ -84,7 +84,7 @@ import UIKit
     /// ChatTool on the computer (ChatToolLink.swift), connected while watching with it switched on.
     let chatTool = ChatToolLink()
     var computerKnowledgeCache = ""  // the last knowledge fetched from the computer, for when it is out of reach
-    var watchSeen: [String: Set<String>] = [:]  // per chat: the messages already read this watch (WatchReport.key)
+    var watchLast: [String: [WatchReport.Line]] = [:]  // per chat: the previous look, to tell what is new (WatchReport.new)
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var lastWidgetReload = 0.0
 
