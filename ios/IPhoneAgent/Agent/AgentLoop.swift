@@ -99,6 +99,12 @@ extension Pointer: Gestures {}
     var pasteHop: ((String) async -> PasteHopResult)?
     private var pasteHopOff = false  // a hop got lost once in this run: the rest of it types
     private var lastTap: CGPoint?    // the last tap (0-1), the input box when a type follows
+    /// WeChat watch send: a reply pasted and seen in the box is sent with Return at once (no look to find 发送).
+    var returnSends = false
+    /// Where this run typed: the input box (0-1), for WeChat watch to send the next reply without a run.
+    private(set) var typedInto: CGPoint?
+    /// Whether this run's strokes have left a line yet; nil until one is checked.
+    private var inkSeen: Bool?
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -295,6 +301,44 @@ extension Pointer: Gestures {}
         return moves[0]
     }
 
+    static let noInkReason = "The stroke left no line on the canvas: no drawing tool is selected, so the drag only moved the "
+        + "canvas. Select a pen first (in 无边记/Freeform: the pen or pencil in the toolbar at the bottom, then a pen in the "
+        + "panel that opens; it stands raised when selected), then draw again. It is not done until lines show."
+
+    /// The points a stroke goes through, 0-1 of the screen, for checking it left a line.
+    private func strokePoints(_ act: JObject) -> [CGPoint] {
+        func p(_ k: String) -> Double { (act[k]?.double ?? 0) / 1000 }
+        switch act["action"]?.str {
+        case "circle": return circle(p("x"), p("y"), p("r"), aspect: screen?.aspect ?? 9 / 19.5, n: 36)
+        case "path": return points(act).map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }
+        default: return []
+        }
+    }
+
+    /// The share of a stroke's points where a line newly shows: clearly darker than before (a pen, black or in colour;
+    /// the canvas's grey dots moving do not count). A stroke without a pen selected only pans the canvas and leaves
+    /// none (logs(14): two smileys "drawn" on an empty board, both taken as done). nil when it cannot be told.
+    static func inkShare(before: Data?, after: Data?, stroke: [CGPoint]) -> Double? {
+        guard let before, let after, let a = Vision.image(before), let b = Vision.image(after),
+              a.width == b.width, a.height == b.height, stroke.count >= 2 else { return nil }
+        let w = a.width / 2, h = a.height / 2, reach = 4  // a line within 8 px of where it was aimed
+        let ga = Vision.gray(a, w, h), gb = Vision.gray(b, w, h)
+        var samples = 0, inked = 0
+        for pt in stroke {
+            let x = Int(Double(pt.x) * Double(w)), y = Int(Double(pt.y) * Double(h))
+            guard x >= reach, y >= reach, x < w - reach, y < h - reach else { continue }
+            samples += 1
+            var darkBefore = 255, darkAfter = 255
+            for dy in -reach...reach { for dx in -reach...reach {
+                let i = (y + dy) * w + x + dx
+                darkBefore = min(darkBefore, Int(ga.px[i]))
+                darkAfter = min(darkAfter, Int(gb.px[i]))
+            } }
+            if darkAfter < 150 && darkAfter < darkBefore - 80 { inked += 1 }
+        }
+        return samples == 0 ? nil : Double(inked) / Double(samples)
+    }
+
     static let loopReason = "this move starts again a back-and-forth this run already went through twice; the move that "
         + "left was the mistake. Stay on this screen and do the task here."
 
@@ -331,7 +375,7 @@ extension Pointer: Gestures {}
 
     func run() async {
         var failures = 0
-        (pasteHopOff, lastTap) = (false, nil)
+        (pasteHopOff, lastTap, typedInto, inkSeen) = (false, nil, nil, nil)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -478,7 +522,7 @@ extension Pointer: Gestures {}
                     DebugLog.write("loop: back and forth twice; going on, the move back is refused from now on")
                 }
             }
-            if name == "done", let missing = Self.unmadeResult(task: task, steps: steps) {
+            if name == "done", let missing = inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps) {
                 doneRejected += 1
                 if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
                     record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])
@@ -553,6 +597,14 @@ extension Pointer: Gestures {}
                 // Observe it before spending the rest of the batch on the same mistaken state.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                if let share = Self.inkShare(before: seen, after: screen?.frame, stroke: strokePoints(act)) {
+                    if share < 0.25 {
+                        inkSeen = inkSeen ?? false
+                        record(screen?.frame, ["action": .str("no ink"), "reason": .str(Self.noInkReason)])
+                    } else {
+                        inkSeen = true
+                    }
+                }
                 return false
             }
             let following = i < acts.count - 1 ? acts[i + 1].act["action"]?.str : nil
@@ -577,6 +629,7 @@ extension Pointer: Gestures {}
     /// to the model as before (InputNeedsVerification, a "compose" step).
     private func typeFast(_ text: String) async throws {
         guard let phone else { return }
+        if typedInto == nil { typedInto = lastTap }
         if Pasteboard.needed(text), !pasteHopOff {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
             if hop == .lost {  // not sure which app is in front now: look again, and type from here on
@@ -590,6 +643,10 @@ extension Pointer: Gestures {}
                 let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
                 try await phone.key("cmd+v")
                 if let after = await freshFrame(), CandidatePicker.count(text, in: after) > before {
+                    if returnSends {  // checked: exactly this text is in the box
+                        try await phone.key("enter")
+                        return DebugLog.write("type: pasted, seen in the field, sent with Return")
+                    }
                     return DebugLog.write("type: pasted and seen in the field")
                 }
                 try await phone.key("cmd+a")

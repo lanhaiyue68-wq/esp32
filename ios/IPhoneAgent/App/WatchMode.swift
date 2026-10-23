@@ -98,6 +98,7 @@ enum WatchSettings {
     static func fires(_ m: ReadMessage, _ r: Rules) -> Bool {
         let allowed = r.senders.isEmpty || r.senders.contains { m.sender == $0 || m.sender.contains($0) }
         guard allowed else { return false }
+        if !m.group { return true }  // a private chat is talking to this account: no @ needed
         let mention = r.myNames.contains { m.text.contains("@" + $0) || m.text.contains("＠" + $0) }
         return mention || r.passphrases.contains { m.text.contains($0) }
     }
@@ -151,13 +152,19 @@ enum WatchSettings {
         """
     }
 
+    /// After a quick send whose Return did not send: the text is in the box, only 发送 is left.
+    static func tapSendTask(chat: String) -> String {
+        "在微信会话“\(chat)”里，底部输入框里已经写好了一段话。点输入框右边的“发送”把它发出去，然后完成。不要输入、删除或改动任何文字。"
+    }
+    static let tapSendPlan = "1. Tap 发送 next to the input box.\n2. When the message shows as a green bubble, done."
+
     /// The steps of sendTask: fixed, so no planner call.
     static func sendPlan(chat: String, back: Bool) -> String {
         """
         1. If the screen is not the chat “\(chat)”, go back to the chat list and open it (search at the top if it is not listed).
         2. Tap the input box at the bottom so the keyboard shows.
-        3. type the message exactly as the goal gives it, picking the exact pinyin candidates.
-        4. Tap 发送 to send it.
+        3. type the message exactly as the goal gives it (a checked paste is sent with Return by itself).
+        4. If the text is still in the box, tap 发送.
         5. When it shows as a green bubble, \(back ? "go back to the chat list, then " : "")done.
         """
     }
@@ -223,7 +230,9 @@ enum WatchSettings {
         群主就是成员头像里的第一个（左上角第一个，名字在头像下面）；微信不在成员旁标“群主”二字，不要上下滑动去找这两个字。
         要@某人：回到这个会话，在底部输入框输入“@”，在弹出的成员列表里找到并点选他（列表顶部可以搜索），再接着输入其余内容，然后发送。
         只能在微信里操作；不准付款、发红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接。
-        做完后停在会话“\(chat)”里，然后完成，答案写你做了什么、查到了什么。做不到就失败，并写明原因。
+        主人要的是一条信息（例如群主是谁）时，查到就直接完成，不用回会话发消息：答案只写一行 JSON {"send":"要回给主人的话"}，\
+        例如 {"send":"群主是蓝海乐"}，回话会自动发出。要@人这类必须在会话里做的事，做完停在会话“\(chat)”里再完成，答案写 {"send":""}。\
+        做不到就失败，并写明原因。
         """
     }
 
@@ -370,6 +379,13 @@ enum WatchReport {
     }
     static func saveLooks(_ looks: [String: [Line]]) {
         UserDefaults.standard.set(try? JSONEncoder().encode(looks), forKey: looksKey)
+    }
+
+    /// The owner task's answer: the "send" of its JSON, or nil.
+    static func sendAnswer(_ answer: String) -> String? {
+        struct Box: Decodable { var send: String? }
+        guard let data = object(answer), let box = try? JSONDecoder().decode(Box.self, from: data) else { return nil }
+        return box.send?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func answerKey(_ m: ReadMessage) -> String { m.chat + "\u{1F}" + m.sender + "\u{1F}" + m.text }
@@ -584,7 +600,7 @@ extension AppModel {
                 let due = t - lastCheck >= Double(WatchSettings.intervalMinutes) * 60
                 // a reply that did not go out, or a check that did not finish: again soon, not at the next interval
                 let retry = (!watchRetries.isEmpty || failures > 0) && t - lastCheck >= 20
-                if due || retry || (moved && t - lastCheck >= 15) {
+                if due || retry || (moved && t - lastCheck >= 5) {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
@@ -661,10 +677,15 @@ extension AppModel {
         if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
             DebugLog.write("watch: owner task in \(chat): \(task)")
             if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task), stepLimit: 25) {
+                // What it found is sent from here: going back to the chat to type it, the agent forgot what it had
+                // found and went to look again until it ran out of steps (logs(14)).
+                if let answer = WatchReport.sendAnswer(done).flatMap(WatchSettings.typeable), !answer.isEmpty {
+                    _ = await sendReply(answer, chat: chat, back: !rules.single, quick: false)
+                }
                 if let i = read.indices.last { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
             } else if watching {  // stuck or out of steps: say so once instead of trying again and again
                 DebugLog.write("watch: owner task not done in \(chat)")
-                _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single)
+                _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single, quick: false)
                 if let i = read.indices.last { read[i].replied += "【未完成】" + task }
             }
         } else if reply == nil, task == nil, !rules.single {
@@ -738,15 +759,69 @@ extension AppModel {
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.
     /// Types one message into the chat and sends it (fixed plan, no planner call).
-    private func sendReply(_ text: String, chat: String, back: Bool) async -> Bool {
-        await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: back), plan: WatchSettings.sendPlan(chat: chat, back: back),
-                       stepLimit: 25) != nil
+    /// `quick: false` when the agent may have left the chat (after an owner task): the run finds its way back first.
+    private func sendReply(_ text: String, chat: String, back: Bool, quick: Bool = true) async -> Bool {
+        if !back, quick {
+            switch await quickSend(text, chat: chat) {
+            case .sent: return true
+            case .inBox:  // typed and checked, but Return did not send it: only 发送 is left
+                return await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
+            case .notTried: break
+            }
+        }
+        let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: back), plan: WatchSettings.sendPlan(chat: chat, back: back),
+                                stepLimit: 25, returnSends: true) != nil
+        if ok, let box = agent.typedInto { watchInputBox[chat] = box }  // the next reply here goes the quick way
+        return ok
     }
 
-    private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15) async -> String? {
+    enum QuickSend { case sent, inBox, notTried }
+
+    /// A reply without an agent run, once a send in this chat showed where its input box is. Each step is checked on
+    /// the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
+    /// front for a moment); tap the box again; paste, and go on only if exactly this text newly shows; Return; then
+    /// read the chat, and it counts as sent only when the newest own message is this text.
+    private func quickSend(_ text: String, chat: String) async -> QuickSend {
+        guard let box = watchInputBox[chat], WatchSettings.rules.single, Pasteboard.needed(text),
+              UIApplication.shared.applicationState != .active else { return .notTried }
+        func look() async -> Data? {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            _ = try? await feed.currentFrame()
+            return feed.frame
+        }
+        do {
+            try await pointer.tap(box.x, box.y)
+            guard await hopToPaste(text) == .filled else { return .notTried }
+            try await pointer.tap(box.x, box.y)
+            let before = await look().map { CandidatePicker.count(text, in: $0) } ?? 0
+            try await pointer.key("cmd+v")
+            guard let pasted = await look(), CandidatePicker.count(text, in: pasted) > before else {
+                try await pointer.key("cmd+a")
+                try await pointer.key("backspace")
+                DebugLog.write("watch: quick send: the paste did not show the text; cleared it, the agent sends")
+                return .notTried
+            }
+            try await pointer.key("enter")
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let screen = await readChat(chat), let mine = screen.lines.last(where: { $0.mine }),
+                  WatchReport.key(mine) == WatchReport.key(WatchReport.Line(sender: "我", text: text, mine: true)) else {
+                DebugLog.write("watch: quick send: not seen as sent")
+                return .inBox
+            }
+            DebugLog.write("watch: quick send: sent and seen in \(chat)")
+            watchHandled += 1
+            return .sent
+        } catch {
+            DebugLog.write("watch: quick send failed: \(error.localizedDescription)")
+            return .notTried
+        }
+    }
+
+    private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15,
+                          returnSends: Bool = false) async -> String? {
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
-        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan, stepLimit: stepLimit, fastText: true)
+        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan, stepLimit: stepLimit, fastText: true, returnSends: returnSends)
         while agent.running || startingAgent {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }

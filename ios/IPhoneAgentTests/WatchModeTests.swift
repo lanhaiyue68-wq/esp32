@@ -83,7 +83,7 @@ import XCTest
         XCTAssertFalse(WatchReport.isChat("蓝海乐", "虾笔刀陪跑学员元群"))
         XCTAssertFalse(WatchReport.isChat("", "虾笔刀陪跑学员元群"))  // not a chat screen
         XCTAssertEqual(WatchReport.screen(#"{"group":false,"messages":[]}"#)?.title, "")
-        XCTAssertTrue(WatchSettings.sendPlan(chat: "客户群", back: false).contains("Tap 发送"))
+        XCTAssertTrue(WatchSettings.sendPlan(chat: "客户群", back: false).contains("tap 发送"))
         XCTAssertTrue(WatchSettings.openPlan(chat: "客户群").contains("done right away"))
     }
 
