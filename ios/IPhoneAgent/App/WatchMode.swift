@@ -256,7 +256,7 @@ struct ReadMessage: Codable, Equatable {
 }
 
 enum WatchReport {
-    struct Line: Equatable { var sender: String; var text: String; var mine: Bool }
+    struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line] }
 
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
@@ -318,12 +318,22 @@ enum WatchReport {
     /// rather than single texts catches a message repeated word for word (traces(35): the owner asked the same thing
     /// twice and the second was taken as already read). When the previous lines are gone (scrolled far), every line
     /// not on the previous screen.
-    /// The first look at a chat: what nobody answered yet, the messages under this account's last one (the last three
-    /// when none of its own is on screen). Opening the chat takes half a minute, and a message sent just after the
-    /// watch started (build 22 took it as old and never answered); one answered before sits above "mine".
-    static func unanswered(_ lines: [Line]) -> [Line] {
-        if let i = lines.lastIndex(where: { $0.mine }) { return Array(lines[(i + 1)...]) }
-        return Array(lines.suffix(3))
+    /// A watch's first look at a chat: what came after the last look of the previous watch. That covers a message
+    /// sent while this watch was still opening the chat (half a minute; build 22 lost it) and leaves out what an
+    /// earlier test asked (build 25 answered that). With no earlier look that shares a message with this screen,
+    /// all of it is from before this watch.
+    static func firstNew(_ lines: [Line], after earlier: [Line]?) -> [Line] {
+        guard let earlier, !Set(lines.map(key)).isDisjoint(with: earlier.map(key)) else { return [] }
+        return new(lines, after: earlier)
+    }
+
+    private static let looksKey = "watch.lastLooks"
+    static func savedLooks() -> [String: [Line]] {
+        guard let data = UserDefaults.standard.data(forKey: looksKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: [Line]].self, from: data)) ?? [:]
+    }
+    static func saveLooks(_ looks: [String: [Line]]) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(looks), forKey: looksKey)
     }
 
     static func new(_ lines: [Line], after previous: [Line]) -> [Line] {
@@ -486,7 +496,8 @@ extension AppModel {
         watching = true
         watchHandled = 0
         watchRead = 0
-        watchLast = [:]
+        watchLast = WatchReport.savedLooks()
+        watchLooked = []
         watchInterjectedAt = [:]
         watchRetries = [:]
         watchStatus = String(localized: "Starting…")
@@ -583,10 +594,11 @@ extension AppModel {
             (chat, screen) = (open, look)
         }
 
-        let firstLook = watchLast[chat] == nil, before = watchLast[chat]
-        let fresh = firstLook ? WatchReport.unanswered(screen.lines) : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
+        let firstLook = !watchLooked.contains(chat), before = watchLast[chat]
+        let fresh = firstLook ? WatchReport.firstNew(screen.lines, after: before) : WatchReport.new(screen.lines, after: before ?? [])
+        watchLooked.insert(chat)
         watchLast[chat] = screen.lines
-        if firstLook { DebugLog.write("watch: first look at \(chat): \(fresh.count) of \(screen.lines.count) message(s) not answered yet") }
+        if firstLook { DebugLog.write("watch: first look at \(chat): \(fresh.count) of \(screen.lines.count) message(s) came after the last watch") }
         var read = fresh.filter { !$0.mine }.map { line in
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
                         atMe: rules.myNames.contains { line.text.contains("@" + $0) })

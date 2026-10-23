@@ -87,16 +87,18 @@ import XCTest
         XCTAssertTrue(WatchSettings.openPlan(chat: "客户群").contains("done right away"))
     }
 
-    func testTheFirstLookKeepsWhatNobodyAnsweredYet() {
-        // traces(36): "@蓝 在不在" was sent right after the watch started, before opening the chat (30 s) let it look.
+    func testAWatchStartsAfterTheLastLookOfThePreviousOne() {
         let line = { (sender: String, text: String, mine: Bool) in WatchReport.Line(sender: sender, text: text, mine: mine) }
-        let screen = [line("蓝海乐", "@蓝 你在不在", false), line("闫寒", "@虾笔刀 你在不在", false), line("虾笔刀", "在的，你说。", false),
-                      line("闫寒", "@虾笔刀 你的大脑今天有哪些进化？", false), line("虾笔刀", "这条我私聊回你了。", false),
-                      line("蓝海乐", "@蓝 在不在", false)]
-        XCTAssertEqual(WatchReport.unanswered(screen).map(\.text), ["@虾笔刀 你的大脑今天有哪些进化？", "这条我私聊回你了。", "@蓝 在不在"])
-        let answered = [line("蓝海乐", "@蓝 你在不在", false), line("我", "在的", true), line("良三", "+1", false)]
-        XCTAssertEqual(WatchReport.unanswered(answered).map(\.text), ["+1"])  // what was answered stays answered
-        XCTAssertEqual(WatchReport.unanswered([line("蓝海乐", "@蓝 在吗", false), line("我", "在", true)]), [])
+        // traces(39): the previous watch had already seen the old "find the group owner" from a test; only what came
+        // after it is new, so that old request is not carried out again.
+        let earlier = [line("蓝海乐", "@蓝 在不在", false), line("我", "在的,有什么事吗", true), line("蓝海乐", "@蓝 告诉我群主是谁，并把他@出来", false)]
+        let now = earlier + [line("蓝海乐", "又傻逼了", false), line("蓝海乐", "@蓝 在不在", false)]
+        XCTAssertEqual(WatchReport.firstNew(now, after: earlier).map(\.text), ["又傻逼了", "@蓝 在不在"])
+        // traces(36): sent while the watch was still opening the chat: after the last look, so it is new.
+        XCTAssertEqual(WatchReport.firstNew(earlier + [line("蓝海乐", "@蓝 在不在", false)], after: earlier).map(\.text), ["@蓝 在不在"])
+        // No earlier look, or one too old to share a message with this screen: all of it is from before this watch.
+        XCTAssertEqual(WatchReport.firstNew(now, after: nil), [])
+        XCTAssertEqual(WatchReport.firstNew(now, after: [line("某人", "很久以前的话", false)]), [])
     }
 
     func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {
