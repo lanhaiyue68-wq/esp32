@@ -2,23 +2,32 @@ import Foundation
 
 /// WeChat watch (守候微信): stay on WeChat, read new messages and answer the ones that call for it. Waiting costs
 /// nothing: the mirrored screen is compared on this iPhone every 2 s and the model is only asked when WeChat changed
-/// for a few seconds (a new message moves the chat list, a red badge appears) or, as a safety net, every few minutes.
-/// Each check is an ordinary run (trace, lessons, review) built from the user's choices. A reply is triggered only
-/// by an @mention or a passphrase from the whitelisted people (or, in interject mode, a light remark on small talk);
-/// everything else is only read and kept (ReadLog). With ChatTool on the computer, what was read is reported there
-/// and ChatTool may decide the replies (ChatToolLink). Background audio stays on for the whole watch.
+/// for a few seconds (a new message, a red badge) or, as a safety net, every few minutes.
+///
+/// A check is split into small steps, each done by what does it reliably (traces(34): one run asked to find, read,
+/// remember and answer lost track and went back and forth until it gave up):
+/// 1. an agent run opens the chat (the one chosen chat, or the first unread one in scope);
+/// 2. one vision call reads the screen into messages (WatchReport.screen);
+/// 3. code keeps what is new (watchSeen), and decides by plain text matching whether a reply is due: a whitelisted
+///    sender's @mention of one of the user's own names, or a passphrase (WatchSettings.fires); interject mode may
+///    add one light remark to small talk, at most every ten minutes per chat;
+/// 4. one text call writes the reply from the recent chat, the user's rules and the chosen knowledge;
+/// 5. an agent run types and sends it, with the privacy check on every `type`.
+/// Everything read is kept (ReadLog) and, with ChatTool on the computer, reported there (ChatToolLink), which may
+/// decide the replies instead. Background audio stays on for the whole watch.
 enum WatchSettings {
     static let onlyListedKey = "watchOnlyListedV1", targetsKey = "watchTargetsV1"
     static let instructionKey = "watchInstructionV1", fallbackKey = "watchFallbackV1"
     static let knowledgeKey = "watchKnowledgeV1", privateWordsKey = "watchPrivateWordsV1"
     static let blockNumbersKey = "watchBlockNumbersV1", intervalKey = "watchIntervalMinutesV1"
     static let interjectKey = "watchInterjectV1", sendersKey = "watchSendersV1", passphrasesKey = "watchPassphrasesV1"
+    static let myNamesKey = "watchMyNamesV1"
     static let serverOnKey = "watchServerOnV1", serverURLKey = "watchServerURLV1", robotKey = "watchRobotIdV1"
     static let serverRepliesKey = "watchServerRepliesV1"
     static let knowledgeFromComputerKey = "watchKnowledgeComputerV1", computerURLKey = "watchComputerURLV1"
     static let computerTokenKey = "watchComputerTokenV1", computerFilesKey = "watchComputerFilesV1"
-    static let defaultInstruction = "用简短、礼貌、自然的中文回复，像真人聊天一样，不要长篇大论。"
-    static let defaultFallback = "收到，我稍后回复您。"
+    static let defaultInstruction = "用简短、礼貌、自然的中文回复，像真人聊天一样，正面回答对方的问题。"
+    static let defaultFallback = "这个我不太确定，稍后再告诉你。"
     static let defaultPassphrase = "天王盖地虎"
     static let defaultRobot = "lan_agent_iphone"
 
@@ -34,6 +43,8 @@ enum WatchSettings {
     static var interject: Bool { d.bool(forKey: interjectKey) }
     static var senders: [String] { lines(d.string(forKey: sendersKey) ?? "") }
     static var passphrases: [String] { lines(d.string(forKey: passphrasesKey) ?? defaultPassphrase) }
+    /// The names others @ this account by (WeChat nickname, group nicknames): "@蓝" is a mention only if "蓝" is here.
+    static var myNames: [String] { lines(d.string(forKey: myNamesKey) ?? "").map { $0.hasPrefix("@") ? String($0.dropFirst()) : $0 } }
     static var serverOn: Bool { d.bool(forKey: serverOnKey) }
     static var serverURL: String { text(serverURLKey, "") }
     static var robotId: String { text(robotKey, defaultRobot) }
@@ -59,64 +70,98 @@ enum WatchSettings {
 
     struct Rules {
         var targets: [String] = [], onlyListed = true, senders: [String] = [], passphrases: [String] = []
-        var interject = false, serverReplies = false, instruction = "", fallback = "", knowledge = false
+        var myNames: [String] = [], interject = false, serverReplies = false, instruction = "", fallback = ""
+        /// The one chosen chat stays open between checks: its new messages show up on screen by themselves.
+        var single: Bool { onlyListed && targets.count == 1 }
     }
 
     static var rules: Rules {
-        Rules(targets: targets, onlyListed: onlyListed, senders: senders, passphrases: passphrases, interject: interject,
-              serverReplies: serverReplies, instruction: instruction, fallback: fallback, knowledge: false)
+        Rules(targets: targets, onlyListed: onlyListed, senders: senders, passphrases: passphrases, myNames: myNames,
+              interject: interject, serverReplies: serverReplies, instruction: instruction, fallback: fallback)
     }
 
-    /// The run's task, in the user's language: which chats, what triggers a reply, how, and the fixed safety rules.
-    /// It always ends with the messages read as JSON (WatchReport), which is how reading and learning are kept.
-    static func task(_ r: Rules) -> String {
-        let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
-        let scope = r.onlyListed
-            ? "2. 只看这些会话：\(names)。它们之外的未读会话一律不打开。"
-            : "2. 看私聊里的未读消息；群聊只看这些：\(names.isEmpty ? "无" : names)。公众号、订阅号、服务通知、文件传输助手不打开。"
-        let who = r.senders.isEmpty ? "会话里的人" : r.senders.map { "“\($0)”" }.joined(separator: "、")
-        let codes = r.passphrases.map { "“\($0)”" }.joined(separator: "、")
-        var reply: String
-        if r.serverReplies {
-            reply = "4. 不要自己回复任何消息：回复由电脑上的 ChatTool 决定。只读取并记录。"
-        } else {
-            reply = "4. 回复的条件：只有\(who)在消息里@你\(codes.isEmpty ? "" : "，或消息里出现暗号\(codes)")时，才回复那条消息；"
-                + "其他消息不回复，只读取并记录（读屏学习）。"
-            if r.interject {
-                reply += "插嘴模式：遇到闲聊、问候、玩笑这类无关紧要的消息，可以简短自然地插一句；涉及金钱、承诺、隐私、工作业务的一律不插嘴，每个会话最多插一句。"
-            }
-            reply += "\n   回复按用户的要求：\(r.instruction)"
+    /// A reply is due: the sender is whitelisted (or there is no whitelist) and the text @mentions one of the user's
+    /// names or holds a passphrase. Plain text matching, so the model cannot talk itself into or out of it.
+    static func fires(_ m: ReadMessage, _ r: Rules) -> Bool {
+        let allowed = r.senders.isEmpty || r.senders.contains { m.sender == $0 || m.sender.contains($0) }
+        guard allowed else { return false }
+        let mention = r.myNames.contains { m.text.contains("@" + $0) || m.text.contains("＠" + $0) }
+        return mention || r.passphrases.contains { m.text.contains($0) }
+    }
+
+    /// Step 1: open the chat to read. Never replies.
+    static func openTask(_ r: Rules) -> String {
+        if r.single {
+            let chat = r.targets[0]
+            return """
+            打开微信里的会话“\(chat)”。如果现在已经在这个会话里，什么都不用做，直接完成；否则回到微信聊天列表找到它并打开，列表里没有就用顶部搜索。
+            打开后完成，答案写“\(chat)”。不要回复、不要输入任何内容。
+            """
         }
-        let source = r.knowledge
-            ? "5. 回复内容只能依据用户选定的知识库；知识库里没有答案时，回复：“\(r.fallback)”。不要编造。"
-            : "5. 用户没有选定知识库：只做礼貌、通用的回复；需要具体信息（价格、地址、时间、承诺等）时，回复：“\(r.fallback)”。不要编造。"
+        let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
+        let scope = r.onlyListed ? "这些会话：\(names)" : "私聊，以及这些群：\(names.isEmpty ? "无" : names)（公众号、订阅号、服务通知、文件传输助手除外）"
         return """
-        守候微信：替用户读微信里的新消息，在需要时回复。
-        1. 如果当前不在微信的聊天列表（底部“微信”标签页），先打开微信回到聊天列表。
-        \(scope)
-        3. 在要看的会话里，找带红色未读数字或红点的，从上往下逐个打开，读完新消息；都没有未读就直接完成。
-        \(reply)
-        \(source)
-        6. 不透露用户的任何隐私，不把一个会话里的内容发到别的会话；不点红包、转账、付款、链接和文件；对方要钱、要验证码、要隐私的，不回复。
-        7. 每个会话处理完都返回聊天列表。全部处理完再完成，完成的答案只写一行 JSON，列出这次读到的新消息：
-        {"messages":[{"chat":"会话名","group":true,"sender":"发言人","text":"消息内容","atMe":false,"replied":"你发出的回复，没有就留空"}]}
-        没有新消息就写 {"messages":[]}。
+        打开微信，回到聊天列表（底部“微信”标签页）。在\(scope)里，找第一个带红色未读数字或红点的会话并打开。
+        打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有未读就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
         """
     }
 
-    /// A ChatTool "send message" command as a task: open that chat, type the text, send it.
-    static func sendTask(chat: String, text: String) -> String {
+    /// Step 5 (and ChatTool's replies): type the text in the chat and send it.
+    static func sendTask(chat: String, text: String, back: Bool = false) -> String {
         """
-        在微信里给“\(chat)”发一条消息。
-        1. 打开微信，在聊天列表找到“\(chat)”并打开；列表里没有就用顶部搜索找到它。
-        2. 在输入框输入下面这段内容并发送，一字不改：
+        在微信会话“\(chat)”里发一条消息。如果现在不在这个会话里，先回到聊天列表找到它并打开（列表里没有就用顶部搜索）。
+        点底部输入框，输入下面这段内容并发送，一字不改：
         \(text)
-        3. 发完返回聊天列表，然后完成，答案写 {"messages":[]}。找不到这个会话就失败，并写明原因。
+        发送后\(back ? "返回聊天列表" : "停在这个会话里")，然后完成。找不到这个会话就失败，并写明原因。
+        """
+    }
+
+    /// Step 2: one look at the open chat.
+    static func readPrompt(chat: String, myNames: [String]) -> String {
+        let mine = myNames.isEmpty ? "" : "我的微信名字是：\(myNames.map { "“\($0)”" }.joined(separator: "、"))。"
+        return """
+        你在看一张微信聊天界面的截图，会话名是“\(chat)”。\(mine)
+        从上到下列出截图里能看清的每条消息（最多 20 条），只输出一行 JSON，不要别的文字：
+        {"group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
+        规则：group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
+        左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，
+        语音写 [语音]，文件写 [文件]。时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
+        """
+    }
+
+    /// Step 4: the reply, from the recent chat, the user's rules and the chosen knowledge.
+    static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String) -> String {
+        let history = recent.suffix(20).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
+        let asks = due.map { "\($0.sender)：\($0.text)" }.joined(separator: "\n")
+        return """
+        你是用户在微信里的分身，正在替他在\(group ? "群聊" : "私聊")“\(chat)”里回复。\(r.myNames.isEmpty ? "" : "别人用“@\(r.myNames[0])”叫的就是你。")
+        最近的聊天（从早到晚）：
+        \(history)
+        需要你回复的消息：
+        \(asks)
+        用户对回复的要求：\(r.instruction)
+        \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
+                             : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。对方要你在手机上做事（比如查群主、发文件）而你只能打字时，就用一句话说明你能做的。
+        \(group ? "在群里回复时，开头写“@发言人 ”。" : "")不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。
+        只输出要发送的那段话本身，不要引号、解释或前缀。
+        """
+    }
+
+    /// Interject mode: one light remark to small talk, or SKIP.
+    static func interjectPrompt(chat: String, recent: [WatchReport.Line], r: Rules) -> String {
+        let history = recent.suffix(15).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
+        return """
+        你是用户在微信群“\(chat)”里的分身。下面是最近的聊天（从早到晚）：
+        \(history)
+        判断要不要插一句：只在轻松的闲聊（问候、玩笑、感慨、日常）时插一句简短自然的话；涉及金钱、承诺、隐私、工作业务、争论、
+        严肃话题时不插。用户的风格要求：\(r.instruction)
+        要插就只输出那一句话；不插就只输出 SKIP。
         """
     }
 }
 
-/// One message read from the screen, as the check reports it in its done answer.
+/// One message read from the screen.
 struct ReadMessage: Codable, Equatable {
     var chat: String
     var group: Bool
@@ -138,7 +183,7 @@ struct ReadMessage: Codable, Equatable {
         self.at = at
     }
 
-    init(from decoder: Decoder) throws {  // the model may leave fields out
+    init(from decoder: Decoder) throws {  // older log lines or a model may leave fields out
         let c = try decoder.container(keyedBy: CodingKeys.self)
         chat = (try? c.decode(String.self, forKey: .chat)) ?? ""
         group = (try? c.decode(Bool.self, forKey: .group)) ?? false
@@ -151,14 +196,46 @@ struct ReadMessage: Codable, Equatable {
 }
 
 enum WatchReport {
-    /// The messages in a done answer: the JSON object anywhere in it; nothing if it has none.
-    static func parse(_ answer: String) -> [ReadMessage] {
-        guard let start = answer.firstIndex(of: "{"), let end = answer.lastIndex(of: "}"), start < end,
-              let data = String(answer[start...end]).data(using: .utf8) else { return [] }
-        struct Box: Decodable { var messages: [ReadMessage]? }
-        let list = (try? JSONDecoder().decode(Box.self, from: data))?.messages ?? []
-        return list.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+    struct Line: Equatable { var sender: String; var text: String; var mine: Bool }
+    struct Screen: Equatable { var group: Bool; var lines: [Line] }
+
+    /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
+    static func object(_ reply: String) -> Data? {
+        guard let start = reply.firstIndex(of: "{"), let end = reply.lastIndex(of: "}"), start < end else { return nil }
+        return String(reply[start...end]).data(using: .utf8)
     }
+
+    /// Step 2's reply as lines; nil when it is not the expected JSON.
+    static func screen(_ reply: String) -> Screen? {
+        struct Row: Decodable { var sender: String?; var text: String?; var mine: Bool? }
+        struct Box: Decodable { var group: Bool?; var messages: [Row]? }
+        guard let data = object(reply), let box = try? JSONDecoder().decode(Box.self, from: data), let rows = box.messages else { return nil }
+        let lines = rows.compactMap { row -> Line? in
+            let text = (row.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let mine = row.mine ?? false
+            return Line(sender: mine ? "我" : (row.sender ?? "").trimmingCharacters(in: .whitespaces), text: text, mine: mine)
+        }
+        return Screen(group: box.group ?? false, lines: lines)
+    }
+
+    /// Step 1's answer in multi-chat mode: the chat it opened, or nil when nothing was unread.
+    static func openedChat(_ answer: String) -> String? {
+        struct Box: Decodable { var chat: String? }
+        if let data = object(answer), let box = try? JSONDecoder().decode(Box.self, from: data) {
+            let chat = (box.chat ?? "").trimmingCharacters(in: .whitespaces)
+            return chat.isEmpty ? nil : chat
+        }
+        return nil
+    }
+
+    /// The lines after the last one already seen: what is new on screen. Everything, when none was seen before.
+    static func new(_ lines: [Line], seen: Set<String>) -> [Line] {
+        guard let last = lines.lastIndex(where: { seen.contains(key($0)) }) else { return lines }
+        return Array(lines[(last + 1)...])
+    }
+
+    static func key(_ l: Line) -> String { (l.mine ? "我" : l.sender) + "\u{1F}" + l.text }
 }
 
 /// What watch read, one JSON line per message in Documents/readlog/<day>.jsonl (visible in Files), and the summaries
@@ -291,11 +368,17 @@ extension AppModel {
         if WatchSettings.onlyListed && WatchSettings.targets.isEmpty {
             return String(localized: "Add at least one chat or group to reply to, or turn off “Only these chats”.")
         }
+        if !WatchSettings.serverReplies && WatchSettings.myNames.isEmpty {
+            return String(localized: "Enter your name in WeChat (what people type after @), so an @mention can be recognized.")
+        }
         if WatchSettings.serverOn, ChatToolLink.socketURL(WatchSettings.serverURL, robot: WatchSettings.robotId) == nil {
             return String(localized: "Enter the computer's ChatTool address, like http://192.168.31.85:8881.")
         }
         watching = true
         watchHandled = 0
+        watchRead = 0
+        watchSeen = [:]
+        watchInterjectedAt = [:]
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
@@ -328,13 +411,17 @@ extension AppModel {
             } else if let send = chatTool.nextCommand() {
                 watchStatus = String(localized: "Sending ChatTool's reply to \(send.chat)…")
                 DebugLog.write("watch: ChatTool asks to send to \(send.chat)")
-                _ = await watchRun(WatchSettings.sendTask(chat: send.chat, text: send.text))
+                if let why = PrivacyGuard.check(send.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
+                    DebugLog.write("watch: ChatTool's reply withheld: \(why)")
+                } else {
+                    _ = await watchRun(WatchSettings.sendTask(chat: send.chat, text: send.text, back: !WatchSettings.rules.single))
+                }
                 guard watching else { break }
                 (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
             } else {
                 let t = now(), frame = feed.frame
                 if t < quietUntil {
-                    baseline = nil  // after a check the pointer fades and the list settles: not new messages
+                    baseline = nil  // after a check the pointer fades and the screen settles: not new messages
                 } else if baseline == nil {
                     baseline = frame
                     changedAt = nil
@@ -346,7 +433,7 @@ extension AppModel {
                     changedAt = nil
                 }
                 let due = t - lastCheck >= Double(WatchSettings.intervalMinutes) * 60
-                if due || (moved && t - lastCheck >= 20) {
+                if due || (moved && t - lastCheck >= 15) {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
@@ -367,18 +454,83 @@ extension AppModel {
         }
     }
 
-    /// One check: read (and answer what triggers a reply); keep what was read and report it to ChatTool.
+    /// One check, in small steps (see WatchSettings): open, read, keep what is new, decide in code, write, send.
     private func watchCheck() async -> Bool {
-        let knowledge = await watchKnowledge()
-        var rules = WatchSettings.rules
-        rules.knowledge = !knowledge.isEmpty
-        guard let answer = await watchRun(WatchSettings.task(rules), reference: knowledge) else { return false }
-        let read = WatchReport.parse(answer)
+        let rules = WatchSettings.rules
+        guard let opened = await watchRun(WatchSettings.openTask(rules)) else { return false }
+        guard let chat = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
+        guard let screen = await readChat(chat) else { return false }
+
+        let firstLook = watchSeen[chat] == nil
+        let fresh = firstLook ? [] : WatchReport.new(screen.lines, seen: watchSeen[chat] ?? [])
+        watchSeen[chat, default: []].formUnion(screen.lines.map(WatchReport.key))
+        if firstLook { DebugLog.write("watch: first look at \(chat): \(screen.lines.count) message(s) taken as already seen") }
+        var read = fresh.filter { !$0.mine }.map { line in
+            ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
+                        atMe: rules.myNames.contains { line.text.contains("@" + $0) })
+        }
+
+        var reply: String?
+        if !rules.serverReplies && !read.isEmpty {
+            let due = read.filter { WatchSettings.fires($0, rules) }
+            let knowledge = due.isEmpty ? "" : await watchKnowledge()
+            if !due.isEmpty {
+                reply = await compose(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines, due: due,
+                                                                   r: rules, knowledge: knowledge))
+            } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
+                reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules))
+                if reply != nil { watchInterjectedAt[chat] = now() }
+            }
+        }
+        if let text = reply {
+            if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
+                DebugLog.write("watch: reply withheld: \(why)")
+            } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single)) != nil {
+                if let i = read.indices.last { read[i].replied = text }
+                watchSeen[chat, default: []].insert(WatchReport.key(.init(sender: "我", text: text, mine: true)))
+            }
+        } else if !rules.single {
+            try? await pointer.goBack()  // back to the chat list, for the other chats' badges
+        }
+
         ReadLog.append(read)
         watchRead += read.count
         if WatchSettings.serverOn { chatTool.report(read) }
-        if !read.isEmpty { DebugLog.write("watch: read \(read.count) message(s), replied to \(read.filter { !$0.replied.isEmpty }.count)") }
+        DebugLog.write("watch: \(chat): \(read.count) new message(s)\(reply == nil ? "" : ", replied")")
         return true
+    }
+
+    /// Step 2: one vision call on the open chat; logged into the check's trace.
+    private func readChat(_ chat: String) async -> WatchReport.Screen? {
+        do {
+            _ = try await feed.currentFrame()
+            guard let frame = feed.frame else { return nil }
+            let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),
+                                                                text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
+            traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(reply.text)])
+            guard let screen = WatchReport.screen(reply.text) else {
+                DebugLog.write("watch: could not read \(chat): \(reply.text.prefix(200))")
+                return nil
+            }
+            return screen
+        } catch {
+            DebugLog.write("watch: reading \(chat) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Step 4: one text call; nil for SKIP or an empty answer.
+    private func compose(_ prompt: String) async -> String? {
+        do {
+            let reply = try await settings.client("planner").chat(system: prompt, text: "写出要发送的那段话。", image: nil,
+                                                                  maxTokens: 400, temperature: 0.6)
+            let text = reply.text.trimmingCharacters(in: CharacterSet(charactersIn: " \n\"“”'「」"))
+            traces.write(kind: "watch reply", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(text)])
+            return text.isEmpty || text.uppercased() == "SKIP" ? nil : text
+        } catch {
+            DebugLog.write("watch: writing the reply failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.

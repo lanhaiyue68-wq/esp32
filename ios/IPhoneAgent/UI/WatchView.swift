@@ -9,6 +9,7 @@ struct WatchView: View {
     @AppStorage(WatchSettings.interjectKey) private var interject = false
     @AppStorage(WatchSettings.sendersKey) private var senders = ""
     @AppStorage(WatchSettings.passphrasesKey) private var passphrases = WatchSettings.defaultPassphrase
+    @AppStorage(WatchSettings.myNamesKey) private var myNames = ""
     @AppStorage(WatchSettings.instructionKey) private var instruction = WatchSettings.defaultInstruction
     @AppStorage(WatchSettings.fallbackKey) private var fallback = WatchSettings.defaultFallback
     @AppStorage(WatchSettings.knowledgeKey) private var knowledge = ""
@@ -108,6 +109,9 @@ struct WatchView: View {
                 Text("Reply only when triggered").tag(false)
                 Text("Interject").tag(true)
             }
+            TextField("My name in WeChat, as people @ me (one per line)", text: $myNames, axis: .vertical)
+                .lineLimit(1...4)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
             TextField("Whitelist: who may trigger a reply, one per line (empty: anyone)", text: $senders, axis: .vertical)
                 .lineLimit(2...6)
             TextField("Passphrases, one per line", text: $passphrases, axis: .vertical)

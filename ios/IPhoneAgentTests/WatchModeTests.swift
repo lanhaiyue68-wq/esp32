@@ -4,48 +4,67 @@ import XCTest
 /// WeChat watch: who is read and answered, what triggers a reply, what is kept and reported, what never leaves.
 @MainActor final class WatchModeTests: XCTestCase {
     private func rules(_ edit: (inout WatchSettings.Rules) -> Void = { _ in }) -> WatchSettings.Rules {
-        var r = WatchSettings.Rules(targets: ["客户群", "张三"], onlyListed: true, senders: ["老板"], passphrases: ["天王盖地虎"],
-                                    interject: false, serverReplies: false, instruction: "礼貌回复", fallback: "稍后人工回复", knowledge: true)
+        var r = WatchSettings.Rules(targets: ["客户群"], onlyListed: true, senders: ["蓝海乐"], passphrases: ["天王盖地虎"],
+                                    myNames: ["蓝"], interject: false, serverReplies: false, instruction: "礼貌回复", fallback: "稍后告诉你")
         edit(&r)
         return r
+    }
+
+    private func message(_ sender: String, _ text: String) -> ReadMessage {
+        ReadMessage(chat: "客户群", group: true, sender: sender, text: text)
     }
 
     func testNamesAreOnePerLineOrSeparatedByCommas() {
         XCTAssertEqual(WatchSettings.lines("张三\n 客户群 ，李四、张三\n\n"), ["张三", "客户群", "李四"])
     }
 
-    func testOnlyAnAtOrAPassphraseFromTheWhitelistTriggersAReply() {
-        let task = WatchSettings.task(rules())
-        XCTAssertTrue(task.contains("只看这些会话：“客户群”、“张三”"))
-        XCTAssertTrue(task.contains("只有“老板”在消息里@你，或消息里出现暗号“天王盖地虎”时，才回复"))
-        XCTAssertTrue(task.contains("只读取并记录"))
-        XCTAssertFalse(task.contains("插嘴模式"))
-        XCTAssertTrue(task.contains("知识库里没有答案时，回复：“稍后人工回复”"))
-        XCTAssertTrue(task.contains("不点红包、转账、付款"))
-        XCTAssertTrue(task.contains(#"{"messages":["#))
-        XCTAssertFalse(task.contains("画"))  // never looks like a drawing task (unmadeResult)
+    func testOnlyAWhitelistedAtMentionOrPassphraseIsAReplyTrigger() {
+        let r = rules()
+        XCTAssertTrue(WatchSettings.fires(message("蓝海乐", "@蓝 你告诉我群主是谁"), r))
+        XCTAssertTrue(WatchSettings.fires(message("蓝海乐", "＠蓝 在吗"), r))
+        XCTAssertTrue(WatchSettings.fires(message("蓝海乐", "天王盖地虎，今天几点开会"), r))
+        XCTAssertFalse(WatchSettings.fires(message("蓝海乐", "妈的还得调试"), r))      // traces(34): read, not answered
+        XCTAssertFalse(WatchSettings.fires(message("路人甲", "@蓝 借我点钱"), r))      // not whitelisted
+        XCTAssertTrue(WatchSettings.fires(message("路人甲", "@蓝 在吗"), rules { $0.senders = [] }))  // no whitelist: anyone
+        XCTAssertFalse(WatchSettings.fires(message("蓝海乐", "@蓝色妖姬 你好"), rules { $0.myNames = ["小蓝"] }))
     }
 
-    func testInterjectAndServerModesChangeOnlyTheReplyRule() {
-        XCTAssertTrue(WatchSettings.task(rules { $0.interject = true }).contains("插嘴模式"))
-        let server = WatchSettings.task(rules { $0.serverReplies = true; $0.interject = true })
-        XCTAssertTrue(server.contains("不要自己回复任何消息"))
-        XCTAssertFalse(server.contains("插嘴模式"))
-        let anyone = WatchSettings.task(rules { $0.senders = []; $0.onlyListed = false; $0.knowledge = false })
-        XCTAssertTrue(anyone.contains("只有会话里的人在消息里@你"))
-        XCTAssertTrue(anyone.contains("看私聊里的未读消息"))
-        XCTAssertTrue(anyone.contains("用户没有选定知识库"))
-        XCTAssertTrue(WatchSettings.sendTask(chat: "客户群", text: "好的").contains("“客户群”"))
+    func testOpeningTheChatNeverReplies() {
+        let one = WatchSettings.openTask(rules())
+        XCTAssertTrue(one.contains("“客户群”"))
+        XCTAssertTrue(one.contains("已经在这个会话里"))
+        XCTAssertTrue(one.contains("不要回复"))
+        let many = WatchSettings.openTask(rules { $0.targets = ["客户群", "张三"] })
+        XCTAssertTrue(many.contains(#"{"chat":"会话名"}"#))
+        XCTAssertFalse(one.contains("画") || many.contains("画"))  // never looks like a drawing task (unmadeResult)
+        XCTAssertTrue(WatchSettings.sendTask(chat: "客户群", text: "好的").contains("一字不改"))
     }
 
-    func testTheMessagesReadAreParsedFromTheDoneAnswer() {
-        let answer = #"读完了 {"messages":[{"chat":"客户群","group":true,"sender":"老板","text":"@我 天王盖地虎 明天几点","atMe":true,"replied":"十点"},{"chat":"张三","sender":"张三","text":""}]}"#
-        let read = WatchReport.parse(answer)
-        XCTAssertEqual(read.count, 1)  // the empty one is dropped; missing fields default
-        XCTAssertEqual(read.first?.chat, "客户群")
-        XCTAssertEqual(read.first?.atMe, true)
-        XCTAssertEqual(read.first?.replied, "十点")
-        XCTAssertEqual(WatchReport.parse("没有新消息"), [])
+    func testTheScreenIsReadIntoLinesAndOnlyWhatFollowsTheSeenOnesIsNew() throws {
+        let reply = #"```json {"group":true,"messages":[{"sender":"蓝海乐","text":"@蓝 你人呢"},{"sender":"我","text":"在的","mine":true},{"sender":"蓝海乐","text":"妈的还得调试"},{"sender":"x","text":" "}]} ```"#
+        let screen = try XCTUnwrap(WatchReport.screen(reply))
+        XCTAssertTrue(screen.group)
+        XCTAssertEqual(screen.lines.map(\.text), ["@蓝 你人呢", "在的", "妈的还得调试"])
+        let seen = Set(screen.lines.prefix(2).map(WatchReport.key))
+        XCTAssertEqual(WatchReport.new(screen.lines, seen: seen).map(\.text), ["妈的还得调试"])
+        XCTAssertEqual(WatchReport.new(screen.lines, seen: Set(screen.lines.map(WatchReport.key))), [])
+        XCTAssertNil(WatchReport.screen("看不清"))
+        XCTAssertEqual(WatchReport.openedChat(#"{"chat":"张三"}"#), "张三")
+        XCTAssertNil(WatchReport.openedChat(#"{"chat":""}"#))
+    }
+
+    func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {
+        let lines = [WatchReport.Line(sender: "蓝海乐", text: "@蓝 群主是谁", mine: false)]
+        let due = [message("蓝海乐", "@蓝 群主是谁")]
+        let prompt = WatchSettings.composePrompt(chat: "客户群", group: true, recent: lines, due: due, r: rules(), knowledge: "## 群.md\n群主是王老师")
+        XCTAssertTrue(prompt.contains("蓝海乐：@蓝 群主是谁"))
+        XCTAssertTrue(prompt.contains("群主是王老师"))
+        XCTAssertTrue(prompt.contains("“@蓝”"))
+        XCTAssertTrue(prompt.contains("@发言人"))
+        let bare = WatchSettings.composePrompt(chat: "张三", group: false, recent: lines, due: due, r: rules(), knowledge: "")
+        XCTAssertTrue(bare.contains("用户没有给知识库"))
+        XCTAssertFalse(bare.contains("@发言人"))
+        XCTAssertTrue(WatchSettings.interjectPrompt(chat: "客户群", recent: lines, r: rules()).contains("SKIP"))
     }
 
     func testTheReadLogKeepsEachDayAndFeedsTheSummary() throws {

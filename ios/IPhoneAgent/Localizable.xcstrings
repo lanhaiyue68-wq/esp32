@@ -7146,6 +7146,26 @@
           }
         }
       }
+    },
+    "My name in WeChat, as people @ me (one per line)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我在微信里的名字，也就是别人 @ 我时显示的（每行一个）"
+          }
+        }
+      }
+    },
+    "Enter your name in WeChat (what people type after @), so an @mention can be recognized." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请填写你在微信里的名字（别人 @ 你时显示的那个），这样才能认出别人在 @ 你。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
