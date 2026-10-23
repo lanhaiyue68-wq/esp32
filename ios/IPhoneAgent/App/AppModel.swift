@@ -79,7 +79,11 @@ import UIKit
     @Published var watching = false
     @Published var watchStatus = ""
     @Published var watchHandled = 0
+    @Published var watchRead = 0  // messages read since the watch started (ReadLog keeps them)
     var watchJob: Task<Void, Never>?
+    /// ChatTool on the computer (ChatToolLink.swift), connected while watching with it switched on.
+    let chatTool = ChatToolLink()
+    var computerKnowledgeCache = ""  // the last knowledge fetched from the computer, for when it is out of reach
     var lastWidgetReload = 0.0
 
     init() {

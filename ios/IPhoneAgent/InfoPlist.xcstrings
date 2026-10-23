@@ -33,6 +33,22 @@
           }
         }
       }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lan Agent talks to its USB board over Bluetooth to see the screen and move the pointer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lan Agent 通过你的 Wi-Fi 接收开发板传来的镜像画面，并连接你电脑上的 ChatTool 和知识库。"
+          }
+        }
+      }
     }
   }
 }

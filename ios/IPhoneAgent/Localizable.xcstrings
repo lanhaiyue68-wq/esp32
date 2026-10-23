@@ -6716,6 +6716,436 @@
           }
         }
       }
+    },
+    "Enter the computer's ChatTool address, like http://192.168.31.85:8881." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请填写电脑上 ChatTool 的地址，例如 http://192.168.31.85:8881。"
+          }
+        }
+      }
+    },
+    "Sending ChatTool's reply to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在把 ChatTool 的回复发给“%@”…"
+          }
+        }
+      }
+    },
+    "Nothing has been read today yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天还没有读到消息。"
+          }
+        }
+      }
+    },
+    "Could not summarize: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总结失败：%@"
+          }
+        }
+      }
+    },
+    "Enter the computer's knowledge address, like http://192.168.31.85:8882." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请填写电脑知识库的地址，例如 http://192.168.31.85:8882。"
+          }
+        }
+      }
+    },
+    "Wrong password for the computer's knowledge base." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑知识库的密码不对。"
+          }
+        }
+      }
+    },
+    "The computer answered %lld." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑返回了错误 %lld。"
+          }
+        }
+      }
+    },
+    "Which Chats to Read" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读哪些会话"
+          }
+        }
+      }
+    },
+    "Only the chats and groups listed here are opened; everything else stays unread." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只打开这里列出的聊天和群，其他的保持未读。"
+          }
+        }
+      }
+    },
+    "Every private chat is read. Groups only when listed here; Official Accounts and service notices never." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读所有私聊；群聊只读这里列出的；公众号和服务通知一律不看。"
+          }
+        }
+      }
+    },
+    "Checked before anything is typed, ChatTool's replies included: a reply that contains them is stopped and rewritten, never sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次打字前都会检查（ChatTool 发来的回复也一样）：回复里含有这些内容会被拦下重写，绝不会发出。"
+          }
+        }
+      }
+    },
+    "Read %lld messages so far" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已读 %lld 条消息"
+          }
+        }
+      }
+    },
+    "Mode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模式"
+          }
+        }
+      }
+    },
+    "Reply only when triggered" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在触发时回复"
+          }
+        }
+      }
+    },
+    "Interject" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "插嘴模式"
+          }
+        }
+      }
+    },
+    "Whitelist: who may trigger a reply, one per line (empty: anyone)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "白名单：谁可以触发回复，每行一个（留空表示任何人）"
+          }
+        }
+      }
+    },
+    "Passphrases, one per line" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号，每行一个"
+          }
+        }
+      }
+    },
+    "When to Reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "什么时候回复"
+          }
+        }
+      }
+    },
+    "A whitelisted person who @mentions you or says a passphrase gets a reply. Besides that, small talk may get one short, light remark; never on money, promises, privacy or work." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "白名单里的人@你或说出暗号时会回复。除此之外，闲聊可以简短轻松地插一句；涉及金钱、承诺、隐私、工作的一律不插嘴。"
+          }
+        }
+      }
+    },
+    "Only a whitelisted person who @mentions you or says a passphrase gets a reply. Everything else is only read and kept, so the agent learns the chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有白名单里的人@你或说出暗号时才回复。其他消息只读取并记录，让 Agent 从聊天里学习。"
+          }
+        }
+      }
+    },
+    "Source" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源"
+          }
+        }
+      }
+    },
+    "Files on this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上的文件"
+          }
+        }
+      }
+    },
+    "My computer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的电脑"
+          }
+        }
+      }
+    },
+    "Computer address, like http://192.168.31.85:8882" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑地址，例如 http://192.168.31.85:8882"
+          }
+        }
+      }
+    },
+    "Password shown by the computer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑上显示的密码"
+          }
+        }
+      }
+    },
+    "Load the Computer's Files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取电脑上的文件"
+          }
+        }
+      }
+    },
+    "%lld characters" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 字"
+          }
+        }
+      }
+    },
+    "Run tools/lan-knowledge-server on the computer; it serves one folder (ChatTool's 小蓝知识库 by default). Only the files switched on here are fetched." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在电脑上运行 tools/lan-knowledge-server，它提供一个文件夹（默认是 ChatTool 的“小蓝知识库”）。只读取这里打开的文件。"
+          }
+        }
+      }
+    },
+    "Connect to ChatTool on my computer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接电脑上的 ChatTool"
+          }
+        }
+      }
+    },
+    "ChatTool address, like http://192.168.31.85:8881" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatTool 地址，例如 http://192.168.31.85:8881"
+          }
+        }
+      }
+    },
+    "Robot ID" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "机器人 ID"
+          }
+        }
+      }
+    },
+    "ChatTool decides the replies" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 ChatTool 决定回复"
+          }
+        }
+      }
+    },
+    "Computer (ChatTool)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑（ChatTool）"
+          }
+        }
+      }
+    },
+    "This iPhone reads and reports every message; ChatTool's prefix and allowed senders decide what to send, and this iPhone types it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 读取并上报每条消息；回复什么由 ChatTool 的前缀和允许发令人决定，这台 iPhone 照着打字。"
+          }
+        }
+      }
+    },
+    "Messages read here also show up in ChatTool's dashboard and digests. Replies are still decided here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里读到的消息也会出现在 ChatTool 的后台和干货里。回复仍由这台 iPhone 决定。"
+          }
+        }
+      }
+    },
+    "%lld messages read today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天已读 %lld 条消息"
+          }
+        }
+      }
+    },
+    "Summarize Today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总结今天"
+          }
+        }
+      }
+    },
+    "Read Log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读屏记录"
+          }
+        }
+      }
+    },
+    "Every message read is kept in Files › On My iPhone › Lan Agent › readlog, one file per day, with the summaries next to them." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读到的每条消息都保存在“文件 › 我的 iPhone › Lan Agent › readlog”，每天一个文件，总结也放在旁边。"
+          }
+        }
+      }
+    },
+    "The computer's folder has no .md or .txt files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑的文件夹里没有 .md 或 .txt 文件。"
+          }
+        }
+      }
+    },
+    "Connects when watching starts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始守候时自动连接"
+          }
+        }
+      }
+    },
+    "Connected · reported %lld · %lld replies to send" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接 · 已上报 %1$lld 条 · 待发送 %2$lld 条回复"
+          }
+        }
+      }
+    },
+    "Not reachable: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上：%@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
