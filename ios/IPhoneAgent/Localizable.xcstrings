@@ -7186,6 +7186,16 @@
           }
         }
       }
+    },
+    "When something goes wrong, export all logs here and send the zip to your support contact: it holds the debug log, the runs and any crash reports iOS gave the app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出现问题时，在这里导出全部日志，把压缩包发给技术支持：里面有调试日志、运行记录，以及 iOS 交给本 App 的崩溃报告。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

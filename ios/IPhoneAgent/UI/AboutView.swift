@@ -1,42 +1,13 @@
 import SwiftUI
 
-/// Settings › About: version, source code, acknowledgements, disclaimer and the text logs.
+/// Settings › About: version, acknowledgements, disclaimer and the text logs.
 struct AboutView: View {
     @ObservedObject var app: AppModel
-    static let repo = URL(string: "https://github.com/onehumanbeing/esp32-iphone-agent")!
 
     private var version: String {
         let info = Bundle.main.infoDictionary
         return "\(info?["CFBundleShortVersionString"] as? String ?? "1.0") (\(info?["CFBundleVersion"] as? String ?? "1"))"
     }
-
-    /// A new GitHub issue, prefilled with what we always ask for.
-    private var bugReport: URL {
-        let device = UIDevice.current
-        let body = """
-        **What happened**
-
-
-        **What you expected**
-
-
-        **Steps**
-        1.
-
-        Lan Agent \(version) · \(device.systemName) \(device.systemVersion) · \(Self.model)
-        (Attach the zip from Settings › About › Logs › Export all logs.)
-        """
-        var c = URLComponents(url: Self.repo.appendingPathComponent("issues/new"), resolvingAgainstBaseURL: false)!
-        c.queryItems = [URLQueryItem(name: "labels", value: "bug"), URLQueryItem(name: "body", value: body)]
-        return c.url ?? Self.repo
-    }
-
-    /// The hardware model, e.g. "iPhone17,2".
-    private static let model: String = {
-        var info = utsname()
-        uname(&info)
-        return withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-    }()
 
     var body: some View {
         List {
@@ -62,19 +33,11 @@ struct AboutView: View {
                 Text("No data leaves this iPhone except the requests to the model endpoint you set up and, when you switch them on, to ChatTool and the knowledge base on your computer.")
             }
             Section {
-                Link(destination: bugReport) {
-                    HStack {
-                        SettingsLabel(title: "Report a bug", symbol: "ladybug.fill", color: .red)
-                        Spacer()
-                        Image(systemName: "arrow.up.forward.app").foregroundStyle(.tertiary)
-                    }
-                }
-                .tint(.primary)
                 NavigationLink { LogsView(app: app) } label: {
                     SettingsLabel(title: "Logs", symbol: "text.alignleft", color: .gray)
                 }
             } footer: {
-                Text("Opens a GitHub issue with your version filled in. Attach the zip from Logs › Export all logs: it holds the debug log, the runs and any crash reports iOS gave the app.")
+                Text("When something goes wrong, export all logs here and send the zip to your support contact: it holds the debug log, the runs and any crash reports iOS gave the app.")
             }
         }
         .navigationTitle("About")
