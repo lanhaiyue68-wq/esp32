@@ -47,6 +47,15 @@ import Foundation
         guard let file, let data = try? Data(contentsOf: file) else { return }
         if data.count <= Self.readLimit, let saved = try? JSONDecoder().decode([Lesson].self, from: data) {
             lessons = Array(saved.sorted { $0.updated > $1.updated }.prefix(Self.limit))
+            // Once: drop what failed Freeform runs taught itself about the pen ("the pencil at the bottom right" is the
+            // New Board button). The user's own notes stay.
+            let purge = "lessons.purge.freeform-pen.v1"
+            if !UserDefaults.standard.bool(forKey: purge) {
+                UserDefaults.standard.set(true, forKey: purge)
+                let before = lessons.count
+                lessons.removeAll { $0.auto == true && Self.aboutFreeformPen($0.text) }
+                if lessons.count != before { DebugLog.write("lessons: dropped \(before - lessons.count) self-learned Freeform pen lesson(s)") }
+            }
         } else {
             // Unreadable or far too big: set it aside, so the next save does not silently replace it.
             let aside = file.appendingPathExtension("unreadable-\(Int(clock().timeIntervalSince1970))")
@@ -56,6 +65,12 @@ import Foundation
     }
 
     func clear() { lessons = []; epoch += 1; save() }
+
+    static func aboutFreeformPen(_ text: String) -> Bool {
+        let app = text.contains("无边记") || text.localizedCaseInsensitiveContains("freeform")
+        let tool = ["画笔", "铅笔", "笔", "pen", "pencil"].contains { text.localizedCaseInsensitiveContains($0) }
+        return app && tool
+    }
 
     /// Replace everything learned from one run (`group`, usually the run ID) with `items` (id suffix, text).
     func learn(group: String, task: String, items: [(String, String)], auto: Bool = false) {

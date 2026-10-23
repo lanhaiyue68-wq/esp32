@@ -43,6 +43,23 @@ import UIKit
         XCTAssertLessThan(AgentLoop.inkShare(before: drawn, after: drawn, stroke: stroke) ?? 1, 0.25)  // an old drawing is not new ink
     }
 
+    func testATapThatPickedNoPenIsTheOneBeforeTheBlankStroke() {
+        // traces(44): tap the New Board button, draw, no line; again and again.
+        let tap: JObject = ["action": .str("tap"), "x": .num(856), "y": .num(938)]
+        let stroke: JObject = ["action": .str("circle"), "x": .num(400), "y": .num(475), "r": .num(120)]
+        let noInk: JObject = ["action": .str("no ink")]
+        XCTAssertEqual(AgentLoop.tapBeforeStroke([tap, stroke]), tap)
+        XCTAssertNil(AgentLoop.tapBeforeStroke([tap, stroke, noInk, stroke]))  // no new try between two blank strokes
+        XCTAssertTrue(AgentLoop.noInkReason.contains("New Board"))
+        XCTAssertTrue(AgentLoop.deadTapReason.contains("different button"))
+    }
+
+    func testSelfLearnedFreeformPenLessonsAreTheOnesDropped() {
+        XCTAssertTrue(LessonBook.aboutFreeformPen("无边记画布：先点击底部工具栏的铅笔按钮打开工具面板"))
+        XCTAssertTrue(LessonBook.aboutFreeformPen("Freeform board: tap the bottom-right pencil icon"))
+        XCTAssertFalse(LessonBook.aboutFreeformPen("微信聊天列表：直接点击目标会话"))
+    }
+
     func testTheOwnerTaskAnswerIsWhatToSend() {
         XCTAssertEqual(WatchReport.sendAnswer(#"{"send":"群主是蓝海乐"}"#), "群主是蓝海乐")
         XCTAssertEqual(WatchReport.sendAnswer(#"已完成 {"send":""}"#), "")

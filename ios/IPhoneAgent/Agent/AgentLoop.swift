@@ -105,6 +105,9 @@ extension Pointer: Gestures {}
     private(set) var typedInto: CGPoint?
     /// Whether this run's strokes have left a line yet; nil until one is checked.
     private var inkSeen: Bool?
+    /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
+    /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
+    private var deadTaps: [JObject] = []
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -302,8 +305,23 @@ extension Pointer: Gestures {}
     }
 
     static let noInkReason = "The stroke left no line on the canvas: no drawing tool is selected, so the drag only moved the "
-        + "canvas. Select a pen first (in 无边记/Freeform: the pen or pencil in the toolbar at the bottom, then a pen in the "
-        + "panel that opens; it stands raised when selected), then draw again. It is not done until lines show."
+        + "canvas. In 无边记/Freeform the pen is the FIRST icon (a pen nib in a circle) of the rounded toolbar at the bottom "
+        + "middle, left of 字 and the paperclip. The lone square-with-a-pencil button at the bottom right is New Board, not "
+        + "the pen: do not tap it. Tap the pen icon, then draw again. It is not done until lines show."
+    static let deadTapReason = "Refused: tapping this spot already did nothing twice (the next stroke still left no line). It is "
+        + "not the control you want. Look at the screen again and pick a different button."
+
+    /// The tap since the previous stroke (the try at picking a tool), if there was one.
+    static func tapBeforeStroke(_ steps: [JObject]) -> JObject? {
+        for s in steps.reversed() {
+            switch s["action"]?.str ?? "" {
+            case "tap": return s
+            case "no ink": return nil  // two strokes with no tap between: no tool was tried
+            default: continue
+            }
+        }
+        return nil
+    }
 
     /// The points a stroke goes through, 0-1 of the screen, for checking it left a line.
     private func strokePoints(_ act: JObject) -> [CGPoint] {
@@ -375,7 +393,7 @@ extension Pointer: Gestures {}
 
     func run() async {
         var failures = 0
-        (pasteHopOff, lastTap, typedInto, inkSeen) = (false, nil, nil, nil)
+        (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps) = (false, nil, nil, nil, [])
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -565,6 +583,10 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(refused)])  // never typed
                     return false
                 }
+                if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
+                    return false
+                }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used
@@ -600,6 +622,7 @@ extension Pointer: Gestures {}
                 if let share = Self.inkShare(before: seen, after: screen?.frame, stroke: strokePoints(act)) {
                     if share < 0.25 {
                         inkSeen = inkSeen ?? false
+                        if let tap = Self.tapBeforeStroke(steps) { deadTaps.append(tap) }  // that tap picked no pen
                         record(screen?.frame, ["action": .str("no ink"), "reason": .str(Self.noInkReason)])
                     } else {
                         inkSeen = true

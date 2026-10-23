@@ -245,7 +245,10 @@ extension AppModel {
     /// Self-learning after every run: the planner model reviews the run's own steps and keeps up to three lessons
     /// for similar tasks (LessonBook), shown in the trace as a "learned" record.
     func learnFromRun(_ run: String, task: String, steps: [JObject]) async {
+        // Only from a run that got there: after a failed one the model can only guess the right way, and those guesses
+        // ("tap the pencil at the bottom right") taught the next runs to repeat the mistake (traces(44)).
         guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty,
+              steps.last?["action"]?.str == "done",
               steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }),
               LessonBook.worthReviewing(steps) else { return }
         let epoch = lessons.epoch  // a clear, the switch or a correction while the model answers wins over the reply
