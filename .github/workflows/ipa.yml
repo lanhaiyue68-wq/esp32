@@ -50,6 +50,11 @@ jobs:
           set -o pipefail
           sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
           echo "simulator: $sim"
+          status=0
           xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
             -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build-sim \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -150
+            CODE_SIGNING_ALLOWED=NO > test.log 2>&1 || status=$?
+          tail -40 test.log
+          echo "---- failures (assertion lines kept even when the log is long)"
+          grep -E "error: |Test Case .* failed|Failing tests:|^\s+[A-Za-z0-9]+Tests\.test" test.log | head -80 || true
+          exit $status

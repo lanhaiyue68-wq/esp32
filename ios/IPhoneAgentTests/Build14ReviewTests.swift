@@ -98,12 +98,14 @@ import XCTest
 
     func testTheLeavingMoveIsRefusedWhenItClosesTheCircle() async {
         let agent = await taps(["264 225", "57 89", "264 225", "57 89"], steps: 4)  // in, back, in, back
-        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "loop"])  // stays in the chat
+        // stays in the chat; the run then ends on its step limit ("fail")
+        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "loop", "fail"])
     }
 
     func testMovingOnEndsTheGuard() async {
         let agent = await taps(["57 89", "264 225", "57 89", "264 225", "450 920", "57 89"], steps: 6)
-        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "tap", "tap", "tap"])  // a new target: the circle is over
+        // a new target: the circle is over and nothing is refused; the run then ends on its step limit ("fail")
+        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "tap", "tap", "tap", "fail"])
     }
 
     func testTheUsersNoteReplacesTheModelsGuessesAboutThatKindOfTask() {
