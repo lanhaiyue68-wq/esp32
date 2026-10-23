@@ -70,6 +70,22 @@ import UIKit
     let probe = TouchProbe()
     private var lastStatus = ""
     private var lastTick = now()
+    private var notStreamingSince: Double?
+
+    /// The board's AirPlay state into feed.mirroring. "connected" is the session with no video for a few seconds (a
+    /// still screen, a busy Wi-Fi): firmware before v30 said so after 3 s, flipping back and forth, and every run
+    /// stopped as if mirroring were gone (logs(16)). It counts as lost after 10 s of it, or at once when the session
+    /// itself is gone ("idle").
+    func noteMirroring(_ ap: String?) {
+        if ap == "streaming" { (notStreamingSince, feed.mirroring) = (nil, true); return }
+        if ap == "connected", feed.mirroring {
+            let since = notStreamingSince ?? now()
+            notStreamingSince = since
+            if now() - since < 10 { return }
+        }
+        notStreamingSince = nil
+        feed.mirroring = false
+    }
     private var lastStreamLog = 0.0
     private var timers: [Task<Void, Never>] = []
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -138,7 +154,7 @@ import UIKit
         board.onVideo = { [weak self] in self?.feed.receive($0) }
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
-            self?.feed.mirroring = s.ap == "streaming"
+            self?.noteMirroring(s.ap)
             self?.feed.tcp.update(ip: s.ip, token: self?.board.net?.video_token, boardHasClient: s.tcp.map { $0 > 0 },
                                   boardResumes: (s.fw.flatMap { Int($0.dropFirst()) } ?? 0) >= 29)
             self?.feed.status(s)
