@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Touch-like gestures on the phone, built from relative mouse moves. Port of phone.py.
 ///
@@ -354,12 +355,18 @@ import Foundation
         try await device.send("scroll \(lines) 0")
     }
 
-    /// The board only has US keys. Chinese (simplified or traditional: whichever pinyin keyboard the phone has on)
-    /// goes in as toneless pinyin left open for the actor to inspect and select the exact candidate. A run with
-    /// Latin letters goes in between two Caps Lock presses, which switch the pinyin keyboard to English and back.
-    /// Assumes the phone's keyboard is a pinyin keyboard in Chinese mode, and leaves it that way.
+    /// The board only has US keys. Text they cannot type (Chinese, full-width punctuation, emoji) is pasted: this
+    /// app puts it on the pasteboard and the board presses Cmd+V, one step for the whole text. Picking pinyin
+    /// candidates phrase by phrase took a minute for a short reply (traces(38)); iOS takes a keyboard paste as the
+    /// user's own, so no paste prompt. It replaces what was on the clipboard. Plain ASCII is still typed.
     func type(_ text: String) async throws {
         drawChain = false
+        if Self.pastes(text) {
+            UIPasteboard.general.string = text
+            try await device.send("key cmd+v")
+            try await Task.sleep(nanoseconds: 300_000_000)  // let the field take it before the next look
+            return
+        }
         let runs = Self.typingRuns(text)
         // Validate every run before the first side effect; never silently skip an emoji or unsupported script.
         for run in runs {
@@ -387,6 +394,11 @@ import Foundation
                 try await sendKeyboard(run.text)
             }
         }
+    }
+
+    /// True when some character is not on a US keyboard.
+    static func pastes(_ text: String) -> Bool {
+        !text.unicodeScalars.allSatisfy { (32...126).contains($0.value) || $0 == "\n" || $0 == "\t" }
     }
 
     static func keyboardChunks(_ text: String) throws -> [String] {

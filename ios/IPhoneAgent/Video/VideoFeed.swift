@@ -97,6 +97,11 @@ extension ScreenSource {
     private(set) var updated = 0.0
     /// When the board received the shown frame, in local time (≈; see `boardClock`).
     private(set) var capturedAt = 0.0
+    /// When the board last forwarded a live (not snapshot) unit: the stream is flowing on its link.
+    private var liveUnitAt = -Double.infinity
+    /// The stream is flowing and whole: a frame after an action is on its way. A snapshot would resend the whole
+    /// GOP (MBs) ahead of it on the same link and put the picture a minute behind (traces(38): 73 s, then timeouts).
+    private var flowing: Bool { !broken && now() - liveUnitAt < 2 }
     /// A decode error or a lost chunk since the last good frame: the shown frame is stale until the next IDR.
     private(set) var broken = false
     private var clockOffset: Double?  // local s − board s, the smallest seen (≈ the link latency)
@@ -217,7 +222,7 @@ extension ScreenSource {
         if assembler.drops > dropsBefore { metrics?.videoDrops(assembler.drops - dropsBefore); broken = true }
         if assembler.restarts > restartsBefore { broken = true }  // waits for the next key unit; nothing was lost
         guard let unit else { return }
-        if !unit.snap { boardClock(ms: Int(unit.boardMs)) }  // snap units are resent late: their ages say nothing
+        if !unit.snap { boardClock(ms: Int(unit.boardMs)); liveUnitAt = now() }  // snap units are resent late: their ages say nothing
         if unit.idr { metrics?.idrSeen() }
         decoder.queue.async { [decoder] in decoder.decode(unit) }
     }
@@ -226,7 +231,7 @@ extension ScreenSource {
     /// a decode still in the queue nor its cached GOP (refreshDecoder would replay it as if it were current).
     func resetStream() {
         assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
-        decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false
+        decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false; liveUnitAt = -.infinity
         generation += 1
         let g = generation
         decoder.queue.async { [decoder] in decoder.reset(generation: g) }
@@ -294,6 +299,7 @@ extension ScreenSource {
             if usable() { return "live" }
             if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
             if await refreshDecoder("frame not current") { return "cached GOP" }
+            if flowing, await recovered(within: 8) { return "live (caught up)" }
         }
         DebugLog.write(String(format: "frame: no current frame; asking the board for a snapshot (up to %.0f s)", snapLimit.map { min(snapTimeout, $0) } ?? snapTimeout))
         do {
@@ -358,6 +364,10 @@ extension ScreenSource {
                 if await newer(than: since, timeout: 1.5) { return }
                 if usable(after: since) { return DebugLog.write("frame: latest board image verified unchanged") }
                 if await refreshDecoder("stale after an action"), usable(after: since) { return }
+                if flowing {
+                    if await newer(than: since, timeout: 4) { return }
+                    return DebugLog.write("frame: no newer frame on a flowing stream; the screen did not change")
+                }
                 DebugLog.write("frame: stream stale (waiting for an IDR); snapping")
                 try await snap()
             }

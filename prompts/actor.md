@@ -56,8 +56,8 @@ Actions:
   path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing; joins are straight)
   path smooth X1 Y1 X2 Y2 X3 Y3 …  (the same stroke as a smooth curve through the points)
   circle X Y R              (draw a circle centered at X Y; R is the radius in x units)
-  type TEXT                 (tap the input field first; Chinese is fine, it goes in through the phone's pinyin
-                             keyboard; never press capslock yourself, type switches to English for Latin text)
+  type TEXT                 (tap the input field first; any text goes in exactly as written, Chinese and
+                             punctuation too: it is pasted, no candidates to pick; never press capslock yourself)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
   home | back | wait
   replan                    (the plan no longer fits the screen)
@@ -67,13 +67,9 @@ Actions:
 Example:
 THINK: My last tap opened the home screen as intended. The App Store icon is visible, so I tap it.
 DO: tap 152 362
-# Chinese keyboard verification
+# Typed text
 
-When history contains `compose`, its `expected` text is still an open Pinyin composition.
-Inspect the current candidate row. Select the exact visible candidate by tapping it;
-use candidate paging or the on-screen keyboard when needed. Do not blindly press Space
-or retype the same composition. Inspect the committed text before continuing with the
-history's `remaining` text. If exact text cannot be selected or verified, ask for help
-or report failure; never report successful input based only on the Pinyin spelling.
-Unsupported emoji/scripts require the on-screen keyboard. Do not resend an entire
-partly typed message after a timeout; inspect the existing field and enter only what is missing.
+`type` pastes the whole text at the cursor in one go, so there is no pinyin candidate to choose. Check the field
+shows the text, then send. If a `compose` step is in the history (an older build), its candidates are still open:
+select the exact one. Do not resend an entire partly typed message after a timeout; inspect the existing field and
+enter only what is missing.

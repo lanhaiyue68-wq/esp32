@@ -87,6 +87,9 @@ extension Pointer: Gestures {}
     /// Reference text the user chose for this run (WeChat watch: the selected knowledge files), appended to the
     /// planner and actor prompts. Empty for ordinary runs.
     var reference = ""
+    /// A fixed plan (WeChat watch's open and send tasks, whose steps never change): used as is, without the
+    /// planner's call. Empty for ordinary runs.
+    var presetPlan = ""
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -327,7 +330,10 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         do {
-            try await replan()
+            if presetPlan.isEmpty { try await replan() } else {
+                plan = presetPlan
+                record(nil, ["action": .str("plan"), "plan": .str(presetPlan), "plan_zh": .str(""), "think_s": .num(0)])
+            }
             for _ in 0..<maxSteps {
                 do {
                     if try await step() {

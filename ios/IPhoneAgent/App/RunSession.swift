@@ -14,7 +14,7 @@ extension AppModel {
     /// reviewed run win over the intent's.
     /// `reference` and `outgoing` come from WeChat watch (knowledge files, the privacy check); other runs clear them.
     func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
-             reference: String = "", outgoing: ((String) -> String?)? = nil) async {
+             reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "") async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -23,6 +23,7 @@ extension AppModel {
         agent.hints = hints.flatMap { $0.isEmpty ? nil : $0 } ?? intent?.checklist ?? []
         agent.reference = reference
         agent.outgoingGuard = outgoing
+        agent.presetPlan = plan
         await startAgent(task)
     }
 

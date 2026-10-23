@@ -74,6 +74,19 @@ import XCTest
         XCTAssertEqual(WatchReport.new(scrolled, after: before).map(\.text), ["大家好", "@蓝 你在不在"])
     }
 
+    func testAChatAlreadyOpenIsNotOpenedAgain() {
+        // traces(38): every check ran an agent just to find it was in the group already (~10 s of thinking).
+        let read = WatchReport.screen(#"{"title":"虾笔刀陪跑学员元群(90)","group":true,"messages":[{"sender":"蓝海乐","text":"@蓝 在不在"}]}"#)
+        XCTAssertEqual(read?.title, "虾笔刀陪跑学员元群(90)")
+        XCTAssertTrue(WatchReport.isChat("虾笔刀陪跑学员元群(90)", "虾笔刀陪跑学员元群"))
+        XCTAssertTrue(WatchReport.isChat("虾笔刀陪跑学员…", "虾笔刀陪跑学员元群"))  // a long name cut short
+        XCTAssertFalse(WatchReport.isChat("蓝海乐", "虾笔刀陪跑学员元群"))
+        XCTAssertFalse(WatchReport.isChat("", "虾笔刀陪跑学员元群"))  // not a chat screen
+        XCTAssertEqual(WatchReport.screen(#"{"group":false,"messages":[]}"#)?.title, "")
+        XCTAssertTrue(WatchSettings.sendPlan(chat: "客户群", back: false).contains("Tap 发送"))
+        XCTAssertTrue(WatchSettings.openPlan(chat: "客户群").contains("done right away"))
+    }
+
     func testTheFirstLookKeepsWhatNobodyAnsweredYet() {
         // traces(36): "@蓝 在不在" was sent right after the watch started, before opening the chat (30 s) let it look.
         let line = { (sender: String, text: String, mine: Bool) in WatchReport.Line(sender: sender, text: text, mine: mine) }
@@ -93,7 +106,8 @@ import XCTest
         XCTAssertTrue(prompt.contains("蓝海乐：@蓝 群主是谁"))
         XCTAssertTrue(prompt.contains("群主是王老师"))
         XCTAssertTrue(prompt.contains("“@蓝”"))
-        XCTAssertTrue(prompt.contains("@发言人"))
+        XCTAssertTrue(prompt.contains("reply 开头不要@人"))  // traces(38): replies start with what they say, no @
+        XCTAssertFalse(prompt.contains("@发言人"))
         let bare = WatchSettings.composePrompt(chat: "张三", group: false, recent: lines, due: due, r: rules(), knowledge: "", owner: false)
         XCTAssertTrue(bare.contains("用户没有给知识库"))
         XCTAssertFalse(bare.contains("@发言人"))

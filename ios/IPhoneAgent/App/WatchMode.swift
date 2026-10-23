@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// WeChat watch (守候微信): stay on WeChat, read new messages and answer the ones that call for it. Waiting costs
 /// nothing: the mirrored screen is compared on this iPhone every 2 s and the model is only asked when WeChat changed
@@ -119,6 +120,26 @@ enum WatchSettings {
     }
 
     /// Step 5 (and ChatTool's replies): type the text in the chat and send it.
+    /// The steps of openTask with one chat: fixed, so no planner call (~4 s of thinking per check).
+    static func openPlan(chat: String) -> String {
+        """
+        1. If the screen already shows the chat “\(chat)” (its name at the top), done right away.
+        2. Otherwise open WeChat, go to the chat list (bottom tab 微信) and tap “\(chat)”; if it is not listed, use the search at the top.
+        3. When the chat “\(chat)” is open, done.
+        """
+    }
+
+    /// The steps of sendTask: fixed, so no planner call.
+    static func sendPlan(chat: String, back: Bool) -> String {
+        """
+        1. If the screen is not the chat “\(chat)”, go back to the chat list and open it (search at the top if it is not listed).
+        2. Tap the input box at the bottom so the keyboard shows.
+        3. type the message exactly as the goal gives it (it is pasted in one go).
+        4. Tap 发送 to send it.
+        5. When it shows as a green bubble, \(back ? "go back to the chat list, then " : "")done.
+        """
+    }
+
     static func sendTask(chat: String, text: String, back: Bool = false) -> String {
         """
         在微信会话“\(chat)”里发一条消息。如果现在不在这个会话里，先回到聊天列表找到它并打开（列表里没有就用顶部搜索）。
@@ -134,8 +155,8 @@ enum WatchSettings {
         return """
         你在看一张微信聊天界面的截图，会话名是“\(chat)”。\(mine)
         从上到下列出截图里能看清的每条消息（最多 20 条），只输出一行 JSON，不要别的文字：
-        {"group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
-        规则：group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
+        {"title":"顶部标题","group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
+        规则：title 照抄顶部的会话名（不要括号里的人数）；这不是微信聊天界面就写 ""，messages 写 []。group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
         左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，
         语音写 [语音]，文件写 [文件]。气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
         时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
@@ -166,7 +187,7 @@ enum WatchSettings {
         \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
         \(tasks)
-        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。\(group ? "在群里用 reply 时，开头写“@发言人 ”。" : "")
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
         不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
         只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在微信里执行的操作，不需要就留空"}
         """
@@ -232,7 +253,7 @@ struct ReadMessage: Codable, Equatable {
 
 enum WatchReport {
     struct Line: Equatable { var sender: String; var text: String; var mine: Bool }
-    struct Screen: Equatable { var group: Bool; var lines: [Line] }
+    struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line] }
 
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
     static func object(_ reply: String) -> Data? {
@@ -243,7 +264,7 @@ enum WatchReport {
     /// Step 2's reply as lines; nil when it is not the expected JSON.
     static func screen(_ reply: String) -> Screen? {
         struct Row: Decodable { var sender: String?; var text: String?; var mine: Bool? }
-        struct Box: Decodable { var group: Bool?; var messages: [Row]? }
+        struct Box: Decodable { var title: String?; var group: Bool?; var messages: [Row]? }
         guard let data = object(reply), let box = try? JSONDecoder().decode(Box.self, from: data), let rows = box.messages else { return nil }
         let lines = rows.compactMap { row -> Line? in
             let text = (row.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -251,7 +272,18 @@ enum WatchReport {
             let mine = row.mine ?? false
             return Line(sender: mine ? "我" : (row.sender ?? "").trimmingCharacters(in: .whitespaces), text: text, mine: mine)
         }
-        return Screen(group: box.group ?? false, lines: lines)
+        return Screen(title: (box.title ?? "").trimmingCharacters(in: .whitespaces), group: box.group ?? false, lines: lines)
+    }
+
+    /// True when a read title names this chat: WeChat cuts long names with "…" and shows a group's head count.
+    static func isChat(_ title: String, _ chat: String) -> Bool {
+        func bare(_ s: String) -> String {
+            var t = s.filter { !$0.isWhitespace }
+            if let open = t.lastIndex(where: { $0 == "(" || $0 == "（" }), t.hasSuffix(")") || t.hasSuffix("）") { t = String(t[..<open]) }
+            return t.trimmingCharacters(in: CharacterSet(charactersIn: "…."))
+        }
+        let t = bare(title), c = bare(chat)
+        return t.count >= 2 && (t == c || c.hasPrefix(t) || t.hasPrefix(c))
     }
 
     /// Step 1's answer in multi-chat mode: the chat it opened, or nil when nothing was unread.
@@ -535,9 +567,17 @@ extension AppModel {
     /// One check, in small steps (see WatchSettings): open, read, keep what is new, decide in code, write, send.
     private func watchCheck() async -> Bool {
         let rules = WatchSettings.rules
-        guard let opened = await watchRun(WatchSettings.openTask(rules)) else { return false }
-        guard let chat = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
-        guard let screen = await readChat(chat) else { return false }
+        let chat: String, screen: WatchReport.Screen
+        if rules.single, UIApplication.shared.applicationState != .active, let look = await readChat(rules.targets[0]),
+           WatchReport.isChat(look.title, rules.targets[0]) {
+            (chat, screen) = (rules.targets[0], look)  // still in the chat: no agent run to open it (~10 s saved)
+        } else {
+            let plan = rules.single ? WatchSettings.openPlan(chat: rules.targets[0]) : ""
+            guard let opened = await watchRun(WatchSettings.openTask(rules), plan: plan) else { return false }
+            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
+            guard let look = await readChat(open) else { return false }
+            (chat, screen) = (open, look)
+        }
 
         let firstLook = watchLast[chat] == nil, before = watchLast[chat]
         let fresh = firstLook ? WatchReport.unanswered(screen.lines) : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
@@ -573,7 +613,8 @@ extension AppModel {
         } else if let text = reply {
             if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                 DebugLog.write("watch: reply withheld: \(why)")
-            } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single)) != nil {
+            } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single),
+                                     plan: WatchSettings.sendPlan(chat: chat, back: !rules.single)) != nil {
                 if let i = read.indices.last { read[i].replied = text }
             } else { sent = false }
         } else if !rules.single {
@@ -644,10 +685,10 @@ extension AppModel {
     }
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.
-    private func watchRun(_ task: String, reference: String = "") async -> String? {
+    private func watchRun(_ task: String, reference: String = "", plan: String = "") async -> String? {
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
-        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) })
+        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan)
         while agent.running || startingAgent {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }

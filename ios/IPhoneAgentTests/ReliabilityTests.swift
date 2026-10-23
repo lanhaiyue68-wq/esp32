@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import IPhoneAgent
 
 @MainActor final class ReliabilityTests: XCTestCase {
@@ -43,20 +44,16 @@ import XCTest
         XCTAssertEqual(board.lines.map { $0.split(separator: " ")[1] }, ["type", "abort"])
     }
 
-    func testUnsupportedTextFailsBeforeAnyKeyboardSideEffect() async {
+    func testTextAKeyboardCannotTypeIsPastedInOneStep() async throws {
+        // traces(38): picking pinyin candidates phrase by phrase took a minute for a short reply.
         let device = FakeDevice()
         let pointer = Pointer(device: device, calibrationFile: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
-        do { try await pointer.type("hello😀"); XCTFail("unsupported text must fail") } catch {}
-        XCTAssertEqual(device.sent, [])
-    }
-
-    func testChineseLeavesCompositionOpenForCandidateInspection() async {
-        let device = FakeDevice()
-        let pointer = Pointer(device: device, calibrationFile: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
-        do { try await pointer.type("你好"); XCTFail("must inspect candidates") }
-        catch let input as InputNeedsVerification { XCTAssertEqual(input.expected, "你好"); XCTAssertEqual(input.remaining, "") }
-        catch { XCTFail("unexpected error: \(error)") }
-        XCTAssertEqual(device.sent, ["type nihao"])
+        try await pointer.type("在的，有什么事吗？")
+        XCTAssertEqual(device.sent, ["key cmd+v"])
+        XCTAssertEqual(UIPasteboard.general.string, "在的，有什么事吗？")
+        try await pointer.type("hello😀")
+        XCTAssertEqual(device.sent, ["key cmd+v", "key cmd+v"])
+        XCTAssertTrue(Pointer.pastes("你好") && Pointer.pastes("ok😀") && !Pointer.pastes("Clock 7:00"))
     }
 
     func testDrawingTravelBetweenStrokesCountsTowardRehomeBudget() async throws {
