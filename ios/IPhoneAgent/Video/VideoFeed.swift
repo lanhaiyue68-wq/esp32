@@ -155,6 +155,13 @@ extension ScreenSource {
             if streamOn { try await stream(false) }
         } else {
             try await stream(true)
+            if metrics?.board?.sta == 1, metrics?.board?.tcp == 0 {
+                // The board is on Wi-Fi but this phone's video link is not (it is reconnecting, see VideoTCP.update):
+                // until it is, the video crawls over BLE a minute behind and the check below fails (logs(11)).
+                let deadline = now() + 8
+                while metrics?.board?.tcp == 0, now() < deadline { try await Task.sleep(nanoseconds: 300_000_000) }
+                DebugLog.write("start: Wi-Fi video \(metrics?.board?.tcp == 0 ? "still not back after 8 s" : "back")")
+            }
         }
         do {
             return try await currentFrame(wait: wait, snapLimit: snapLimit)
@@ -406,11 +413,34 @@ final class VideoTCP: @unchecked Sendable {
     private var host: String?
     private var token: String?
     private var failedAt = Date.distantPast
+    private var startedAt: Date?    // when `conn` was opened
+    private var readyAt: Date?      // when `conn` came up
+    private var boardLostAt: Date?  // since when the board has said it has no Wi-Fi client while `conn` is up
 
     /// The board's IP from each status (about once a second): connects, or reconnects after a drop or a new IP.
-    func update(ip: String?, token: String? = nil) {
+    /// `boardHasClient` is the board's own view (status `tcp`). It saying 0 for 2 s while this side has held a
+    /// connection for a while means the socket is half-open (the phone's Wi-Fi dropped and came back): it never
+    /// delivers another byte and nothing here notices, so the video went over BLE at a third of the rate it needs,
+    /// a minute behind, and every start failed until the app was relaunched (esp32-agent-logs(11)). Start over.
+    func update(ip: String?, token: String? = nil, boardHasClient: Bool? = nil) {
         queue.async {
             if self.token != token { self.conn?.cancel(); self.conn = nil; self.host = nil; self.token = token }
+            if boardHasClient == false, let c = self.conn, let ready = self.readyAt, Date().timeIntervalSince(ready) > 4 {
+                let since = self.boardLostAt ?? Date()
+                self.boardLostAt = since
+                if Date().timeIntervalSince(since) >= 2 {
+                    DebugLog.write("video tcp: the board has no connection from this phone; reconnecting")
+                    c.cancel()
+                    (self.conn, self.host, self.readyAt, self.boardLostAt) = (nil, nil, nil, nil)
+                }
+            } else {
+                self.boardLostAt = nil
+            }
+            if self.readyAt == nil, let c = self.conn, let started = self.startedAt, Date().timeIntervalSince(started) > 8 {
+                DebugLog.write("video tcp: no connection after 8 s; trying again")  // stuck connecting after a network change
+                c.cancel()
+                (self.conn, self.host) = (nil, nil)
+            }
             self.connect(ip)
         }
     }
@@ -424,7 +454,7 @@ final class VideoTCP: @unchecked Sendable {
         if ip == host, conn != nil { return }
         if conn == nil, Date().timeIntervalSince(failedAt) < 2 { return }  // the phone may not be on that network
         conn?.cancel()
-        host = ip
+        (host, startedAt, readyAt, boardLostAt) = (ip, Date(), nil, nil)
         let c = NWConnection(host: NWEndpoint.Host(ip), port: 7001, using: .tcp)
         c.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -432,6 +462,7 @@ final class VideoTCP: @unchecked Sendable {
                 c.send(content: Data((token + "\n").utf8), completion: .contentProcessed { [weak self] error in
                     if error != nil { self?.drop(c) }
                 })
+                if self?.conn === c { self?.readyAt = Date() }
                 DebugLog.write("video tcp: connected to \(ip):7001")
             case .failed(let error): DebugLog.write("video tcp: failed: \(error)"); self?.drop(c)
             case .waiting(let error): DebugLog.write("video tcp: waiting: \(error)"); self?.drop(c)

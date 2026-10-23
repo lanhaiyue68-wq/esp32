@@ -11,7 +11,7 @@ extension AppModel {
     /// any more: an iPhone ignores it from a keyboard (tested on iOS 26), so it only cost two seconds.
     /// The model is never asked to do this.
     func leaveApp() async -> Bool {
-        for method in ["home swipe"] {
+        for method in ["home swipe", "home swipe again"] {  // one flick sometimes does not take (logs(11))
             if inBackground { return true }
             do {
                 switch method {

@@ -557,7 +557,8 @@ extension AppModel {
                     changedAt = nil
                 }
                 let due = t - lastCheck >= Double(WatchSettings.intervalMinutes) * 60
-                let retry = !watchRetries.isEmpty && t - lastCheck >= 20  // a reply that did not go out
+                // a reply that did not go out, or a check that did not finish: again soon, not at the next interval
+                let retry = (!watchRetries.isEmpty || failures > 0) && t - lastCheck >= 20
                 if due || retry || (moved && t - lastCheck >= 15) {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
@@ -565,10 +566,10 @@ extension AppModel {
                     let ok = await watchCheck()
                     guard watching else { break }
                     failures = ok ? 0 : failures + 1
-                    if failures >= 3 {
+                    if failures >= 4 {
                         notifier.post(.failed, title: String(localized: "WeChat watch stopped"),
-                                      body: String(localized: "Three checks in a row did not finish."), run: runID)
-                        stopWatch(String(localized: "three checks in a row did not finish"))
+                                      body: String(localized: "Four checks in a row did not finish."), run: runID)
+                        stopWatch(String(localized: "four checks in a row did not finish"))
                         break
                     }
                     (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
