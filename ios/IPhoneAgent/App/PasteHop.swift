@@ -9,11 +9,13 @@ extension AppModel {
         if UIApplication.shared.applicationState == .active { return Pasteboard.put(text) ? .filled : .refused }
         pasteHopping = true
         defer { pasteHopping = false }
-        do { try await pointer.previousApp() } catch { return .lost }
-        guard await waitForState(.active, within: 3) else {
-            DebugLog.write("paste hop: Lan Agent did not come to the front")
-            return .lost
+        var front = false
+        for attempt in 1...2 where !front {
+            do { try await pointer.previousApp() } catch { return .lost }
+            front = await waitForState(.active, within: 2.5)
+            if !front { DebugLog.write("paste hop: Lan Agent did not come to the front (try \(attempt))") }
         }
+        guard front else { return .lost }
         let filled = Pasteboard.put(text)
         guard let wechat = URL(string: "weixin://"), await UIApplication.shared.open(wechat),
               await waitForState(.background, within: 3) else {

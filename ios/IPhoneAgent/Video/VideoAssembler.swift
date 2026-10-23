@@ -31,11 +31,14 @@ struct VideoAssembler {
     private(set) var waitingForKey = true  // until the first IDR/CONFIG
     private var lastSeq: UInt16?
     private var current: AccessUnit?
+    /// The board time of the last whole live unit handed out.
+    private(set) var lastLiveMs: UInt32?
 
     mutating func reset() {
         lastSeq = nil
         current = nil
         waitingForKey = true
+        lastLiveMs = nil
     }
 
     /// Feed one notify; returns a completed access unit, if this chunk finished one.
@@ -61,11 +64,15 @@ struct VideoAssembler {
         }
         if flags.contains(.start) {
             let key = flags.contains(.idr) || flags.contains(.config)
-            if waitingForKey && !key { current = nil; return nil }
-            waitingForKey = false
             guard payload.count >= 4 else { current = nil; return nil }
             let p = [UInt8](payload.prefix(4))
             let ms = UInt32(p[0]) | UInt32(p[1]) << 8 | UInt32(p[2]) << 16 | UInt32(p[3]) << 24
+            if waitingForKey && !key {
+                // After a gap: a board that resumed this stream (firmware v29; VideoTCP says where it got to) starts
+                // again at the last unit already here, so nothing between is missing. Anything newer cannot decode.
+                guard !flags.contains(.snap), let last = lastLiveMs, ms <= last else { current = nil; return nil }
+            }
+            waitingForKey = false
             payload = payload.dropFirst(4)
             current = AccessUnit(data: Data(payload), idr: flags.contains(.idr), config: flags.contains(.config),
                                  snap: flags.contains(.snap), boardMs: ms)
@@ -76,6 +83,7 @@ struct VideoAssembler {
         }
         guard flags.contains(.end) else { return nil }
         defer { current = nil }
+        if let unit = current, !unit.snap, !unit.config { lastLiveMs = unit.boardMs }
         return current
     }
 }

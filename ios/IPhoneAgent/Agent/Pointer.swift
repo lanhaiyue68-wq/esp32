@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// Touch-like gestures on the phone, built from relative mouse moves. Port of phone.py.
 ///
@@ -371,7 +372,7 @@ import Foundation
             try Task.checkCancellation()
             switch run.kind {
             case .chinese:
-                let phrase = String(run.text.prefix(6))  // a short phrase is more often offered whole as one candidate
+                let phrase = Self.firstWord(run.text)
                 try await sendKeyboard(Self.pinyin(phrase))
                 try await Task.sleep(nanoseconds: 400_000_000)  // let the candidates come up
                 let remaining = String(run.text.dropFirst(phrase.count)) + runs.dropFirst(index + 1).map { $0.text }.joined()
@@ -436,6 +437,20 @@ import Foundation
         }
     }
 
+    /// The first word of a Chinese run (on-device segmentation), at most 4 characters: a pinyin keyboard offers a
+    /// whole word as one candidate, but not "这个我不太确" (logs(15): stuck, pinyin piling up in the field).
+    static func firstWord(_ han: String) -> String {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = han
+        tokenizer.setLanguage(.simplifiedChinese)
+        var word = ""
+        tokenizer.enumerateTokens(in: han.startIndex..<han.endIndex) { range, _ in
+            word = String(han[range])
+            return false
+        }
+        return String((word.isEmpty ? han : word).prefix(4))
+    }
+
     static func isHan(_ s: Unicode.Scalar) -> Bool {
         switch s.value {
         case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x2FA1F: return true
@@ -472,8 +487,15 @@ import Foundation
     }
     /// The swipe right along the home bar: back to the app used before this one (iOS app switching).
     func previousApp() async throws {
-        try await swipe(0.2, 0.995, 0.85, 0.995, hold: false)
-        pos = nil  // the edge may have clamped the pointer: re-home before the next move
+        // From the very bottom edge: coming down from the top after a re-home, the pointer stopped a little above the
+        // home bar and the swipe only slid inside WeChat (logs(15)). An extra move down pins it against the edge.
+        drawChain = false
+        try await point(0.2, 1)
+        try await device.send("move 0 80")
+        try await device.send("press")
+        try await device.send("move \(Int(0.65 * Double(span?.w ?? 400))) 0")
+        try await device.send("release")
+        pos = nil  // the edge clamped the pointer: re-home before the next move
     }
 
     private func dx(_ x: Double) -> Int { Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven)) }

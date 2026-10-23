@@ -229,6 +229,15 @@ extension ScreenSource {
         if assembler.drops > dropsBefore { metrics?.videoDrops(assembler.drops - dropsBefore); broken = true }
         if assembler.restarts > restartsBefore { broken = true }  // waits for the next key unit; nothing was lost
         guard let unit else { return }
+        if unit.config {
+            fed.removeAll(); fedOrder.removeAll()  // a decoder starting over takes everything after it
+        } else if !unit.snap {
+            let key = UInt64(unit.boardMs) << 32 | UInt64(unit.data.count)
+            if fed.contains(key) { return }  // resent after a reconnect (a resumed stream starts at the last one): decoded
+            fed.insert(key); fedOrder.append(key)
+            if fedOrder.count > 512 { fed.remove(fedOrder.removeFirst()) }
+            tcp.fed(unit.boardMs)
+        }
         if !unit.snap { boardClock(ms: Int(unit.boardMs)); liveUnitAt = now() }  // snap units are resent late: their ages say nothing
         if unit.idr { metrics?.idrSeen() }
         decoder.queue.async { [decoder] in decoder.decode(unit) }
@@ -239,6 +248,7 @@ extension ScreenSource {
     func resetStream() {
         assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
         decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false; liveUnitAt = -.infinity
+        fed.removeAll(); fedOrder.removeAll(); tcp.fed(0)
         generation += 1
         let g = generation
         decoder.queue.async { [decoder] in decoder.reset(generation: g) }
@@ -246,6 +256,8 @@ extension ScreenSource {
 
     /// Bumped by resetStream; a decoded frame from an earlier stream is dropped in publish.
     private var generation = 0
+    /// Live units decoded lately (board time and size), so a resumed stream's first, repeated units are skipped.
+    private var fed: Set<UInt64> = [], fedOrder: [UInt64] = []
 
     /// A board timestamp (status `up`, or a streamed unit) just arrived: keep the smallest offset.
     func boardClock(ms: Int) {
@@ -414,6 +426,17 @@ final class VideoTCP: @unchecked Sendable {
     private var token: String?
     private var failedAt = Date.distantPast
     private var startedAt: Date?    // when `conn` was opened
+    private let fedLock = NSLock()
+    private var lastFedMs: UInt32 = 0
+    private var resumes = false     // the board resumes a stream after a reconnect (firmware v29)
+
+    /// The newest live unit decoded (0: none). A reconnect asks the board to go on from just before it, so units the
+    /// dropped socket swallowed still arrive and the decoder needs no new IDR (logs(15): "restart mirroring").
+    func fed(_ ms: UInt32) { fedLock.lock(); lastFedMs = ms; fedLock.unlock() }
+    private var resumeAfter: UInt32 {
+        fedLock.lock(); defer { fedLock.unlock() }
+        return resumes && lastFedMs > 1 ? lastFedMs - 1 : 0
+    }
     private var readyAt: Date?      // when `conn` came up
     private var boardLostAt: Date?  // since when the board has said it has no Wi-Fi client while `conn` is up
 
@@ -422,7 +445,8 @@ final class VideoTCP: @unchecked Sendable {
     /// connection for a while means the socket is half-open (the phone's Wi-Fi dropped and came back): it never
     /// delivers another byte and nothing here notices, so the video went over BLE at a third of the rate it needs,
     /// a minute behind, and every start failed until the app was relaunched (esp32-agent-logs(11)). Start over.
-    func update(ip: String?, token: String? = nil, boardHasClient: Bool? = nil) {
+    func update(ip: String?, token: String? = nil, boardHasClient: Bool? = nil, boardResumes: Bool = false) {
+        fedLock.lock(); resumes = boardResumes; fedLock.unlock()
         queue.async {
             if self.token != token { self.conn?.cancel(); self.conn = nil; self.host = nil; self.token = token }
             if boardHasClient == false, let c = self.conn, let ready = self.readyAt, Date().timeIntervalSince(ready) > 4 {
@@ -459,7 +483,8 @@ final class VideoTCP: @unchecked Sendable {
         c.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                c.send(content: Data((token + "\n").utf8), completion: .contentProcessed { [weak self] error in
+                let after = self?.resumeAfter ?? 0
+                c.send(content: Data((token + (after > 0 ? " \(after)" : "") + "\n").utf8), completion: .contentProcessed { [weak self] error in
                     if error != nil { self?.drop(c) }
                 })
                 if self?.conn === c { self?.readyAt = Date() }

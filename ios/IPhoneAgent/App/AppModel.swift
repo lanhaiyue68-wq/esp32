@@ -139,7 +139,8 @@ import UIKit
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
             self?.feed.mirroring = s.ap == "streaming"
-            self?.feed.tcp.update(ip: s.ip, token: self?.board.net?.video_token, boardHasClient: s.tcp.map { $0 > 0 })
+            self?.feed.tcp.update(ip: s.ip, token: self?.board.net?.video_token, boardHasClient: s.tcp.map { $0 > 0 },
+                                  boardResumes: (s.fw.flatMap { Int($0.dropFirst()) } ?? 0) >= 29)
             self?.feed.status(s)
             self?.metrics.status(s)
             self?.logStatus(s)
