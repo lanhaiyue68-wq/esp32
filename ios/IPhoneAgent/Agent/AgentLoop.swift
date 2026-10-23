@@ -284,7 +284,7 @@ extension Pointer: Gestures {}
             || t.range(of: #"\b(draw|sketch)\b"#, options: .regularExpression) != nil  // not "drawer"
         if draws, did.isDisjoint(with: ["circle", "path"]) {
             return "Nothing has been drawn in this run yet; a drawing already on screen is from before and does not count. "
-                + "Open a new blank board (Freeform: back to the board list, then New Board) and draw it."
+                + "Start a new blank canvas (a new board, note or page in this app) and draw it there."
         }
         // No such check for typing: Chinese goes in through pinyin candidates (a "compose" step, not "type"), and a
         // turned-down "done" after a message was sent made it send the message again (traces(32)).
