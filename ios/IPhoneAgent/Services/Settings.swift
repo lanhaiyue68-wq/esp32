@@ -168,6 +168,12 @@ import UIKit
         // Qwen on DashScope (Bailian) thinks by default: thousands of reasoning tokens on a busy screen, 30-90 s per
         // step and timeouts. The agent needs quick answers, so thinking is off unless the Extra body sets it.
         if baseURL.lowercased().contains("dashscope"), extra["enable_thinking"] == nil { extra["enable_thinking"] = false }
+        // Doubao Seed / 2.x on Volcano Ark (the 豆包 preset) also think by default. Same choice; models without the
+        // switch (an "ep-..." endpoint ID, a thinking-only model) are left alone, and the Extra body can turn it back on.
+        let name = (own.isEmpty ? model : own).lowercased()
+        if baseURL.lowercased().contains("volces.com"), extra["thinking"] == nil, name.hasPrefix("doubao"), !name.contains("thinking") {
+            extra["thinking"] = ["type": "disabled"]
+        }
         return LLMClient(baseURL: baseURL, model: own.isEmpty ? try await resolvedModel() : own, apiKey: apiKey,
                          extra: extra, tokenParam: tokenParam)
     }

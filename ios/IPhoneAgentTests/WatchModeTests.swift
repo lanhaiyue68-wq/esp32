@@ -66,15 +66,30 @@ import XCTest
     func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {
         let lines = [WatchReport.Line(sender: "蓝海乐", text: "@蓝 群主是谁", mine: false)]
         let due = [message("蓝海乐", "@蓝 群主是谁")]
-        let prompt = WatchSettings.composePrompt(chat: "客户群", group: true, recent: lines, due: due, r: rules(), knowledge: "## 群.md\n群主是王老师")
+        let prompt = WatchSettings.composePrompt(chat: "客户群", group: true, recent: lines, due: due, r: rules(), knowledge: "## 群.md\n群主是王老师", owner: true)
         XCTAssertTrue(prompt.contains("蓝海乐：@蓝 群主是谁"))
         XCTAssertTrue(prompt.contains("群主是王老师"))
         XCTAssertTrue(prompt.contains("“@蓝”"))
         XCTAssertTrue(prompt.contains("@发言人"))
-        let bare = WatchSettings.composePrompt(chat: "张三", group: false, recent: lines, due: due, r: rules(), knowledge: "")
+        let bare = WatchSettings.composePrompt(chat: "张三", group: false, recent: lines, due: due, r: rules(), knowledge: "", owner: false)
         XCTAssertTrue(bare.contains("用户没有给知识库"))
         XCTAssertFalse(bare.contains("@发言人"))
         XCTAssertTrue(WatchSettings.interjectPrompt(chat: "客户群", recent: lines, r: rules()).contains("SKIP"))
+        XCTAssertTrue(prompt.contains("主人"))
+        XCTAssertTrue(prompt.contains(#""task":"#))
+        XCTAssertTrue(bare.contains("不能给 task"))
+    }
+
+    func testTheOwnersRequestBecomesAPhoneTaskThatReallyMentions() {
+        XCTAssertEqual(WatchReport.decision(#"{"reply":"","task":"查看群成员找出群主，并在群里@群主说：这是群主"}"#)?.task,
+                       "查看群成员找出群主，并在群里@群主说：这是群主")
+        XCTAssertEqual(WatchReport.decision(#"```json {"reply":"@蓝海乐 在的","task":""} ```"#)?.reply, "@蓝海乐 在的")
+        XCTAssertEqual(WatchReport.decision("在的，有事吗")?.reply, "在的，有事吗")  // plain words still work
+        XCTAssertNil(WatchReport.decision(#"{"reply": "半截"#))               // broken JSON is never typed
+        let task = WatchSettings.ownerTask(chat: "客户群", task: "找出群主并@他")
+        XCTAssertTrue(task.contains("标着“群主”"))
+        XCTAssertTrue(task.contains("在弹出的成员列表里找到并点选他"))
+        XCTAssertTrue(task.contains("不准付款"))
     }
 
     func testTheReadLogKeepsEachDayAndFeedsTheSummary() throws {

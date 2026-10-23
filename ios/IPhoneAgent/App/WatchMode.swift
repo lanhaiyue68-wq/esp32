@@ -142,21 +142,43 @@ enum WatchSettings {
     }
 
     /// Step 4: the reply, from the recent chat, the user's rules and the chosen knowledge.
-    static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String) -> String {
+    /// Step 4: what to do about the messages that called for it: a reply to type, or, when the owner asks for
+    /// something only the phone can find out or do (who the group owner is, @ someone), a task for the agent.
+    static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String,
+                              owner: Bool) -> String {
         let history = recent.suffix(20).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
         let asks = due.map { "\($0.sender)：\($0.text)" }.joined(separator: "\n")
+        let tasks = owner
+            ? """
+              说这话的是主人（白名单里的人）。主人要你在微信里查看或操作才能做到的事（例如看群成员、找出谁是群主、@某人、看群公告），\
+              就给出 task：一句完整的中文操作说明，写清要找什么、最后要在这个会话里发出什么（要@人就写“@某某”，执行时会从成员列表里选人，\
+              这样才是真的@）。能直接从上面的聊天或知识库回答的，只用 reply。
+              """
+            : "说这话的不是主人：只能用 reply 回答，不能给 task。"
         return """
         你是用户在微信里的分身，正在替他在\(group ? "群聊" : "私聊")“\(chat)”里回复。\(r.myNames.isEmpty ? "" : "别人用“@\(r.myNames[0])”叫的就是你。")
         最近的聊天（从早到晚）：
         \(history)
-        需要你回复的消息：
+        需要你回应的消息：
         \(asks)
         用户对回复的要求：\(r.instruction)
         \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
-        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。对方要你在手机上做事（比如查群主、发文件）而你只能打字时，就用一句话说明你能做的。
-        \(group ? "在群里回复时，开头写“@发言人 ”。" : "")不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。
-        只输出要发送的那段话本身，不要引号、解释或前缀。
+        \(tasks)
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。\(group ? "在群里用 reply 时，开头写“@发言人 ”。" : "")
+        不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
+        只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在微信里执行的操作，不需要就留空"}
+        """
+    }
+
+    /// The owner's request carried out on the phone; the agent sends the outcome itself (a real @ from the member list).
+    static func ownerTask(chat: String, task: String) -> String {
+        """
+        你在微信会话“\(chat)”里，替主人完成他的指令：\(task)
+        做法提示：看群成员和群主：点会话右上角的“…”打开聊天信息，群成员在顶部，点“查看更多群成员”看全部；群主在成员列表里名字旁标着“群主”。
+        要@某人：回到这个会话，在底部输入框输入“@”，在弹出的成员列表里找到并点选他（列表顶部可以搜索），再接着输入其余内容，然后发送。
+        只能在微信里操作；不准付款、发红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接。
+        做完后停在会话“\(chat)”里，然后完成，答案写你做了什么、查到了什么。做不到就失败，并写明原因。
         """
     }
 
@@ -239,6 +261,19 @@ enum WatchReport {
             return chat.isEmpty ? nil : chat
         }
         return nil
+    }
+
+    /// Step 4's answer: the reply and the phone task (either may be empty). A model that ignored the format and wrote
+    /// plain words gets them as the reply; broken JSON gives nil rather than braces typed into a chat.
+    static func decision(_ answer: String) -> (reply: String, task: String)? {
+        struct Box: Decodable { var reply: String?; var task: String? }
+        let clean = { (s: String?) in (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let data = object(answer) {
+            guard let box = try? JSONDecoder().decode(Box.self, from: data) else { return nil }
+            return (clean(box.reply), clean(box.task))
+        }
+        let words = answer.trimmingCharacters(in: CharacterSet(charactersIn: " \n\"“”'「」"))
+        return words.isEmpty || answer.contains("{") ? nil : (words, "")
     }
 
     /// The lines after the last one already seen: what is new on screen. Everything, when none was seen before.
@@ -482,19 +517,28 @@ extension AppModel {
                         atMe: rules.myNames.contains { line.text.contains("@" + $0) })
         }
 
-        var reply: String?
+        var reply: String?, task: String?
         if !rules.serverReplies && !read.isEmpty {
             let due = read.filter { WatchSettings.fires($0, rules) }
-            let knowledge = due.isEmpty ? "" : await watchKnowledge()
             if !due.isEmpty {
-                reply = await compose(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines, due: due,
-                                                                   r: rules, knowledge: knowledge))
+                let knowledge = await watchKnowledge()
+                let owner = !rules.senders.isEmpty  // phone tasks only for an explicit whitelist, never for anyone
+                if let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
+                                                                           due: due, r: rules, knowledge: knowledge, owner: owner)) {
+                    reply = decided.reply.isEmpty ? nil : decided.reply
+                    task = owner && !decided.task.isEmpty ? decided.task : nil
+                }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
                 reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules))
                 if reply != nil { watchInterjectedAt[chat] = now() }
             }
         }
-        if let text = reply {
+        if let task {  // the owner asked for something only the phone can do: the agent does it and sends the outcome
+            DebugLog.write("watch: owner task in \(chat): \(task)")
+            if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task)), let i = read.indices.last {
+                read[i].replied = "【已执行】" + (done.isEmpty ? task : done)
+            }
+        } else if let text = reply {
             if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                 DebugLog.write("watch: reply withheld: \(why)")
             } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single)) != nil {
@@ -531,7 +575,20 @@ extension AppModel {
         }
     }
 
-    /// Step 4: one text call; nil for SKIP or an empty answer.
+    /// Step 4: the reply or the owner's phone task, as one JSON line from the planner model.
+    private func decide(_ prompt: String) async -> (reply: String, task: String)? {
+        do {
+            let answer = try await settings.client("planner").chat(system: prompt, text: "按要求只输出那一行 JSON。", image: nil,
+                                                                   maxTokens: 500, temperature: 0.4)
+            traces.write(kind: "watch decide", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(answer.text)])
+            return WatchReport.decision(answer.text)
+        } catch {
+            DebugLog.write("watch: deciding the reply failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Interject mode: one text call; nil for SKIP or an empty answer.
     private func compose(_ prompt: String) async -> String? {
         do {
             let reply = try await settings.client("planner").chat(system: prompt, text: "写出要发送的那段话。", image: nil,

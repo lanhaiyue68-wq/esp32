@@ -2,7 +2,7 @@ import Foundation
 
 /// Presets only configure public endpoints. Users always supply their own credentials.
 enum ModelProvider: String, CaseIterable, Identifiable {
-    case openAI, gemini, qwen, qwenInternational, deepSeek, openRouter, others
+    case openAI, gemini, qwen, qwenInternational, doubao, deepSeek, openRouter, others
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -10,6 +10,7 @@ enum ModelProvider: String, CaseIterable, Identifiable {
         case .gemini: return "Google Gemini"
         case .qwen: return "Qwen · China"
         case .qwenInternational: return "Qwen · International"
+        case .doubao: return "豆包 · 火山方舟"
         case .deepSeek: return "DeepSeek"
         case .openRouter: return "OpenRouter"
         case .others: return "Others"
@@ -22,6 +23,7 @@ enum ModelProvider: String, CaseIterable, Identifiable {
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
         case .qwenInternational: return "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        case .doubao: return "https://ark.cn-beijing.volces.com/api/v3"
         case .deepSeek: return "https://api.deepseek.com"
         case .others: return ""
         }
@@ -34,6 +36,7 @@ enum ModelProvider: String, CaseIterable, Identifiable {
         case .gemini: address = "https://aistudio.google.com/apikey"
         case .qwen: address = "https://bailian.console.aliyun.com/"
         case .qwenInternational: address = "https://modelstudio.console.alibabacloud.com/"
+        case .doubao: address = "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
         case .deepSeek: address = "https://platform.deepseek.com/api_keys"
         case .others: return nil
         }
