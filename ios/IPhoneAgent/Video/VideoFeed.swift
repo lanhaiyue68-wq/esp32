@@ -303,8 +303,9 @@ extension ScreenSource {
                 DebugLog.write("snap timed out; retrying once with a longer timeout")
                 try await snap(timeout: snapTimeout * 1.5)
             }
-        } catch let error as DeviceError where error.message.hasPrefix("err no video") {
-            // A live frame may have arrived while the snapshot command was in flight.
+        } catch let error as DeviceError where error.message.hasPrefix("err no video") || error.message.hasPrefix("err ble send failed") {
+            // A live frame may have arrived while the snapshot command was in flight. "ble send failed": the board's
+            // Wi-Fi video dropped mid-snapshot (traces(37) failed the start on it); the reconnect brings the stream back.
             if usable() { return "live (recovered during snap)" }
             if await recovered(within: noVideoGrace) { return "live (recovered)" }
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
@@ -411,7 +412,7 @@ final class VideoTCP: @unchecked Sendable {
             return
         }
         if ip == host, conn != nil { return }
-        if conn == nil, Date().timeIntervalSince(failedAt) < 5 { return }  // the phone may not be on that network
+        if conn == nil, Date().timeIntervalSince(failedAt) < 2 { return }  // the phone may not be on that network
         conn?.cancel()
         host = ip
         let c = NWConnection(host: NWEndpoint.Host(ip), port: 7001, using: .tcp)
@@ -432,7 +433,7 @@ final class VideoTCP: @unchecked Sendable {
         read(c)
     }
 
-    /// On `queue`. The next status update reconnects (after a 5 s pause).
+    /// On `queue`. The next status update reconnects (after a 2 s pause: the board holds the video ~10 s for it).
     private func drop(_ c: NWConnection) {
         c.cancel()
         guard conn === c else { return }
