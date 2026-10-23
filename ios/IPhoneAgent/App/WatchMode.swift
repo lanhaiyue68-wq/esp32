@@ -444,6 +444,7 @@ extension AppModel {
         watchRead = 0
         watchLast = [:]
         watchInterjectedAt = [:]
+        watchRetries = [:]
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
@@ -501,7 +502,8 @@ extension AppModel {
                     changedAt = nil
                 }
                 let due = t - lastCheck >= Double(WatchSettings.intervalMinutes) * 60
-                if due || (moved && t - lastCheck >= 15) {
+                let retry = !watchRetries.isEmpty && t - lastCheck >= 20  // a reply that did not go out
+                if due || retry || (moved && t - lastCheck >= 15) {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
@@ -529,7 +531,7 @@ extension AppModel {
         guard let chat = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
         guard let screen = await readChat(chat) else { return false }
 
-        let firstLook = watchLast[chat] == nil
+        let firstLook = watchLast[chat] == nil, before = watchLast[chat]
         let fresh = firstLook ? [] : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
         watchLast[chat] = screen.lines
         if firstLook { DebugLog.write("watch: first look at \(chat): \(screen.lines.count) message(s) taken as already seen") }
@@ -554,25 +556,35 @@ extension AppModel {
                 if reply != nil { watchInterjectedAt[chat] = now() }
             }
         }
+        var sent = true  // false: what was due did not go out
         if let task {  // the owner asked for something only the phone can do: the agent does it and sends the outcome
             DebugLog.write("watch: owner task in \(chat): \(task)")
-            if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task)), let i = read.indices.last {
-                read[i].replied = "【已执行】" + (done.isEmpty ? task : done)
-            }
+            if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task)) {
+                if let i = read.indices.last { read[i].replied = "【已执行】" + (done.isEmpty ? task : done) }
+            } else { sent = false }
         } else if let text = reply {
             if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                 DebugLog.write("watch: reply withheld: \(why)")
             } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single)) != nil {
                 if let i = read.indices.last { read[i].replied = text }
-            }
+            } else { sent = false }
         } else if !rules.single {
             try? await pointer.goBack()  // back to the chat list, for the other chats' badges
         }
 
+        if !sent, watching, watchRetries[chat, default: 0] < 2 {
+            // Cut off (the screen dropped, a run failed): read these again soon instead of losing them as seen.
+            watchRetries[chat, default: 0] += 1
+            watchLast[chat] = before
+            DebugLog.write("watch: \(chat): the reply did not go out; reading again at the next check")
+            return false
+        }
+        watchRetries[chat] = nil
         ReadLog.append(read)
         watchRead += read.count
         if WatchSettings.serverOn { chatTool.report(read) }
-        DebugLog.write("watch: \(chat): \(read.count) new message(s)\(reply == nil ? "" : ", replied")")
+        let outcome = reply == nil && task == nil ? "" : sent ? ", replied" : ", reply not sent"
+        DebugLog.write("watch: \(chat): \(read.count) new message(s)\(outcome)")
         return true
     }
 

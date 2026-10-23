@@ -4,8 +4,6 @@ import SwiftUI
 struct AboutView: View {
     @ObservedObject var app: AppModel
     static let repo = URL(string: "https://github.com/onehumanbeing/esp32-iphone-agent")!
-    static let author = URL(string: "https://x.com/iamhenryyuan")!
-    static let discord = URL(string: "https://discord.gg/BSJEnfdDX")!
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -53,11 +51,6 @@ struct AboutView: View {
                 .padding(.vertical, Space.s)
                 .listRowBackground(Color.clear)
             }
-            Section("Community") {
-                CommunityRow(logo: "GitHubMark", title: "View source on GitHub", url: Self.repo)
-                CommunityRow(logo: "XLogo", title: "Author on X", detail: "@iamhenryyuan", url: Self.author)
-                CommunityRow(logo: "DiscordLogo", title: "Join the Discord", url: Self.discord)
-            }
             Section {
                 NavigationLink { AcknowledgementsView() } label: {
                     SettingsLabel(title: "Acknowledgements", symbol: "heart.fill", color: .pink)
@@ -66,7 +59,7 @@ struct AboutView: View {
                     SettingsLabel(title: "Disclaimer", symbol: "exclamationmark.shield.fill", color: .orange)
                 }
             } footer: {
-                Text("Open source. No data leaves this iPhone except the requests to the model endpoint you set up.")
+                Text("No data leaves this iPhone except the requests to the model endpoint you set up and, when you switch them on, to ChatTool and the knowledge base on your computer.")
             }
             Section {
                 Link(destination: bugReport) {
@@ -86,35 +79,6 @@ struct AboutView: View {
         }
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// A link row with a brand mark (template image: black or white with the appearance), opened with openURL.
-struct CommunityRow: View {
-    let logo: String
-    let title: LocalizedStringKey
-    var detail: String?
-    let url: URL
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        Button { openURL(url) } label: {
-            HStack {
-                Label {
-                    Text(title)
-                } icon: {
-                    Image(logo).renderingMode(.template).resizable().scaledToFit()
-                        .frame(width: 20, height: 20)
-                        .frame(width: 29, height: 29)
-                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .accessibilityHidden(true)
-                }
-                Spacer()
-                if let detail { Text(verbatim: detail).foregroundStyle(.secondary) }
-                Image(systemName: "arrow.up.forward").font(.footnote).foregroundStyle(.tertiary)
-            }
-        }
-        .tint(.primary)
     }
 }
 

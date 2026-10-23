@@ -7176,6 +7176,16 @@
           }
         }
       }
+    },
+    "No data leaves this iPhone except the requests to the model endpoint you set up and, when you switch them on, to ChatTool and the knowledge base on your computer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除了发往你设置的模型接口的请求，以及你打开后发往电脑上 ChatTool 和知识库的数据，没有数据离开这台 iPhone。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

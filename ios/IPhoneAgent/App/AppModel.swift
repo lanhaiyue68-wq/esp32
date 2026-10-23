@@ -86,6 +86,7 @@ import UIKit
     var computerKnowledgeCache = ""  // the last knowledge fetched from the computer, for when it is out of reach
     var watchLast: [String: [WatchReport.Line]] = [:]  // per chat: the previous look, to tell what is new (WatchReport.new)
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
+    var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
     var lastWidgetReload = 0.0
 
     init() {

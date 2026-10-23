@@ -264,11 +264,13 @@ extension ScreenSource {
     /// The app asked the board to forward the stream (`stream on`).
     private(set) var streamOn = false
 
-    /// Seconds a snap may take: the buffered GOP over the measured BLE rate, doubled, at least 8 s.
+    /// Seconds a snap may take: the buffered GOP over the measured BLE rate, doubled, 8 to 20 s. A GOP of a few MB
+    /// over BLE needed minutes, and a run waiting that long without a word looked frozen (build 20): past 20 s the
+    /// snap fails and the run's recovery (waitForScreen) takes over, on screen.
     var snapTimeout: Double {
         let gopBytes = Double(metrics?.board?.gop ?? 0)
         let kbps = max(metrics?.bleKbps ?? 0, metrics?.board?.ble?.kbps ?? 0, 40)
-        return max(8, gopBytes * 8 / 1000 / kbps * 2 + 3)
+        return min(20, max(8, gopBytes * 8 / 1000 / kbps * 2 + 3))
     }
 
     /// A current frame for the model. While the board streams, the live stream has it: use a frame younger than
@@ -293,6 +295,7 @@ extension ScreenSource {
             if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
             if await refreshDecoder("frame not current") { return "cached GOP" }
         }
+        DebugLog.write(String(format: "frame: no current frame; asking the board for a snapshot (up to %.0f s)", snapLimit.map { min(snapTimeout, $0) } ?? snapTimeout))
         do {
             do {
                 try await snap(timeout: snapLimit.map { min(snapTimeout, $0) })
