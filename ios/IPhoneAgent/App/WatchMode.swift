@@ -282,6 +282,14 @@ enum WatchReport {
     /// rather than single texts catches a message repeated word for word (traces(35): the owner asked the same thing
     /// twice and the second was taken as already read). When the previous lines are gone (scrolled far), every line
     /// not on the previous screen.
+    /// The first look at a chat: what nobody answered yet, the messages under this account's last one (the last three
+    /// when none of its own is on screen). Opening the chat takes half a minute, and a message sent just after the
+    /// watch started (build 22 took it as old and never answered); one answered before sits above "mine".
+    static func unanswered(_ lines: [Line]) -> [Line] {
+        if let i = lines.lastIndex(where: { $0.mine }) { return Array(lines[(i + 1)...]) }
+        return Array(lines.suffix(3))
+    }
+
     static func new(_ lines: [Line], after previous: [Line]) -> [Line] {
         guard !previous.isEmpty else { return lines }
         let cur = lines.map(key), prev = previous.map(key)
@@ -532,9 +540,9 @@ extension AppModel {
         guard let screen = await readChat(chat) else { return false }
 
         let firstLook = watchLast[chat] == nil, before = watchLast[chat]
-        let fresh = firstLook ? [] : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
+        let fresh = firstLook ? WatchReport.unanswered(screen.lines) : WatchReport.new(screen.lines, after: watchLast[chat] ?? [])
         watchLast[chat] = screen.lines
-        if firstLook { DebugLog.write("watch: first look at \(chat): \(screen.lines.count) message(s) taken as already seen") }
+        if firstLook { DebugLog.write("watch: first look at \(chat): \(fresh.count) of \(screen.lines.count) message(s) not answered yet") }
         var read = fresh.filter { !$0.mine }.map { line in
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
                         atMe: rules.myNames.contains { line.text.contains("@" + $0) })

@@ -74,6 +74,18 @@ import XCTest
         XCTAssertEqual(WatchReport.new(scrolled, after: before).map(\.text), ["大家好", "@蓝 你在不在"])
     }
 
+    func testTheFirstLookKeepsWhatNobodyAnsweredYet() {
+        // traces(36): "@蓝 在不在" was sent right after the watch started, before opening the chat (30 s) let it look.
+        let line = { (sender: String, text: String, mine: Bool) in WatchReport.Line(sender: sender, text: text, mine: mine) }
+        let screen = [line("蓝海乐", "@蓝 你在不在", false), line("闫寒", "@虾笔刀 你在不在", false), line("虾笔刀", "在的，你说。", false),
+                      line("闫寒", "@虾笔刀 你的大脑今天有哪些进化？", false), line("虾笔刀", "这条我私聊回你了。", false),
+                      line("蓝海乐", "@蓝 在不在", false)]
+        XCTAssertEqual(WatchReport.unanswered(screen).map(\.text), ["@虾笔刀 你的大脑今天有哪些进化？", "这条我私聊回你了。", "@蓝 在不在"])
+        let answered = [line("蓝海乐", "@蓝 你在不在", false), line("我", "在的", true), line("良三", "+1", false)]
+        XCTAssertEqual(WatchReport.unanswered(answered).map(\.text), ["+1"])  // what was answered stays answered
+        XCTAssertEqual(WatchReport.unanswered([line("蓝海乐", "@蓝 在吗", false), line("我", "在", true)]), [])
+    }
+
     func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {
         let lines = [WatchReport.Line(sender: "蓝海乐", text: "@蓝 群主是谁", mine: false)]
         let due = [message("蓝海乐", "@蓝 群主是谁")]
