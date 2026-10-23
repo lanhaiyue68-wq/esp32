@@ -51,7 +51,7 @@ import UIKit
         XCTAssertEqual(AgentLoop.tapBeforeStroke([tap, stroke]), tap)
         XCTAssertNil(AgentLoop.tapBeforeStroke([tap, stroke, noInk, stroke]))  // no new try between two blank strokes
         XCTAssertFalse(AgentLoop.noInkReason.contains("无边记"))  // no app layout written in: it works it out
-        XCTAssertTrue(AgentLoop.deadTapReason.contains("different button"))
+        XCTAssertTrue(AgentLoop.deadTapReason.contains("try a different one"))
     }
 
     func testSelfLearnedFreeformPenLessonsAreTheOnesDropped() {
