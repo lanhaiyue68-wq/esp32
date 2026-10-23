@@ -50,7 +50,7 @@ import UIKit
         let noInk: JObject = ["action": .str("no ink")]
         XCTAssertEqual(AgentLoop.tapBeforeStroke([tap, stroke]), tap)
         XCTAssertNil(AgentLoop.tapBeforeStroke([tap, stroke, noInk, stroke]))  // no new try between two blank strokes
-        XCTAssertTrue(AgentLoop.noInkReason.contains("New Board"))
+        XCTAssertFalse(AgentLoop.noInkReason.contains("无边记"))  // no app layout written in: it works it out
         XCTAssertTrue(AgentLoop.deadTapReason.contains("different button"))
     }
 

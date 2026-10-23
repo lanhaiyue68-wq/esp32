@@ -304,12 +304,13 @@ extension Pointer: Gestures {}
         return moves[0]
     }
 
-    static let noInkReason = "The stroke left no line on the canvas: no drawing tool is selected, so the drag only moved the "
-        + "canvas. In 无边记/Freeform the pen is the FIRST icon (a pen nib in a circle) of the rounded toolbar at the bottom "
-        + "middle, left of 字 and the paperclip. The lone square-with-a-pencil button at the bottom right is New Board, not "
-        + "the pen: do not tap it. Tap the pen icon, then draw again. It is not done until lines show."
-    static let deadTapReason = "Refused: tapping this spot already did nothing twice (the next stroke still left no line). It is "
-        + "not the control you want. Look at the screen again and pick a different button."
+    // No app's layout is written into these: the agent works out which control it is by trying, and what worked is
+    // learned from the run that got there (any app, not only the ones someone described).
+    static let noInkReason = "The stroke left no line on the canvas: no drawing tool is active, so the drag only moved the "
+        + "canvas. Look at the controls on screen and work out which one is the drawing tool (a button you already tried that "
+        + "changed nothing is not it), select it, then draw again. It is not done until lines show."
+    static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
+        + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one."
 
     /// The tap since the previous stroke (the try at picking a tool), if there was one.
     static func tapBeforeStroke(_ steps: [JObject]) -> JObject? {
@@ -637,13 +638,22 @@ extension Pointer: Gestures {}
                 // Independent strokes and type-then-key batches still run together.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                noteDeadTap()
                 return false
             }
         }
         timing.frameMs += try await settle()
         // feedback for the next round
         steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+        noteDeadTap()
         return false
+    }
+
+    /// A tap that changed nothing on screen counts as dead, like one before a stroke that left no line: the same spot
+    /// twice is refused, so the agent tries another control instead of the same one again and again.
+    private func noteDeadTap() {
+        guard let last = steps.last, last["action"]?.str == "tap", last["changed"] == .bool(false) else { return }
+        deadTaps.append(last)
     }
 
     /// Text in without a model look per phrase. A paste when iOS lets this app fill the pasteboard and the text then
