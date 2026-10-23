@@ -90,6 +90,9 @@ extension Pointer: Gestures {}
     /// A fixed plan (WeChat watch's open and send tasks, whose steps never change): used as is, without the
     /// planner's call. Empty for ordinary runs.
     var presetPlan = ""
+    /// WeChat watch: fewer steps than maxSteps, and no pause for help (nobody is at the phone; a stuck task fails
+    /// and the watch goes on). nil for ordinary runs.
+    var stepLimit: Int?
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -334,7 +337,7 @@ extension Pointer: Gestures {}
                 plan = presetPlan
                 record(nil, ["action": .str("plan"), "plan": .str(presetPlan), "plan_zh": .str(""), "think_s": .num(0)])
             }
-            for _ in 0..<maxSteps {
+            for _ in 0..<(stepLimit ?? maxSteps) {
                 do {
                     if try await step() {
                         guard steps.last?["action"]?.str == "fail", try await askForHelp() else { return finish() }
@@ -381,7 +384,7 @@ extension Pointer: Gestures {}
 
     /// Pauses for the user (at most twice a run). True = go on from the current screen with a new plan.
     private func askForHelp() async throws -> Bool {
-        guard let onHelp, helpAsked < 2 else { return false }
+        guard let onHelp, helpAsked < 2, stepLimit == nil else { return false }
         helpAsked += 1
         let reason = steps.last?["reason"]?.str ?? ""
         record(nil, ["action": .str("help"), "reason": .str(reason)])
@@ -517,6 +520,7 @@ extension Pointer: Gestures {}
                 if name == "path", act["smooth"] == nil, Self.isGentleBend(points(act), aspect: screen?.aspect ?? 9 / 19.5) {
                     act["smooth"] = .bool(true)  // recorded, so the review and the next look know it was a curve
                 }
+                momentum = name == "swipe"
                 do { try await perform(act) }
                 catch let input as InputNeedsVerification {
                     lastActed = now()
@@ -560,9 +564,14 @@ extension Pointer: Gestures {}
         return false
     }
 
+    /// The last action was a swipe: a scrolled list coasts on after the finger lifts, and a look taken meanwhile
+    /// was out of date by the time the model answered ("stale plan" again and again in traces(39)).
+    private var momentum = false
+
     private func settle() async throws -> Double {
         let started = now()
         onDoing?(.looking)
+        if momentum { momentum = false; try await Task.sleep(nanoseconds: 700_000_000) }
         await screen?.afterAction(since: lastActed)
         do {
             try await screen?.requireFrame(after: lastActed)

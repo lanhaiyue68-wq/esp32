@@ -120,6 +120,9 @@ enum WatchSettings {
     }
 
     /// Step 5 (and ChatTool's replies): type the text in the chat and send it.
+    /// Sent when the owner's phone task got stuck or ran out of steps.
+    static let taskFailedReply = "这个我没弄成，你再说具体点？"
+
     /// The steps of openTask with one chat: fixed, so no planner call (~4 s of thinking per check).
     static func openPlan(chat: String) -> String {
         """
@@ -197,7 +200,8 @@ enum WatchSettings {
     static func ownerTask(chat: String, task: String) -> String {
         """
         你在微信会话“\(chat)”里，替主人完成他的指令：\(task)
-        做法提示：看群成员和群主：点会话右上角的“…”打开聊天信息，群成员在顶部，点“查看更多群成员”看全部；群主在成员列表里名字旁标着“群主”。
+        做法提示：看群成员：点会话右上角的“…”打开聊天信息，群成员头像在顶部，点“查看更多群成员”看全部。\
+        群主就是成员头像里的第一个（左上角第一个，名字在头像下面）；微信不在成员旁标“群主”二字，不要上下滑动去找这两个字。
         要@某人：回到这个会话，在底部输入框输入“@”，在弹出的成员列表里找到并点选他（列表顶部可以搜索），再接着输入其余内容，然后发送。
         只能在微信里操作；不准付款、发红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接。
         做完后停在会话“\(chat)”里，然后完成，答案写你做了什么、查到了什么。做不到就失败，并写明原因。
@@ -605,19 +609,25 @@ extension AppModel {
             }
         }
         var sent = true  // false: what was due did not go out
-        if let task {  // the owner asked for something only the phone can do: the agent does it and sends the outcome
-            DebugLog.write("watch: owner task in \(chat): \(task)")
-            if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task)) {
-                if let i = read.indices.last { read[i].replied = "【已执行】" + (done.isEmpty ? task : done) }
-            } else { sent = false }
-        } else if let text = reply {
+        // The reply first, then the owner's phone task: a task takes a minute or more and the person who just asked
+        // "在不在" waited for all of it (traces(39)).
+        if let text = reply {
             if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                 DebugLog.write("watch: reply withheld: \(why)")
-            } else if await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: !rules.single),
-                                     plan: WatchSettings.sendPlan(chat: chat, back: !rules.single)) != nil {
+            } else if await sendReply(text, chat: chat, back: !rules.single && task == nil) {
                 if let i = read.indices.last { read[i].replied = text }
             } else { sent = false }
-        } else if !rules.single {
+        }
+        if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
+            DebugLog.write("watch: owner task in \(chat): \(task)")
+            if let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task), stepLimit: 25) {
+                if let i = read.indices.last { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
+            } else if watching {  // stuck or out of steps: say so once instead of trying again and again
+                DebugLog.write("watch: owner task not done in \(chat)")
+                _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single)
+                if let i = read.indices.last { read[i].replied += "【未完成】" + task }
+            }
+        } else if reply == nil, task == nil, !rules.single {
             try? await pointer.goBack()  // back to the chat list, for the other chats' badges
         }
 
@@ -685,10 +695,16 @@ extension AppModel {
     }
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.
-    private func watchRun(_ task: String, reference: String = "", plan: String = "") async -> String? {
+    /// Types one message into the chat and sends it (fixed plan, no planner call).
+    private func sendReply(_ text: String, chat: String, back: Bool) async -> Bool {
+        await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: back), plan: WatchSettings.sendPlan(chat: chat, back: back),
+                       stepLimit: 15) != nil
+    }
+
+    private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15) async -> String? {
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
-        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan)
+        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan, stepLimit: stepLimit)
         while agent.running || startingAgent {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }

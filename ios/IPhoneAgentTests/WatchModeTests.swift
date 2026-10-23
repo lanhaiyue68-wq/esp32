@@ -124,7 +124,7 @@ import XCTest
         XCTAssertEqual(WatchReport.decision("在的，有事吗")?.reply, "在的，有事吗")  // plain words still work
         XCTAssertNil(WatchReport.decision(#"{"reply": "半截"#))               // broken JSON is never typed
         let task = WatchSettings.ownerTask(chat: "客户群", task: "找出群主并@他")
-        XCTAssertTrue(task.contains("标着“群主”"))
+        XCTAssertTrue(task.contains("群主就是成员头像里的第一个"))  // traces(39): WeChat shows no 群主 label to scroll for
         XCTAssertTrue(task.contains("在弹出的成员列表里找到并点选他"))
         XCTAssertTrue(task.contains("不准付款"))
     }
