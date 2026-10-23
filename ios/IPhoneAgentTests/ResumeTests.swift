@@ -3,7 +3,7 @@ import XCTest
 
 /// logs(15): after a Wi-Fi drop the decoder lost a few units and mirroring had to be restarted; the fallback typing
 /// got stuck on a six-character pinyin phrase.
-final class ResumeTests: XCTestCase {
+@MainActor final class ResumeTests: XCTestCase {
     private func chunk(_ seq: UInt16, _ flags: VideoAssembler.Flags, _ payload: [UInt8], ms: UInt32? = nil) -> Data {
         var d = Data([UInt8(seq & 0xff), UInt8(seq >> 8), flags.rawValue])
         if let ms { d.append(contentsOf: [UInt8(ms & 0xff), UInt8(ms >> 8 & 0xff), UInt8(ms >> 16 & 0xff), UInt8(ms >> 24)]) }
