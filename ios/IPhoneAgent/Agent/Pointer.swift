@@ -470,6 +470,11 @@ import Foundation
         try await swipe(0.005, 0.45, 0.6, 0.45, hold: false)
         pos = nil
     }
+    /// The swipe right along the home bar: back to the app used before this one (iOS app switching).
+    func previousApp() async throws {
+        try await swipe(0.2, 0.995, 0.85, 0.995, hold: false)
+        pos = nil  // the edge may have clamped the pointer: re-home before the next move
+    }
 
     private func dx(_ x: Double) -> Int { Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven)) }
     private func dy(_ y: Double) -> Int { Int((min(max(fix(y, "y"), 0), 1) * Double(span!.h)).rounded(.toNearestOrEven)) }

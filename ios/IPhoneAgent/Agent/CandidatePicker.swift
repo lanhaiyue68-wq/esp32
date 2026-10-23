@@ -94,6 +94,10 @@ enum CandidatePicker {
     }
 }
 
+/// How putting a reply on the pasteboard went (AppModel.hopToPaste): filled, refused, or lost on the way (not back in
+/// WeChat, or never in Lan Agent).
+enum PasteHopResult { case filled, refused, lost }
+
 /// The general pasteboard, for pasting a reply.
 enum Pasteboard {
     /// True when some character is not on a US keyboard (Chinese, full-width punctuation, emoji).

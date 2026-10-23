@@ -87,6 +87,7 @@ import UIKit
     /// Per chat: the last 20 messages seen, to tell what is new (WatchReport.new, as ChatTool keeps them). Kept
     /// across watches and launches, so a new watch takes up where the last one stopped.
     var watchLast: [String: [WatchReport.Line]] = [:] { didSet { WatchReport.saveLooks(watchLast) } }
+    var pasteHopping = false  // Lan Agent is in front for a paste (hopToPaste): not a reason to hold the run
     var watchAnswered: [String: Double] = [:]  // a message answered, by WatchReport.answerKey: when
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
@@ -163,6 +164,7 @@ import UIKit
         agent.onDoing = { [weak self] d in self?.doing(d) }
         agent.onHelp = { [weak self] reason in await self?.needsHelp(reason) ?? .stop }
         agent.gate = { [weak self] in try await self?.holdWhileInFront() }
+        agent.pasteHop = { [weak self] text in await self?.hopToPaste(text) ?? .lost }
         AgentControl.handle = { [weak self] command in await self?.control(command) }
         AgentRequests.handle = { [weak self] request in await self?.handle(request) ?? AgentRequests.unavailable }
         notifier.onAction = { [weak self] action, run in self?.notificationAction(action, run: run) }

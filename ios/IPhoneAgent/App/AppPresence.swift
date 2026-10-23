@@ -39,7 +39,7 @@ extension AppModel {
     /// Live Activity, a notification or an intent), or Continue was just tapped here, send the app away at once;
     /// if the user opened it, wait until they leave. The model never sees or taps this app's own screens.
     func holdWhileInFront() async throws {
-        guard UIApplication.shared.applicationState == .active, agent.running, !MockMode.on else { return }
+        guard UIApplication.shared.applicationState == .active, agent.running, !MockMode.on, !pasteHopping else { return }
         let ours = now() - agent.lastActed < 3 || now() - resumeAsked < 5
         DebugLog.write("run: Lan Agent is in front (\(ours ? "after an agent action" : "opened by the user")); holding")
         let since = now()

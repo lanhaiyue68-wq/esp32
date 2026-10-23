@@ -95,6 +95,10 @@ extension Pointer: Gestures {}
     var stepLimit: Int?
     /// WeChat watch: text goes in without a model look per phrase (typeFast). Off for ordinary runs.
     var fastText = false
+    /// Puts a reply on the pasteboard with Lan Agent in front for a moment (AppModel.hopToPaste); nil in tests.
+    var pasteHop: ((String) async -> PasteHopResult)?
+    private var pasteHopOff = false  // a hop got lost once in this run: the rest of it types
+    private var lastTap: CGPoint?    // the last tap (0-1), the input box when a type follows
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -327,6 +331,7 @@ extension Pointer: Gestures {}
 
     func run() async {
         var failures = 0
+        (pasteHopOff, lastTap) = (false, nil)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -572,9 +577,17 @@ extension Pointer: Gestures {}
     /// to the model as before (InputNeedsVerification, a "compose" step).
     private func typeFast(_ text: String) async throws {
         guard let phone else { return }
-        if Pasteboard.needed(text) {
-            let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
-            if Pasteboard.put(text) {
+        if Pasteboard.needed(text), !pasteHopOff {
+            let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
+            if hop == .lost {  // not sure which app is in front now: look again, and type from here on
+                pasteHopOff = true
+                throw DeviceError(message: "switching to Lan Agent for the paste did not work; look at the screen again")
+            }
+            if pasteHop != nil, let field = lastTap {  // back from Lan Agent: the input box lost its focus
+                try await phone.tap(field.x, field.y, aim: false)
+            }
+            if hop == .filled {
+                let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
                 try await phone.key("cmd+v")
                 if let after = await freshFrame(), CandidatePicker.count(text, in: after) > before {
                     return DebugLog.write("type: pasted and seen in the field")
@@ -583,7 +596,7 @@ extension Pointer: Gestures {}
                 try await phone.key("backspace")
                 DebugLog.write("type: the paste did not show the text; cleared the field, typing it instead")
             } else {
-                DebugLog.write("type: iOS kept the pasteboard from this app (in the background); typing")
+                DebugLog.write("type: the pasteboard refused the text; typing")
             }
         }
         var rest = text
@@ -717,7 +730,9 @@ extension Pointer: Gestures {}
         guard let phone else { throw DeviceError(message: "no phone") }
         func p(_ k: String) -> Double { (a[k]?.double ?? 0) / 1000 }
         switch a["action"]?.str {
-        case "tap": try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed)
+        case "tap":
+            lastTap = CGPoint(x: p("x"), y: p("y"))
+            try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed)
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
