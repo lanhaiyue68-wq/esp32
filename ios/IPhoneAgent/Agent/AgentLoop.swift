@@ -693,9 +693,17 @@ extension Pointer: Gestures {}
         while true {
             do { return try await phone.type(rest) }
             catch let input as InputNeedsVerification {
-                guard let frame = await freshFrame(), let spot = CandidatePicker.find(input.expected, in: frame) else { throw input }
-                try await phone.tap(spot.x, spot.y, aim: false)
-                DebugLog.write("type: picked “\(input.expected)” on the candidate row")
+                // Like a person: of the candidates, the longest that starts the phrase; the keyboard keeps the rest of
+                // the pinyin open for the next pick. Whole six-character phrases are often not offered (logs(15)).
+                var left = input.expected
+                while !left.isEmpty {
+                    guard let frame = await freshFrame(), let pick = CandidatePicker.longestStart(of: left, in: frame) else {
+                        throw InputNeedsVerification(expected: left, remaining: input.remaining)
+                    }
+                    try await phone.tap(pick.spot.x, pick.spot.y, aim: false)
+                    DebugLog.write("type: picked “\(pick.text)” on the candidate row")
+                    left = String(left.dropFirst(pick.text.count))
+                }
                 if input.remaining.isEmpty { return }
                 rest = input.remaining
             }

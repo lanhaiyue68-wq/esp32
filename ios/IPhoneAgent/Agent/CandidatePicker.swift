@@ -21,6 +21,19 @@ enum CandidatePicker {
         return find(phrase, rows: rows(in: jpeg, top: 0.4, bottom: 1))
     }
 
+    /// The longest candidate that starts `phrase`, on the lowest row of several pieces that has one (the candidate
+    /// row sits right above the keyboard; chat bubbles are higher up), in 0-1 screen coordinates.
+    static func longestStart(of phrase: String, in jpeg: Data) -> (text: String, spot: CGPoint)? {
+        longestStart(of: phrase, rows: rows(in: jpeg, top: 0.4, bottom: 1))
+    }
+
+    static func longestStart(of phrase: String, rows: [[Piece]]) -> (text: String, spot: CGPoint)? {
+        let starts = { (row: [Piece]) in row.filter { !$0.text.isEmpty && phrase.hasPrefix($0.text) && !keyLabels.contains($0.text) } }
+        guard let row = rows.filter({ $0.count >= 2 && !starts($0).isEmpty }).max(by: { $0[0].box.midY < $1[0].box.midY }),
+              let best = starts(row).max(by: { $0.text.count < $1.text.count }) else { return nil }
+        return (best.text, CGPoint(x: best.box.midX, y: best.box.midY))
+    }
+
     static func find(_ phrase: String, rows: [[Piece]]) -> CGPoint? {
         let hits = rows.filter { $0.count >= 2 }.flatMap { $0 }.filter { $0.text == phrase }
         guard let hit = hits.max(by: { $0.box.midY < $1.box.midY }) else { return nil }

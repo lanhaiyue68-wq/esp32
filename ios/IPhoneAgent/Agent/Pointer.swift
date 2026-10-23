@@ -1,5 +1,4 @@
 import Foundation
-import NaturalLanguage
 
 /// Touch-like gestures on the phone, built from relative mouse moves. Port of phone.py.
 ///
@@ -372,7 +371,7 @@ import NaturalLanguage
             try Task.checkCancellation()
             switch run.kind {
             case .chinese:
-                let phrase = Self.firstWord(run.text)
+                let phrase = String(run.text.prefix(6))  // picked a candidate at a time (AgentLoop.typeFast)
                 try await sendKeyboard(Self.pinyin(phrase))
                 try await Task.sleep(nanoseconds: 400_000_000)  // let the candidates come up
                 let remaining = String(run.text.dropFirst(phrase.count)) + runs.dropFirst(index + 1).map { $0.text }.joined()
@@ -435,20 +434,6 @@ import NaturalLanguage
             if run.chinese { return (.chinese, run.text) }
             return (run.text.contains { $0.isASCII && $0.isLetter } ? .latin : .other, run.text)
         }
-    }
-
-    /// The first word of a Chinese run (on-device segmentation), at most 4 characters: a pinyin keyboard offers a
-    /// whole word as one candidate, but not "这个我不太确" (logs(15): stuck, pinyin piling up in the field).
-    static func firstWord(_ han: String) -> String {
-        let tokenizer = NLTokenizer(unit: .word)
-        tokenizer.string = han
-        tokenizer.setLanguage(.simplifiedChinese)
-        var word = ""
-        tokenizer.enumerateTokens(in: han.startIndex..<han.endIndex) { range, _ in
-            word = String(han[range])
-            return false
-        }
-        return String((word.isEmpty ? han : word).prefix(4))
     }
 
     static func isHan(_ s: Unicode.Scalar) -> Bool {

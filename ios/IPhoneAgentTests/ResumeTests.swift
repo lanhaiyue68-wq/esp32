@@ -32,10 +32,16 @@ import XCTest
         XCTAssertNotNil(a.add(chunk(21, [.start, .end, .idr], idr, ms: 10)))
     }
 
-    func testChineseIsTypedAWordAtATime() {
-        let w = Pointer.firstWord("这个我不太确定")
-        XCTAssertTrue("这个我不太确定".hasPrefix(w))
-        XCTAssertTrue((1...4).contains(w.count))
-        XCTAssertLessThan(w.count, 6)  // never the whole stuck phrase "这个我不太确"
+    func testThePickIsTheLongestCandidateThatStartsThePhrase() {
+        // logs(15): "这个我不太确" was not offered whole; a person takes "这个", then the next.
+        func piece(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: 0.08, height: 0.03))
+        }
+        let bubble = [piece("这个", 0.2, 0.42), piece("我不太确定", 0.35, 0.42)]  // higher up: a chat line
+        let candidates = [piece("这个我不太去", 0.02, 0.6), piece("这个", 0.4, 0.6), piece("这", 0.55, 0.6)]
+        let pick = CandidatePicker.longestStart(of: "这个我不太确", rows: [bubble, candidates])
+        XCTAssertEqual(pick?.text, "这个")
+        XCTAssertEqual(pick?.spot.y ?? 0, 0.615, accuracy: 0.001)
+        XCTAssertNil(CandidatePicker.longestStart(of: "确定", rows: [candidates]))
     }
 }
