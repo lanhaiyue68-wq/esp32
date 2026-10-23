@@ -66,7 +66,7 @@ import XCTest
 
     func testInternalReasonsReachTheUserInPlainWords() {
         let blind = StepText.userReason("board replied but no verified current video frame was decoded")
-        XCTAssertTrue(blind.contains("ESP32"))  // tells the user what to do, not the decoder's state
+        XCTAssertTrue(blind.contains("Lan Agent"))  // tells the user what to do, not the decoder's state
         XCTAssertEqual(StepText.userReason("lost the phone screen: reconnect Screen Mirroring"), blind)
         XCTAssertEqual(StepText.userReason("3 errors in a row"), String(localized: "Went wrong \(3) times in a row."))
         XCTAssertNotEqual(StepText.userReason("claimed done 3 times without doing it: Nothing has been drawn"),
