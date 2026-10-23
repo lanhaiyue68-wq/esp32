@@ -371,7 +371,7 @@ import Foundation
             try Task.checkCancellation()
             switch run.kind {
             case .chinese:
-                let phrase = String(run.text.prefix(12))
+                let phrase = String(run.text.prefix(6))  // a short phrase is more often offered whole as one candidate
                 try await sendKeyboard(Self.pinyin(phrase))
                 try await Task.sleep(nanoseconds: 400_000_000)  // let the candidates come up
                 let remaining = String(run.text.dropFirst(phrase.count)) + runs.dropFirst(index + 1).map { $0.text }.joined()

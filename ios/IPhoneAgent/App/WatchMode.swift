@@ -123,6 +123,25 @@ enum WatchSettings {
     /// Sent when the owner's phone task got stuck or ran out of steps.
     static let taskFailedReply = "这个我没弄成，你再说具体点？"
 
+    /// A reply the board can type: what a pinyin keyboard has keys for. "～" or an emoji made every type fail
+    /// ("unsupported keyboard text"), the send ran out of steps three times and the messages went unanswered
+    /// (logs(13): "抱歉刚才没及时回复你～"). nil when nothing is left.
+    static func typeable(_ text: String) -> String? {
+        let swaps: [Character: String] = ["～": "", "~": "", "〜": "", "…": "。", "—": "，", "–": "，", "·": "",
+                                          "「": "“", "」": "”", "『": "“", "』": "”", "【": "（", "】": "）", "《": "“", "》": "”"]
+        let keyed = Set("，。！？：；（）、“”‘’")
+        var out = ""
+        for ch in text {
+            if let swap = swaps[ch] { out += swap; continue }
+            let han = { (u: Unicode.Scalar) in (0x3400...0x9FFF).contains(u.value) || (0xF900...0xFAFF).contains(u.value) }
+            let ok = ch.unicodeScalars.allSatisfy { han($0) || (32...126).contains($0.value) } || keyed.contains(ch)
+            if ok { out.append(ch) }
+        }
+        while out.contains("。。") { out = out.replacingOccurrences(of: "。。", with: "。") }
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// The steps of openTask with one chat: fixed, so no planner call (~4 s of thinking per check).
     static func openPlan(chat: String) -> String {
         """
@@ -190,7 +209,7 @@ enum WatchSettings {
         \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
         \(tasks)
-        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，只用汉字、数字和常见标点（，。？！），不要用表情、～、…；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
         不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
         只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在微信里执行的操作，不需要就留空"}
         """
@@ -620,11 +639,11 @@ extension AppModel {
                 let owner = !rules.senders.isEmpty  // phone tasks only for an explicit whitelist, never for anyone
                 if let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner)) {
-                    reply = decided.reply.isEmpty ? nil : decided.reply
+                    reply = WatchSettings.typeable(decided.reply)
                     task = owner && !decided.task.isEmpty ? decided.task : nil
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
-                reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules))
+                reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules)).flatMap(WatchSettings.typeable)
                 if reply != nil { watchInterjectedAt[chat] = now() }
             }
         }
@@ -674,14 +693,16 @@ extension AppModel {
             if !feed.streamOn { try await feed.stream(true) }  // the screen as it is now, not the last frame of the run
             _ = try await feed.currentFrame()
             guard let frame = feed.frame else { return nil }
-            let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),
-                                                                text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
-            traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(reply.text)])
-            guard let screen = WatchReport.screen(reply.text) else {
-                DebugLog.write("watch: could not read \(chat): \(reply.text.prefix(200))")
-                return nil
+            // Asked twice at most: the model now and then writes broken JSON (logs(13): a missing quote), and a
+            // lost read is a lost check.
+            for attempt in 1...2 {
+                let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),
+                                                                    text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
+                traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(reply.text)])
+                if let screen = WatchReport.screen(reply.text) { return screen }
+                DebugLog.write("watch: could not read \(chat) (try \(attempt)): \(reply.text.prefix(200))")
             }
-            return screen
+            return nil
         } catch {
             DebugLog.write("watch: reading \(chat) failed: \(error.localizedDescription)")
             return nil
@@ -719,13 +740,13 @@ extension AppModel {
     /// Types one message into the chat and sends it (fixed plan, no planner call).
     private func sendReply(_ text: String, chat: String, back: Bool) async -> Bool {
         await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: back), plan: WatchSettings.sendPlan(chat: chat, back: back),
-                       stepLimit: 15) != nil
+                       stepLimit: 25) != nil
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15) async -> String? {
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
-        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan, stepLimit: stepLimit)
+        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan, stepLimit: stepLimit, fastText: true)
         while agent.running || startingAgent {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }

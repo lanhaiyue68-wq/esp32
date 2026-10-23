@@ -93,6 +93,8 @@ extension Pointer: Gestures {}
     /// WeChat watch: fewer steps than maxSteps, and no pause for help (nobody is at the phone; a stuck task fails
     /// and the watch goes on). nil for ordinary runs.
     var stepLimit: Int?
+    /// WeChat watch: text goes in without a model look per phrase (typeFast). Off for ordinary runs.
+    var fastText = false
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -564,6 +566,47 @@ extension Pointer: Gestures {}
         return false
     }
 
+    /// Text in without a model look per phrase. A paste when iOS lets this app fill the pasteboard and the text then
+    /// newly shows on screen (read on this phone); anything else the paste put in the field is cleared. Else pinyin,
+    /// each candidate found on the candidate row (CandidatePicker) and tapped. A candidate not found that way is left
+    /// to the model as before (InputNeedsVerification, a "compose" step).
+    private func typeFast(_ text: String) async throws {
+        guard let phone else { return }
+        if Pasteboard.needed(text) {
+            let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
+            if Pasteboard.put(text) {
+                try await phone.key("cmd+v")
+                if let after = await freshFrame(), CandidatePicker.count(text, in: after) > before {
+                    return DebugLog.write("type: pasted and seen in the field")
+                }
+                try await phone.key("cmd+a")
+                try await phone.key("backspace")
+                DebugLog.write("type: the paste did not show the text; cleared the field, typing it instead")
+            } else {
+                DebugLog.write("type: iOS kept the pasteboard from this app (in the background); typing")
+            }
+        }
+        var rest = text
+        while true {
+            do { return try await phone.type(rest) }
+            catch let input as InputNeedsVerification {
+                guard let frame = await freshFrame(), let spot = CandidatePicker.find(input.expected, in: frame) else { throw input }
+                try await phone.tap(spot.x, spot.y, aim: false)
+                DebugLog.write("type: picked “\(input.expected)” on the candidate row")
+                if input.remaining.isEmpty { return }
+                rest = input.remaining
+            }
+        }
+    }
+
+    /// The screen a moment after the last keys, for reading text on it.
+    private func freshFrame() async -> Data? {
+        let since = now()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        await screen?.afterAction(since: since)
+        return screen?.frame
+    }
+
     /// The last action was a swipe: a scrolled list coasts on after the finger lifts, and a look taken meanwhile
     /// was out of date by the time the model answered ("stale plan" again and again in traces(39)).
     private var momentum = false
@@ -684,7 +727,7 @@ extension Pointer: Gestures {}
             // further so the ends overlap.
             try await phone.drag(circle(p("x"), p("y"), p("r"), aspect: screen?.aspect ?? 9 / 19.5,
                                         extra: p("r") < 0.06 ? 0.25 : 0), hold: true)
-        case "type": try await phone.type(a["text"]?.str ?? "")
+        case "type": if fastText { try await typeFast(a["text"]?.str ?? "") } else { try await phone.type(a["text"]?.str ?? "") }
         case "key": try await phone.key(a["combo"]?.str ?? "")
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()
