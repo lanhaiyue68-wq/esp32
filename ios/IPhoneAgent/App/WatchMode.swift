@@ -137,7 +137,7 @@ enum WatchSettings {
         """
         1. If the screen is not the chat “\(chat)”, go back to the chat list and open it (search at the top if it is not listed).
         2. Tap the input box at the bottom so the keyboard shows.
-        3. type the message exactly as the goal gives it (it is pasted in one go).
+        3. type the message exactly as the goal gives it, picking the exact pinyin candidates.
         4. Tap 发送 to send it.
         5. When it shows as a green bubble, \(back ? "go back to the chat list, then " : "")done.
         """
