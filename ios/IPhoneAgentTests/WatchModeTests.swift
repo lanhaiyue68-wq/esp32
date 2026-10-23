@@ -55,8 +55,8 @@ import XCTest
         let screen = try XCTUnwrap(WatchReport.screen(reply))
         XCTAssertTrue(screen.group)
         XCTAssertEqual(screen.lines.map(\.text), ["@蓝 你人呢", "在的", "妈的还得调试"])
-        XCTAssertEqual(WatchReport.new(screen.lines, after: Array(screen.lines.prefix(2))).map(\.text), ["妈的还得调试"])
-        XCTAssertEqual(WatchReport.new(screen.lines, after: screen.lines), [])
+        XCTAssertEqual(WatchReport.new(screen.lines, history: Array(screen.lines.prefix(2))).map(\.text), ["妈的还得调试"])
+        XCTAssertEqual(WatchReport.new(screen.lines, history: screen.lines), [])
         XCTAssertNil(WatchReport.screen("看不清"))
         XCTAssertEqual(WatchReport.openedChat(#"{"chat":"张三"}"#), "张三")
         XCTAssertNil(WatchReport.openedChat(#"{"chat":""}"#))
@@ -69,9 +69,9 @@ import XCTest
         let before = [line("蓝海乐", "妈的还得调试"), line("良三", "+1"), line("蓝海乐", "@蓝 你告诉我群主是谁")]
         let now = [line("蓝海乐", "妈的还得调试"), line("良三", "+1 \n江南芳言 admin：个微用的怎么样"), line("蓝海乐", "@蓝 你告诉我群主是谁"),
                    line("蓝海乐", "@蓝 你告诉我群主是谁")]
-        XCTAssertEqual(WatchReport.new(now, after: before).map(\.text), ["@蓝 你告诉我群主是谁"])
+        XCTAssertEqual(WatchReport.new(now, history: before).map(\.text), ["@蓝 你告诉我群主是谁"])
         let scrolled = [line("新人", "大家好"), line("蓝海乐", "@蓝 你在不在")]  // nothing of the previous look is left
-        XCTAssertEqual(WatchReport.new(scrolled, after: before).map(\.text), ["大家好", "@蓝 你在不在"])
+        XCTAssertEqual(WatchReport.new(scrolled, history: before).map(\.text), ["大家好", "@蓝 你在不在"])
     }
 
     func testAChatAlreadyOpenIsNotOpenedAgain() {
@@ -91,10 +91,13 @@ import XCTest
         // logs(12): "@蓝 在不在" sent three times was never new: the previous tail matched the newest copy.
         let a = WatchReport.Line(sender: "蓝海乐", text: "@蓝 在不在", mine: false)
         let comma = WatchReport.Line(sender: "蓝海乐", text: "，", mine: false)
-        XCTAssertEqual(WatchReport.new([a, a], after: [comma, a]), [a])
-        XCTAssertEqual(WatchReport.new([a, a, a], after: [a, a]), [a])
-        XCTAssertEqual(WatchReport.firstNew([a, a, a], after: [a, a]), [a])
-        XCTAssertEqual(WatchReport.new([a, a], after: [a, a]), [])  // nothing sent: nothing new
+        XCTAssertEqual(WatchReport.new([a, a], history: [comma, a]), [a])
+        XCTAssertEqual(WatchReport.new([a, a, a], history: [a, a]), [a])
+        XCTAssertEqual(WatchReport.new([a, a], history: [a, a]), [])  // nothing sent: nothing new
+        XCTAssertEqual(WatchReport.remember([a], screen: [a, a, a], history: [a, a]), [a, a, a])
+        // the top line cut off or read differently: the run may start up to two lines down
+        let z = WatchReport.Line(sender: "良三", text: "+1", mine: false), n = WatchReport.Line(sender: "蓝海乐", text: "@蓝 新的", mine: false)
+        XCTAssertEqual(WatchReport.new([WatchReport.Line(sender: "蓝海乐", text: "又傻", mine: false), z, n], history: [comma, a, z]), [n])
         // and a read written with Python's True/False is still read (logs(12) lost one)
         let read = WatchReport.screen(#"{"title":"测试群","group":True,"messages":[{"sender":"蓝海乐","text":"@蓝 在不在","mine":False}]}"#)
         XCTAssertEqual(read?.group, true)
@@ -107,12 +110,12 @@ import XCTest
         // after it is new, so that old request is not carried out again.
         let earlier = [line("蓝海乐", "@蓝 在不在", false), line("我", "在的,有什么事吗", true), line("蓝海乐", "@蓝 告诉我群主是谁，并把他@出来", false)]
         let now = earlier + [line("蓝海乐", "又傻逼了", false), line("蓝海乐", "@蓝 在不在", false)]
-        XCTAssertEqual(WatchReport.firstNew(now, after: earlier).map(\.text), ["又傻逼了", "@蓝 在不在"])
+        XCTAssertEqual(WatchReport.new(now, history: earlier).map(\.text), ["又傻逼了", "@蓝 在不在"])
         // traces(36): sent while the watch was still opening the chat: after the last look, so it is new.
-        XCTAssertEqual(WatchReport.firstNew(earlier + [line("蓝海乐", "@蓝 在不在", false)], after: earlier).map(\.text), ["@蓝 在不在"])
-        // No earlier look, or one too old to share a message with this screen: all of it is from before this watch.
-        XCTAssertEqual(WatchReport.firstNew(now, after: nil), [])
-        XCTAssertEqual(WatchReport.firstNew(now, after: [line("某人", "很久以前的话", false)]), [])
+        XCTAssertEqual(WatchReport.new(earlier + [line("蓝海乐", "@蓝 在不在", false)], history: earlier).map(\.text), ["@蓝 在不在"])
+        // No history yet: the watch starts here. History but no overlap: more than a screenful came in, all new.
+        XCTAssertEqual(WatchReport.new(now, history: nil), [])
+        XCTAssertEqual(WatchReport.new(now, history: [line("某人", "很久以前的话", false)]), now)
     }
 
     func testTheReplyIsWrittenFromTheChatTheRulesAndTheKnowledge() {

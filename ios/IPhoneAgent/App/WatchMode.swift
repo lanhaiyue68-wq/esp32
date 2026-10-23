@@ -318,18 +318,30 @@ enum WatchReport {
         return words.isEmpty || answer.contains("{") ? nil : (words, "")
     }
 
-    /// What is new on screen since the previous look: the lines after the place where the previous look's last lines
-    /// (three, else two, else one) show up again, its last occurrence when there are several. Matching a run of lines
-    /// rather than single texts catches a message repeated word for word (traces(35): the owner asked the same thing
-    /// twice and the second was taken as already read). When the previous lines are gone (scrolled far), every line
-    /// not on the previous screen.
-    /// A watch's first look at a chat: what came after the last look of the previous watch. That covers a message
-    /// sent while this watch was still opening the chat (half a minute; build 22 lost it) and leaves out what an
-    /// earlier test asked (build 25 answered that). With no earlier look that shares a message with this screen,
-    /// all of it is from before this watch.
-    static func firstNew(_ lines: [Line], after earlier: [Line]?) -> [Line] {
-        guard let earlier, !Set(lines.map(key)).isDisjoint(with: earlier.map(key)) else { return [] }
-        return new(lines, after: earlier)
+    /// What is new on this screen, the way ChatTool does it on Android (j2/d0.c): find the longest run at the end of
+    /// the chat's history that the screen starts with; everything after it is new. A run is lines in order, so the
+    /// same words sent again are new each time (logs(12)). The top line or two may be cut off or read differently
+    /// (this reads a picture, ChatTool reads the view tree), so the run may start up to two lines down. No overlap:
+    /// more than a screenful came in since the last look, all of it new. No history yet: the watch starts here.
+    static func new(_ lines: [Line], history: [Line]?) -> [Line] {
+        guard let history, !history.isEmpty else { return [] }
+        let cur = lines.map(key), old = history.map(key)
+        var best: (end: Int, run: Int)?
+        for skip in 0...min(2, cur.count) {
+            for run in stride(from: min(old.count, cur.count - skip), through: 1, by: -1)
+            where Array(old.suffix(run)) == Array(cur[skip..<(skip + run)]) {
+                if run > (best?.run ?? 0) { best = (skip + run, run) }
+                break
+            }
+        }
+        guard let best else { return lines }
+        return Array(lines.dropFirst(best.end))
+    }
+
+    /// The chat's history after a look: what was new appended, the last 20 kept (ChatTool keeps 20 as well).
+    static func remember(_ fresh: [Line], screen: [Line], history: [Line]?) -> [Line] {
+        guard let history, !history.isEmpty else { return Array(screen.suffix(20)) }
+        return Array((history + fresh).suffix(20))
     }
 
     private static let looksKey = "watch.lastLooks"
@@ -341,20 +353,7 @@ enum WatchReport {
         UserDefaults.standard.set(try? JSONEncoder().encode(looks), forKey: looksKey)
     }
 
-    static func new(_ lines: [Line], after previous: [Line]) -> [Line] {
-        guard !previous.isEmpty else { return lines }
-        let cur = lines.map(key), prev = previous.map(key)
-        for n in stride(from: min(3, prev.count), through: 1, by: -1) {
-            let tail = Array(prev.suffix(n))
-            // The first place the previous tail shows up: the same words sent again ("@蓝 在不在" three times in
-            // logs(12)) matched the newest copy, so the repeats were never new and never answered.
-            for start in stride(from: 0, through: cur.count - n, by: 1) where Array(cur[start..<(start + n)]) == tail {
-                return Array(lines[(start + n)...])
-            }
-        }
-        let seen = Set(prev)
-        return lines.filter { !seen.contains(key($0)) }
-    }
+    static func answerKey(_ m: ReadMessage) -> String { m.chat + "\u{1F}" + m.sender + "\u{1F}" + m.text }
 
     /// Sender and the first line of the text without spaces: a quote under a message, read differently from one look
     /// to the next, does not make the same message look new.
@@ -504,7 +503,7 @@ extension AppModel {
         watchHandled = 0
         watchRead = 0
         watchLast = WatchReport.savedLooks()
-        watchLooked = []
+        watchAnswered = [:]
         watchInterjectedAt = [:]
         watchRetries = [:]
         watchStatus = String(localized: "Starting…")
@@ -602,11 +601,10 @@ extension AppModel {
             (chat, screen) = (open, look)
         }
 
-        let firstLook = !watchLooked.contains(chat), before = watchLast[chat]
-        let fresh = firstLook ? WatchReport.firstNew(screen.lines, after: before) : WatchReport.new(screen.lines, after: before ?? [])
-        watchLooked.insert(chat)
-        watchLast[chat] = screen.lines
-        if firstLook { DebugLog.write("watch: first look at \(chat): \(fresh.count) of \(screen.lines.count) message(s) came after the last watch") }
+        let before = watchLast[chat]
+        let fresh = WatchReport.new(screen.lines, history: before)
+        watchLast[chat] = WatchReport.remember(fresh, screen: screen.lines, history: before)
+        if before == nil { DebugLog.write("watch: \(chat): history starts here (\(screen.lines.count) message(s) on screen)") }
         var read = fresh.filter { !$0.mine }.map { line in
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
                         atMe: rules.myNames.contains { line.text.contains("@" + $0) })
@@ -614,7 +612,9 @@ extension AppModel {
 
         var reply: String?, task: String?
         if !rules.serverReplies && !read.isEmpty {
-            let due = read.filter { WatchSettings.fires($0, rules) }
+            // ChatTool's guard against running one message twice: the same words from the same person in this chat
+            // were answered under 30 s ago (a misread made them look new again).
+            let due = read.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty  // phone tasks only for an explicit whitelist, never for anyone
@@ -636,6 +636,7 @@ extension AppModel {
                 DebugLog.write("watch: reply withheld: \(why)")
             } else if await sendReply(text, chat: chat, back: !rules.single && task == nil) {
                 if let i = read.indices.last { read[i].replied = text }
+                for m in read where WatchSettings.fires(m, rules) { watchAnswered[WatchReport.answerKey(m)] = now() }
             } else { sent = false }
         }
         if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
