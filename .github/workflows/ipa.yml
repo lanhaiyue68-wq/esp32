@@ -1,0 +1,55 @@
+# Unsigned IPA on a GitHub macOS runner, for a team without a Mac: the same Release build the Mac made for
+# build 14 (default bundle ID, no signing). Sign and install from Windows (AllInSign or a sideloading tool),
+# entering the bundle ID used on the phone there. The IPA is uploaded before the unit tests run, so a test
+# failure still leaves something to install, and the run shows what failed.
+name: Unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+      - name: XcodeGen
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen generate
+      - name: Build (Release, device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent -configuration Release \
+            -destination generic/platform=iOS -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build 2>&1 | tail -150
+      - name: Package IPA
+        run: |
+          app=$(ls -d build-device/Build/Products/Release-iphoneos/*.app | head -1)
+          build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
+          echo "app: $app, build $build"
+          /usr/libexec/PlistBuddy -c 'Print UIBackgroundModes' "$app/Info.plist"
+          mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
+          (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
+          shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IPhoneAgent-unsigned-ipa
+          path: |
+            ios/IPhoneAgent-build*-unsigned.ipa
+            ios/ipa.sha256
+          retention-days: 30
+      - name: Unit tests (simulator, unsigned)
+        run: |
+          set -o pipefail
+          sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
+          echo "simulator: $sim"
+          xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
+            -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -150

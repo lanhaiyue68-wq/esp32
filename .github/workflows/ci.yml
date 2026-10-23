@@ -1,9 +1,9 @@
 name: CI
 
+# Manual only in this private copy: ipa.yml builds and tests the app on every push, and the firmware and
+# server jobs here cover the upstream code, not the board's firmware (that lives in esp32-iphone-agent).
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   ios:
