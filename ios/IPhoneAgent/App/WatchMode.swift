@@ -262,7 +262,12 @@ enum WatchReport {
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
     static func object(_ reply: String) -> Data? {
         guard let start = reply.firstIndex(of: "{"), let end = reply.lastIndex(of: "}"), start < end else { return nil }
-        return String(reply[start...end]).data(using: .utf8)
+        // Models sometimes write Python's True/False/None (logs(12) lost a whole read to "group":True).
+        var json = String(reply[start...end])
+        for (word, value) in [("True", "true"), ("False", "false"), ("None", "null")] {
+            json = json.replacingOccurrences(of: #":\s*"# + word + #"\b"#, with: ":" + value, options: .regularExpression)
+        }
+        return json.data(using: .utf8)
     }
 
     /// Step 2's reply as lines; nil when it is not the expected JSON.
@@ -341,7 +346,9 @@ enum WatchReport {
         let cur = lines.map(key), prev = previous.map(key)
         for n in stride(from: min(3, prev.count), through: 1, by: -1) {
             let tail = Array(prev.suffix(n))
-            for start in stride(from: cur.count - n, through: 0, by: -1) where Array(cur[start..<(start + n)]) == tail {
+            // The first place the previous tail shows up: the same words sent again ("@蓝 在不在" three times in
+            // logs(12)) matched the newest copy, so the repeats were never new and never answered.
+            for start in stride(from: 0, through: cur.count - n, by: 1) where Array(cur[start..<(start + n)]) == tail {
                 return Array(lines[(start + n)...])
             }
         }

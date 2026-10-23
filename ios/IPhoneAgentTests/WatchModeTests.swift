@@ -87,6 +87,20 @@ import XCTest
         XCTAssertTrue(WatchSettings.openPlan(chat: "客户群").contains("done right away"))
     }
 
+    func testTheSameWordsSentAgainAreNewEachTime() {
+        // logs(12): "@蓝 在不在" sent three times was never new: the previous tail matched the newest copy.
+        let a = WatchReport.Line(sender: "蓝海乐", text: "@蓝 在不在", mine: false)
+        let comma = WatchReport.Line(sender: "蓝海乐", text: "，", mine: false)
+        XCTAssertEqual(WatchReport.new([a, a], after: [comma, a]), [a])
+        XCTAssertEqual(WatchReport.new([a, a, a], after: [a, a]), [a])
+        XCTAssertEqual(WatchReport.firstNew([a, a, a], after: [a, a]), [a])
+        XCTAssertEqual(WatchReport.new([a, a], after: [a, a]), [])  // nothing sent: nothing new
+        // and a read written with Python's True/False is still read (logs(12) lost one)
+        let read = WatchReport.screen(#"{"title":"测试群","group":True,"messages":[{"sender":"蓝海乐","text":"@蓝 在不在","mine":False}]}"#)
+        XCTAssertEqual(read?.group, true)
+        XCTAssertEqual(read?.lines, [a])
+    }
+
     func testAWatchStartsAfterTheLastLookOfThePreviousOne() {
         let line = { (sender: String, text: String, mine: Bool) in WatchReport.Line(sender: sender, text: text, mine: mine) }
         // traces(39): the previous watch had already seen the old "find the group owner" from a test; only what came
