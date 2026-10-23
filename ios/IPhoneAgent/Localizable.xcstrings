@@ -7166,6 +7166,16 @@
           }
         }
       }
+    },
+    "Passphrases, one per line (“@我” means when you @ this account)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号，每行一个（写“@我”表示你 @ 这个号就算）"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

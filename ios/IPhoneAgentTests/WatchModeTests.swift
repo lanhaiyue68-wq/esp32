@@ -29,6 +29,16 @@ import XCTest
         XCTAssertFalse(WatchSettings.fires(message("蓝海乐", "@蓝色妖姬 你好"), rules { $0.myNames = ["小蓝"] }))
     }
 
+    func testAnAtPassphraseMeansAnAtMentionOfThisAccount() {
+        XCTAssertEqual(WatchSettings.passphrases(from: "@我\n天王盖地虎"), ["天王盖地虎"])  // "@我" is not words to look for
+        XCTAssertEqual(WatchSettings.names(typed: "蓝", codes: "@我"), ["蓝"])
+        XCTAssertEqual(WatchSettings.names(typed: "", codes: "＠蓝\n天王盖地虎"), ["蓝"])
+        XCTAssertEqual(WatchSettings.names(typed: "@蓝\n蓝", codes: "@蓝"), ["蓝"])
+        let r = rules { $0.passphrases = WatchSettings.passphrases(from: "@我") }
+        XCTAssertTrue(WatchSettings.fires(message("蓝海乐", "@蓝 你告诉我群主是谁"), r))
+        XCTAssertFalse(WatchSettings.fires(message("蓝海乐", "大家@我一下"), r))
+    }
+
     func testOpeningTheChatNeverReplies() {
         let one = WatchSettings.openTask(rules())
         XCTAssertTrue(one.contains("“客户群”"))

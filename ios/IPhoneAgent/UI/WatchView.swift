@@ -114,7 +114,7 @@ struct WatchView: View {
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             TextField("Whitelist: who may trigger a reply, one per line (empty: anyone)", text: $senders, axis: .vertical)
                 .lineLimit(2...6)
-            TextField("Passphrases, one per line", text: $passphrases, axis: .vertical)
+            TextField("Passphrases, one per line (“@我” means when you @ this account)", text: $passphrases, axis: .vertical)
                 .lineLimit(1...4)
         } header: {
             Text("When to Reply")

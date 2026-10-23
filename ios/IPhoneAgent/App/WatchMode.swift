@@ -42,9 +42,21 @@ enum WatchSettings {
     static var intervalMinutes: Int { min(60, max(1, d.object(forKey: intervalKey) as? Int ?? 5)) }
     static var interject: Bool { d.bool(forKey: interjectKey) }
     static var senders: [String] { lines(d.string(forKey: sendersKey) ?? "") }
-    static var passphrases: [String] { lines(d.string(forKey: passphrasesKey) ?? defaultPassphrase) }
+    static var passphrases: [String] { passphrases(from: d.string(forKey: passphrasesKey) ?? defaultPassphrase) }
     /// The names others @ this account by (WeChat nickname, group nicknames): "@蓝" is a mention only if "蓝" is here.
-    static var myNames: [String] { lines(d.string(forKey: myNamesKey) ?? "").map { $0.hasPrefix("@") ? String($0.dropFirst()) : $0 } }
+    static var myNames: [String] { names(typed: d.string(forKey: myNamesKey) ?? "", codes: d.string(forKey: passphrasesKey) ?? "") }
+
+    /// A passphrase written as an @ is a mention, not words to look for: "@我" means "when the owner @s this account"
+    /// (matched through myNames), "@蓝" also names the account 蓝.
+    static func passphrases(from raw: String) -> [String] { lines(raw).filter { !isMention($0) } }
+
+    static func names(typed: String, codes: String) -> [String] {
+        let fromCodes = lines(codes).filter(isMention).map(withoutAt).filter { !["我", "me", "自己", "本号"].contains($0) }
+        return lines((lines(typed).map(withoutAt) + fromCodes).joined(separator: "\n"))
+    }
+
+    private static func isMention(_ s: String) -> Bool { s.hasPrefix("@") || s.hasPrefix("＠") }
+    private static func withoutAt(_ s: String) -> String { isMention(s) ? String(s.dropFirst()).trimmingCharacters(in: .whitespaces) : s }
     static var serverOn: Bool { d.bool(forKey: serverOnKey) }
     static var serverURL: String { text(serverURLKey, "") }
     static var robotId: String { text(robotKey, defaultRobot) }
