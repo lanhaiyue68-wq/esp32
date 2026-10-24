@@ -32,6 +32,8 @@ extension AppModel {
 
     /// "See you later" (DepartureOverlay): the character takes off just before the phone goes Home.
     private func depart() async {
+        // Watch runs often start while another app is already in front; no departure animation is visible then.
+        guard UIApplication.shared.applicationState != .background else { return }
         departing = true
         try? await Task.sleep(nanoseconds: 800_000_000)
         departing = false

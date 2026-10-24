@@ -650,7 +650,8 @@ extension AppModel {
                 // While a result is pending, only its delivery is retried. Never re-enter task classification.
                 if now() >= quietUntil {
                     await deliverWatchTaskReply()
-                    (baseline, changedAt, quietUntil) = (nil, nil, now() + 20)
+                    // Back off only an unsent report. A successful send needs the ordinary screen cooldown.
+                    (baseline, changedAt, quietUntil) = (nil, nil, now() + (watchTaskReply == nil ? 6 : 20))
                 }
             } else if let send = chatTool.nextCommand() {
                 watchStatus = String(localized: "Sending ChatTool's reply to \(send.chat)…")
@@ -693,15 +694,22 @@ extension AppModel {
                         break
                     }
                     (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
+                    if watchTaskReply != nil {
+                        // A completed task is already persisted. Deliver it immediately; it isn't new screen activity.
+                        quietUntil = 0
+                        continue
+                    }
                 }
                 if changedAt == nil { watchStatus = watchIdleLine }
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
     }
 
     /// One check, in small steps (see WatchSettings): open, read, keep what is new, decide in code, write, send.
     private func watchCheck() async -> Bool {
+        let began = now()
+        defer { logWatchTiming("check", since: began) }
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
         if rules.single, UIApplication.shared.applicationState != .active, let look = await readChat(rules.targets[0]),
@@ -820,6 +828,8 @@ extension AppModel {
 
     private func deliverWatchTaskReply() async {
         guard watching, !Task.isCancelled, let result = watchTaskReply else { return }
+        let began = now()
+        defer { logWatchTiming("report", since: began) }
         guard result.canDeliver(WatchSettings.rules, watching: watching) else {
             DebugLog.write("watch: phone task report withheld after its permission changed")
             watchTaskReply = nil
@@ -839,6 +849,8 @@ extension AppModel {
 
     /// Step 2: one vision call on the open chat; logged into the check's trace.
     private func readChat(_ chat: String) async -> WatchReport.Screen? {
+        let began = now()
+        defer { logWatchTiming("read", since: began) }
         do {
             if !feed.streamOn { try await feed.stream(true) }  // the screen as it is now, not the last frame of the run
             _ = try await feed.currentFrame()
@@ -861,6 +873,8 @@ extension AppModel {
 
     /// Step 4: the reply or the owner's phone task, as one JSON line from the planner model.
     private func decide(_ prompt: String) async -> (reply: String, task: String)? {
+        let began = now()
+        defer { logWatchTiming("decide", since: began) }
         do {
             let answer = try await settings.client("planner").chat(system: prompt, text: "按要求只输出那一行 JSON。", image: nil,
                                                                    maxTokens: 500, temperature: 0.4)
@@ -989,18 +1003,26 @@ extension AppModel {
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
+        let began = now()
+        defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
         await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
         guard !Task.isCancelled else { return nil }
         guard let last = agent.steps.last, last["action"]?.str == "done" else { return nil }
         watchHandled += 1
         return last["answer"]?.str ?? ""
+    }
+
+    private func logWatchTiming(_ stage: String, since began: Double) {
+        let ms = (now() - began) * 1000
+        DebugLog.write(String(format: "watch timing: %@ %.0f ms", stage, ms))
+        traces.write(kind: "watch timing", ["stage": .str(stage), "elapsed_ms": .num(ms)])
     }
 
     /// The chosen knowledge: files on this iPhone, or the ones chosen on the computer (kept from the last good fetch
