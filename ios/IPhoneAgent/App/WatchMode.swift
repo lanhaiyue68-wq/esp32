@@ -447,6 +447,14 @@ enum WatchReport {
         return words.isEmpty || answer.contains("{") ? nil : (words, "")
     }
 
+    @MainActor static func decide(_ prompt: String, client: ChatModel, onReply: (String) -> Void,
+                                  rollback: () -> Void) async throws -> (reply: String, task: String)? {
+        let answer = try await client.chat(system: prompt, text: "按要求只输出那一行 JSON。", image: nil,
+                                           maxTokens: 500, temperature: 0.4)
+        onReply(answer.text)
+        return decision(answer.text)
+    }
+
     /// What is new on this screen, the way ChatTool does it on Android (j2/d0.c): find the longest run at the end of
     /// the chat's history that the screen starts with; everything after it is new. A run is lines in order, so the
     /// same words sent again are new each time (logs(12)). The top line or two may be cut off or read differently
@@ -820,7 +828,8 @@ extension AppModel {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty && due.allSatisfy { rules.senders.contains($0.sender) }
                 if let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
-                                                                           due: due, r: rules, knowledge: knowledge, owner: owner)) {
+                                                                           due: due, r: rules, knowledge: knowledge, owner: owner),
+                                               rollback: { self.watchLast[chat] = before }) {
                     reply = WatchSettings.typeable(decided.reply)
                     task = owner && !decided.task.isEmpty ? decided.task : nil
                     if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
@@ -962,14 +971,13 @@ extension AppModel {
     }
 
     /// Step 4: the reply or the owner's phone task, as one JSON line from the planner model.
-    private func decide(_ prompt: String) async -> (reply: String, task: String)? {
+    private func decide(_ prompt: String, rollback: () -> Void = {}) async -> (reply: String, task: String)? {
         let began = now()
         defer { logWatchTiming("decide", since: began) }
         do {
-            let answer = try await settings.client("planner").chat(system: prompt, text: "按要求只输出那一行 JSON。", image: nil,
-                                                                   maxTokens: 500, temperature: 0.4)
-            traces.write(kind: "watch decide", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(answer.text)])
-            return WatchReport.decision(answer.text)
+            return try await WatchReport.decide(prompt, client: settings.client("planner"), onReply: { answer in
+                traces.write(kind: "watch decide", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(answer)])
+            }, rollback: rollback)
         } catch {
             DebugLog.write("watch: deciding the reply failed: \(error.localizedDescription)")
             return nil
