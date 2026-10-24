@@ -58,3 +58,13 @@
 - 桌面 E:/桌面/Lan-Agent-build49-unsigned.ipa，4,987,626 bytes；SHA256 7d3a9307af79bad1c360cc77fc070c096be8b6b5a46d13ac33f36bd081d72be9。App/Widget49、ZIP、minimumOS18.0、无模型预设和新编译路径已核对；桌面48的IPA／sha／说明三件套已回收。
 - 路由 systematic-debugging／TDD／verification-before-completion，沿用已有spec；未派子Agent。Headroom压缩RED省7443、GREEN省7123 tokens；合成88字节H264测试不含手机画面。
 - 证据 ../out/build49-speed/{implementation-plan.md,verification.json,red-ci.log,green-ci.log,checkpoint.json}。未改固件／网络／账号／模型配置；原生ScreenCaptureKit要求iOS27且现有编译环境26.6，本轮未接入。未操作真机，整体提速和成功率待同任务新日志验证。
+
+
+## 2026-10-25 build50：日志23返回失败与重复读取修复
+- 日志23确认build49及directStart／frame-wait路径生效；返回手势未成功但未核对结果，18轮重复读同一会话合计91,732ms，读消息模型61,225ms。Return发送的快捷完成也跳过发送计划的返回步骤。原始日志/截图仅保留本机out/logs23-diagnosis。
+- WatchListReturn：新鲜帧及完整会话标题确认后，点原生导航栏左上返回按钮一次；只有列表标题与四个底部标签均可见才结束。识别不确定时用最多4步导航actor并再核对列表，不能仅凭模型done。
+- watchLoop优先处理pending返回；返回失败只恢复导航，不读消息/重发/重做任务，20秒退避，连续4次失败停止。普通回复、任务回报、ChatTool和无须回复的多会话读取统一排队返回；单会话留在会话页。先读后退出和49提速路径保留。
+- RED40112190894：旧一滑即成功的行为触发新测试失败；测试自身有一处可空数组强制解包导致主机重启，已改为安全断言，不据RED宣称完整基线通过。首轮GREEN40112733914发现默认回调的MainActor编译问题，已修。最终GREEN40112899851：源码cd4acaf7b32788b131e31b2f22bfdce08e6f70b4，Xcode26.6设备Release与全部231项XCTest（新增8项）通过，117Swift语法/JSON/plist/entitlements/diff核对通过。
+- 桌面E:/桌面/Lan-Agent-build50-unsigned.ipa，4,999,422 bytes，SHA256 912159ce44551cafd789d2d6bd15035f6bc5c1d6533aa245e979e395adf183cf；App/Widget50、MinimumOS18、ZIP、无模型预设、新路径及桌面hash已核对；49的IPA/sha/说明三件套已回收。
+- 路由systematic-debugging/TDD/verification-before-completion，沿用spec；无子Agent。仅private远端推源码与通用记录，不上传私人日志/图片。备份E:/Backups/esp32-before-build50-20261025.zip。证据../out/build50-chat-return/{verification.json,checkpoint.json,red-ci.log,green1-ci.log,green-ci.log,implementation-plan.md}；Headroom分别省8223/5348/7123 tokens。
+- 没有操作真实手机，真机返回及总耗时仍待同任务新日志；测试数不代表容错率/成功率或速度百分比。没有改固件、网络、账号和模型设置。

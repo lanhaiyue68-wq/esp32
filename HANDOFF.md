@@ -1,3 +1,15 @@
+## 最新交付：build50 / 日志23聊天返回与重复读取 — 2026-10-25
+
+- 工作树E:/AgentStorage/esp32/iphone-agent-build13，codex/wechat-phone-tasks；最终测试源码cd4acaf7b32788b131e31b2f22bfdce08e6f70b4，仅private远端。
+- 用户问题：进入聊天后无法返回且仍慢。日志23是49；18轮重复读取约92秒，其中read模型61秒；边缘滑动失败未验证；Return发送快捷done跳过返回。49提速路径确实生效，不能因此声称真实任务整体已提速。
+- 新WatchListReturn在新鲜帧确认完整会话标题后点导航栏左上返回按钮；核对列表标题+四底部标签，不确定时最多4步导航actor，最终仍需可见列表证据。watchLoop优先pending返回，失败只恢复导航，20秒退避／四次失败停止。
+- sendReply固定发送计划不再夹带返回，成功后独立排队。普通回复、任务回报、ChatTool、无须回复的多会话读取都覆盖；导航失败不重发/重读/重做任务；单会话留在聊天页；48先读后退出和49加速保留。
+- 关键文件WatchListReturn.swift、WatchMode.swift、AppModel.swift、WatchListReturnTests.swift、Shared.xcconfig。路由systematic-debugging/TDD/verification-before-completion，沿用spec，无子Agent。
+- RED40112190894：旧一滑即成功触发新断言失败，测试自身强制解包已修，不推断完整旧基线通过。GREEN1 40112733914默认回调MainActor编译失败已修；最终GREEN40112899851：Xcode26.6设备Release与231项XCTest全通过，117Swift语法／JSON／plist／entitlements／diff通过。
+- 桌面E:/桌面/Lan-Agent-build50-unsigned.ipa（4,999,422 bytes），SHA256 912159ce44551cafd789d2d6bd15035f6bc5c1d6533aa245e979e395adf183cf；App/Widget50／ZIP／minimumOS18／无模型预设／新二进制路径／桌面hash均核对；49三件套已送回收筒，仅留50。
+- 证据../out/build50-chat-return/verification.json、checkpoint.json、implementation-plan.md及CI日志；原始私有数据../out/logs23-diagnosis（不要上传）。备份E:/Backups/esp32-before-build50-20261025.zip。
+- 未操作真机，下一步沿用Bundle ID签名覆盖并重启守候，两个会话发新消息核对返回、无重复读取／重发及总耗时。测试不能换算真实容错率/提速百分比。无固件/网络/账号/模型修改；iOS27原生取画面仍未实现。
+
 ## 最新交付：build49 / 直接执行与有效画面及时返回 — 2026-10-25
 
 - 工作树 E:/AgentStorage/esp32/iphone-agent-build13；codex/wechat-phone-tasks；已测试App源码24a22f586d46506cd26340647595f158a0c9e330。仅private远端，未推origin/main。
