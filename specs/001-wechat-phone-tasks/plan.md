@@ -53,3 +53,8 @@ Xcode26.6／现有iOS18+构建暂不引入要求iOS27的ScreenCaptureKit，不�
 ### build51 review refinement
 WatchListReturn改arrived/deferred/failed，仅真失败累加；列表要求标题和至少三个正确列tab，容忍漏认一个；WatchMode在模型失败/坏格式时回滚history并fail check，明确有效空回复仍正常记录。保留50版发送/返回分离、49提速和48先读消息顺序。
 No architecture or permission expansion. RED238/5 and RED241/7; final Release and241/0 at f9d3a68. Physical-device acceptance remains T009.
+
+
+### build52 bounded local navigation trial
+新增WatchChatOpen：仅“仅指定会话”且名单只有1项，完整唯一名称+较小消息预览+已验证微信列表时点一次；必须动作后新鲜帧匹配目标标题，才交原readChat独立确认/读取。名称截断、重名、未知布局回原导航；多会话未读选择原样。点后错误/过期目的地停止本轮，不再点击/读/发送；前景暂停不累计检查失败。
+Retains prior model navigation, independent model message read, privacy/permission/stop/send-dedup checks. No Android APK code or system permission integration. Validation: RED254/15 assertion failures, GREEN254/0 at551ef25. Keep desktop51 and independent verified backup as explicitly pinned rollback baseline. Physical-device performance remains T009.

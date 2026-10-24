@@ -1,3 +1,15 @@
+## 最新交付：build52 / 保留51回退的本机单会话导航试验 — 2026-10-25
+
+- 工作树E:/AgentStorage/esp32/iphone-agent-build13，分支codex/wechat-phone-tasks，仅private；最终测试源码551ef25368e7de76095914abd41089ed3a5305bc，后续仅文档。
+- 新增WatchChatOpen：仅“仅指定会话”且名单只有1项，完整唯一名称+较小消息预览+已验证微信列表时点一次；必须动作后新鲜帧匹配目标标题，才交原readChat独立确认/读取。名称截断、重名、未知布局回原导航；多会话未读选择原样。点后错误/过期目的地停止本轮，不再点击/读/发送；前景暂停不累计检查失败。
+- 关键文件WatchChatOpen.swift、WatchMode.swift、WatchChatOpenTests.swift、Shared.xcconfig。
+- RED40129055561：254项中15个预期断言失败，均为新快路测试，原241通过。GREEN40129446177：设备Release与254项XCTest全部通过，源码551ef25368e7de76095914abd41089ed3a5305bc；含新增13项和真实Vision读取合成列表画面。120Swift语法、13JSON、4plist/entitlements、diff、App/Widget52、ZIP、minimumOS18、空模型预设及桌面hash核对通过。
+- 桌面E:/桌面/Lan-Agent-build52-unsigned.ipa，5,008,240 bytes，SHA256 ed0426c0c7b567a45e6a88f70161ada756cb0f47f07582a252c805f7b39d1aea；校验和使用说明同目录。51三件套未改未删，SHA仍8fee0ad21175c75ebde0f8051f552e8ef754e01219e904f552f42170518e4969；另备份E:/Backups/esp32-build51-rollback-20261025，含源码快照/rollback.txt/受保护manifest；本地回退分支codex/rollback-build51。
+- 明确保留51为回退基准，禁止自动回收；这是用户对旧包默认清理规则的最新覆盖要求。原APK分析记录仍保留，未复制他人代码。
+- 本轮没有改固件、网络、模型、账号权限或签名。没有真机测速，不能承诺全任务提速比例。新增快路主要省单一目标从列表进入时的试读/导航调用；51原有已在单一聊天直接读取的行为保留，不把它当新提升。多会话及复杂跨App任务本版没有新增快路。
+- 已按共享reminder执行开发/收尾路由；router偏向OCR候选，现有Swift/Vision足够，无需新工具或技能安装。使用systematic-debugging、test-driven-development、verification-before-completion；Headroom压缩源码与CI日志。无子Agent；无私人截图/日志或APK源码上传。
+- 证据../out/build52-local-navigation/verification.json、checkpoint、implementation-plan和CI原日志/Headroom。下一步同一单会话对照验收；保留51直到用户明确同意丢弃。
+
 ## 最新交付：build51 / 50版交付后复查修复 — 2026-10-25
 
 - 工作树E:/AgentStorage/esp32/iphone-agent-build13，codex/wechat-phone-tasks，仅private远端；测试源码f9d3a6801fae7f310d9a4c0a4bf94d1f6254c120，后续仅文档。

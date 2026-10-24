@@ -77,3 +77,18 @@
 - 设备Release与241项XCTest全通过，GREEN40115040451，源码f9d3a6801fae7f310d9a4c0a4bf94d1f6254c120；118Swift语法、13JSON、4plist/entitlements和diff通过。App/Widget51、ZIP、minimumOS18、无模型预设、新二进制路径和桌面hash均核对。
 - 桌面E:/桌面/Lan-Agent-build51-unsigned.ipa，5,003,989 bytes，SHA256 8fee0ad21175c75ebde0f8051f552e8ef754e01219e904f552f42170518e4969；校验码/说明同目录，旧50三件套已送回收筒。证据../out/build51-review-fixes；备份E:/Backups/esp32-before-build51-20261025.zip。
 - 未操作真机微信；实际返回、暂停恢复、模型失败重试及整体速度待真机日志验收，不能给出实际容错率/提速百分比。未改固件、网络、账号、模型或签名。
+
+
+## APK参考方案静态分析 — 2026-10-25
+- 用户提供尖椒1.0.2与肉包1.4.0 APK，已本地静态分析。确认肉包Shizuku本机截图/input及系统返回；尖椒无障碍控件树、id/文字定位及参数化命令脚本。肉包仍有截图后500ms、首轮动作后5s/后续2s和多阶段模型调用，不能据此声称必然更快。
+- 可借鉴：扩展现有本机可验证动作、稳定短流程、细分耗时与模型次数；Android权限不能原样移植iPhone。51已有directStart/新鲜帧/本机返回OCR，本轮未改程序或发布52。
+- 详细报告和本地证据：../out/apk-performance-review-20261025/APK性能机制对照.md。JADX部分方法还原失败，关键肉包协程另用simple指令输出核对；APK/反编译代码只保存在项目外out，未上传。没有运行APK或实测端到端速度。
+
+
+## build52 / 保留51回退的本机单会话导航试验 — 2026-10-25
+- 用户授权先做一版并明确保留当前51供回退，覆盖原“新版到桌面回收旧包”的本次默认规则。
+- 新增WatchChatOpen：仅“仅指定会话”且名单只有1项，完整唯一名称+较小消息预览+已验证微信列表时点一次；必须动作后新鲜帧匹配目标标题，才交原readChat独立确认/读取。名称截断、重名、未知布局回原导航；多会话未读选择原样。点后错误/过期目的地停止本轮，不再点击/读/发送；前景暂停不累计检查失败。
+- RED40129055561：254项中15个预期断言失败，均为新快路测试，原241通过。GREEN40129446177：设备Release与254项XCTest全部通过，源码551ef25368e7de76095914abd41089ed3a5305bc；含新增13项和真实Vision读取合成列表画面。120Swift语法、13JSON、4plist/entitlements、diff、App/Widget52、ZIP、minimumOS18、空模型预设及桌面hash核对通过。
+- 桌面E:/桌面/Lan-Agent-build52-unsigned.ipa，5,008,240 bytes，SHA256 ed0426c0c7b567a45e6a88f70161ada756cb0f47f07582a252c805f7b39d1aea；校验和使用说明同目录。51三件套未改未删，SHA仍8fee0ad21175c75ebde0f8051f552e8ef754e01219e904f552f42170518e4969；另备份E:/Backups/esp32-build51-rollback-20261025，含源码快照/rollback.txt/受保护manifest；本地回退分支codex/rollback-build51。
+- 本轮没有改固件、网络、模型、账号权限或签名。没有真机测速，不能承诺全任务提速比例。新增快路主要省单一目标从列表进入时的试读/导航调用；51原有已在单一聊天直接读取的行为保留，不把它当新提升。多会话及复杂跨App任务本版没有新增快路。
+- 证据../out/build52-local-navigation；下一步同一单会话/同网络模型对比51与52“列表到读消息”耗时、对象准确性、暂停恢复和无重复发送。

@@ -54,3 +54,11 @@
 - [x] Fix deferred returns, positioned/tolerant list proof and failed-decision history rollback.
 - [x] Release +241/0 at f9d3a68; verify51 artifact and recycle desktop50.
 - [ ] T009 physical-device double-chat return, foreground-resume, failed-decision retry and total latency acceptance remains open.
+
+
+### build52 trial
+- [x] Preserve verified desktop51, independent backup, source snapshot, rollback instructions and protected manifest.
+- [x] Add13 tests (exact/duplicate/truncated/preview/scope, one-tap/freshness/pause, actual synthetic Vision); RED before implementation.
+- [x] Implement single-target-only local open, exact post-action verification, original navigator fallback and foreground deferral.
+- [x] Release +254/0 at551ef25; validate52 IPA and unchanged51 rollback baseline.
+- [ ] T009 physical-phone comparison and real latency/accuracy acceptance; no global speed claim.
