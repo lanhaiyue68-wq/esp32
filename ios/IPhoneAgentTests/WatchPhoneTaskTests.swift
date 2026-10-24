@@ -32,7 +32,7 @@ import XCTest
     }
 
     func testPhoneTasksRequireEverySourceMessageToBeExplicitlyAuthorized() {
-        let owner = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录，写下买牛奶")
+        let owner = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录，写下买牛奶", verified: true)
         let r = enabledRules()
         XCTAssertEqual(WatchSettings.phoneRequest([owner], r), "打开备忘录，写下买牛奶")
         var denied = r; denied.phoneTasks = false
@@ -53,12 +53,16 @@ import XCTest
         XCTAssertNil(WatchSettings.phoneRequest([other], r))
     }
 
-    func testGroupTasksStillRequireTheMentionAndUseTheOriginalRequestsInOrder() {
-        let first = ReadMessage(chat: "测试群", group: true, sender: "蓝海乐", text: "@蓝 打开备忘录")
-        let second = ReadMessage(chat: "测试群", group: true, sender: "蓝海乐", text: "@蓝 写下买牛奶")
-        XCTAssertEqual(WatchSettings.phoneRequest([first, second], enabledRules()), "@蓝 打开备忘录\n@蓝 写下买牛奶")
-        var noMention = first; noMention.text = "打开备忘录"
-        XCTAssertNil(WatchSettings.phoneRequest([noMention], enabledRules()))
+    func testGroupMessagesNeverStartPhoneTasksEvenFromTheOwnersName() {
+        // logs26: anyone in a group can take the owner's name as a group nickname.
+        let first = ReadMessage(chat: "测试群", group: true, sender: "蓝海乐", text: "@蓝 打开备忘录", verified: true)
+        let second = ReadMessage(chat: "测试群", group: true, sender: "蓝海乐", text: "@蓝 写下买牛奶", verified: true)
+        XCTAssertNil(WatchSettings.phoneRequest([first, second], enabledRules()))
+        let unproven = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录")
+        XCTAssertNil(WatchSettings.phoneRequest([unproven], enabledRules()), "a private message without the passcode")
+        var proven = unproven; proven.verified = true
+        XCTAssertEqual(WatchSettings.phoneRequest([proven, proven], enabledRules()), "打开备忘录
+打开备忘录")
     }
 
     func testPendingResultSurvivesRelaunchWithoutKeepingAnExecutableTask() throws {

@@ -7379,12 +7379,32 @@
         }
       }
     },
-    "An exactly listed sender in a listed chat can ask this iPhone to use other apps, then receive the result here. Add your private chat name to both lists to give tasks privately. Groups still need an @mention or passphrase. ChatTool reply mode does not run phone tasks." : {
+    "Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; group messages never start one, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "名单内会话中，名字完全匹配白名单的发言人可以让这台 iPhone 操作其他 App，结果会回到原会话。私聊下任务时，把私聊名同时加入会话范围和发言人白名单。群聊仍需 @ 本账号或口令。ChatTool 负责回复时不执行手机任务。"
+            "value" : "只有同时写在会话范围和发言人白名单里的私聊可以下手机任务，而且消息里必须带口令；群聊消息一律不执行手机任务，因为群里任何人都能改成同样的昵称。口令只存在这台 iPhone 的钥匙串里，读取和回复前都会去掉。建议在微信里给主人设一个独一无二的备注。ChatTool 负责回复时不执行手机任务。"
+          }
+        }
+      }
+    },
+    "Phone task passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机任务口令"
+          }
+        }
+      }
+    },
+    "Set a passcode of at least 4 characters before phone tasks can run." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先设置至少 4 个字符的口令，手机任务才会执行。"
           }
         }
       }

@@ -24,6 +24,7 @@ enum WatchSettings {
     static let interjectKey = "watchInterjectV1", sendersKey = "watchSendersV1", passphrasesKey = "watchPassphrasesV1"
     static let myNamesKey = "watchMyNamesV1"
     static let phoneTasksKey = "watchPhoneTasksV1"
+    static let ownerPINAccount = "watch-owner-pin"  // Keychain
     static let serverOnKey = "watchServerOnV1", serverURLKey = "watchServerURLV1", robotKey = "watchRobotIdV1"
     static let serverRepliesKey = "watchServerRepliesV1"
     static let knowledgeFromComputerKey = "watchKnowledgeComputerV1", computerURLKey = "watchComputerURLV1"
@@ -45,6 +46,12 @@ enum WatchSettings {
     static var interject: Bool { d.bool(forKey: interjectKey) }
     static var senders: [String] { lines(d.string(forKey: sendersKey) ?? "") }
     static var phoneTasks: Bool { d.bool(forKey: phoneTasksKey) }
+    /// The passcode a phone task must carry, in the Keychain. A nickname alone proves nothing: anyone in a group can
+    /// take the owner's name as their group nickname. Under 4 characters counts as unset (no phone tasks).
+    static var ownerPIN: String {
+        get { Keychain.get(ownerPINAccount) ?? "" }
+        set { Keychain.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), for: ownerPINAccount) }
+    }
     static var passphrases: [String] { passphrases(from: d.string(forKey: passphrasesKey) ?? defaultPassphrase) }
     /// The names others @ this account by (WeChat nickname, group nicknames): "@蓝" is a mention only if "蓝" is here.
     static var myNames: [String] { names(typed: d.string(forKey: myNamesKey) ?? "", codes: d.string(forKey: passphrasesKey) ?? "") }
@@ -86,24 +93,68 @@ enum WatchSettings {
     struct Rules {
         var targets: [String] = [], onlyListed = true, senders: [String] = [], passphrases: [String] = []
         var myNames: [String] = [], interject = false, serverReplies = false, instruction = "", fallback = ""
-        var phoneTasks = false
+        var phoneTasks = false, ownerPIN = ""
         /// The one chosen chat stays open between checks: its new messages show up on screen by themselves.
         var single: Bool { onlyListed && targets.count == 1 }
     }
 
     static var rules: Rules {
         Rules(targets: targets, onlyListed: onlyListed, senders: senders, passphrases: passphrases, myNames: myNames,
-              interject: interject, serverReplies: serverReplies, instruction: instruction, fallback: fallback, phoneTasks: phoneTasks)
+              interject: interject, serverReplies: serverReplies, instruction: instruction, fallback: fallback, phoneTasks: phoneTasks,
+              ownerPIN: ownerPIN)
     }
 
-    /// A separate capability from ordinary replies: every source must exactly match both lists. Keep the user's
-    /// words; a planner may decide that an action is needed, but cannot replace them with a different instruction.
+    /// A separate capability from ordinary replies: every source must exactly match both lists, come from a private
+    /// chat and carry the owner's passcode (verified). Keep the user's words; a planner may decide that an action is
+    /// needed, but cannot replace them with a different instruction.
     static func phoneRequest(_ messages: [ReadMessage], _ r: Rules) -> String? {
         guard r.phoneTasks, !r.serverReplies, !messages.isEmpty,
               Set(messages.map(\.chat)).count == 1,
-              messages.allSatisfy({ r.targets.contains($0.chat) && r.senders.contains($0.sender) && fires($0, r)
+              messages.allSatisfy({ isOwner($0, r) && r.targets.contains($0.chat) && fires($0, r)
                   && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
         return messages.map(\.text).joined(separator: "\n")
+    }
+
+    /// Owner authority (tasks, not replies): a listed sender, in a private chat, whose message held the passcode.
+    static func isOwner(_ m: ReadMessage, _ r: Rules) -> Bool {
+        r.senders.contains(m.sender) && !m.group && m.verified
+    }
+
+    /// The passcode taken out of what was read, so it never reaches a model, a reply, a log or the read log. Lines of
+    /// a private chat that held it are `proven`; in a group it proves nothing (everyone there has seen it).
+    static func masked(_ screen: WatchReport.Screen, pin: String) -> WatchReport.Screen {
+        guard pin.count >= 4 else { return screen }
+        var out = screen
+        out.lines = screen.lines.map { line in
+            guard !line.mine, line.text.contains(pin) else { return line }
+            var l = line
+            l.text = line.text.replacingOccurrences(of: pin, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if screen.group {
+                DebugLog.write("watch: the phone-task passcode showed in a group; not accepted there, change it in Lan Agent")
+            } else {
+                out.proven.insert(WatchReport.proofKey(l))
+            }
+            return l
+        }
+        return out
+    }
+
+    static func hidePIN(_ text: String, _ pin: String) -> String {
+        pin.count >= 4 ? text.replacingOccurrences(of: pin, with: "‹passcode›") : text
+    }
+
+    /// Before typing in a send run. Refused when the chat on screen is not the destination (logs26: the report for
+    /// 蓝海乐 went into 测试群), or when the text already shows more often than when this run first typed it (logs26:
+    /// sent with 发送, then typed and sent again with Return).
+    static func sendRefusal(chat: String, inChat: Bool, shown: Int, baseline: inout Int?) -> String? {
+        guard inChat else {
+            return "This screen is not the chat “\(chat)”. Go back to the chat list and open “\(chat)” first; never type this message in another chat."
+        }
+        if let b = baseline, shown > b {
+            return "This message already shows here since this run typed it: it was sent, or it is still in the input box. If it is a green bubble, finish with done; if it is still in the box, tap 发送. Never type it again."
+        }
+        if baseline == nil { baseline = shown }
+        return nil
     }
 
     /// A reply is due: the sender is whitelisted (or there is no whitelist) and the text @mentions one of the user's
@@ -333,10 +384,14 @@ struct ReadMessage: Codable, Equatable {
     var atMe: Bool
     var replied: String
     var at: Date?
+    /// Read in a private chat with the owner's passcode (WatchSettings.masked); never decoded from a model.
+    var verified = false
 
     enum CodingKeys: String, CodingKey { case chat, group, sender, text, atMe, replied, at }
 
-    init(chat: String, group: Bool, sender: String, text: String, atMe: Bool = false, replied: String = "", at: Date? = nil) {
+    init(chat: String, group: Bool, sender: String, text: String, atMe: Bool = false, replied: String = "", at: Date? = nil,
+         verified: Bool = false) {
+        self.verified = verified
         self.chat = chat
         self.group = group
         self.sender = sender
@@ -360,7 +415,10 @@ struct ReadMessage: Codable, Equatable {
 
 enum WatchReport {
     struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
-    struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line] }
+    struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line]; var proven: Set<String> = [] }
+
+    /// A read line's key in Screen.proven.
+    static func proofKey(_ l: Line) -> String { l.sender + "\u{1}" + l.text }
 
     private static func fullTitle(_ text: String) -> String {
         text.replacingOccurrences(of: #"\s*[（(]\s*\d+\s*[）)]\s*$"#, with: "", options: .regularExpression)
@@ -844,7 +902,8 @@ extension AppModel {
         if before == nil { DebugLog.write("watch: \(chat): history starts here (\(screen.lines.count) message(s) on screen)") }
         var read = fresh.filter { !$0.mine }.map { line in
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
-                        atMe: rules.myNames.contains { line.text.contains("@" + $0) })
+                        atMe: rules.myNames.contains { line.text.contains("@" + $0) },
+                        verified: screen.proven.contains(WatchReport.proofKey(line)))
         }
 
         var reply: String?, task: String?
@@ -861,7 +920,7 @@ extension AppModel {
             if let last = due.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
-                let owner = !rules.senders.isEmpty && due.allSatisfy { rules.senders.contains($0.sender) }
+                let owner = !rules.senders.isEmpty && due.allSatisfy { WatchSettings.isOwner($0, rules) }
                 guard let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner),
                                                rollback: { self.watchLast[chat] = before }) else {
@@ -992,18 +1051,20 @@ extension AppModel {
             guard let frame = feed.frame else { return nil }
             // Asked twice at most: the model now and then writes broken JSON (logs(13): a missing quote), and a
             // lost read is a lost check.
+            let pin = WatchSettings.ownerPIN
             for attempt in 1...2 {
                 let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),
                                                                     text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
-                traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(reply.text)])
-                if let screen = WatchReport.screen(reply.text) {
+                traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(WatchSettings.hidePIN(reply.text, pin))])
+                if let read = WatchReport.screen(reply.text) {
+                    let screen = WatchSettings.masked(read, pin: pin)
                     guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules) else {
                         DebugLog.write("watch: read destination mismatch; ignoring this check")
                         return nil
                     }
                     return screen
                 }
-                DebugLog.write("watch: could not read \(chat) (try \(attempt)): \(reply.text.prefix(200))")
+                DebugLog.write("watch: could not read \(chat) (try \(attempt)): \(WatchSettings.hidePIN(reply.text, pin).prefix(200))")
             }
             return nil
         } catch {
@@ -1063,7 +1124,7 @@ extension AppModel {
         }
         // Return-sending intentionally ends the send run. Returning is a separate, verified stage.
         let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: false), plan: WatchSettings.sendPlan(chat: chat, back: false),
-                                stepLimit: 25, returnSends: true) != nil
+                                stepLimit: 25, returnSends: true, sendTo: chat) != nil
         if ok, let box = agent.typedInto { watchInputBox[chat] = box }  // the next reply here goes the quick way
         if ok, back { watchListReturn.pending = chat }
         return ok
@@ -1151,7 +1212,7 @@ extension AppModel {
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
-                          directStart: Bool = false, returning: Bool = false) async -> String? {
+                          directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now()
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
@@ -1171,7 +1232,16 @@ extension AppModel {
             }
         }
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
-        await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan,
+        var baseline: Int?  // how often the text showed when this send run first typed it
+        let outgoing: (String) -> String? = { text in
+            if let why = PrivacyGuard.check(text, words: words, numbers: numbers) { return why }
+            guard let chat else { return nil }
+            let frame = self.feed.frame
+            let inChat = frame.map { WatchReport.navigationChat(in: $0, targets: [chat]) == chat } ?? false
+            return WatchSettings.sendRefusal(chat: chat, inChat: inChat,
+                                             shown: frame.map { CandidatePicker.count(text, in: $0) } ?? 0, baseline: &baseline)
+        }
+        await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
                   directStart: directStart)
         while agent.running || startingAgent {

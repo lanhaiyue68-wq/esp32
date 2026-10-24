@@ -25,6 +25,7 @@ struct WatchView: View {
     @AppStorage(WatchSettings.privateWordsKey) private var privateWords = ""
     @AppStorage(WatchSettings.blockNumbersKey) private var blockNumbers = true
     @AppStorage(WatchSettings.intervalKey) private var interval = 5
+    @State private var ownerPIN = WatchSettings.ownerPIN
     @State private var files: [String] = []
     @State private var computerFiles: [ComputerKnowledge.File] = []
     @State private var computerProblem: String?
@@ -51,14 +52,24 @@ struct WatchView: View {
                 Section {
                     Toggle("Allow phone tasks from WeChat", isOn: $phoneTasks)
                         .disabled(serverOn && serverReplies)
+                    if phoneTasks {
+                        SecureField("Phone task passcode", text: $ownerPIN)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onChange(of: ownerPIN) { _, value in WatchSettings.ownerPIN = value }
+                    }
                     if phoneTasks && (WatchSettings.lines(senders).isEmpty || WatchSettings.lines(targets).isEmpty) {
                         Text("List both a chat and its permitted sender before phone tasks can run.")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                    if phoneTasks && ownerPIN.trimmingCharacters(in: .whitespacesAndNewlines).count < 4 {
+                        Text("Set a passcode of at least 4 characters before phone tasks can run.")
                             .font(.footnote).foregroundStyle(.orange)
                     }
                 } header: {
                     Text("Phone Tasks")
                 } footer: {
-                    Text("An exactly listed sender in a listed chat can ask this iPhone to use other apps, then receive the result here. Add your private chat name to both lists to give tasks privately. Groups still need an @mention or passphrase. ChatTool reply mode does not run phone tasks.")
+                    Text("Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; group messages never start one, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks.")
                 }
                 Section("How to Reply") {
                     TextField("How replies should sound", text: $instruction, axis: .vertical)
