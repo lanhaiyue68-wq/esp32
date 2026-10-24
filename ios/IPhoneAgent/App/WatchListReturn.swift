@@ -14,16 +14,26 @@ import Foundation
 
     func attempt(phone: Gestures, screen: ScreenSource, canAct: () -> Bool,
                  inspect: ((Data, String) -> View)? = nil, fallback: () async -> Bool) async -> Outcome {
-        await resume(phone: phone, screen: screen, canAct: canAct, inspect: inspect, fallback: fallback) ? .arrived : .failed
+        guard pending != nil else { return .arrived }
+        guard !Task.isCancelled, canAct() else { return .deferred }
+        if await resume(phone: phone, screen: screen, canAct: canAct, inspect: inspect, fallback: fallback) { return .arrived }
+        return Task.isCancelled || !canAct() ? .deferred : .failed
     }
 
     static func view(rows: [[CandidatePicker.Piece]], chat: String) -> View {
         let titles = ["微信", "WeChat", "Chats", "聊天"]
-        let footer = Set(rows.flatMap { $0 }.filter { $0.box.midY > 0.85 }.map { $0.text.filter { !$0.isWhitespace } })
+        let footer = rows.flatMap { $0 }.filter { $0.box.midY > 0.85 }
         let tabs = [["微信", "WeChat", "Chats", "聊天"], ["通讯录", "通訊錄", "Contacts"],
                     ["发现", "發現", "Discover"], ["我", "Me"]]
+        let found = tabs.enumerated().filter { index, labels in
+            let center = (Double(index) + 0.5) / 4
+            return footer.contains { piece in
+                abs(piece.box.midX - center) <= 0.10 && labels.contains(piece.text.filter { !$0.isWhitespace })
+            }
+        }.count
+        // Independent title + tab layout evidence; tolerate one unreadable label, never a bag of words in a message.
         if WatchReport.navigationChat(rows: rows, targets: titles) != nil,
-           tabs.allSatisfy({ labels in labels.contains { footer.contains($0) } }) { return .list }
+           found >= 3 { return .list }
 
         let headers = rows.filter { WatchReport.navigationChat(rows: [$0], targets: [chat]) != nil }
         guard headers.count == 1 else { return .unknown }

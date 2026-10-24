@@ -449,10 +449,15 @@ enum WatchReport {
 
     @MainActor static func decide(_ prompt: String, client: ChatModel, onReply: (String) -> Void,
                                   rollback: () -> Void) async throws -> (reply: String, task: String)? {
+        var accepted = false
+        defer { if !accepted { rollback() } }
         let answer = try await client.chat(system: prompt, text: "按要求只输出那一行 JSON。", image: nil,
                                            maxTokens: 500, temperature: 0.4)
+        try Task.checkCancellation()
         onReply(answer.text)
-        return decision(answer.text)
+        let result = decision(answer.text)
+        accepted = result != nil
+        return result
     }
 
     /// What is new on this screen, the way ChatTool does it on Android (j2/d0.c): find the longest run at the end of
@@ -703,20 +708,24 @@ extension AppModel {
                 // A failed return retries navigation only. Do not read the same chat or resend its message.
                 if now() >= quietUntil {
                     watchStatus = String(localized: "Returning to WeChat's chat list…")
-                    let returned = await resumeWatchReturn(chat)
+                    let outcome = await resumeWatchReturn(chat)
                     guard watching, !Task.isCancelled else { break }
                     (baseline, changedAt) = (nil, nil)
-                    if returned {
+                    if outcome == .arrived {
                         failures = 0
                         (lastCheck, quietUntil) = (0, 0)
                         continue
                     }
-                    failures += 1
-                    if failures >= 4 {
-                        stopWatch(String(localized: "Could not return to WeChat's chat list. Check the screen and start watching again."))
-                        break
+                    if outcome == .failed {
+                        failures += 1
+                        if failures >= 4 {
+                            stopWatch(String(localized: "Could not return to WeChat's chat list. Check the screen and start watching again."))
+                            break
+                        }
+                        quietUntil = now() + 20
+                    } else {
+                        watchStatus = String(localized: "Paused while Lan Agent is in front…")
                     }
-                    quietUntil = now() + 20
                 }
             } else if watchTaskReply != nil {
                 // While a result is pending, only its delivery is retried. Never re-enter task classification.
@@ -827,23 +836,28 @@ extension AppModel {
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty && due.allSatisfy { rules.senders.contains($0.sender) }
-                if let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
+                guard let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner),
-                                               rollback: { self.watchLast[chat] = before }) {
-                    reply = WatchSettings.typeable(decided.reply)
-                    task = owner && !decided.task.isEmpty ? decided.task : nil
-                    if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
-                        phoneMessages = due
-                        task = original
-                        if reply == nil { reply = "收到，我去处理。" }
-                    }
+                                               rollback: { self.watchLast[chat] = before }) else {
+                    DebugLog.write("watch: decision unavailable; new messages preserved for retry")
+                    return (false, false)
+                }
+                reply = WatchSettings.typeable(decided.reply)
+                task = owner && !decided.task.isEmpty ? decided.task : nil
+                if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
+                    phoneMessages = due
+                    task = original
+                    if reply == nil { reply = "收到，我去处理。" }
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
                 reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules)).flatMap(WatchSettings.typeable)
                 if reply != nil { watchInterjectedAt[chat] = now() }
             }
         }
-        guard watching, !Task.isCancelled else { return (false, false) }
+        guard watching, !Task.isCancelled else {
+            watchLast[chat] = before
+            return (false, false)
+        }
         var sent = true  // false: what was due did not go out
         // The reply first, then the owner's phone task: a task takes a minute or more and the person who just asked
         // "在不在" waited for all of it (traces(39)).
@@ -907,16 +921,18 @@ extension AppModel {
         return (true, true)
     }
 
-    private func resumeWatchReturn(_ chat: String) async -> Bool {
+    private func resumeWatchReturn(_ chat: String) async -> WatchListReturn.Outcome {
+        guard UIApplication.shared.applicationState != .active else { return .deferred }
         let began = now()
         defer { logWatchTiming("return", since: began) }
-        let returned = await watchListReturn.resume(phone: pointer, screen: feed,
+        let outcome = await watchListReturn.attempt(phone: pointer, screen: feed,
             canAct: { self.watching && UIApplication.shared.applicationState != .active },
             fallback: { await self.watchRun(WatchSettings.returnTask, plan: WatchSettings.returnPlan,
                                            stepLimit: 4, returning: true) != nil })
-        if returned { watchInputBox[chat] = nil }
-        DebugLog.write("watch: return to list \(returned ? "verified" : "pending; navigation retry only")")
-        return returned
+        if outcome == .arrived { watchInputBox[chat] = nil }
+        if outcome == .deferred { DebugLog.write("watch: return paused; not a failed attempt") }
+        else { DebugLog.write("watch: return to list \(outcome == .arrived ? "verified" : "pending; navigation retry only")") }
+        return outcome
     }
 
     private func deliverWatchTaskReply() async {
@@ -974,8 +990,15 @@ extension AppModel {
     private func decide(_ prompt: String, rollback: () -> Void = {}) async -> (reply: String, task: String)? {
         let began = now()
         defer { logWatchTiming("decide", since: began) }
+        let client: ChatModel
+        do { client = try settings.client("planner") }
+        catch {
+            rollback()
+            DebugLog.write("watch: deciding the reply failed: \(error.localizedDescription)")
+            return nil
+        }
         do {
-            return try await WatchReport.decide(prompt, client: settings.client("planner"), onReply: { answer in
+            return try await WatchReport.decide(prompt, client: client, onReply: { answer in
                 traces.write(kind: "watch decide", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(answer)])
             }, rollback: rollback)
         } catch {
