@@ -24,7 +24,8 @@ import XCTest
             }
         }
         for (key, value) in values { defaults.set(value, forKey: key) }
-        let request = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录，新建一条买牛奶的备忘录")
+        let request = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录，新建一条买牛奶的备忘录",
+                                  verified: true)  // a private message that carried the passcode
         let prompt = WatchSettings.composePrompt(chat: request.chat, group: false, recent: [], due: [request],
                                                 r: WatchSettings.rules, knowledge: "", owner: true)
         // The planner must be offered the phone executor, otherwise the request can only receive a chat reply.
