@@ -50,10 +50,11 @@ import UIKit
     var boardReady: Bool { app.board.connected && app.board.status?.usb == "ok" }
     var mirroring: Bool { app.board.status?.ap == "streaming" }
 
-    /// Calibration is due: never done, the screen shape changed, or the learned correction drifted.
+    /// Calibration is due: never done, an aimed tap found it stale, the screen shape changed, or the learned
+    /// correction drifted.
     var needed: Bool {
         let p = app.pointer
-        guard p.calibrated else { return true }
+        guard p.calibrated, !p.stale else { return true }
         if let aspect = p.aspect, abs(aspect - DeviceScreen.aspect) > 0.02 { return true }
         return p.drift > Self.tolerance
     }

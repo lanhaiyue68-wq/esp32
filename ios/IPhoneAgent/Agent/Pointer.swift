@@ -13,10 +13,12 @@ import Foundation
     static let tapGap = 0.15                // s to stay still after a click, so iOS sees a finished tap
     static let nudge = 12                   // mouse units the pointer is wiggled by to find it on screen
     static let aimTolerance = 0.008         // screen fraction; a bigger miss is corrected before pressing
-    static let maxMiss = 0.06               // bigger misses are still corrected, but not learned from
+    static let maxMiss = 0.06               // bigger misses are still corrected, but not learned from; they mark the calibration stale
+    static let aimPasses = 3                // closed loop: look, correct, look again, at most this many corrections
+    static let edge = 0.05                  // screen fraction; a pointer this close to the border, past its target, was stopped by it
 
     struct Span: Codable, Equatable { var w: Int, h: Int }
-    private struct Saved: Codable { var w: Int, h: Int, seen: [String: [[Double]]]?, quality: Double?, aspect: Double? }
+    private struct Saved: Codable { var w: Int, h: Int, seen: [String: [[Double]]]?, quality: Double?, aspect: Double?, stale: Bool? }
 
     let device: HIDDevice
     weak var screen: ScreenSource?
@@ -37,11 +39,16 @@ import Foundation
     private(set) var seen: [String: [(Double, Double)]] = ["x": [], "y": []]
     @Published private(set) var quality: Double?  // pointer error at the last check, fraction of the screen
     private(set) var aspect: Double?  // frame width / height when calibrated
+    /// An aimed tap missed by more than maxMiss or hit the border: the span no longer fits this phone (log25: saved
+    /// 494 x 1110, real ~445 x 620). Every tap aims until the next calibration clears it.
+    @Published private(set) var stale = false
     var log: (String) -> Void = { print($0) }
     /// The device screen's width / height (iPhone or iPad), stored with a calibration.
     var screenAspect: () -> Double = { 9 / 19.5 }
     /// Last-resort pointer finder on a frame (the vision model), when the pixel diff finds nothing.
     var locate: ((Data) async -> CGPoint?)?
+    /// Finds the pointer for an aim instead of wiggling it on the mirrored screen (tests).
+    var finder: ((Double, Double) async throws -> CGPoint?)?
 
     init(device: HIDDevice, calibrationFile: URL, screen: ScreenSource? = nil) {
         self.device = device
@@ -49,7 +56,7 @@ import Foundation
         self.screen = screen
         if let data = try? Data(contentsOf: calibrationFile), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
             span = Span(w: saved.w, h: saved.h)
-            (quality, aspect) = (saved.quality, saved.aspect)
+            (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             for axis in ["x", "y"] {
                 seen[axis] = (saved.seen?[axis] ?? []).filter { $0.count == 2 }.map { ($0[0], $0[1]) }.suffix(12)
             }
@@ -88,7 +95,7 @@ import Foundation
         let (u1, x1, y1) = found[0], (u2, x2, y2) = found[1]
         let s = Span(w: Int((Double(u2 - u1) / (x2 - x1)).rounded(.toNearestOrEven)), h: Int((Double(u2 - u1) / (y2 - y1)).rounded(.toNearestOrEven)))
         span = s
-        (quality, aspect) = (nil, screenAspect())
+        (quality, aspect, stale) = (nil, screenAspect(), false)
         seen = ["x": [], "y": []]
         for (units, x, y) in found {  // where each stop landed, so moves are corrected for the offset too
             remember("x", (Double(units) / Double(s.w), x))
@@ -122,7 +129,7 @@ import Foundation
 
     /// x, y: where the pointer ended up after startCalibration() (one point, picked by the user).
     func finishCalibration(x: Double, y: Double) {
-        (quality, aspect) = (nil, screenAspect())
+        (quality, aspect, stale) = (nil, screenAspect(), false)
         span = Span(w: Int((Double(Self.calibrationMove) / x).rounded(.toNearestOrEven)), h: Int((Double(Self.calibrationMove) / y).rounded(.toNearestOrEven)))
         seen = ["x": [], "y": []]
         save()
@@ -133,7 +140,7 @@ import Foundation
     func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)]) {
         let s = Span(w: Int((1 / x.a).rounded()), h: Int((1 / y.a).rounded()))
         span = s
-        (quality, aspect) = (max(x.rms, y.rms), screenAspect())
+        (quality, aspect, stale) = (max(x.rms, y.rms), screenAspect(), false)
         seen = ["x": [], "y": []]
         for p in samples {
             remember("x", (p.ux / Double(s.w), p.fx))
@@ -155,32 +162,86 @@ import Foundation
     private func save() {
         guard let span else { return }
         let saved = Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
-                          aspect: aspect)
+                          aspect: aspect, stale: stale ? true : nil)
         try? JSONEncoder().encode(saved).write(to: file)
     }
 
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim && screen != nil { try await self.aim(x, y) }
+        if aim && (screen != nil || finder != nil) { try await self.aim(x, y) }
     }
 
-    /// Closed loop: find the real pointer on screen, fix a miss, and learn the error for later moves.
+    /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
+    /// Each correction measures the real scale (mouse units per screen) from how far it moved the pointer, so a stale
+    /// span is fixed within a tap instead of overshooting once and clicking there. A pointer stopped by the border
+    /// says nothing about the scale: home, move half way, and measure from the corner.
     private func aim(_ x: Double, _ y: Double) async throws {
-        guard let span, let found = try await measure(x, y, model: false) else {
+        guard let span, var found = try await find(x, y) else {
             log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
             return
         }
-        let fx = Double(found.x), fy = Double(found.y)
-        if max(abs(fx - x), abs(fy - y)) <= Self.maxMiss {  // learn from normal drift only, never a stray reading
-            remember("x", (fix(x, "x"), fx))
-            remember("y", (fix(y, "y"), fy))
+        let miss = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
+        if miss <= Self.maxMiss && !pinned(found, x, y) {  // learn from normal drift only, never a stray reading
+            remember("x", (fix(x, "x"), Double(found.x)))
+            remember("y", (fix(y, "y"), Double(found.y)))
             save()
         }
-        if abs(fx - x) <= Self.aimTolerance && abs(fy - y) <= Self.aimTolerance { return }
-        let mx = Int(((x - fx) * Double(span.w)).rounded(.toNearestOrEven)), my = Int(((y - fy) * Double(span.h)).rounded(.toNearestOrEven))
-        try await device.send("move \(mx) \(my)")  // fix this miss right away
-        if let p = pos { pos = (p.0 + mx, p.1 + my) }
+        if miss > Self.maxMiss || pinned(found, x, y) { markStale(miss, found, x, y) }
+        var gain = (w: Double(span.w), h: Double(span.h))
+        for _ in 0..<Self.aimPasses {
+            let fx = Double(found.x), fy = Double(found.y)
+            if abs(fx - x) <= Self.aimTolerance && abs(fy - y) <= Self.aimTolerance { break }
+            if pinned(found, x, y) {
+                try await device.send("home")
+                let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
+                try await device.send("move \(ux) \(uy)")
+                pos = (ux, uy)
+                guard let p = try await find(x, y) else { break }
+                if let g = measured(ux, 0, Double(p.x), x, gain.w) { gain.w = g }
+                if let g = measured(uy, 0, Double(p.y), y, gain.h) { gain.h = g }
+                found = p
+                continue
+            }
+            let mx = Int(((x - fx) * gain.w).rounded(.toNearestOrEven)), my = Int(((y - fy) * gain.h).rounded(.toNearestOrEven))
+            try await device.send("move \(mx) \(my)")  // fix this miss right away
+            if let p = pos { pos = (p.0 + mx, p.1 + my) }
+            guard let p = try await find(x, y) else { break }
+            if abs(mx) >= 20, let g = measured(mx, fx, Double(p.x), x, gain.w) { gain.w = g }
+            if abs(my) >= 20, let g = measured(my, fy, Double(p.y), y, gain.h) { gain.h = g }
+            found = p
+        }
+        if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
+    }
+
+    private func find(_ x: Double, _ y: Double) async throws -> CGPoint? {
+        if let finder { return try await finder(x, y) }
+        return try await measure(x, y, model: false)
+    }
+
+    /// Stopped by the screen border: near the edge and past the target towards it (f, t: found, target on one axis).
+    private static func stopped(_ f: Double, _ t: Double) -> Bool {
+        (f > 1 - edge && f > t + aimTolerance) || (f < edge && f < t - aimTolerance)
+    }
+
+    private func pinned(_ p: CGPoint, _ x: Double, _ y: Double) -> Bool {
+        Self.stopped(Double(p.x), x) || Self.stopped(Double(p.y), y)
+    }
+
+    /// Mouse units per screen from one move (from -> to), when it went far enough, did not end on the border, and is
+    /// within a sane range of the current estimate.
+    private func measured(_ units: Int, _ from: Double, _ to: Double, _ target: Double, _ current: Double) -> Double? {
+        let moved = to - from
+        guard abs(moved) > 0.02, !Self.stopped(to, target) else { return nil }
+        let g = Double(units) / moved
+        return 0.4 * current < g && g < 2.5 * current ? g : nil
+    }
+
+    private func markStale(_ miss: Double, _ found: CGPoint, _ x: Double, _ y: Double) {
+        let border = pinned(found, x, y) ? " against the border" : ""
+        log(String(format: "aim (%.3f, %.3f): pointer at (%.3f, %.3f)", x, y, Double(found.x), Double(found.y))
+            + border + ", calibration marked stale")
+        if !stale { stale = true; quality = miss; save() }
     }
 
     /// Wiggle the pointer and find it on screen, near the target first, then anywhere. model: ask the vision
@@ -269,7 +330,7 @@ import Foundation
     /// aim: find the pointer on screen first (slower); worth it when a tap just missed.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
-        try await point(x, y, aim: aim)
+        try await point(x, y, aim: aim || stale)
         try await device.send("click")
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
