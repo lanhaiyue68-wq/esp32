@@ -280,6 +280,8 @@ import UIKit
         }
     }
 
+    func clearLog() { log.removeAll() }
+
     func say(_ text: String) {
         log = Array((log + [LogLine(text: text)]).suffix(200))
         DebugLog.write(text)

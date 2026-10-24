@@ -164,7 +164,7 @@ struct LogsView: View {
         do {
             try storage.clear()
             try DebugLog.clear()
-            app.log.removeAll()
+            app.clearLog()
             app.runs.reload()
             cleanupMessage = String(localized: "Logs and diagnostic cache cleared.")
         } catch { cleanupMessage = error.localizedDescription }
