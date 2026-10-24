@@ -15,6 +15,11 @@ import UIKit
 }
 
 enum FrameFreshness {
+    /// Recovery policy for the delayed background hook. Other callers still force recovery when necessary.
+    static func needsDecoderRefresh(decodedAt: Double, transitionAt: Double, usable: Bool) -> Bool {
+        true  // Existing behavior: every background transition rebuilds the decoder.
+    }
+
     static func usable(frameAt: Double, decodedMs: Int, latestMs: Int?, statusAt: Double,
                        at: Double, after: Double?, broken: Bool) -> Bool {
         // A frame "from the future" pairs an old stream's board time with a new clock offset (the board rebooted).
@@ -178,7 +183,11 @@ extension ScreenSource {
     /// Decode the cached GOP again in a fresh session (see H264Decoder.refresh): far faster than a snapshot,
     /// and it works when the board's own buffer has overflowed. True when that gives a usable frame.
     @discardableResult
-    func refreshDecoder(_ why: String) async -> Bool {
+    func refreshDecoder(_ why: String, afterTransition: Double? = nil) async -> Bool {
+        if let afterTransition,
+           !FrameFreshness.needsDecoderRefresh(decodedAt: updated, transitionAt: afterTransition, usable: usable()) {
+            return true
+        }
         guard now() - refreshedAt > 2 else { return usable() }  // the app's background hook may just have done it
         refreshedAt = now()
         let n = await withCheckedContinuation { c in decoder.queue.async { [decoder] in c.resume(returning: decoder.refresh()) } }

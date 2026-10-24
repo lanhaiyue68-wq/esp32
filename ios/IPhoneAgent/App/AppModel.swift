@@ -270,10 +270,11 @@ import UIKit
     /// still Home Screen never sends. During a run, rebuild it from the cached GOP shortly after leaving.
     private func refreshDecoderSoon() {
         guard agent.running || startingAgent else { return }
+        let transitionAt = now()
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self, self.agent.running || self.startingAgent else { return }
-            await self.feed.refreshDecoder("app in background")
+            await self.feed.refreshDecoder("app in background", afterTransition: transitionAt)
         }
     }
 
