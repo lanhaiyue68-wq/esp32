@@ -10,6 +10,13 @@ import Foundation
         case unknown
     }
 
+    enum Outcome { case arrived, deferred, failed }
+
+    func attempt(phone: Gestures, screen: ScreenSource, canAct: () -> Bool,
+                 inspect: ((Data, String) -> View)? = nil, fallback: () async -> Bool) async -> Outcome {
+        await resume(phone: phone, screen: screen, canAct: canAct, inspect: inspect, fallback: fallback) ? .arrived : .failed
+    }
+
     static func view(rows: [[CandidatePicker.Piece]], chat: String) -> View {
         let titles = ["微信", "WeChat", "Chats", "聊天"]
         let footer = Set(rows.flatMap { $0 }.filter { $0.box.midY > 0.85 }.map { $0.text.filter { !$0.isWhitespace } })

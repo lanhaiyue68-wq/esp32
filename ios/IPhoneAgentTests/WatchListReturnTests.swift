@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import IPhoneAgent
 
 @MainActor final class WatchListReturnTests: XCTestCase {
@@ -101,6 +102,81 @@ import XCTest
         XCTAssertFalse(ok)
         XCTAssertEqual(state.pending, "客户群")
         XCTAssertEqual(phone.calls, ["tap"])
+    }
+
+    func testForegroundPauseIsDeferredInsteadOfCountingAsAFailedReturn() async {
+        let state = WatchListReturn(); state.pending = "客户群"
+        let phone = FakeGestures()
+        let outcome = await state.attempt(phone: phone, screen: ReturnScreen(), canAct: { false },
+                                          fallback: { XCTFail("paused"); return false })
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(state.pending, "客户群")
+        XCTAssertEqual(phone.calls, [])
+    }
+
+    func testPauseWhileTheReturnIsInFlightIsAlsoDeferred() async {
+        let state = WatchListReturn(); state.pending = "客户群"
+        let phone = FakeGestures(), screen = ReturnScreen()
+        var allowed = true
+        screen.onAfter = { allowed = false }
+        let outcome = await state.attempt(phone: phone, screen: screen, canAct: { allowed },
+            inspect: { _, _ in .chat(CGPoint(x: 0.06, y: 0.09)) },
+            fallback: { XCTFail("paused after tap"); return false })
+        XCTAssertEqual(outcome, .deferred)
+        XCTAssertEqual(state.pending, "客户群")
+        XCTAssertEqual(phone.calls, ["tap"])
+    }
+
+    func testARealNavigationFailureIsStillCountedAsFailure() async {
+        let state = WatchListReturn(); state.pending = "客户群"
+        let outcome = await state.attempt(phone: FakeGestures(), screen: ReturnScreen(), canAct: { true },
+                                          inspect: { _, _ in .unknown }, fallback: { false })
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(state.pending, "客户群")
+    }
+
+    func testOneMissingFooterLabelIsToleratedOnlyInTheCorrectTabColumns() {
+        let header = [piece("微信(3)", x: 0.4, y: 0.08)]
+        let tabs = [piece("微信", x: 0.05, y: 0.95), piece("通讯录", x: 0.3, y: 0.95),
+                    piece("发现", x: 0.55, y: 0.95)]
+        XCTAssertEqual(WatchListReturn.view(rows: [header, tabs], chat: "客户群"), .list)
+        XCTAssertEqual(WatchListReturn.view(rows: [header, Array(tabs.prefix(2))], chat: "客户群"), .unknown)
+    }
+
+    func testFooterWordsInTheWrongPositionsCannotPretendToBeAChatList() {
+        let header = [piece("微信(3)", x: 0.4, y: 0.08)]
+        let message = ["微信", "通讯录", "发现", "我"].map { piece($0, x: 0.4, y: 0.9) }
+        XCTAssertEqual(WatchListReturn.view(rows: [header, message], chat: "客户群"), .unknown)
+    }
+
+    func testRealOnDeviceOCRRecognizesAListDespiteOneMissingLabel() throws {
+        let frame = try drawnFrame(title: "微信(3)", tabs: ["微信", "通讯录", "发现"])
+        XCTAssertEqual(WatchListReturn.view(in: frame, chat: "客户群"), .list)
+    }
+
+    func testRealOnDeviceOCRKeepsAChatWithoutTabsAsAChat() throws {
+        let frame = try drawnFrame(title: "客户群", tabs: [])
+        guard case .chat(let point) = WatchListReturn.view(in: frame, chat: "客户群") else {
+            return XCTFail("The production OCR path must find the current chat's title")
+        }
+        XCTAssertEqual(point.x, 0.06)
+        XCTAssertTrue((0.075...0.11).contains(point.y))
+    }
+
+    private func drawnFrame(title: String, tabs: [String]) throws -> Data {
+        // Synthetic screen only: no customer screenshots, chat text or personal data goes to CI.
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 720, height: 1560))
+            func draw(_ text: String, center: CGFloat, y: CGFloat, size: CGFloat) {
+                let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size), .foregroundColor: UIColor.white]
+                let width = (text as NSString).size(withAttributes: attributes).width
+                (text as NSString).draw(at: CGPoint(x: center - width / 2, y: y), withAttributes: attributes)
+            }
+            draw(title, center: 360, y: 120, size: 34)
+            for (index, text) in tabs.enumerated() { draw(text, center: 90 + CGFloat(index) * 180, y: 1480, size: 26) }
+        }
+        return try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
     }
 }
 
