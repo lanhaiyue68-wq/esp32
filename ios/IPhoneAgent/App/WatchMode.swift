@@ -25,6 +25,7 @@ enum WatchSettings {
     static let myNamesKey = "watchMyNamesV1"
     static let phoneTasksKey = "watchPhoneTasksV1"
     static let ownerPINAccount = "watch-owner-pin"  // Keychain
+    static let inputBoxKey = "watchInputBoxV1"
     static let serverOnKey = "watchServerOnV1", serverURLKey = "watchServerURLV1", robotKey = "watchRobotIdV1"
     static let serverRepliesKey = "watchServerRepliesV1"
     static let knowledgeFromComputerKey = "watchKnowledgeComputerV1", computerURLKey = "watchComputerURLV1"
@@ -46,6 +47,21 @@ enum WatchSettings {
     static var interject: Bool { d.bool(forKey: interjectKey) }
     static var senders: [String] { lines(d.string(forKey: sendersKey) ?? "") }
     static var phoneTasks: Bool { d.bool(forKey: phoneTasksKey) }
+    /// Where WeChat's input box sits with the keyboard down: the same in every chat, so one good send teaches all and
+    /// a reply goes out without an agent run in any chat (logs26: send runs took 15–76 s).
+    static var inputBox: CGPoint? {
+        get {
+            guard let v = d.array(forKey: inputBoxKey) as? [Double], v.count == 2 else { return nil }
+            let p = CGPoint(x: v[0], y: v[1])
+            return usableBox(p) ? p : nil
+        }
+        set { if let p = newValue, usableBox(p) { d.set([Double(p.x), Double(p.y)], forKey: inputBoxKey) } }
+    }
+
+    /// The tap before a `type` is the input box only at the bottom (keyboard down): with the keyboard up the box sits
+    /// mid-screen, where the same tap later would hit a message.
+    static func usableBox(_ p: CGPoint) -> Bool { (0.15...0.85).contains(p.x) && (0.85...0.98).contains(p.y) }
+
     /// The passcode a phone task must carry, in the Keychain. A nickname alone proves nothing: anyone in a group can
     /// take the owner's name as their group nickname. Under 4 characters counts as unset (no phone tasks).
     static var ownerPIN: String {
@@ -802,7 +818,7 @@ extension AppModel {
                 if let why = PrivacyGuard.check(send.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                     DebugLog.write("watch: ChatTool's reply withheld: \(why)")
                 } else {
-                    _ = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single, quick: false)
+                    _ = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single)
                 }
                 guard watching else { break }
                 (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + 6)
@@ -863,18 +879,22 @@ extension AppModel {
 
     /// One check, in small steps (see WatchSettings): open, read, keep what is new, decide in code, write, send.
     private func watchCheck() async -> (ok: Bool, scannedChat: Bool) {
-        let began = now()
-        defer { logWatchTiming("check", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming("check", since: began, calls: calls) }
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
-        if rules.single && UIApplication.shared.applicationState != .active {
+        if (rules.single || rules.onlyListed && rules.targets.count > 1) && UIApplication.shared.applicationState != .active {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
                 WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed
             })
         } else { local = .fallback }
         if case .deferred = local { return (false, false) }
+        if case .nothing = local {
+            DebugLog.write("watch: no unread badge on the listed chats; navigation model skipped")
+            return (true, false)
+        }
         if case .unverified = local {
             DebugLog.write("watch: local open destination not verified; no read or send")
             return (false, false)
@@ -959,7 +979,6 @@ extension AppModel {
             let phone = !phoneMessages.isEmpty
             guard watching, !Task.isCancelled else { return (false, false) }
             if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
-            watchInputBox[chat] = nil  // leaving the chat invalidates its cached keyboard coordinates
             DebugLog.write("watch: owner task in \(chat): \(task)")
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
                                       stepLimit: phone ? agent.maxSteps : 25, fastText: !phone, directStart: phone)
@@ -978,12 +997,12 @@ extension AppModel {
                 // What it found is sent from here: going back to the chat to type it, the agent forgot what it had
                 // found and went to look again until it ran out of steps (logs(14)).
                 if let answer = WatchReport.sendAnswer(done).flatMap(WatchSettings.typeable), !answer.isEmpty {
-                    _ = await sendReply(answer, chat: chat, back: !rules.single, quick: false)
+                    _ = await sendReply(answer, chat: chat, back: !rules.single)
                 }
                 if let i = read.indices.last { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
             } else if watching && !Task.isCancelled {  // stuck or out of steps: say so once instead of trying again and again
                 DebugLog.write("watch: owner task not done in \(chat)")
-                _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single, quick: false)
+                _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single)
                 if let i = read.indices.last { read[i].replied += "【未完成】" + task }
             }
         } else if reply == nil, task == nil, !rules.single {
@@ -1008,13 +1027,12 @@ extension AppModel {
 
     private func resumeWatchReturn(_ chat: String) async -> WatchListReturn.Outcome {
         guard UIApplication.shared.applicationState != .active else { return .deferred }
-        let began = now()
-        defer { logWatchTiming("return", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming("return", since: began, calls: calls) }
         let outcome = await watchListReturn.attempt(phone: pointer, screen: feed,
             canAct: { self.watching && UIApplication.shared.applicationState != .active },
             fallback: { await self.watchRun(WatchSettings.returnTask, plan: WatchSettings.returnPlan,
                                            stepLimit: 4, returning: true) != nil })
-        if outcome == .arrived { watchInputBox[chat] = nil }
         if outcome == .deferred { DebugLog.write("watch: return paused; not a failed attempt") }
         else { DebugLog.write("watch: return to list \(outcome == .arrived ? "verified" : "pending; navigation retry only")") }
         return outcome
@@ -1022,15 +1040,15 @@ extension AppModel {
 
     private func deliverWatchTaskReply() async {
         guard watching, !Task.isCancelled, let result = watchTaskReply else { return }
-        let began = now()
-        defer { logWatchTiming("report", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming("report", since: began, calls: calls) }
         guard result.canDeliver(WatchSettings.rules, watching: watching) else {
             DebugLog.write("watch: phone task report withheld after its permission changed")
             watchTaskReply = nil
             return
         }
         watchStatus = String(localized: "Reporting the phone task result…")
-        if await sendReply(result.text, chat: result.chat, back: !WatchSettings.rules.single, quick: false) {
+        if await sendReply(result.text, chat: result.chat, back: !WatchSettings.rules.single) {
             watchTaskReply = nil
             watchTaskReplyFailures = 0
         } else if watching && !Task.isCancelled {
@@ -1043,8 +1061,8 @@ extension AppModel {
 
     /// Step 2: one vision call on the open chat; logged into the check's trace.
     private func readChat(_ chat: String) async -> WatchReport.Screen? {
-        let began = now()
-        defer { logWatchTiming("read", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming("read", since: began, calls: calls) }
         do {
             if !feed.streamOn { try await feed.stream(true) }  // the screen as it is now, not the last frame of the run
             _ = try await feed.currentFrame()
@@ -1075,8 +1093,8 @@ extension AppModel {
 
     /// Step 4: the reply or the owner's phone task, as one JSON line from the planner model.
     private func decide(_ prompt: String, rollback: () -> Void = {}) async -> (reply: String, task: String)? {
-        let began = now()
-        defer { logWatchTiming("decide", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming("decide", since: began, calls: calls) }
         let client: ChatModel
         do { client = try await settings.client("planner") }
         catch {
@@ -1110,34 +1128,39 @@ extension AppModel {
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.
     /// Types one message into the chat and sends it (fixed plan, no planner call).
-    /// `quick: false` when the agent may have left the chat (after an owner task): the run finds its way back first.
+    /// The quick way first when the destination is on screen (its title checked); otherwise, or when any of its checks
+    /// fails, the agent run finds the chat and sends.
     private func sendReply(_ text: String, chat: String, back: Bool, quick: Bool = true, after: WatchReport.Line? = nil) async -> Bool {
         guard watching, !Task.isCancelled else { return false }
         guard PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) == nil else { return false }
-        if !back, quick {
+        if quick {
             switch await quickSend(text, chat: chat, after: after) {
-            case .sent: return true
+            case .sent:
+                if back { watchListReturn.pending = chat }
+                return true
             case .inBox:  // typed and checked, but Return did not send it: only 发送 is left
-                return await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
+                let ok = await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
+                if ok, back { watchListReturn.pending = chat }
+                return ok
             case .notTried: break
             }
         }
         // Return-sending intentionally ends the send run. Returning is a separate, verified stage.
         let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: false), plan: WatchSettings.sendPlan(chat: chat, back: false),
                                 stepLimit: 25, returnSends: true, sendTo: chat) != nil
-        if ok, let box = agent.typedInto { watchInputBox[chat] = box }  // the next reply here goes the quick way
+        if ok, let box = agent.typedInto { WatchSettings.inputBox = box }  // the next reply goes the quick way
         if ok, back { watchListReturn.pending = chat }
         return ok
     }
 
     enum QuickSend { case sent, inBox, notTried }
 
-    /// A reply without an agent run, once a send in this chat showed where its input box is. Each step is checked on
-    /// the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
+    /// A reply without an agent run, once any send showed where the input box is (WatchSettings.inputBox), in the chat
+    /// whose title is on screen. Each step is checked on the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
     /// front for a moment); tap the box again; paste, and go on only if exactly this text newly shows; Return; then
     /// read the chat, and it counts as sent only when the newest own message is this text.
     private func quickSend(_ text: String, chat: String, after: WatchReport.Line?) async -> QuickSend {
-        guard let box = watchInputBox[chat], WatchSettings.rules.single, Pasteboard.needed(text),
+        guard let box = WatchSettings.inputBox, Pasteboard.needed(text),
               UIApplication.shared.applicationState != .active else { return .notTried }
         func look() async -> Data? {
             try? await Task.sleep(nanoseconds: 500_000_000)
@@ -1166,6 +1189,11 @@ extension AppModel {
             return shown.map { CandidatePicker.count(text, in: $0) > before } ?? false
         }
         do {
+            // logs26: a report meant for 蓝海乐 went into 测试群. Paste only where the title says it is the chat.
+            guard let first = await look(), WatchReport.navigationChat(in: first, targets: [chat]) == chat else {
+                DebugLog.write("watch: quick send: \(chat) is not the chat on screen; the agent finds it")
+                return .notTried
+            }
             try await focusBox()  // before the hop: WeChat on screen, steady, so the keyboard check can be trusted
             guard await hopToPaste(text) == .filled else { return .notTried }
             // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and no
@@ -1214,8 +1242,8 @@ extension AppModel {
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
                           directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
-        let began = now()
-        defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
+        let began = now(), calls = LLMClient.requests
+        defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
         let completion: ((Data) -> String?)?
         if returning {
@@ -1254,10 +1282,12 @@ extension AppModel {
         return last["answer"]?.str ?? ""
     }
 
-    private func logWatchTiming(_ stage: String, since began: Double) {
-        let ms = (now() - began) * 1000
-        DebugLog.write(String(format: "watch timing: %@ %.0f ms", stage, ms))
-        traces.write(kind: "watch timing", ["stage": .str(stage), "elapsed_ms": .num(ms)])
+    /// One stage's time and how many model requests it made (LLMClient.requests since `calls`), so a log shows
+    /// where a check spends its time and which stages still need the model.
+    private func logWatchTiming(_ stage: String, since began: Double, calls: Int) {
+        let ms = (now() - began) * 1000, models = LLMClient.requests - calls
+        DebugLog.write(String(format: "watch timing: %@ %.0f ms, %d model call(s)", stage, ms, models))
+        traces.write(kind: "watch timing", ["stage": .str(stage), "elapsed_ms": .num(ms), "model_calls": .int(models)])
     }
 
     /// The chosen knowledge: files on this iPhone, or the ones chosen on the computer (kept from the last good fetch

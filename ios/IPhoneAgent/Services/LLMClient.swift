@@ -39,6 +39,8 @@ struct LLMError: LocalizedError {
 /// Cloudflare cuts requests that send nothing for ~100 s, so replies are streamed (SSE). A server that
 /// ignores `stream` and answers with plain JSON works too.
 @MainActor final class LLMClient: ChatModel, ModelProgressReporting {
+    /// Model requests made since launch; WeChat watch logs how many each stage made.
+    static var requests = 0
     var onProgress: ((ModelResponseProgress) -> Void)?
     static let tokenParams = ["max_tokens", "max_completion_tokens"]
 
@@ -101,6 +103,7 @@ struct LLMError: LocalizedError {
 
         let started = now()
         let kb = images.reduce(0) { $0 + $1.count } / 1024
+        Self.requests += 1
         DebugLog.write("llm → \(model): \(images.count) image(s) \(kb) KB, \(text.count) chars")
         var status = 0, result: ChatResult?, errorText = ""
         do {

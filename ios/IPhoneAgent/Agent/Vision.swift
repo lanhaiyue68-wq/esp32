@@ -24,6 +24,27 @@ enum Vision {
         return CGImageSourceCreateImageAtIndex(src, 0, nil)
     }
 
+    /// Share of WeChat-red pixels (the unread badge, about #FA5151) in `rect`, fractions of the image (top-left origin).
+    static func redShare(_ img: CGImage, in rect: CGRect) -> Double {
+        let full = CGRect(x: 0, y: 0, width: img.width, height: img.height)
+        let r = CGRect(x: rect.minX * full.width, y: rect.minY * full.height,
+                       width: rect.width * full.width, height: rect.height * full.height).integral.intersection(full)
+        guard !r.isEmpty, let crop = img.cropping(to: r) else { return 0 }
+        let w = crop.width, h = crop.height
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        rgba.withUnsafeMutableBytes { buf in
+            let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+            ctx.draw(crop, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        var red = 0
+        for i in 0..<(w * h) {
+            let r = Int(rgba[i * 4]), g = Int(rgba[i * 4 + 1]), b = Int(rgba[i * 4 + 2])
+            if r > 200 && g < 130 && b < 130 && r - g > 100 { red += 1 }
+        }
+        return Double(red) / Double(w * h)
+    }
+
     /// The image drawn at w x h (bilinear-ish scaling), converted to gray like PIL's convert("L").
     static func gray(_ img: CGImage, _ w: Int, _ h: Int) -> Gray {
         var rgba = [UInt8](repeating: 0, count: w * h * 4)
