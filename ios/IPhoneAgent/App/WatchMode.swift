@@ -815,10 +815,8 @@ extension AppModel {
             if let now = await look(), CandidatePicker.keyboardUp(in: now) { return }
             try await pointer.tap(box.x, box.y)
         }
-        do {
-            try await focusBox()
-            guard await hopToPaste(text) == .filled else { return .notTried }
-            try await focusBox()
+        // Cmd+V, iOS's paste prompt answered, and true when the text newly shows (looked at twice).
+        func paste() async throws -> Bool {
             let before = await look().map { CandidatePicker.count(text, in: $0) } ?? 0
             try await pointer.key("cmd+v")
             var shown = await look()
@@ -831,7 +829,21 @@ extension AppModel {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 shown = await look()
             }
-            guard let pasted = shown, CandidatePicker.count(text, in: pasted) > before else {
+            return shown.map { CandidatePicker.count(text, in: $0) > before } ?? false
+        }
+        do {
+            try await focusBox()  // before the hop: WeChat on screen, steady, so the keyboard check can be trusted
+            guard await hopToPaste(text) == .filled else { return .notTried }
+            // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and no
+            // keyboard is on screen, the box cleared first (logs(20): the space bar again).
+            var landed = try await paste()
+            if !landed, let now = await look(), !CandidatePicker.keyboardUp(in: now) {
+                try await pointer.key("cmd+a")
+                try await pointer.key("backspace")
+                try await pointer.tap(box.x, box.y)
+                landed = try await paste()
+            }
+            guard landed else {
                 try await pointer.key("cmd+a")
                 try await pointer.key("backspace")
                 DebugLog.write("watch: quick send: the paste did not show the text; cleared it, the agent sends")

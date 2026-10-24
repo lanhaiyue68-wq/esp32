@@ -105,6 +105,7 @@ extension Pointer: Gestures {}
     private(set) var typedInto: CGPoint?
     /// Whether this run's strokes have left a line yet; nil until one is checked.
     private var inkSeen: Bool?
+    private var returnSent = false  // typeFast sent the message with Return: the run is done
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
     private var deadTaps: [JObject] = []
@@ -399,7 +400,7 @@ extension Pointer: Gestures {}
 
     func run() async {
         var failures = 0
-        (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps) = (false, nil, nil, nil, [])
+        (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -620,6 +621,10 @@ extension Pointer: Gestures {}
             }
             record(planned.shot, act)
             if name == "done" || name == "fail" { return true }
+            if returnSent {  // sent and checked: nothing is left to look at or tap
+                record(nil, ["action": .str("done"), "answer": .str("sent with Return")])
+                return true
+            }
             if startsDrawing, drawing.contains(name) {
                 // A first stroke may pan a canvas if the drawing tool was not actually active.
                 // Observe it before spending the rest of the batch on the same mistaken state.
@@ -674,29 +679,23 @@ extension Pointer: Gestures {}
                 pasteHopOff = true
                 throw DeviceError(message: "switching to Lan Agent for the paste did not work; look at the screen again")
             }
-            if pasteHop != nil, let field = lastTap {  // back from Lan Agent: focus the box again, unless it still has the keyboard
-                if let now = await freshFrame(), CandidatePicker.keyboardUp(in: now) {
-                    DebugLog.write("type: the keyboard is still up; pasting into the box without a tap")
-                } else {
-                    try await phone.tap(field.x, field.y, aim: false)
-                }
-            }
             if hop == .filled {
-                let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
-                try await phone.key("cmd+v")
-                var after = await freshFrame()
-                if let shown = after, let allow = CandidatePicker.allowPaste(in: shown) {  // iOS asks: allow, once
-                    try await phone.tap(allow.x, allow.y, aim: false)
-                    DebugLog.write("type: iOS asked to allow the paste; allowed")
-                    after = await freshFrame()
+                // Paste first, tap after. Back from Lan Agent the box usually still has the keyboard, and a tap where
+                // it sits without one hit the space bar whenever the first frame back did not show the keyboard yet
+                // (logs(17), logs(20)). Only a paste that did not land, with no keyboard on screen, clears the box,
+                // taps it and pastes once more (never twice into the same box).
+                var pasted = try await pasteChecked(text, phone: phone)
+                if !pasted, pasteHop != nil, let field = lastTap, let now = await freshFrame(), !CandidatePicker.keyboardUp(in: now) {
+                    try await phone.key("cmd+a")
+                    try await phone.key("backspace")
+                    try await phone.tap(field.x, field.y, aim: false)
+                    pasted = try await pasteChecked(text, phone: phone)
                 }
-                if let shown = after, CandidatePicker.count(text, in: shown) <= before {  // the frame may predate the paste
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    after = await freshFrame()
-                }
-                if let after, CandidatePicker.count(text, in: after) > before {
-                    if returnSends {  // checked: exactly this text is in the box
+                if pasted {
+                    if returnSends {  // checked: exactly this text is in the box. The run ends here: a look at the
+                        // empty box afterwards tapped "发送" on the keyboard's space bar (logs(20)).
                         try await phone.key("enter")
+                        returnSent = true
                         return DebugLog.write("type: pasted, seen in the field, sent with Return")
                     }
                     return DebugLog.write("type: pasted and seen in the field")
@@ -727,6 +726,24 @@ extension Pointer: Gestures {}
                 rest = input.remaining
             }
         }
+    }
+
+    /// Cmd+V, answering iOS's paste prompt if it comes up, and true when the text newly shows on screen (looked at
+    /// twice: the first frame may come from before the paste).
+    private func pasteChecked(_ text: String, phone: Gestures) async throws -> Bool {
+        let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
+        try await phone.key("cmd+v")
+        var after = await freshFrame()
+        if let shown = after, let allow = CandidatePicker.allowPaste(in: shown) {  // iOS asks: allow, once
+            try await phone.tap(allow.x, allow.y, aim: false)
+            DebugLog.write("type: iOS asked to allow the paste; allowed")
+            after = await freshFrame()
+        }
+        if let shown = after, CandidatePicker.count(text, in: shown) <= before {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            after = await freshFrame()
+        }
+        return after.map { CandidatePicker.count(text, in: $0) > before } ?? false
     }
 
     /// The screen a moment after the last keys, for reading text on it.
