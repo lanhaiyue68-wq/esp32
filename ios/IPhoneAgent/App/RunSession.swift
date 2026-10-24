@@ -15,7 +15,7 @@ extension AppModel {
     /// `reference` and `outgoing` come from WeChat watch (knowledge files, the privacy check); other runs clear them.
     func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
-             frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false) async {
+             frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false, keyboardGuard: Bool = false) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -30,6 +30,7 @@ extension AppModel {
         agent.stepLimit = stepLimit
         agent.fastText = fastText
         agent.returnSends = returnSends
+        agent.keyboardGuard = keyboardGuard
         await startAgent(task)
     }
 

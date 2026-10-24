@@ -133,7 +133,11 @@ import Foundation
                 guard allowed() else { return .deferred }
                 try await screen.requireFrame(after: ended)
                 guard allowed(), let after = screen.frame else { return .deferred }
-                return title(after) == chat ? .opened(chat) : .unverified
+                if title(after) == chat { return .opened(chat) }
+                // logs27: the title was not up yet on the first frame after the tap; one more settled look
+                await screen.afterAction(since: now())
+                guard allowed(), let later = screen.frame else { return .deferred }
+                return title(later) == chat ? .opened(chat) : .unverified
             }
         } catch {
             if !allowed() { return .deferred }

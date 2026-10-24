@@ -110,6 +110,12 @@ extension Pointer: Gestures {}
     /// Whether this run's strokes have left a line yet; nil until one is checked.
     private var inkSeen: Bool?
     private var returnSent = false  // typeFast sent the message with Return: the run is done
+    /// WeChat watch: a `type` with no keyboard on screen is refused and the next tap aims (logs27: the tap on the
+    /// input box landed above it, and "nihaoya" was typed seven times into nothing while the model said the box was
+    /// focused). Refused twice in a row, it goes through, in case the keyboard is one the check does not know.
+    var keyboardGuard = false
+    private var noKeyboard = 0
+    private var aimNext = false  // the next tap finds the pointer on screen first
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
     private var deadTaps: [JObject] = []
@@ -323,6 +329,8 @@ extension Pointer: Gestures {}
     static let noInkReason = "The stroke left no line on the canvas: no drawing tool is active, so the drag only moved the "
         + "canvas. Look at the controls on screen and work out which one is the drawing tool (a button you already tried that "
         + "changed nothing is not it), select it, then draw again. It is not done until lines show."
+    static let noKeyboardReason = "Not typed: no keyboard is on screen, so the input box is not focused (the last tap "
+        + "missed it). Tap the input box again (this tap is aimed) and type only once the keyboard shows."
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
         + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one."
 
@@ -409,6 +417,7 @@ extension Pointer: Gestures {}
     func run() async {
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
+        (noKeyboard, aimNext) = (0, false)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -606,13 +615,21 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(refused)])  // never typed
                     return false
                 }
+                if name == "type", keyboardGuard, noKeyboard < 2, let shown = screen?.frame, Vision.image(shown) != nil,
+                   !CandidatePicker.keyboardUp(in: shown) {
+                    noKeyboard += 1
+                    aimNext = true
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
+                    return false
+                }
+                if name == "type" { noKeyboard = 0 }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
-                if name == "tap", missed { act["precise"] = .bool(true) } // record the aim mode actually used
+                if name == "tap", missed || aimNext { act["precise"] = .bool(true) } // record the aim mode actually used
                 if name == "path", act["smooth"] == nil, Self.isGentleBend(points(act), aspect: screen?.aspect ?? 9 / 19.5) {
                     act["smooth"] = .bool(true)  // recorded, so the review and the next look know it was a curve
                 }
@@ -882,7 +899,8 @@ extension Pointer: Gestures {}
         switch a["action"]?.str {
         case "tap":
             lastTap = CGPoint(x: p("x"), y: p("y"))
-            try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed)
+            try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed || aimNext)
+            aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)

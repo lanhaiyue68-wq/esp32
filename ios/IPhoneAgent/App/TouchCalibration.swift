@@ -8,7 +8,8 @@ extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
 
     static let roughStops = [150, 350]
-    static let targets: [(Double, Double)] = [(0.25, 0.25), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.75, 0.75)]
+    /// The last one is where chat input boxes sit (logs27: a tap there landed 4% high).
+    static let targets: [(Double, Double)] = [(0.25, 0.25), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.75, 0.75), (0.5, 0.9)]
     static let check = (x: 0.5, y: 0.62)
     static let tapTimeout = 3.0
     static let maxCheckError = 0.05  // a check tap this far off means the fit is wrong: fail, not "calibrated"

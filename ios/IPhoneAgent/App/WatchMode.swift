@@ -1170,7 +1170,7 @@ extension AppModel {
         // A tap where the box sits without the keyboard hits the space bar while the keyboard is up (logs(17)).
         func focusBox() async throws {
             if let now = await look(), CandidatePicker.keyboardUp(in: now) { return }
-            try await pointer.tap(box.x, box.y)
+            try await pointer.tap(box.x, box.y, aim: true)
         }
         // Cmd+V, iOS's paste prompt answered, and true when the text newly shows (looked at twice).
         func paste() async throws -> Bool {
@@ -1202,7 +1202,7 @@ extension AppModel {
             if !landed, let now = await look(), !CandidatePicker.keyboardUp(in: now) {
                 try await pointer.key("cmd+a")
                 try await pointer.key("backspace")
-                try await pointer.tap(box.x, box.y)
+                try await pointer.tap(box.x, box.y, aim: true)
                 landed = try await paste()
             }
             guard landed else {
@@ -1271,7 +1271,7 @@ extension AppModel {
         }
         await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
-                  directStart: directStart)
+                  directStart: directStart, keyboardGuard: true)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: 100_000_000)
