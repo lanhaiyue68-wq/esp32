@@ -1,3 +1,11 @@
+## 2026-10-25 — build54：點擊閉環對準、貼邊重量、大偏差標記校準失效（Claude Code）
+
+日誌25（06:19，跑的是52/51）：模型給的微信座標 (0.85,0.59) 正確，但存著的 span 494x1110 與手機實際約 445x620 不符；home→move 420 655 卡在右下角，單次修正 move -49 -464 落到 Watch，守候一直打不開微信。日誌24「主畫面被說成白板」很可能同源（誤開無邊記）。
+源碼 263999a：Pointer.aim 改為最多3次「修正→再找→用實際位移重量比例」；游標被邊緣擋住時先 home、走一半重量；偏差>maxMiss 或貼邊即 stale（持久化，之後所有 tap 自動 aim，AutoCalibrator.needed 為真，重新校準清除）。滑動/拖曳仍用舊 span。
+驗證：run 40138959029（chen-private，workflow_dispatch）設備 Release 編譯與279項 XCTest 全過（新增 PointerAimTests 5項，以日誌25數據模擬）。未另跑 RED（新測試依賴新介面，舊碼無法編譯）；未真機驗證。
+交付：E:/桌面/Lan-Agent-build54-unsigned.ipa，5,053,059 bytes，SHA256 a12684c85dfa1e7d29a2062d0c6ba95d5977b0e017ba8b9eb4ffd0430d641faf；App/Widget 54、iOS 18、無內建 key。桌面52/53已送回收筒，51保留。證據 ../out/build54-aim-closed-loop。
+下一步：覆蓋安裝54 → 設定裡重新校準 → 守候查未讀，看日誌是否出現 "calibration marked stale" 及能否點中微信。
+
 ## 2026-10-25 — build53：守候启动/停止修复、诊断清理与私人仓库切换
 
 用户授权使用Edge已登录的ChenQian-hub新建私人仓库并邀请lanhaiyue-web，已建立 https://github.com/ChenQian-hub/esp32-iphone-agent-app 。邀请339533511已接受，API确认PRIVATE/WRITE；本地新增chen-private，当前分支上游与remote.pushDefault切换到chen-private，原private和origin保留，禁止推送origin。未上传手机日志或付费APK文件。
