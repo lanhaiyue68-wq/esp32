@@ -61,8 +61,7 @@ import XCTest
         let unproven = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录")
         XCTAssertNil(WatchSettings.phoneRequest([unproven], enabledRules()), "a private message without the passcode")
         var proven = unproven; proven.verified = true
-        XCTAssertEqual(WatchSettings.phoneRequest([proven, proven], enabledRules()), "打开备忘录
-打开备忘录")
+        XCTAssertEqual(WatchSettings.phoneRequest([proven, proven], enabledRules()), "打开备忘录\n打开备忘录")
     }
 
     func testPendingResultSurvivesRelaunchWithoutKeepingAnExecutableTask() throws {
