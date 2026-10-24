@@ -128,7 +128,8 @@ enum WatchSettings {
         let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
         let scope = r.onlyListed ? "这些会话：\(names)" : "私聊，以及这些群：\(names.isEmpty ? "无" : names)（公众号、订阅号、服务通知、文件传输助手除外）"
         return """
-        打开微信，回到聊天列表（底部“微信”标签页）。在\(scope)里，找第一个带红色未读数字或红点的会话并打开。
+        如果已经在范围内的微信会话里，直接完成并返回这个会话名，不要退出再查未读。否则打开微信，回到聊天列表（底部“微信”标签页），在\(scope)里找第一个带红色未读数字或红点的会话并打开。
+        一旦进入目标会话就完成，不要返回列表；打开会话会清掉红点，不能因此当成没有新消息。
         打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有未读就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
         """
     }
@@ -165,6 +166,16 @@ enum WatchSettings {
         """
     }
 
+    static func openPlan(_ rules: Rules) -> String {
+        if rules.single { return openPlan(chat: rules.targets[0]) }
+        return """
+        1. First inspect the CURRENT screen. If an eligible WeChat conversation is already open, finish immediately with {"chat":"its actual title"}. Never go back to check its unread badge.
+        2. Otherwise open WeChat's chat list and inspect unread badges within the scope in the goal. Open one eligible unread conversation.
+        3. As soon as that conversation is open, finish with {"chat":"its actual title"}. Opening it clears its unread badge; do not go back or check that badge again.
+        4. Only when the chat LIST has no eligible unread conversation, finish with {"chat":""}. Never type or send anything.
+        """
+    }
+
     /// After a quick send whose Return did not send: the text is in the box, only 发送 is left.
     static func tapSendTask(chat: String) -> String {
         "在微信会话“\(chat)”里，底部输入框里已经写好了一段话。点输入框右边的“发送”把它发出去，然后完成。不要输入、删除或改动任何文字。"
@@ -195,7 +206,7 @@ enum WatchSettings {
     static func readPrompt(chat: String, myNames: [String]) -> String {
         let mine = myNames.isEmpty ? "" : "我的微信名字是：\(myNames.map { "“\($0)”" }.joined(separator: "、"))。"
         return """
-        你在看一张微信聊天界面的截图，会话名是“\(chat)”。\(mine)
+        核对截图是否为微信会话“\(chat)”，顶部标题必须照抄实际内容，即使与目标不同。\(mine)
         从上到下列出截图里能看清的每条消息（最多 20 条），只输出一行 JSON，不要别的文字：
         {"title":"顶部标题","group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
         规则：title 照抄顶部的会话名（不要括号里的人数）；这不是微信聊天界面就写 ""，messages 写 []。group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
@@ -344,9 +355,31 @@ enum WatchReport {
     struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line] }
 
-    static func navigationChat(rows: [[CandidatePicker.Piece]], targets: [String]) -> String? { nil }
+    private static func fullTitle(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\s*[（(]\s*\d+\s*[）)]\s*$"#, with: "", options: .regularExpression)
+            .filter { !$0.isWhitespace }
+    }
 
-    static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules) -> Bool { true }
+    /// A local title stops navigation only. The model must still identify a real chat and read its messages.
+    /// List rows and message text cannot complete navigation; uncertain/truncated names fall back to the actor.
+    static func navigationChat(rows: [[CandidatePicker.Piece]], targets: [String]) -> String? {
+        let titles = rows.compactMap { row -> String? in
+            let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
+            let name = fullTitle(header.map(\.text).joined())
+            return name.isEmpty ? nil : name
+        }
+        let matches = targets.filter { !fullTitle($0).isEmpty && titles.contains(fullTitle($0)) }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    static func navigationChat(in frame: Data, targets: [String]) -> String? {
+        navigationChat(rows: CandidatePicker.rows(in: frame, top: 0.055, bottom: 0.135), targets: targets)
+    }
+
+    static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules) -> Bool {
+        !fullTitle(chat).isEmpty && fullTitle(screen.title) == fullTitle(chat)
+            && (!rules.onlyListed || rules.targets.contains(chat))
+    }
 
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
     static func object(_ reply: String) -> Data? {
@@ -720,10 +753,10 @@ extension AppModel {
            WatchReport.isChat(look.title, rules.targets[0]) {
             (chat, screen) = (rules.targets[0], look)  // still in the chat: no agent run to open it (~10 s saved)
         } else {
-            // Both routes already have a complete navigation task. The actor still inspects each screen;
-            // the multi-chat route does not need a separate planner to rewrite the same unread-check steps.
-            let plan = rules.single ? WatchSettings.openPlan(chat: rules.targets[0]) : WatchSettings.openTask(rules)
-            guard let opened = await watchRun(WatchSettings.openTask(rules), plan: plan) else { return false }
+            // Stop on the destination before the actor can return to the list and consume its unread badge.
+            // A local title is only a navigation hint: readChat independently verifies the actual destination.
+            guard let opened = await watchRun(WatchSettings.openTask(rules), plan: WatchSettings.openPlan(rules),
+                                             navigation: rules.single ? nil : rules) else { return false }
             guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
             guard let look = await readChat(open) else { return false }
             (chat, screen) = (open, look)
@@ -867,7 +900,13 @@ extension AppModel {
                 let reply = try await settings.client("actor").chat(system: WatchSettings.readPrompt(chat: chat, myNames: WatchSettings.myNames),
                                                                     text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
                 traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(reply.text)])
-                if let screen = WatchReport.screen(reply.text) { return screen }
+                if let screen = WatchReport.screen(reply.text) {
+                    guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules) else {
+                        DebugLog.write("watch: read destination mismatch; ignoring this check")
+                        return nil
+                    }
+                    return screen
+                }
                 DebugLog.write("watch: could not read \(chat) (try \(attempt)): \(reply.text.prefix(200))")
             }
             return nil
@@ -1007,14 +1046,20 @@ extension AppModel {
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
-                          returnSends: Bool = false, fastText: Bool = true) async -> String? {
+                          returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now()
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
+        let completion: ((Data) -> String?)? = navigation.map { rules in
+            { frame in
+                guard let chat = WatchReport.navigationChat(in: frame, targets: rules.targets) else { return nil }
+                return PyJSON.dumps(["chat": .str(chat)])
+            }
+        }
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
         await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan,
-                  stepLimit: stepLimit, fastText: fastText, returnSends: returnSends)
+                  stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: 100_000_000)

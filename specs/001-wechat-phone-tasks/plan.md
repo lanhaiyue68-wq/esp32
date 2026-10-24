@@ -27,3 +27,9 @@
 - 多会话巡查使用现有 openTask 作为固定计划，省掉每轮初次 planner 调用；actor 仍看实际截图选择与核对，异常 replanning 保留。
 - 启动时若 leaveApp 前已在 background，未执行离开动作，不等待不存在的新 Home 画面；继续 currentFrame 与 requireFrame(nil) 核验。前台离开、非 background 状态以及动作后新鲜度校验不变。
 - 保留 stale plan 保护：日志中确有文件预览、控制中心和键盘/启动变化，不能把这些都算作误判。加入 decoder 决策及重建耗时记录，以新版真机日志验证实际省时。
+
+## build 48：日志 22 的导航回归
+
+build 47 将多会话原始目标直接作为固定计划，actor 进入目标会话后仍返回列表，未读红点被消耗后返回空结果，导致没有 read/decide。修复保留固定计划省去 planner，但改成先判断当前状态的分支步骤。导航专用 frameCompletion 在原有 gate、连接恢复及 requireFrame 后，用本机 OCR 读取顶部标题；仅完整且唯一匹配配置会话时结束导航，不能输入或发送。随后 readChat 独立核对真实微信会话和完整标题，失配不消费消息。普通任务与发送每次 run 都清除该回调。未识别、截断或歧义标题继续原 actor；不使用模糊前缀猜测。保留画面变化、文字验证、发出检查与防循环保护。
+
+日志原文、截图与诊断数据只保存本机 out/logs22-diagnosis，不进仓库。路由沿用 systematic-debugging、TDD、verification-before-completion；不需要新增平台技能。

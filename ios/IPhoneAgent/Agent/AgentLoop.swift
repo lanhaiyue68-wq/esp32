@@ -218,6 +218,10 @@ extension Pointer: Gestures {}
         guard let screen, screen.live else { throw BlindError() }  // never let the model act blind
         try await screen.requireFrame(after: nil)
         let frame = screen.frame, started = now()
+        if role == "actor", let frame, let answer = frameCompletion?(frame) {
+            DebugLog.write("agent: navigation title found locally; handing off to message verification")
+            return ("THINK: The navigation destination is visible; read and verify it next.\nDO: done \(answer)", 0, frame)
+        }
         // Retrieve against the very frame sent with this request, after freshness/recovery checks.
         if let frame, let scene = Vision.experienceScene(frame), let image = Vision.image(frame) {
             let aspect = Double(image.width) / Double(image.height)
