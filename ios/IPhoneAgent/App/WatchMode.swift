@@ -704,6 +704,9 @@ extension AppModel {
             } else if !MockMode.on && !(board.connected && feed.mirroring) {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
                 baseline = nil
+            } else if !MockMode.on && UIApplication.shared.applicationState == .active {
+                watchStatus = String(localized: "Paused while Lan Agent is in front…")
+                (baseline, changedAt) = (nil, nil)
             } else if let chat = watchListReturn.pending {
                 // A failed return retries navigation only. Do not read the same chat or resend its message.
                 if now() >= quietUntil {
@@ -767,6 +770,11 @@ extension AppModel {
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
                     let result = await watchCheck()
                     guard watching else { break }
+                    if !MockMode.on && UIApplication.shared.applicationState == .active {
+                        // A foreground pause during a local tap is deferred, not a failed check.
+                        (baseline, changedAt, lastCheck) = (nil, nil, 0)
+                        continue
+                    }
                     failures = result.ok ? 0 : failures + 1
                     if failures >= 4 {
                         notifier.post(.failed, title: String(localized: "WeChat watch stopped"),
@@ -799,7 +807,23 @@ extension AppModel {
         defer { logWatchTiming("check", since: began) }
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
-        if rules.single, UIApplication.shared.applicationState != .active, let look = await readChat(rules.targets[0]),
+        let local: WatchChatOpen.Outcome
+        if rules.single {
+            local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
+                self.watching && UIApplication.shared.applicationState != .active &&
+                WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed
+            })
+        } else { local = .fallback }
+        if case .deferred = local { return (false, false) }
+        if case .unverified = local {
+            DebugLog.write("watch: local open destination not verified; no read or send")
+            return (false, false)
+        }
+        if case .opened(let opened) = local {
+            DebugLog.write("watch: local open verified; navigation model skipped")
+            guard let look = await readChat(opened) else { return (false, false) }
+            (chat, screen) = (opened, look)
+        } else if rules.single, UIApplication.shared.applicationState != .active, let look = await readChat(rules.targets[0]),
            WatchReport.isChat(look.title, rules.targets[0]) {
             (chat, screen) = (rules.targets[0], look)  // still in the chat: no agent run to open it (~10 s saved)
         } else {
