@@ -12,3 +12,9 @@
 - 使用原有私有 GitHub 仓库的 `Unsigned IPA` 工作流。测试和构建证据、IPA、SHA256 存到 E 盘，桌面放最终可签名安装包。
 
 路由：共享 skill-routing-reminder、direct-execution、systematic-debugging、spec-kit-orchestration、test-driven-development；ponytail 控制改动范围。Spec Kit 1.0.6 已在实际工作树初始化，Codex/Claude 事件均关闭，无社区扩展或运行钩子。未派子 Agent。
+
+## build 46 响应速度调整（2026-10-24）
+
+用户反馈慢。代码时序核对发现：完成任务后首次回报仍继承 6 秒画面冷却、回报成功后仍退避 20 秒，以及 2 秒守候轮询、1 秒任务完成轮询、后台启动仍等待 0.8 秒不可见动画。
+采用小范围调度调整：首次回报立即进入既有发送路径；成功后冷却 6 秒、失败仍退避 20 秒；轮询改为 0.5 秒与 0.1 秒；已在后台时略过不可见出发动画。2 秒持续变化确认、5 秒检查限流、权限/停止/隐私/文字和发送核对均保留。仅记录阶段名和耗时用于分析，不加入消息正文。
+使用 systematic-debugging 定位及 verification-before-completion 验证；属于低影响固定等待调整，不增加镜像实现的测试，运行现有完整 XCTest。源代码时序变化不能冒充真机耗时测量。
