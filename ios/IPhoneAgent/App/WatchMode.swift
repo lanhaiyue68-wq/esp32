@@ -716,7 +716,9 @@ extension AppModel {
            WatchReport.isChat(look.title, rules.targets[0]) {
             (chat, screen) = (rules.targets[0], look)  // still in the chat: no agent run to open it (~10 s saved)
         } else {
-            let plan = rules.single ? WatchSettings.openPlan(chat: rules.targets[0]) : ""
+            // Both routes already have a complete navigation task. The actor still inspects each screen;
+            // the multi-chat route does not need a separate planner to rewrite the same unread-check steps.
+            let plan = rules.single ? WatchSettings.openPlan(chat: rules.targets[0]) : WatchSettings.openTask(rules)
             guard let opened = await watchRun(WatchSettings.openTask(rules), plan: plan) else { return false }
             guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
             guard let look = await readChat(open) else { return false }

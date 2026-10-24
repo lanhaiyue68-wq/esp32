@@ -17,7 +17,7 @@ import UIKit
 enum FrameFreshness {
     /// Recovery policy for the delayed background hook. Other callers still force recovery when necessary.
     static func needsDecoderRefresh(decodedAt: Double, transitionAt: Double, usable: Bool) -> Bool {
-        true  // Existing behavior: every background transition rebuilds the decoder.
+        !(usable && decodedAt > transitionAt)
     }
 
     static func usable(frameAt: Double, decodedMs: Int, latestMs: Int?, statusAt: Double,
@@ -186,13 +186,18 @@ extension ScreenSource {
     func refreshDecoder(_ why: String, afterTransition: Double? = nil) async -> Bool {
         if let afterTransition,
            !FrameFreshness.needsDecoderRefresh(decodedAt: updated, transitionAt: afterTransition, usable: usable()) {
+            DebugLog.write("decoder: kept live session (usable frame decoded after background)")
             return true
         }
         guard now() - refreshedAt > 2 else { return usable() }  // the app's background hook may just have done it
         refreshedAt = now()
+        let began = now()
         let n = await withCheckedContinuation { c in decoder.queue.async { [decoder] in c.resume(returning: decoder.refresh()) } }
         try? await Task.sleep(nanoseconds: 30_000_000)  // let the replayed frame reach the main queue
-        if n > 0 { DebugLog.write("decoder: refreshed (\(why)); decoded the GOP again (\(n) units)") }
+        if n > 0 {
+            DebugLog.write(String(format: "decoder: refreshed (%@); decoded the GOP again (%d units, %.0f ms)",
+                                  why, n, (now() - began) * 1000))
+        }
         return n > 0 && usable()
     }
 

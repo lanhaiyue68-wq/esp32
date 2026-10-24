@@ -93,6 +93,7 @@ extension AppModel {
                 self?.endBackgroundTask()
             }
             let left = now()
+            let alreadyAway = UIApplication.shared.applicationState == .background
             mark("leaving app")
             var away = await leaveApp()
             if !away { away = await askUserToLeave() }
@@ -100,14 +101,17 @@ extension AppModel {
                 throw DeviceError(message: String(localized: "Lan Agent is still on screen"))
             }
             mark("app in background")
-            if !snapMode {
+            if !snapMode && !alreadyAway {
                 let changed = await feed.fresh(since: left, timeout: 3) != nil
                 await feed.settled()
                 mark(changed ? "screen changed and settled" : "no screen change seen in 3 s; settled")
             }
             mark("verifying first task frame")
             let firstFrame = try await feed.currentFrame()
-            try await feed.requireFrame(after: left)
+            // With no departure gesture, a currently usable frame is sufficient. A quiet screen can be
+            // validated by the board heartbeat; foreground departures still need a frame after leaving.
+            try await feed.requireFrame(after: alreadyAway ? nil : left)
+            if alreadyAway { mark("already in background; current frame verified") }
             mark("first frame: " + firstFrame)
             try agent.start(task, traceStarted: true)
             mark("agent started")
