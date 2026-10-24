@@ -31,7 +31,7 @@ import Foundation
     }
 
     func resume(phone: Gestures, screen: ScreenSource, canAct: () -> Bool,
-                inspect: (Data, String) -> View = { view(in: $0, chat: $1) },
+                inspect: ((Data, String) -> View)? = nil,
                 fallback: () async -> Bool) async -> Bool {
         guard let chat = pending else { return true }
         func allowed() -> Bool { !Task.isCancelled && canAct() && pending == chat }
@@ -39,7 +39,7 @@ import Foundation
             try Task.checkCancellation()
             try await screen.requireFrame(after: boundary)
             guard allowed(), let frame = screen.frame else { throw CancellationError() }
-            return inspect(frame, chat)
+            return inspect?(frame, chat) ?? Self.view(in: frame, chat: chat)
         }
         guard allowed() else { return false }
         do {
