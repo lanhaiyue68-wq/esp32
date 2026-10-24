@@ -68,3 +68,12 @@
 - 桌面E:/桌面/Lan-Agent-build50-unsigned.ipa，4,999,422 bytes，SHA256 912159ce44551cafd789d2d6bd15035f6bc5c1d6533aa245e979e395adf183cf；App/Widget50、MinimumOS18、ZIP、无模型预设、新路径及桌面hash已核对；49的IPA/sha/说明三件套已回收。
 - 路由systematic-debugging/TDD/verification-before-completion，沿用spec；无子Agent。仅private远端推源码与通用记录，不上传私人日志/图片。备份E:/Backups/esp32-before-build50-20261025.zip。证据../out/build50-chat-return/{verification.json,checkpoint.json,red-ci.log,green1-ci.log,green-ci.log,implementation-plan.md}；Headroom分别省8223/5348/7123 tokens。
 - 没有操作真实手机，真机返回及总耗时仍待同任务新日志；测试数不代表容错率/成功率或速度百分比。没有改固件、网络、账号和模型设置。
+
+
+## build51 / 50版交付后复查修复 — 2026-10-25
+- 用户不放心要求重审。独立核对桌面50与已测CI完全一致，仍发现：前景/操作中暂停误计导航失败；列表OCR要求四标签过严且未验横向列；既存模型决策超时/坏JSON提前消耗消息历史。
+- WatchListReturn改arrived/deferred/failed，仅真失败累加；列表要求标题和至少三个正确列tab，容忍漏认一个；WatchMode在模型失败/坏格式时回滚history并fail check，明确有效空回复仍正常记录。保留50版发送/返回分离、49提速和48先读消息顺序。
+- RED1 40113904071：238项5失败，原231通过；RED2 40114372304：241项7失败（加模型超时/坏格式2）。新增10测试包含真实iOS Vision读取合成画面；GREEN1 40114949695编译检出缺await，已修复。
+- 设备Release与241项XCTest全通过，GREEN40115040451，源码f9d3a6801fae7f310d9a4c0a4bf94d1f6254c120；118Swift语法、13JSON、4plist/entitlements和diff通过。App/Widget51、ZIP、minimumOS18、无模型预设、新二进制路径和桌面hash均核对。
+- 桌面E:/桌面/Lan-Agent-build51-unsigned.ipa，5,003,989 bytes，SHA256 8fee0ad21175c75ebde0f8051f552e8ef754e01219e904f552f42170518e4969；校验码/说明同目录，旧50三件套已送回收筒。证据../out/build51-review-fixes；备份E:/Backups/esp32-before-build51-20261025.zip。
+- 未操作真机微信；实际返回、暂停恢复、模型失败重试及整体速度待真机日志验收，不能给出实际容错率/提速百分比。未改固件、网络、账号、模型或签名。

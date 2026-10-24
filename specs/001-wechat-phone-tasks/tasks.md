@@ -47,3 +47,10 @@
 - [x] B50-03：独立发送与优先pending返回阶段，统一多会话/回报/ChatTool路径；保留单会话与既有保护。
 - [x] B50-04：GREEN40112899851设备Release、231项XCTest、包50校验、桌面交付和回收49。
 - [ ] B50-05：真机多会话返回、没有重复读取/重发及整体速度验收。
+
+
+### build51 recheck
+- [x] Independently verify50 artifact/source correspondence; add10 regressions and reproduce7 failures.
+- [x] Fix deferred returns, positioned/tolerant list proof and failed-decision history rollback.
+- [x] Release +241/0 at f9d3a68; verify51 artifact and recycle desktop50.
+- [ ] T009 physical-device double-chat return, foreground-resume, failed-decision retry and total latency acceptance remains open.

@@ -1,3 +1,15 @@
+## 最新交付：build51 / 50版交付后复查修复 — 2026-10-25
+
+- 工作树E:/AgentStorage/esp32/iphone-agent-build13，codex/wechat-phone-tasks，仅private远端；测试源码f9d3a6801fae7f310d9a4c0a4bf94d1f6254c120，后续仅文档。
+- 独立核对50包匹配已测CI，仍发现：前景/操作中暂停误计导航失败；列表OCR要求四标签过严且未验横向列；既存模型决策超时/坏JSON提前消耗消息历史。
+- WatchListReturn改arrived/deferred/failed，仅真失败累加；列表要求标题和至少三个正确列tab，容忍漏认一个；WatchMode在模型失败/坏格式时回滚history并fail check，明确有效空回复仍正常记录。保留50版发送/返回分离、49提速和48先读消息顺序。
+- 关键文件WatchListReturn.swift、WatchMode.swift、WatchListReturnTests.swift、WatchDecisionRecoveryTests.swift、Shared.xcconfig。
+- RED1 40113904071：238项5失败，原231通过；RED2 40114372304：241项7失败（加模型超时/坏格式2）。新增10测试包含真实iOS Vision读取合成画面；GREEN1 40114949695编译检出缺await，已修复。
+- 设备Release与241项XCTest全通过，GREEN40115040451，源码f9d3a6801fae7f310d9a4c0a4bf94d1f6254c120；118Swift语法、13JSON、4plist/entitlements和diff通过。App/Widget51、ZIP、minimumOS18、无模型预设、新二进制路径和桌面hash均核对。
+- 桌面E:/桌面/Lan-Agent-build51-unsigned.ipa，5,003,989 bytes，SHA256 8fee0ad21175c75ebde0f8051f552e8ef754e01219e904f552f42170518e4969；校验码/说明同目录，旧50三件套已送回收筒。证据../out/build51-review-fixes；备份E:/Backups/esp32-before-build51-20261025.zip。
+- 路由读取共享skill-routing-reminder并执行router；router误报web_frontend，按实际原生Swift审核选择requesting-code-review、systematic-debugging、test-driven-development、verification-before-completion。使用Headroom压缩源码/CI日志，recent_code保护时透传；按用户规则不派子Agent。私有截图/原始日志未上传。
+- 未操作真机微信；实际返回、暂停恢复、模型失败重试及整体速度待真机日志验收，不能给出实际容错率/提速百分比。未改固件、网络、账号、模型或签名。 下一步沿用Bundle ID签名覆盖并重启守候，验收双会话返回/暂停恢复/模型失败重试/无重复发送及总耗时。
+
 ## 最新交付：build50 / 日志23聊天返回与重复读取 — 2026-10-25
 
 - 工作树E:/AgentStorage/esp32/iphone-agent-build13，codex/wechat-phone-tasks；最终测试源码cd4acaf7b32788b131e31b2f22bfdce08e6f70b4，仅private远端。

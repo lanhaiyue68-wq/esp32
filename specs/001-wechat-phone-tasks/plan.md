@@ -48,3 +48,8 @@ Xcode26.6／现有iOS18+构建暂不引入要求iOS27的ScreenCaptureKit，不�
 
 ## build50：日志23的已处理会话返回边界
 多会话读取与发送之后先排队一个独立返回阶段；完整新鲜标题提供原生返回按钮位置，列表标题和四个底部标签证明返回成功。最多4步模型导航为本机识别不足的恢复，模型done不代替最终列表证据。pending返回优先于读消息、发送和任务；返回失败20秒退避，四次失败停止，不重做已经发出的消息或完成的任务。单会话留在聊天页。最终源码cd4acaf，GREEN40112899851设备Release和231项XCTest通过；真实手机验收待日志。
+
+
+### build51 review refinement
+WatchListReturn改arrived/deferred/failed，仅真失败累加；列表要求标题和至少三个正确列tab，容忍漏认一个；WatchMode在模型失败/坏格式时回滚history并fail check，明确有效空回复仍正常记录。保留50版发送/返回分离、49提速和48先读消息顺序。
+No architecture or permission expansion. RED238/5 and RED241/7; final Release and241/0 at f9d3a68. Physical-device acceptance remains T009.
