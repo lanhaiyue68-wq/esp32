@@ -1,3 +1,20 @@
+## 2026-10-25 — build53：守候启动/停止修复、诊断清理与私人仓库切换
+
+用户授权使用Edge已登录的ChenQian-hub新建私人仓库并邀请lanhaiyue-web，已建立 https://github.com/ChenQian-hub/esp32-iphone-agent-app 。邀请339533511已接受，API确认PRIVATE/WRITE；本地新增chen-private，当前分支上游与remote.pushDefault切换到chen-private，原private和origin保留，禁止推送origin。未上传手机日志或付费APK文件。
+
+源代码：2534ba9db049809b836ff61d5a3b140d42380e5f（实现03f808e后修正AppModel日志清理访问）。修复首次守候被前景暂停挡住、停止时旧启动仍续跑、明确标签同一行THINK/DO导致重复请求。设置→日志与缓存，提供占用与空闲清除/导出。自动保留20次/7天/80MiB诊断；单次录影120帧/8MiB、截图12MiB、文字2MiB，系统报告10份/5MiB；默认导出最近5次、无录影、最多20MiB文件内容。保护活动执行、符号链接、导入执行与非诊断设置/配对/校准/知识。
+
+验证：新仓库RED run40136509180编译通过，270项测试中13项新增测试出现15处断言失败，证明能抓到回归/缺失行为；GREEN run40136677665（source2534ba9）设备Release与274项XCTest通过，0失败；124Swift语法/13JSON/4plist及diff检查通过。IPA ZIP有效、App/Widget均53、最低iOS18、无内置模型凭据，runner与本机SHA一致。首次GREEN run40136545880因UI直接修改private(set)日志失败，已改为AppModel.clearLog()并重测通过，不交付失败产物。旧repo run40134910674因付款/用量限制未启动，已通过新仓库恢复。
+
+交付：E:/桌面/Lan-Agent-build53-unsigned.ipa，5,047,349字节，SHA256 6e37b9eca1d856e53129cda47ebd79a77893e0f03b34afe8347776cd02eb4c31，旁有.sha256与使用说明。51与52未删除，51独立保护备份E:/Backups/esp32-build51-rollback-20261025，SHA重新确认不变，禁止自动清理。覆盖安装沿用当前Bundle ID签名，不先卸载。
+
+已知问题：日志24中模型把实际主画面误称为白板画布，未确定是点击落点/打开App动作还是模型理解导致。53不宣称复杂任务全部恢复，也未真机测速；下一步需真机逐步对照。用户可继续使用51，53作为可回退测试版。
+
+路由/工具：共享skill-routing-reminder与Agent Router预检；实际使用systematic-debugging、test-driven-development、verification-before-completion、computer-use；官方gh CLI、Edge CUA、Headroom先压缩长证据、Swift tree-sitter语法检查。未安装新技能/插件，未改模型、固件、网络或权限。证据在E:/AgentStorage/esp32/out/build53-stability-log-cleanup（verification.json、workflow.json、red-verification.json、green-ci.log、*.headroom.json、checkpoint.json、diagnosis-and-changes.md、协作者完成截图）。
+
+
+---
+
 ## 最新交付：build52 / 保留51回退的本机单会话导航试验 — 2026-10-25
 
 - 工作树E:/AgentStorage/esp32/iphone-agent-build13，分支codex/wechat-phone-tasks，仅private；最终测试源码551ef25368e7de76095914abd41089ed3a5305bc，后续仅文档。
