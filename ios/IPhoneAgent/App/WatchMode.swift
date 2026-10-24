@@ -789,13 +789,24 @@ extension AppModel {
             _ = try? await feed.currentFrame()
             return feed.frame
         }
+        // A tap where the box sits without the keyboard hits the space bar while the keyboard is up (logs(17)).
+        func focusBox() async throws {
+            if let now = await look(), CandidatePicker.keyboardUp(in: now) { return }
+            try await pointer.tap(box.x, box.y)
+        }
         do {
-            try await pointer.tap(box.x, box.y)
+            try await focusBox()
             guard await hopToPaste(text) == .filled else { return .notTried }
-            try await pointer.tap(box.x, box.y)
+            try await focusBox()
             let before = await look().map { CandidatePicker.count(text, in: $0) } ?? 0
             try await pointer.key("cmd+v")
-            guard let pasted = await look(), CandidatePicker.count(text, in: pasted) > before else {
+            var shown = await look()
+            if let s = shown, let allow = CandidatePicker.allowPaste(in: s) {  // iOS asks at every paste: allow, once
+                try await pointer.tap(allow.x, allow.y)
+                DebugLog.write("watch: quick send: iOS asked to allow the paste; allowed")
+                shown = await look()
+            }
+            guard let pasted = shown, CandidatePicker.count(text, in: pasted) > before else {
                 try await pointer.key("cmd+a")
                 try await pointer.key("backspace")
                 DebugLog.write("watch: quick send: the paste did not show the text; cleared it, the agent sends")

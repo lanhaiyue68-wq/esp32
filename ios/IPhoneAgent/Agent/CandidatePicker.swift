@@ -40,6 +40,28 @@ enum CandidatePicker {
         return CGPoint(x: hit.box.midX, y: hit.box.midY)
     }
 
+    /// Key labels of the iPhone keyboards (9-key and full pinyin, English).
+    static let keyboardWords: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ", "空格", "space",
+                                             "return", "确认", "发送", "分隔", "选拼音", "选定", "换行", "123"]
+
+    /// True when the on-screen keyboard is up: its key labels in the lower part of the screen. Back from Lan Agent the
+    /// box often still has the keyboard, and a tap where the box sits without it hit the space bar (logs(17)).
+    static func keyboardUp(in jpeg: Data) -> Bool { keyboardUp(rows: rows(in: jpeg, top: 0.6, bottom: 1)) }
+
+    static func keyboardUp(rows: [[Piece]]) -> Bool {
+        if rows.flatMap({ $0 }).filter({ keyboardWords.contains($0.text) }).count >= 2 { return true }
+        return rows.contains { row in row.filter { $0.text.count == 1 && $0.text.first?.isLetter == true }.count >= 6 }  // a QWERTY row
+    }
+
+    /// The "允许粘贴" button of iOS's paste prompt ("微信" wants to paste from "Lan Agent"), if it is up. iOS asks at every
+    /// paste from another app unless the app is set to allow it (Settings › 微信 › 从其他App粘贴).
+    static func allowPaste(in jpeg: Data) -> CGPoint? { allowPaste(rows: rows(in: jpeg, top: 0.25, bottom: 0.85)) }
+
+    static func allowPaste(rows: [[Piece]]) -> CGPoint? {
+        guard let p = rows.flatMap({ $0 }).first(where: { $0.text == "允许粘贴" || $0.text == "AllowPaste" }) else { return nil }
+        return CGPoint(x: p.box.midX, y: p.box.midY)
+    }
+
     /// How often the start of `text` (letters and digits only) shows in the lower part of the screen: a paste is
     /// confirmed when this goes up, so text already in a bubble above does not count.
     static func count(_ text: String, in jpeg: Data) -> Int {

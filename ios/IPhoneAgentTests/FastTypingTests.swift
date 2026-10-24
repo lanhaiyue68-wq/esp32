@@ -23,6 +23,23 @@ import XCTest
         XCTAssertNil(CandidatePicker.find("在的话", rows: [bubble, field, candidates]))  // never a near match
     }
 
+    func testTheKeyboardAndThePastePromptAreRecognised() {
+        // logs(17): back from Lan Agent the keyboard was up and the box tap hit the space bar; iOS's paste prompt
+        // was then tapped back and forth.
+        func piece(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: 0.1, height: 0.03))
+        }
+        let nineKey = [[piece("123", 0.05, 0.67), piece("ABC", 0.45, 0.67), piece("DEF", 0.65, 0.67)],
+                       [piece("选拼音", 0.25, 0.88), piece("选定", 0.55, 0.88)]]
+        XCTAssertTrue(CandidatePicker.keyboardUp(rows: nineKey))
+        let qwerty = [Array("QWERTYUIOP").enumerated().map { piece(String($1), 0.02 + 0.1 * Double($0), 0.7) }]
+        XCTAssertTrue(CandidatePicker.keyboardUp(rows: qwerty))
+        XCTAssertFalse(CandidatePicker.keyboardUp(rows: [[piece("蓝海乐", 0.2, 0.7), piece("@蓝 你在不在", 0.3, 0.72)]]))
+        let prompt = [[piece("“微信”想从“Lan Agent”粘贴", 0.1, 0.45)], [piece("允许粘贴", 0.2, 0.55), piece("不允许粘贴", 0.6, 0.55)]]
+        XCTAssertEqual(CandidatePicker.allowPaste(rows: prompt)?.x ?? 0, 0.25, accuracy: 0.001)  // allow, never "不允许"
+        XCTAssertNil(CandidatePicker.allowPaste(rows: nineKey))
+    }
+
     func testCharactersSplitIntoCandidatesAtWideGaps() {
         let w = 0.04
         func ch(_ c: Character, _ x: Double) -> (Character, CGRect) { (c, CGRect(x: x, y: 0.6, width: w, height: 0.03)) }

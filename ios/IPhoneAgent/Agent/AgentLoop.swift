@@ -669,13 +669,23 @@ extension Pointer: Gestures {}
                 pasteHopOff = true
                 throw DeviceError(message: "switching to Lan Agent for the paste did not work; look at the screen again")
             }
-            if pasteHop != nil, let field = lastTap {  // back from Lan Agent: the input box lost its focus
-                try await phone.tap(field.x, field.y, aim: false)
+            if pasteHop != nil, let field = lastTap {  // back from Lan Agent: focus the box again, unless it still has the keyboard
+                if let now = await freshFrame(), CandidatePicker.keyboardUp(in: now) {
+                    DebugLog.write("type: the keyboard is still up; pasting into the box without a tap")
+                } else {
+                    try await phone.tap(field.x, field.y, aim: false)
+                }
             }
             if hop == .filled {
                 let before = await freshFrame().map { CandidatePicker.count(text, in: $0) } ?? 0
                 try await phone.key("cmd+v")
-                if let after = await freshFrame(), CandidatePicker.count(text, in: after) > before {
+                var after = await freshFrame()
+                if let shown = after, let allow = CandidatePicker.allowPaste(in: shown) {  // iOS asks: allow, once
+                    try await phone.tap(allow.x, allow.y, aim: false)
+                    DebugLog.write("type: iOS asked to allow the paste; allowed")
+                    after = await freshFrame()
+                }
+                if let after, CandidatePicker.count(text, in: after) > before {
                     if returnSends {  // checked: exactly this text is in the box
                         try await phone.key("enter")
                         return DebugLog.write("type: pasted, seen in the field, sent with Return")
