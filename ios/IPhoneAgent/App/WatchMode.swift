@@ -852,7 +852,9 @@ extension AppModel {
                 if let i = read.indices.last { read[i].replied += "【未完成】" + task }
             }
         } else if reply == nil, task == nil, !rules.single {
-            try? await pointer.goBack()  // back to the chat list, for the other chats' badges
+            let returning = WatchListReturn()
+            returning.pending = chat
+            _ = await returning.resume(phone: pointer, screen: feed, canAct: { true }, fallback: { false })
         }
 
         if !sent, watching, watchRetries[chat, default: 0] < 2 {
