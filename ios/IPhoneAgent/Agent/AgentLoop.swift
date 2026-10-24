@@ -90,6 +90,8 @@ extension Pointer: Gestures {}
     /// A fixed plan (WeChat watch's open and send tasks, whose steps never change): used as is, without the
     /// planner's call. Empty for ordinary runs.
     var presetPlan = ""
+    /// Navigation-only completion from a verified frame; message reading still checks the destination.
+    var frameCompletion: ((Data) -> String?)?
     /// WeChat watch: fewer steps than maxSteps, and no pause for help (nobody is at the phone; a stuck task fails
     /// and the watch goes on). nil for ordinary runs.
     var stepLimit: Int?

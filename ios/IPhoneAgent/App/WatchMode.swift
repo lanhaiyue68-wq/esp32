@@ -344,6 +344,10 @@ enum WatchReport {
     struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line] }
 
+    static func navigationChat(rows: [[CandidatePicker.Piece]], targets: [String]) -> String? { nil }
+
+    static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules) -> Bool { true }
+
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
     static func object(_ reply: String) -> Data? {
         guard let start = reply.firstIndex(of: "{"), let end = reply.lastIndex(of: "}"), start < end else { return nil }
