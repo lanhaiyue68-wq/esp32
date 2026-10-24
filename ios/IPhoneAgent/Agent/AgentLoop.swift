@@ -286,8 +286,13 @@ extension Pointer: Gestures {}
             return "Nothing has been drawn in this run yet; a drawing already on screen is from before and does not count. "
                 + "Start a new blank canvas (a new board, note or page in this app) and draw it there."
         }
-        // No such check for typing: Chinese goes in through pinyin candidates (a "compose" step, not "type"), and a
-        // turned-down "done" after a message was sent made it send the message again (traces(32)).
+        // A message to send word for word must be typed in this run: the same words in a bubble above are an earlier
+        // message (logs(19): an identical reply was "already sent", and the new message went unanswered). Only when
+        // nothing was typed at all: a turned-down "done" after a message was sent made it send again (traces(32)).
+        if task.contains("一字不改"), did.isDisjoint(with: ["type", "compose"]) {
+            return "Nothing has been typed in this run; a bubble with the same words above is an earlier message, not "
+                + "this one. Tap the input box, type the message and send it."
+        }
         return nil
     }
 

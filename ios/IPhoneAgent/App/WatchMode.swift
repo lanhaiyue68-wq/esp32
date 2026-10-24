@@ -172,7 +172,7 @@ enum WatchSettings {
     static func sendTask(chat: String, text: String, back: Bool = false) -> String {
         """
         在微信会话“\(chat)”里发一条消息。如果现在不在这个会话里，先回到聊天列表找到它并打开（列表里没有就用顶部搜索）。
-        点底部输入框，输入下面这段内容并发送，一字不改：
+        点底部输入框，输入下面这段内容并发送，一字不改（上面已经有一样的话也要再发：那是以前发的）：
         \(text)
         发送后\(back ? "返回聊天列表" : "停在这个会话里")，然后完成。找不到这个会话就失败，并写明原因。
         """
@@ -216,7 +216,7 @@ enum WatchSettings {
         \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
         \(tasks)
-        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，只用汉字、数字和常见标点（，。？！），不要用表情、～、…，也不要出现 @ 符号（要@人只能用 task）；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，不要和上面你已经发过的话一字不差，只用汉字、数字和常见标点（，。？！），不要用表情、～、…，也不要出现 @ 符号（要@人只能用 task）；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
         不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
         只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在微信里执行的操作，不需要就留空"}
         """
@@ -386,6 +386,13 @@ enum WatchReport {
         struct Box: Decodable { var send: String? }
         guard let data = object(answer), let box = try? JSONDecoder().decode(Box.self, from: data) else { return nil }
         return box.send?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when an own message with these words comes after `after` (the message answered) on screen: an identical
+    /// earlier reply higher up does not count (logs(19)). Without `after` on screen, any own message with them.
+    static func replied(_ text: String, after: Line?, in lines: [Line]) -> Bool {
+        let start = after.flatMap { a in lines.lastIndex { !$0.mine && sameWords($0.text, a.text) } }.map { $0 + 1 } ?? 0
+        return lines[min(start, lines.count)...].contains { $0.mine && sameWords($0.text, text) }
     }
 
     /// The same message, by its letters and digits: punctuation, spaces and a cut-off end aside.
@@ -654,6 +661,7 @@ extension AppModel {
         }
 
         var reply: String?, task: String?
+        var answering: WatchReport.Line?  // the newest message being answered: the reply must show up after it
         if !rules.serverReplies && !read.isEmpty {
             // ChatTool's guard against running one message twice: the same words from the same person in this chat
             // were answered under 30 s ago (a misread made them look new again).
@@ -662,6 +670,7 @@ extension AppModel {
             let afterMine = fresh.lastIndex(where: { $0.mine }).map { fresh.count - 1 - $0 } ?? fresh.count
             let pending = read.suffix(fresh.suffix(afterMine).filter { !$0.mine }.count)
             let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
+            if let last = due.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty  // phone tasks only for an explicit whitelist, never for anyone
@@ -681,7 +690,7 @@ extension AppModel {
         if let text = reply {
             if let why = PrivacyGuard.check(text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                 DebugLog.write("watch: reply withheld: \(why)")
-            } else if await sendReply(text, chat: chat, back: !rules.single && task == nil) {
+            } else if await sendReply(text, chat: chat, back: !rules.single && task == nil, after: answering) {
                 if let i = read.indices.last { read[i].replied = text }
                 for m in read where WatchSettings.fires(m, rules) { watchAnswered[WatchReport.answerKey(m)] = now() }
             } else { sent = false }
@@ -772,9 +781,9 @@ extension AppModel {
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.
     /// Types one message into the chat and sends it (fixed plan, no planner call).
     /// `quick: false` when the agent may have left the chat (after an owner task): the run finds its way back first.
-    private func sendReply(_ text: String, chat: String, back: Bool, quick: Bool = true) async -> Bool {
+    private func sendReply(_ text: String, chat: String, back: Bool, quick: Bool = true, after: WatchReport.Line? = nil) async -> Bool {
         if !back, quick {
-            switch await quickSend(text, chat: chat) {
+            switch await quickSend(text, chat: chat, after: after) {
             case .sent: return true
             case .inBox:  // typed and checked, but Return did not send it: only 发送 is left
                 return await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
@@ -793,7 +802,7 @@ extension AppModel {
     /// the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
     /// front for a moment); tap the box again; paste, and go on only if exactly this text newly shows; Return; then
     /// read the chat, and it counts as sent only when the newest own message is this text.
-    private func quickSend(_ text: String, chat: String) async -> QuickSend {
+    private func quickSend(_ text: String, chat: String, after: WatchReport.Line?) async -> QuickSend {
         guard let box = watchInputBox[chat], WatchSettings.rules.single, Pasteboard.needed(text),
               UIApplication.shared.applicationState != .active else { return .notTried }
         func look() async -> Data? {
@@ -830,10 +839,10 @@ extension AppModel {
             }
             try await pointer.key("enter")
             try? await Task.sleep(nanoseconds: 700_000_000)
-            var sent = await sentAlready(text, chat: chat)
+            var sent = await sentAlready(text, chat: chat, after: after)
             if !sent {  // the read may come before the bubble: one more look before anything is sent again
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
-                sent = await sentAlready(text, chat: chat)
+                sent = await sentAlready(text, chat: chat, after: after)
             }
             guard sent else {
                 DebugLog.write("watch: quick send: not seen as sent")
@@ -850,9 +859,9 @@ extension AppModel {
 
     /// True when the newest own message in the chat is `text`, by its words: the read writes punctuation its own way
     /// ("，" as ","), and comparing it whole took a sent reply for unsent, so it went out twice (logs(18)).
-    private func sentAlready(_ text: String, chat: String) async -> Bool {
-        guard let screen = await readChat(chat), let mine = screen.lines.last(where: { $0.mine }) else { return false }
-        return WatchReport.sameWords(mine.text, text)
+    private func sentAlready(_ text: String, chat: String, after: WatchReport.Line?) async -> Bool {
+        guard let screen = await readChat(chat) else { return false }
+        return WatchReport.replied(text, after: after, in: screen.lines)
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15,

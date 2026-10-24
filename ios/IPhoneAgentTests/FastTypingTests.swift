@@ -31,6 +31,23 @@ import XCTest
         XCTAssertEqual(WatchSettings.typeable("好的，我这就帮你@群主。"), "好的，我这就帮你群主。")
     }
 
+    func testAnIdenticalEarlierReplyIsNotThisOne() {
+        // logs(19): "@蓝 你在干什么" got the same reply as "你在干啥？" before; the send saw that old bubble, claimed done
+        // without typing, and the new message went unanswered.
+        let send = WatchSettings.sendTask(chat: "测试群", text: "我在待命，随时帮你处理群里的事。")
+        let tap: JObject = ["action": .str("tap"), "x": .num(500), "y": .num(930)]
+        let typed: JObject = ["action": .str("type"), "text": .str("我在待命，随时帮你处理群里的事。")]
+        XCTAssertNotNil(AgentLoop.unmadeResult(task: send, steps: [tap]))
+        XCTAssertNil(AgentLoop.unmadeResult(task: send, steps: [tap, typed]))
+        let line = { (s: String, t: String, mine: Bool) in WatchReport.Line(sender: s, text: t, mine: mine) }
+        let screen = [line("蓝海乐", "@蓝 你在干啥？", false), line("我", "我在待命，随时帮你处理群里的事。", true),
+                      line("蓝海乐", "@蓝 你在干什么", false)]
+        let asked = line("蓝海乐", "@蓝 你在干什么", false)
+        XCTAssertFalse(WatchReport.replied("我在待命，随时帮你处理群里的事。", after: asked, in: screen))
+        XCTAssertTrue(WatchReport.replied("我在待命，随时帮你处理群里的事。", after: asked,
+                                          in: screen + [line("我", "我在待命,随时帮你处理群里的事", true)]))
+    }
+
     func testTheKeyboardAndThePastePromptAreRecognised() {
         // logs(17): back from Lan Agent the keyboard was up and the box tap hit the space bar; iOS's paste prompt
         // was then tapped back and forth.
