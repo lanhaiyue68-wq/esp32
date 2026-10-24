@@ -1,5 +1,16 @@
+## 最新交付：build 48 / 日志22导航回归修复 — 2026-10-25
+
+- 最新工作树 E:/AgentStorage/esp32/iphone-agent-build13，分支 codex/wechat-phone-tasks；应用测试源码 0f1315eb3634de0f70b5945e798ad28753e73f86，后续仅交付文档提交。仅 private remote，未推 origin/main。
+- 已确认47回归：多会话原始目标当固定计划，打开未读后返回列表，红点消耗而没有read/decide。六轮巡查26次actor调用，五次空chat一次bounce失败。原始证据仅本机 out/logs22-diagnosis，不上传日志/截图。
+- 48：状态分支计划；导航前本机完整唯一顶部标题完成（gate/帧恢复核验后），读消息独立确认完整实际会话；普通任务/发送清空回调；多会话读后继续已有未读巡查直到列表为空。47有效的启动/解码优化与文字、发出、stale、bounce保护保留。
+- 关键代码 WatchMode.swift、RunSession.swift、AgentLoop.swift；新增 WatchNavigationTests.swift五项回归。路由：systematic-debugging、TDD、verification-before-completion；沿用现有spec，不新增平台技能，不使用子Agent。
+- RED40104949418：原210通过，新4项失败/9条断言，另1新项通过。GREEN40105825214：最终源码设备Release编译成功，215项XCTest全部通过；本机114Swift语法检查通过。
+- 桌面 E:/桌面/Lan-Agent-build48-unsigned.ipa，4,988,236 bytes，SHA256 dbde67367ad8ec7eba1eb3b3b7dc4fb9400d322d38f8912e50510561b29e6bcf；47的IPA/校验/说明已送回收筒，仅保留48。验证证据 out/build48-logs22-navigation-fix/verification.json。
+- 用户长期偏好：每次新版验证交付桌面后，自动回收桌面旧IPA/校验/说明，无需再问；源码、日志和构建证据保留。
+- 下一步：用户覆盖签名安装，重启守候并发一条新消息，采48日志验证read/decide/任务/回报及真实耗时。47已清红点但未处理的旧消息不自动补执行。没有操作真实手机，测试不可换算真实成功率。
+
 ## 最新用户偏好：桌面安装包仅保留最新已验证版
-已于2026-10-24将 Lan Agent 桌面build44/45/46送回收筒，只留build47及对应说明和校验码。以后每次新版验证并交付桌面后自动回收桌面旧IPA/校验码/说明，无需重复确认；不扩展到源码、日志或构建证据。用户要求优先于之前「桌面保留旧版回退」记录。
+已于2026-10-24将 Lan Agent 桌面build44/45/46送回收筒，只留build48及对应说明和校验码。以后每次新版验证并交付桌面后自动回收桌面旧IPA/校验码/说明，无需重复确认；不扩展到源码、日志或构建证据。用户要求优先于之前「桌面保留旧版回退」记录。
 
 # Codex 接手 ESP32 / Lan Agent — 2026-10-24
 
