@@ -73,15 +73,21 @@ import UIKit
             }
             draw("微信", x: 325, y: 120, size: 34)
             draw("测试群", x: 170, y: 310, size: 34); draw("最新消息", x: 170, y: 365, size: 24)
-            draw("张三", x: 170, y: 520, size: 34); draw("在吗", x: 170, y: 575, size: 24)
+            draw("张三", x: 170, y: 520, size: 34); draw("今天下午见面吗", x: 170, y: 575, size: 24)
             UIColor.gray.setFill(); ctx.fill(CGRect(x: 40, y: 500, width: 92, height: 92))  // avatar
             UIColor(red: 0.98, green: 0.32, blue: 0.32, alpha: 1).setFill()
             ctx.cgContext.fillEllipse(in: CGRect(x: 118, y: 498, width: 24, height: 24))  // its badge
             for (i, text) in ["微信", "通讯录", "发现", "我"].enumerated() { draw(text, x: CGFloat(65 + i * 180), y: 1480, size: 26) }
         }
         let frame = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let rows = CandidatePicker.rows(in: frame, top: 0.055, bottom: 1)
+        let seen = rows.map { $0.map { String(format: "%@@%.3f,%.3f", $0.text, $0.box.minX, $0.box.midY) }.joined(separator: " ") }
+        let cg = try XCTUnwrap(Vision.image(frame))
         guard case .row(let chat, _) = WatchChatOpen.unread(in: frame, rules: rules) else {
-            return XCTFail("Real Vision must find both titles and the badge next to 张三")
+            let all = WatchChatOpen.unread(rows: rows, rules: rules, badge: { _ in true })
+            let share = rows.flatMap { $0 }.filter { $0.text.contains("张") }
+                .map { Vision.redShare(cg, in: WatchChatOpen.badgeArea($0.box)) }
+            return XCTFail("Real Vision must find both titles and the badge next to 张三; rows \(seen); any badge \(all); red \(share)")
         }
         XCTAssertEqual(chat, "张三")
     }
