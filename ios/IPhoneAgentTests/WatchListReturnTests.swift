@@ -34,7 +34,7 @@ import XCTest
         XCTAssertEqual(phone.calls, ["tap"])
         XCTAssertEqual(screen.afterCalls, 1)
         XCTAssertEqual(screen.boundaries.count, 2)
-        XCTAssertNotNil(screen.boundaries.last!)
+        XCTAssertNotNil(screen.boundaries.last.flatMap { $0 })
         XCTAssertEqual(fallbackCalls, 0)
     }
 

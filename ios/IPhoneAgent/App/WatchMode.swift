@@ -176,6 +176,13 @@ enum WatchSettings {
         """
     }
 
+    static let returnTask = "回到微信聊天列表（底部有微信、通讯录、发现、我）。如果已在列表就直接完成；若在会话里，点左上角返回按钮。确认列表出现后才完成。只做导航，不读消息、不输入、不发送。"
+    static let returnPlan = """
+    1. Inspect the current screen. If WeChat's chat list title and its four bottom tabs are visible, done.
+    2. If a conversation is open, tap its top-left back button. An edge swipe already failed; do not repeat it.
+    3. Observe the result. Finish only on the actual chat list. Never type, send, or reopen a conversation.
+    """
+
     /// After a quick send whose Return did not send: the text is in the box, only 发送 is left.
     static func tapSendTask(chat: String) -> String {
         "在微信会话“\(chat)”里，底部输入框里已经写好了一段话。点输入框右边的“发送”把它发出去，然后完成。不要输入、删除或改动任何文字。"
@@ -651,6 +658,7 @@ extension AppModel {
         watchInterjectedAt = [:]
         watchRetries = [:]
         watchTaskReplyFailures = 0
+        watchListReturn.pending = nil
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
@@ -683,12 +691,31 @@ extension AppModel {
             } else if !MockMode.on && !(board.connected && feed.mirroring) {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
                 baseline = nil
+            } else if let chat = watchListReturn.pending {
+                // A failed return retries navigation only. Do not read the same chat or resend its message.
+                if now() >= quietUntil {
+                    watchStatus = String(localized: "Returning to WeChat's chat list…")
+                    let returned = await resumeWatchReturn(chat)
+                    guard watching, !Task.isCancelled else { break }
+                    (baseline, changedAt) = (nil, nil)
+                    if returned {
+                        failures = 0
+                        (lastCheck, quietUntil) = (0, 0)
+                        continue
+                    }
+                    failures += 1
+                    if failures >= 4 {
+                        stopWatch(String(localized: "Could not return to WeChat's chat list. Check the screen and start watching again."))
+                        break
+                    }
+                    quietUntil = now() + 20
+                }
             } else if watchTaskReply != nil {
                 // While a result is pending, only its delivery is retried. Never re-enter task classification.
                 if now() >= quietUntil {
                     await deliverWatchTaskReply()
                     // Back off only an unsent report. A successful send needs the ordinary screen cooldown.
-                    (baseline, changedAt, quietUntil) = (nil, nil, now() + (watchTaskReply == nil ? 6 : 20))
+                    (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + (watchTaskReply == nil ? 6 : 20))
                 }
             } else if let send = chatTool.nextCommand() {
                 watchStatus = String(localized: "Sending ChatTool's reply to \(send.chat)…")
@@ -696,10 +723,10 @@ extension AppModel {
                 if let why = PrivacyGuard.check(send.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
                     DebugLog.write("watch: ChatTool's reply withheld: \(why)")
                 } else {
-                    _ = await watchRun(WatchSettings.sendTask(chat: send.chat, text: send.text, back: !WatchSettings.rules.single))
+                    _ = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single, quick: false)
                 }
                 guard watching else { break }
-                (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
+                (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + 6)
             } else {
                 let t = now(), frame = feed.frame
                 if t < quietUntil {
@@ -731,8 +758,8 @@ extension AppModel {
                         break
                     }
                     (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
-                    if watchTaskReply != nil {
-                        // A completed task is already persisted. Deliver it immediately; it isn't new screen activity.
+                    if watchTaskReply != nil || watchListReturn.pending != nil {
+                        // Finish the saved report or pending navigation before looking for new screen activity.
                         quietUntil = 0
                         continue
                     }
@@ -852,9 +879,7 @@ extension AppModel {
                 if let i = read.indices.last { read[i].replied += "【未完成】" + task }
             }
         } else if reply == nil, task == nil, !rules.single {
-            let returning = WatchListReturn()
-            returning.pending = chat
-            _ = await returning.resume(phone: pointer, screen: feed, canAct: { true }, fallback: { false })
+            watchListReturn.pending = chat
         }
 
         if !sent, watching, watchRetries[chat, default: 0] < 2 {
@@ -871,6 +896,18 @@ extension AppModel {
         let outcome = reply == nil && task == nil ? "" : sent ? ", replied" : ", reply not sent"
         DebugLog.write("watch: \(chat): \(read.count) new message(s)\(outcome)")
         return (true, true)
+    }
+
+    private func resumeWatchReturn(_ chat: String) async -> Bool {
+        let began = now()
+        defer { logWatchTiming("return", since: began) }
+        let returned = await watchListReturn.resume(phone: pointer, screen: feed,
+            canAct: { self.watching && UIApplication.shared.applicationState != .active },
+            fallback: { await self.watchRun(WatchSettings.returnTask, plan: WatchSettings.returnPlan,
+                                           stepLimit: 4, returning: true) != nil })
+        if returned { watchInputBox[chat] = nil }
+        DebugLog.write("watch: return to list \(returned ? "verified" : "pending; navigation retry only")")
+        return returned
     }
 
     private func deliverWatchTaskReply() async {
@@ -967,9 +1004,11 @@ extension AppModel {
             case .notTried: break
             }
         }
-        let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: back), plan: WatchSettings.sendPlan(chat: chat, back: back),
+        // Return-sending intentionally ends the send run. Returning is a separate, verified stage.
+        let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: false), plan: WatchSettings.sendPlan(chat: chat, back: false),
                                 stepLimit: 25, returnSends: true) != nil
         if ok, let box = agent.typedInto { watchInputBox[chat] = box }  // the next reply here goes the quick way
+        if ok, back { watchListReturn.pending = chat }
         return ok
     }
 
@@ -1055,15 +1094,23 @@ extension AppModel {
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
-                          directStart: Bool = false) async -> String? {
+                          directStart: Bool = false, returning: Bool = false) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now()
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
-        let completion: ((Data) -> String?)? = navigation.map { rules in
-            { frame in
-                guard let chat = WatchReport.navigationChat(in: frame, targets: rules.targets) else { return nil }
-                return PyJSON.dumps(["chat": .str(chat)])
+        let completion: ((Data) -> String?)?
+        if returning {
+            completion = { frame in
+                guard WatchListReturn.view(in: frame, chat: "") == .list else { return nil }
+                return #"{"list":true}"#
+            }
+        } else {
+            completion = navigation.map { rules in
+                { frame in
+                    guard let chat = WatchReport.navigationChat(in: frame, targets: rules.targets) else { return nil }
+                    return PyJSON.dumps(["chat": .str(chat)])
+                }
             }
         }
         agent.steps = []  // a start that fails leaves no steps, not the previous check's

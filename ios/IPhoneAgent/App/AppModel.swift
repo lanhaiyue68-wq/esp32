@@ -110,6 +110,7 @@ import UIKit
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
     var watchTaskReply = WatchTaskReply.saved() { didSet { WatchTaskReply.save(watchTaskReply) } }
     var watchTaskReplyFailures = 0
+    let watchListReturn = WatchListReturn()
     var lastWidgetReload = 0.0
 
     init() {
