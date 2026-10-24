@@ -35,3 +35,12 @@ build 47 将多会话原始目标直接作为固定计划，actor 进入目标�
 日志原文、截图与诊断数据只保存本机 out/logs22-diagnosis，不进仓库。路由沿用 systematic-debugging、TDD、verification-before-completion；不需要新增平台技能。
 
 补充：多会话读取完成后继续本轮未读巡查，直到列表确认没有目标未读才进入等待；避免当前会话处理完就进入冷却，使其他已有未读等到下个定时周期。待回报仍优先，不重新执行任务。
+
+
+## build49：当前画面直接执行与条件等待（2026-10-25）
+
+采用对照 Phone Agent 得出的两条适用原则：
+- 已授权的微信手机任务以当前截图和原始完整目标直接调用 actor；固定导航／发送和普通任务仍保留既有起始策略。directStart 每次 run 显式赋值／清除。出现错误、停滞或 replan 仍调用 planner，所有动作继续走原 step、gate、stale、输入与目标校验。
+- VideoFeed 复用完整 usable(after:) 条件做有界轮询，接受新的可解码画面，或 boundary 后 heartbeat 证明已解码的静止帧仍为 board 最新。不要等待不存在的变化帧直到 proof 过期。settled、帧时间／latest_ms／断链判断、恢复与快照回退均保留，取消时不启动下一次恢复。
+
+Xcode26.6／现有iOS18+构建暂不引入要求iOS27的ScreenCaptureKit，不改固件／网络／配对。先以真实VideoFeed及合成H264做RED，再跑最终设备编译和完整XCTest。只将代码和无私有正文的文档推到private仓库。真实速度与可靠度由后续真机日志验收。

@@ -1,3 +1,16 @@
+## 最新交付：build49 / 直接执行与有效画面及时返回 — 2026-10-25
+
+- 工作树 E:/AgentStorage/esp32/iphone-agent-build13；codex/wechat-phone-tasks；已测试App源码24a22f586d46506cd26340647595f158a0c9e330。仅private远端，未推origin/main。
+- 用户授权：结合Phone Agent优点给现有App提速；无新固件、配对、Wi-Fi、真实手机或发送授权动作。
+- VideoFeed等候每50ms检查完整usable(after:)；新可用帧或动作后heartbeat证明已解码图仍最新就继续。settled与freshness／断链／取消／恢复／snap保留。
+- 已授权微信手机任务directStart，让actor直接看当前帧与完整Goal，省去初始planner；遇到错误／卡住／replan仍用planner。普通手动任务、固定导航与发送不继承此标志。所有输入、标题与发出检查仍沿用。
+- 关键文件 VideoFeed.swift、AgentLoop.swift、RunSession.swift、WatchMode.swift、SpeedTests.swift、Shared.xcconfig。路由 systematic-debugging／TDD／verification-before-completion，沿用现有spec，不派子Agent。
+- RED40108170022：原215项通过，新8项中4项失败，重现多余planner、1.838s等待和静止画面snap错误。GREEN40108655015：Xcode26.6设备Release编译及223项XCTest全通过；115Swift语法／JSON／plist／diff通过。
+- 桌面 E:/桌面/Lan-Agent-build49-unsigned.ipa（4,987,626 bytes），SHA256 7d3a9307af79bad1c360cc77fc070c096be8b6b5a46d13ac33f36bd081d72be9；App及Widget49，ZIP／MinimumOS18.0／无模型预设／新二进制路径已验证。48三件套已送回收筒，桌面只保留49。
+- 证据 ../out/build49-speed/verification.json、checkpoint.json、red-ci.log、green-ci.log、implementation-plan.md；备份 E:/Backups/esp32-before-build49-20261025.zip。无私有消息／截图上传；88字节H264为合成黑图。
+- 尚未做真机测速。用户沿用原BundleID签名覆盖安装，重启守候并新发相同任务，比较model／frame wait／report总耗时。不能把测试结果换算真实提速或成功率。
+- iOS27 ScreenCaptureKit未接入，现有编译环境26.6；不要声称已经替换画面传输或使用蓝牙HID固件。
+
 ## 最新交付：build 48 / 日志22导航回归修复 — 2026-10-25
 
 - 最新工作树 E:/AgentStorage/esp32/iphone-agent-build13，分支 codex/wechat-phone-tasks；应用测试源码 0f1315eb3634de0f70b5945e798ad28753e73f86，后续仅交付文档提交。仅 private remote，未推 origin/main。

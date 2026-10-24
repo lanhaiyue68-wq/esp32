@@ -41,3 +41,20 @@
 
 ## 2026-10-25 build 48 已交付
 最终源码0f1315eb3634de0f70b5945e798ad28753e73f86，云端40105825214设备Release与215项XCTest全部通过。桌面Lan-Agent-build48-unsigned.ipa，4,988,236 bytes，SHA256 dbde67367ad8ec7eba1eb3b3b7dc4fb9400d322d38f8912e50510561b29e6bcf；桌面47的IPA/校验/说明已回收，只留48。未操作真实手机，端到端与速度仍待用户新消息和48日志验证。
+
+
+## 2026-10-25 影片速度對照（只讀調查）
+- 已用 video-understand、影片抽幀／本機轉錄、公開源碼核對新物種說影片。畫面 AgentMouse-S3 與 boboabw/phone-agent 高度吻合，但作者精確版本／模型未確認。
+- 該專案當前以 iPhone ScreenCaptureKit 直接取畫面，BLE HID 操作；與本專案 AirPlay → ESP32 → BLE → App 解碼路徑不同。當前原生取畫面方案要求 iOS27，尚未核對使用者設備相容性。
+- 微信點讚示範本身約半分鐘，不能從影片推導完整任務平均耗時或成功率。既有 logs22 導航與模型重複成本仍需分段量測。
+- 完整證據：E:/AgentStorage/esp32/out/video-comparison-20261025/comparison.md；本次未改產品程式或交付 build49，build48 真機速度待驗證。
+
+
+## 2026-10-25 build49 速度优化已交付
+- 已测试源码 24a22f586d46506cd26340647595f158a0c9e330，分支 codex/wechat-phone-tasks，仅private远端。
+- 已授权微信手机任务采用directStart：当前截图与原始Goal直接交actor，省去初始planner；错误／卡住／replan仍沿用planner。普通任务、固定导航和发送默认保留原策略，每次run清除旧模式。
+- VideoFeed以既有完整usable(after:)证据进行有界等待，新帧或boundary后heartbeat确认的静止帧均及时返回；避免固定1.5～3秒等待使证据过期并进入快照失败。保留settled、latest_ms／帧时间／断链／取消／恢复／快照及全部原有输入／会话／发出检查。
+- RED40108170022：223项中4个新测试失败（5条失败，含1个旧等待路径引发的BlindError）；原215项通过。GREEN40108655015：Xcode26.6设备Release编译和223项XCTest全部通过；115Swift语法、JSON、plist、entitlements及diff检查通过。
+- 桌面 E:/桌面/Lan-Agent-build49-unsigned.ipa，4,987,626 bytes；SHA256 7d3a9307af79bad1c360cc77fc070c096be8b6b5a46d13ac33f36bd081d72be9。App/Widget49、ZIP、minimumOS18.0、无模型预设和新编译路径已核对；桌面48的IPA／sha／说明三件套已回收。
+- 路由 systematic-debugging／TDD／verification-before-completion，沿用已有spec；未派子Agent。Headroom压缩RED省7443、GREEN省7123 tokens；合成88字节H264测试不含手机画面。
+- 证据 ../out/build49-speed/{implementation-plan.md,verification.json,red-ci.log,green-ci.log,checkpoint.json}。未改固件／网络／账号／模型配置；原生ScreenCaptureKit要求iOS27且现有编译环境26.6，本轮未接入。未操作真机，整体提速和成功率待同任务新日志验证。
