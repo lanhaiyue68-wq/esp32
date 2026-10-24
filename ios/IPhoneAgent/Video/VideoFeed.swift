@@ -203,14 +203,14 @@ extension ScreenSource {
 
     /// Waits (bounded) for a usable frame: new live frames, or the next status proving the decoded image is the
     /// board's latest.
-    private func recovered(within seconds: Double) async -> Bool {
+    private func recovered(within seconds: Double, after boundary: Double? = nil) async -> Bool {
         let deadline = now() + seconds
-        while now() < deadline {
+        while true {
             if Task.isCancelled { return false }
-            if usable() { return true }
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            if usable(after: boundary) { return true }
+            if now() >= deadline { return false }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
-        return usable()
     }
 
     func status(_ s: BoardStatus) {
@@ -312,7 +312,7 @@ extension ScreenSource {
     }
 
     /// A current frame for the model. While the board streams, the live stream has it: use a frame younger than
-    /// `maxAge`, or wait for the next one. AirPlay only sends frames on change, so when none comes, the board says
+    /// one second, or wait for verified current pixels. AirPlay only sends frames on change, so when none comes, the board says
     /// the phone isn't sending either (status fps ~0) and nothing was lost since the last good frame, the screen
     /// is unchanged and the last frame is still current. If the phone IS sending but nothing reaches us, the
     /// board-to-app path is stuck: never hand the model that stale frame. Snap only as a fallback, retried once
@@ -324,13 +324,16 @@ extension ScreenSource {
     /// the latest image get `noVideoGrace` s for the stream to catch up before the user is told to restart mirroring.
     /// `snapLimit` caps the snapshot (no second try) when someone is waiting on screen.
     @discardableResult
-    func currentFrame(maxAge: Double = 1, wait: Double = 3, snapLimit: Double? = nil) async throws -> String {
+    func currentFrame(wait: Double = 3, snapLimit: Double? = nil) async throws -> String {
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
         if streamOn && mirroring {
             if usable() { return "live" }
-            if await fresh(since: now() - maxAge, timeout: wait) != nil, usable() { return "live (waited)" }
+            // A new heartbeat can verify the decoded image without any new pixels on a quiet screen.
+            // Recheck the same full freshness policy while waiting, before its proof ages out.
+            if await recovered(within: wait) { return "live (waited)" }
+            try Task.checkCancellation()
             if await refreshDecoder("frame not current") { return "cached GOP" }
             if flowing, await recovered(within: 8) { return "live (caught up)" }
         }
@@ -384,6 +387,11 @@ extension ScreenSource {
     /// the screen did not change, but a broken stream (waiting for an IDR) needs a snap. Snap: give the UI a moment,
     /// snap, and snap once more if the GOP still ends before the action.
     func afterAction(since: Double) async {
+        let began = now()
+        defer {
+            DebugLog.write(String(format: "frame wait: after action %.0f ms, verified %@", (now() - began) * 1000,
+                                  usable(after: since) ? "yes" : "no"))
+        }
         do {
             if FrameMode.current == .snap {
                 try await Task.sleep(nanoseconds: 700_000_000)
@@ -394,11 +402,15 @@ extension ScreenSource {
                 try await currentFrame()
             } else {
                 await settled()
-                if await newer(than: since, timeout: 1.5) { return }
-                if usable(after: since) { return DebugLog.write("frame: latest board image verified unchanged") }
+                if Task.isCancelled { return }
+                if await recovered(within: 1.5, after: since) {
+                    if capturedAt < since { DebugLog.write("frame: latest board image verified unchanged") }
+                    return
+                }
+                if Task.isCancelled { return }
                 if await refreshDecoder("stale after an action"), usable(after: since) { return }
                 if flowing {
-                    if await newer(than: since, timeout: 4) { return }
+                    if await recovered(within: 4, after: since) { return }
                     return DebugLog.write("frame: no newer frame on a flowing stream; the screen did not change")
                 }
                 DebugLog.write("frame: stream stale (waiting for an IDR); snapping")
@@ -409,17 +421,6 @@ extension ScreenSource {
             DebugLog.write("frame after action failed: \(error.localizedDescription)")
         }
         if capturedAt < since { DebugLog.write(String(format: "frame: still %.1f s older than the action", since - capturedAt)) }
-    }
-
-    /// Waits until the shown frame was captured after `t`; false on timeout.
-    private func newer(than t: Double, timeout: Double) async -> Bool {
-        let deadline = now() + timeout
-        while capturedAt < t {
-            if Task.isCancelled { return false }
-            if now() > deadline { return false }
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        return true
     }
 
     /// The link dropped: the board forgets `stream on`.

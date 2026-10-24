@@ -417,9 +417,17 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         do {
-            if presetPlan.isEmpty { try await replan() } else {
-                plan = presetPlan
-                record(nil, ["action": .str("plan"), "plan": .str(presetPlan), "plan_zh": .str(""), "think_s": .num(0)])
+            if !presetPlan.isEmpty || directStart {
+                plan = presetPlan.isEmpty ? """
+                Work from the CURRENT screen and the original Goal; keep completed work.
+                Choose the next action from what is visible, then inspect its result before continuing.
+                If the route is unclear or progress stops, request replan rather than guessing or repeating moves.
+                Finish only after checking the visible result against the Goal, using its required answer format.
+                """ : presetPlan
+                record(nil, ["action": .str("plan"), "plan": .str(plan), "plan_zh": .str(""), "think_s": .num(0),
+                             "source": .str(presetPlan.isEmpty ? "direct start" : "fixed plan")])
+            } else {
+                try await replan()
             }
             for _ in 0..<(stepLimit ?? maxSteps) {
                 do {

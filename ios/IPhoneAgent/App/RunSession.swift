@@ -15,7 +15,7 @@ extension AppModel {
     /// `reference` and `outgoing` come from WeChat watch (knowledge files, the privacy check); other runs clear them.
     func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
-             frameCompletion: ((Data) -> String?)? = nil) async {
+             frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -25,6 +25,7 @@ extension AppModel {
         agent.reference = reference
         agent.outgoingGuard = outgoing
         agent.presetPlan = plan
+        agent.directStart = directStart // ordinary tasks and fixed navigation do not inherit a prior phone-task mode
         agent.frameCompletion = frameCompletion // ordinary tasks and sends clear the navigation-only shortcut
         agent.stepLimit = stepLimit
         agent.fastText = fastText

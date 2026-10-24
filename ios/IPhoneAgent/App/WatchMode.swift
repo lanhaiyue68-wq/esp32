@@ -827,7 +827,7 @@ extension AppModel {
             watchInputBox[chat] = nil  // leaving the chat invalidates its cached keyboard coordinates
             DebugLog.write("watch: owner task in \(chat): \(task)")
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
-                                      stepLimit: phone ? agent.maxSteps : 25, fastText: !phone)
+                                      stepLimit: phone ? agent.maxSteps : 25, fastText: !phone, directStart: phone)
             if phone, let source = phoneMessages.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
@@ -1052,7 +1052,8 @@ extension AppModel {
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
-                          returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil) async -> String? {
+                          returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
+                          directStart: Bool = false) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now()
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began) }
@@ -1065,7 +1066,8 @@ extension AppModel {
         }
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
         await run(task, reference: reference, outgoing: { PrivacyGuard.check($0, words: words, numbers: numbers) }, plan: plan,
-                  stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion)
+                  stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
+                  directStart: directStart)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: 100_000_000)
