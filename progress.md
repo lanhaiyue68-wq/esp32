@@ -94,6 +94,14 @@
 - 证据../out/build52-local-navigation；下一步同一单会话/同网络模型对比51与52“列表到读消息”耗时、对象准确性、暂停恢复和无重复发送。
 
 
+## 2026-10-25 — build56：多會話本機打開、全會話本機發送、每階段模型次數（Claude Code）
+
+依日誌26耗時盤點：多會話打開 6–35 s、發送 15–76 s 都是 agent run（兩條本機快路只限單一會話）。
+源碼 ee3b586：WatchChatOpen.unread（列表 OCR＋頭像紅點像素 Vision.redShare，選最上面的名單內紅點會話，點一次後標題核對；全部可見且無紅點→nothing；同名/截斷/不在畫面→模型）；quickSend 不再限單一會話：輸入框（鍵盤收起時 y 0.85–0.98）學一次全會話共用（WatchSettings.inputBox 持久化），貼上前核對標題；返回列表仍為獨立驗證階段。watch timing 加 model call(s)（LLMClient.requests）。
+驗證：run 40142549400 設備 Release + 292 XCTest 全過（新增 WatchLocalFlowTests 7 項，含真實 Vision OCR 合成列表＋紅點）。首次 run 40142234871 失敗：合成預覽「在吗」太短 OCR 讀不到，改長後通過——實機最新預覽很短時也會退回模型。未真機驗證。
+交付：E:/桌面/Lan-Agent-build56-unsigned.ipa，5,069,885 bytes，SHA256 2dcc655e7b2f7403d07a11e2b3704227de5b547cb05399ecdf7d442d73fb2246；55 回收，51 保留。
+下一步：真機日誌看 watch timing 各階段 ms 與 model call(s)；使用者列表有兩個「蓝海乐」，建議改唯一備註並同步名單；建議 iOS 設定微信允許從其他 App 貼上。
+
 ## 2026-10-25 — build55：手機任務只限私聊＋口令；發送前核對會話、不重發（Claude Code）
 
 日誌26：回覆「好的，我这就去给测试群发你好」先按發送發出，模型又輸入一次再 Return（重複）；測試群任務的回報被輸入進測試群（模型說「I am in the 测试群 chat … so I type」）；主人權限只看暱稱，群裡任何人都能改成同名。
