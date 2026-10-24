@@ -991,7 +991,7 @@ extension AppModel {
         let began = now()
         defer { logWatchTiming("decide", since: began) }
         let client: ChatModel
-        do { client = try settings.client("planner") }
+        do { client = try await settings.client("planner") }
         catch {
             rollback()
             DebugLog.write("watch: deciding the reply failed: \(error.localizedDescription)")
