@@ -128,7 +128,7 @@ enum WatchSettings {
     /// ("unsupported keyboard text"), the send ran out of steps three times and the messages went unanswered
     /// (logs(13): "抱歉刚才没及时回复你～"). nil when nothing is left.
     static func typeable(_ text: String) -> String? {
-        let swaps: [Character: String] = ["～": "", "~": "", "〜": "", "…": "。", "—": "，", "–": "，", "·": "",
+        let swaps: [Character: String] = ["～": "", "~": "", "〜": "", "…": "。", "—": "，", "–": "，", "·": "", "@": "", "＠": "",
                                           "「": "“", "」": "”", "『": "“", "』": "”", "【": "（", "】": "）", "《": "“", "》": "”"]
         let keyed = Set("，。！？：；（）、“”‘’")
         var out = ""
@@ -216,7 +216,7 @@ enum WatchSettings {
         \(knowledge.isEmpty ? "用户没有给知识库：凭常识自然地回答；具体事实（价格、时间、地址、名单等）不知道就说不知道，或回复：“\(r.fallback)”。"
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
         \(tasks)
-        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，只用汉字、数字和常见标点（，。？！），不要用表情、～、…；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
+        规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，只用汉字、数字和常见标点（，。？！），不要用表情、～、…，也不要出现 @ 符号（要@人只能用 task）；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
         不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
         只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在微信里执行的操作，不需要就留空"}
         """
@@ -386,6 +386,14 @@ enum WatchReport {
         struct Box: Decodable { var send: String? }
         guard let data = object(answer), let box = try? JSONDecoder().decode(Box.self, from: data) else { return nil }
         return box.send?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The same message, by its letters and digits: punctuation, spaces and a cut-off end aside.
+    static func sameWords(_ a: String, _ b: String) -> Bool {
+        let x = CandidatePicker.bare(a), y = CandidatePicker.bare(b)
+        guard !x.isEmpty, !y.isEmpty else { return false }
+        let n = min(x.count, y.count, 8)
+        return x.prefix(n) == y.prefix(n)
     }
 
     static func answerKey(_ m: ReadMessage) -> String { m.chat + "\u{1F}" + m.sender + "\u{1F}" + m.text }
@@ -649,7 +657,11 @@ extension AppModel {
         if !rules.serverReplies && !read.isEmpty {
             // ChatTool's guard against running one message twice: the same words from the same person in this chat
             // were answered under 30 s ago (a misread made them look new again).
-            let due = read.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
+            // Only what comes after our own last message on screen: what it follows was answered, even when the check
+            // that should have seen the reply go out missed it (logs(18): the same reply sent twice).
+            let afterMine = fresh.lastIndex(where: { $0.mine }).map { fresh.count - 1 - $0 } ?? fresh.count
+            let pending = read.suffix(fresh.suffix(afterMine).filter { !$0.mine }.count)
+            let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty  // phone tasks only for an explicit whitelist, never for anyone
@@ -806,6 +818,10 @@ extension AppModel {
                 DebugLog.write("watch: quick send: iOS asked to allow the paste; allowed")
                 shown = await look()
             }
+            if let s = shown, CandidatePicker.count(text, in: s) <= before {  // the frame may predate the paste
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                shown = await look()
+            }
             guard let pasted = shown, CandidatePicker.count(text, in: pasted) > before else {
                 try await pointer.key("cmd+a")
                 try await pointer.key("backspace")
@@ -814,8 +830,12 @@ extension AppModel {
             }
             try await pointer.key("enter")
             try? await Task.sleep(nanoseconds: 700_000_000)
-            guard let screen = await readChat(chat), let mine = screen.lines.last(where: { $0.mine }),
-                  WatchReport.key(mine) == WatchReport.key(WatchReport.Line(sender: "我", text: text, mine: true)) else {
+            var sent = await sentAlready(text, chat: chat)
+            if !sent {  // the read may come before the bubble: one more look before anything is sent again
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                sent = await sentAlready(text, chat: chat)
+            }
+            guard sent else {
                 DebugLog.write("watch: quick send: not seen as sent")
                 return .inBox
             }
@@ -826,6 +846,13 @@ extension AppModel {
             DebugLog.write("watch: quick send failed: \(error.localizedDescription)")
             return .notTried
         }
+    }
+
+    /// True when the newest own message in the chat is `text`, by its words: the read writes punctuation its own way
+    /// ("，" as ","), and comparing it whole took a sent reply for unsent, so it went out twice (logs(18)).
+    private func sentAlready(_ text: String, chat: String) async -> Bool {
+        guard let screen = await readChat(chat), let mine = screen.lines.last(where: { $0.mine }) else { return false }
+        return WatchReport.sameWords(mine.text, text)
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int = 15,

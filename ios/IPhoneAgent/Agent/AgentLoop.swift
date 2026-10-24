@@ -685,6 +685,10 @@ extension Pointer: Gestures {}
                     DebugLog.write("type: iOS asked to allow the paste; allowed")
                     after = await freshFrame()
                 }
+                if let shown = after, CandidatePicker.count(text, in: shown) <= before {  // the frame may predate the paste
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    after = await freshFrame()
+                }
                 if let after, CandidatePicker.count(text, in: after) > before {
                     if returnSends {  // checked: exactly this text is in the box
                         try await phone.key("enter")

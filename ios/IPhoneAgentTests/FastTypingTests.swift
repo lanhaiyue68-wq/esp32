@@ -23,6 +23,14 @@ import XCTest
         XCTAssertNil(CandidatePicker.find("在的话", rows: [bubble, field, candidates]))  // never a near match
     }
 
+    func testASentReplyIsRecognisedByItsWordsAndNeverAtSigns() {
+        // logs(18): the read wrote "，" as "," and a sent reply was taken for unsent and sent again; "帮你@群主" opened
+        // the member picker.
+        XCTAssertTrue(WatchReport.sameWords("我在待命,随时帮你处理群里的事", "我在待命，随时帮你处理群里的事。"))
+        XCTAssertFalse(WatchReport.sameWords("我是蓝，你的智能助手", "我在待命，随时帮你处理群里的事。"))
+        XCTAssertEqual(WatchSettings.typeable("好的，我这就帮你@群主。"), "好的，我这就帮你群主。")
+    }
+
     func testTheKeyboardAndThePastePromptAreRecognised() {
         // logs(17): back from Lan Agent the keyboard was up and the box tap hit the space bar; iOS's paste prompt
         // was then tapped back and forth.
