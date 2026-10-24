@@ -721,9 +721,9 @@ extension AppModel {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
-                    let ok = await watchCheck()
+                    let result = await watchCheck()
                     guard watching else { break }
-                    failures = ok ? 0 : failures + 1
+                    failures = result.ok ? 0 : failures + 1
                     if failures >= 4 {
                         notifier.post(.failed, title: String(localized: "WeChat watch stopped"),
                                       body: String(localized: "Four checks in a row did not finish."), run: runID)
@@ -736,6 +736,12 @@ extension AppModel {
                         quietUntil = 0
                         continue
                     }
+                    if result.scannedChat && !WatchSettings.rules.single {
+                        // Finish the unread sweep before sleeping: a second chat may already have a badge.
+                        lastCheck = 0
+                        quietUntil = 0
+                        continue
+                    }
                 }
                 if changedAt == nil { watchStatus = watchIdleLine }
             }
@@ -744,7 +750,7 @@ extension AppModel {
     }
 
     /// One check, in small steps (see WatchSettings): open, read, keep what is new, decide in code, write, send.
-    private func watchCheck() async -> Bool {
+    private func watchCheck() async -> (ok: Bool, scannedChat: Bool) {
         let began = now()
         defer { logWatchTiming("check", since: began) }
         let rules = WatchSettings.rules
@@ -756,9 +762,9 @@ extension AppModel {
             // Stop on the destination before the actor can return to the list and consume its unread badge.
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
             guard let opened = await watchRun(WatchSettings.openTask(rules), plan: WatchSettings.openPlan(rules),
-                                             navigation: rules.single ? nil : rules) else { return false }
-            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return true }  // nothing unread
-            guard let look = await readChat(open) else { return false }
+                                             navigation: rules.single ? nil : rules) else { return (false, false) }
+            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return (true, false) }  // nothing unread
+            guard let look = await readChat(open) else { return (false, false) }
             (chat, screen) = (open, look)
         }
 
@@ -801,7 +807,7 @@ extension AppModel {
                 if reply != nil { watchInterjectedAt[chat] = now() }
             }
         }
-        guard watching, !Task.isCancelled else { return false }
+        guard watching, !Task.isCancelled else { return (false, false) }
         var sent = true  // false: what was due did not go out
         // The reply first, then the owner's phone task: a task takes a minute or more and the person who just asked
         // "在不在" waited for all of it (traces(39)).
@@ -816,8 +822,8 @@ extension AppModel {
         }
         if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
             let phone = !phoneMessages.isEmpty
-            guard watching, !Task.isCancelled else { return false }
-            if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return false }
+            guard watching, !Task.isCancelled else { return (false, false) }
+            if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
             watchInputBox[chat] = nil  // leaving the chat invalidates its cached keyboard coordinates
             DebugLog.write("watch: owner task in \(chat): \(task)")
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
@@ -854,7 +860,7 @@ extension AppModel {
             watchRetries[chat, default: 0] += 1
             watchLast[chat] = before
             DebugLog.write("watch: \(chat): the reply did not go out; reading again at the next check")
-            return false
+            return (false, false)
         }
         watchRetries[chat] = nil
         ReadLog.append(read)
@@ -862,7 +868,7 @@ extension AppModel {
         if WatchSettings.serverOn { chatTool.report(read) }
         let outcome = reply == nil && task == nil ? "" : sent ? ", replied" : ", reply not sent"
         DebugLog.write("watch: \(chat): \(read.count) new message(s)\(outcome)")
-        return true
+        return (true, true)
     }
 
     private func deliverWatchTaskReply() async {
