@@ -1,6 +1,138 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Logs and Cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志与缓存"
+          }
+        }
+      }
+    },
+    "Export recent logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出最近日志"
+          }
+        }
+      }
+    },
+    "Exports the latest 5 runs and text logs, up to 20 MB before compression. Video is omitted. Stop watching or running a task before exporting." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出最近 5 次执行和文字日志，压缩前最多 20 MB，不含录影。请先停止守候和当前任务。"
+          }
+        }
+      }
+    },
+    "Diagnostic storage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断数据占用"
+          }
+        }
+      }
+    },
+    "Saved runs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存的执行记录"
+          }
+        }
+      }
+    },
+    "Clear logs and diagnostic cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除日志与诊断缓存"
+          }
+        }
+      }
+    },
+    "Automatic cleanup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动清理"
+          }
+        }
+      }
+    },
+    "Keeps up to 20 runs for 7 days within 80 MB. Each run keeps at most 8 MB / 120 recent video frames and 12 MB of step images. Old export files expire after 1 day. Clearing keeps model settings, board pairing, calibration, knowledge and learned cases. Stop watching or running a task to clear." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "执行记录最多保留 20 次、7 天、共 80 MB；每次最多保留 8 MB／120 张最近录影帧，以及 12 MB 步骤截图。导出临时文件保留 1 天。清理保留模型设置、设备配对、校准、知识与学习记录。请先停止守候和任务再清理。"
+          }
+        }
+      }
+    },
+    "Clear logs and diagnostic cache?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除日志与诊断缓存？"
+          }
+        }
+      }
+    },
+    "Deletes saved diagnostic runs, screenshots, video frames and old export files. Your setup and knowledge are kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除已保存的诊断执行记录、截图、录影帧和旧导出文件，保留设置与知识。"
+          }
+        }
+      }
+    },
+    "Logs and diagnostic cache cleared." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志与诊断缓存已清除。"
+          }
+        }
+      }
+    },
+    "Run diagnostics are cleaned automatically. Manage saved logs, recent video frames and export files in Logs and Cache." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "执行诊断会自动清理。请在“日志与缓存”管理日志、最近录影帧和导出文件。"
+          }
+        }
+      }
+    },
     "I can't see the iPhone screen clearly. Check Screen Mirroring; if it keeps happening, stop it in Control Center and select Lan Agent again." : {
       "localizations" : {
         "zh-Hans" : {

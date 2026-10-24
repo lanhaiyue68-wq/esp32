@@ -36,7 +36,7 @@ final class DiagnosticFilesTests: XCTestCase {
         XCTAssertEqual(storage.usage().runs, 1)
     }
     func testAgeLimitPreservesAnActiveRun() throws {
-        let date = Date(timeIntervalSince1970: 1_000_000)
+        let date = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 22))!
         let old = try run("20261020-000000", date: date), active = try run("20261021-000000", date: date)
         _ = try storage.maintain(active: active, now: date.addingTimeInterval(8 * 86400))
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path)); XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
@@ -89,8 +89,41 @@ final class DiagnosticFilesTests: XCTestCase {
         _ = try run("20261021-000000")
         let stage = try storage.exportStage()
         let items = FileManager.default.enumerator(at: stage, includingPropertiesForKeys: [.fileSizeKey])?.compactMap { $0 as? URL } ?? []
-        let size = items.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        let size = items.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
         XCTAssertLessThanOrEqual(size, 1024); XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+    @MainActor func testRapidRestartsDoNotAppendToTheSameRun() throws {
+        let trace = TraceStore(root: storage.root)
+        trace.start(task: "first"); let first = try XCTUnwrap(trace.dir)
+        trace.start(task: "second"); let second = try XCTUnwrap(trace.dir)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue((try String(contentsOf: first.appendingPathComponent("steps.jsonl"), encoding: .utf8)).contains("first"))
+        XCTAssertFalse((try String(contentsOf: second.appendingPathComponent("steps.jsonl"), encoding: .utf8)).contains("first"))
+    }
+    @MainActor func testPerRunTextLogIsBoundedAndKeepsTaskAndLatestEvent() throws {
+        let trace = TraceStore(root: storage.root)
+        trace.start(task: "keep task")
+        for n in 0..<30 { trace.write(kind: "test", ["payload": .str(String(repeating: "x", count: 100_000)), "index": .int(n)]) }
+        let file = try XCTUnwrap(trace.dir).appendingPathComponent("steps.jsonl")
+        let data = try Data(contentsOf: file), text = String(decoding: data, as: UTF8.self)
+        XCTAssertLessThanOrEqual(data.count, 2 * 1024 * 1024)
+        XCTAssertTrue(text.contains("keep task")); XCTAssertTrue(text.contains("29"))
+        for line in text.split(separator: "\n") { XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(line.utf8))) }
+    }
+    func testSystemDiagnosticReportsAlsoHaveABudgetAndAreCleared() throws {
+        storage.policy.reportCount = 2; storage.policy.reportBytes = 25
+        for n in 1...4 { _ = try put("Documents/diagnostics/100-\(n).json", bytes: 10) }
+        try storage.maintainReports()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: sandbox.appendingPathComponent("Documents/diagnostics").path).sorted(), ["100-3.json", "100-4.json"])
+        try storage.clear()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: sandbox.appendingPathComponent("Documents/diagnostics").path).count, 0)
+    }
+    func testAnExplicitCustomTraceRootDoesNotTouchItsSibling() throws {
+        let sibling = try run("20261020-000000")
+        let custom = sandbox.appendingPathComponent("Documents/custom-traces")
+        let isolated = DiagnosticFiles(documents: storage.documents, temporary: storage.temporary, traceRoot: custom)
+        try isolated.clear()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sibling.path))
     }
     func testExpiredExportCacheIsClearedAutomatically() throws {
         let now = Date(), file = try put("tmp/esp32-agent-logs.zip", date: Date().addingTimeInterval(-2 * 86400))

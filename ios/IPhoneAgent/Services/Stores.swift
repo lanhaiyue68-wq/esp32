@@ -153,7 +153,7 @@ struct Run: Identifiable, Equatable {
         f.dateFormat = "yyyyMMdd-HHmmss"
         f.locale = Locale(identifier: "en_US_POSIX")
         return Run(id: folder.lastPathComponent, folder: folder, task: task,
-                   date: f.date(from: folder.lastPathComponent.replacingOccurrences(of: "imported-", with: "")) ?? Date(),
+                   date: f.date(from: String(folder.lastPathComponent.replacingOccurrences(of: "imported-", with: "").prefix(15))) ?? Date(),
                    steps: steps)
     }
 

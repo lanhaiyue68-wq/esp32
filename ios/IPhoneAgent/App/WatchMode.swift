@@ -697,6 +697,7 @@ extension AppModel {
     private var watchIdleLine: String { String(localized: "Watching WeChat · handled \(watchHandled) times") }
 
     private func watchLoop() async {
+        var gate = WatchCheckGate()
         var baseline: Data?, changedAt: Double?, lastCheck = -Double.infinity, quietUntil = 0.0, failures = 0
         while watching && !Task.isCancelled {
             if agent.running || startingAgent || help != nil {
@@ -704,7 +705,7 @@ extension AppModel {
             } else if !MockMode.on && !(board.connected && feed.mirroring) {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
                 baseline = nil
-            } else if !MockMode.on && UIApplication.shared.applicationState == .active {
+            } else if !MockMode.on && gate.shouldPause(foreground: UIApplication.shared.applicationState == .active) {
                 watchStatus = String(localized: "Paused while Lan Agent is in front…")
                 (baseline, changedAt) = (nil, nil)
             } else if let chat = watchListReturn.pending {
@@ -768,6 +769,7 @@ extension AppModel {
                     lastCheck = t
                     watchStatus = moved ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
                     DebugLog.write("watch: check (\(moved ? "screen changed" : "interval"))")
+                    gate.beginCheck()
                     let result = await watchCheck()
                     guard watching else { break }
                     if !MockMode.on && UIApplication.shared.applicationState == .active {
@@ -808,7 +810,7 @@ extension AppModel {
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
-        if rules.single {
+        if rules.single && UIApplication.shared.applicationState != .active {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
                 WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed

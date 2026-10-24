@@ -91,23 +91,44 @@ struct LogsView: View {
     @ObservedObject var app: AppModel
     @State private var shareURL: URL?
     @State private var exporting = false
+    @State private var clearing = false
+    @State private var confirmClear = false
+    @State private var diskBytes = 0
+    @State private var diskRuns = 0
+    @State private var cleanupMessage: String?
+    private var idle: Bool { !app.agent.running && !app.startingAgent && !app.watching && !app.recorder.recording }
+    private var storage: DiagnosticFiles { app.traces.diagnostics }
+    private func refreshUsage() {
+        let usage = storage.usage(); diskBytes = usage.bytes; diskRuns = usage.runs
+    }
 
     var body: some View {
         List {
             Section {
                 Button { exportAll() } label: {
                     HStack {
-                        Label("Export all logs", systemImage: "archivebox")
+                        Label("Export recent logs", systemImage: "archivebox")
                         Spacer()
                         if exporting { ProgressView() }
                     }
                 }
-                .disabled(exporting)
+                .disabled(exporting || clearing || !idle)
                 if FileManager.default.fileExists(atPath: DebugLog.url.path) {
                     ShareLink(item: DebugLog.url) { Label("Share debug log", systemImage: "doc.text.magnifyingglass") }
                 }
             } footer: {
-                Text("A zip of debug.log, crash reports from iOS and every run (steps, model replies, screenshots, video). Your API key is never in it.")
+                Text("Exports the latest 5 runs and text logs, up to 20 MB before compression. Video is omitted. Stop watching or running a task before exporting.")
+            }
+            Section {
+                LabeledContent("Diagnostic storage", value: ByteCountFormatter.string(fromByteCount: Int64(diskBytes), countStyle: .file))
+                LabeledContent("Saved runs", value: String(diskRuns))
+                Button("Clear logs and diagnostic cache", role: .destructive) { confirmClear = true }
+                    .disabled(!idle || exporting || clearing)
+                if let cleanupMessage { Text(verbatim: cleanupMessage).font(.footnote).foregroundStyle(.secondary) }
+            } header: {
+                Text("Automatic cleanup")
+            } footer: {
+                Text("Keeps up to 20 runs for 7 days within 80 MB. Each run keeps at most 8 MB / 120 recent video frames and 12 MB of step images. Old export files expire after 1 day. Clearing keeps model settings, board pairing, calibration, knowledge and learned cases. Stop watching or running a task to clear.")
             }
             if app.log.isEmpty {
                 Text("Nothing logged yet.").foregroundStyle(.secondary)
@@ -121,7 +142,13 @@ struct LogsView: View {
         }
         .listStyle(.plain)
         .sheet(item: $shareURL) { ShareSheet(items: [$0]) }
-        .navigationTitle("Logs")
+        .navigationTitle("Logs and Cache")
+        .onAppear { refreshUsage() }
+        .confirmationDialog("Clear logs and diagnostic cache?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear", role: .destructive) { clearDiagnostics() }
+        } message: {
+            Text("Deletes saved diagnostic runs, screenshots, video frames and old export files. Your setup and knowledge are kept.")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -130,14 +157,35 @@ struct LogsView: View {
         }
     }
 
-    /// Zip the whole Documents folder (debug.log, debug.1.log, traces/) off the main thread.
+    private func clearDiagnostics() {
+        guard idle, !exporting, !clearing else { return }
+        clearing = true; shareURL = nil
+        defer { clearing = false; refreshUsage() }
+        do {
+            try storage.clear()
+            try DebugLog.clear()
+            app.log.removeAll()
+            app.runs.reload()
+            cleanupMessage = String(localized: "Logs and diagnostic cache cleared.")
+        } catch { cleanupMessage = error.localizedDescription }
+    }
+
+    /// Snapshot selected diagnostics; arbitrary Documents files and lifetime video are never copied.
     private func exportAll() {
-        exporting = true
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        DebugLog.write("export: all logs")
+        guard idle, !exporting, !clearing else { return }
+        exporting = true; shareURL = nil
+        let files = storage
+        _ = DebugLog.tail(0) // flush before taking the snapshot
         Task {
-            let result = await Task.detached { Result { try TraceStore.zip(docs, name: "esp32-agent-logs.zip") } }.value
-            exporting = false
+            let result = await Task.detached {
+                Result {
+                    _ = try files.maintain()
+                    let stage = try files.exportStage()
+                    defer { try? FileManager.default.removeItem(at: stage) }
+                    return try TraceStore.zip(stage, name: "esp32-agent-logs.zip")
+                }
+            }.value
+            exporting = false; refreshUsage()
             switch result {
             case .success(let url): shareURL = url
             case .failure(let e): app.say("export: \(e.localizedDescription)")

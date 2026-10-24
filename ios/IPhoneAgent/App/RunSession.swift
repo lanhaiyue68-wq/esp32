@@ -43,19 +43,30 @@ extension AppModel {
     }
 
     func startAgent(_ task: String) async {
-        if MockMode.on { await depart(); return mockRun(task) }
+        let ticket = runStartGate.begin()
+        func checkStart() throws { try runStartGate.check(ticket) }
+        if MockMode.on {
+            await depart()
+            do { try checkStart(); mockRun(task) } catch {}
+            return
+        }
         guard settings.isConfigured else {
             say(String(localized: "Set up the model in Settings first."))
             return
         }
+        guard !Task.isCancelled else { return }
         guard await calibrator.ensureCalibrated() else {
             say(String(localized: "The pointer isn't calibrated yet."))
             return
         }
         do {
+            try checkStart()
             agent.actor = try await settings.client("actor")
+            try checkStart()
             agent.planner = try await settings.client("planner")
-        } catch {
+            try checkStart()
+        } catch is CancellationError { return }
+        catch {
             say("LLM: \(error.localizedDescription)")
             return
         }
@@ -75,11 +86,14 @@ extension AppModel {
         FrameMode.fallback = nil  // each run starts in the chosen mode
         let snapMode = FrameMode.current == .snap
         do {
+            try checkStart()
             mark("video preflight")
             say(String(localized: "Checking the mirrored screen…"))  // can take a few seconds; capped in prepareForRun
             let source = try await feed.prepareForRun(snapMode: snapMode)
+            try checkStart()
             mark("foreground frame verified: " + source)
             await depart()  // take off only once the screen is known to be readable
+            try checkStart()
             mark("configuring task frame mode")
             if snapMode {
                 if feed.streamOn { try await feed.stream(false) }
@@ -87,6 +101,7 @@ extension AppModel {
             } else {
                 mark("stream on") // already enabled by the foreground preflight
             }
+            try checkStart()
             live.start(task: task, runID: runID, limit: agent.maxSteps)
             liveRequested = true
             mark("Live Activity requested")
@@ -99,7 +114,9 @@ extension AppModel {
             let alreadyAway = UIApplication.shared.applicationState == .background
             mark("leaving app")
             var away = await leaveApp()
+            try checkStart()
             if !away { away = await askUserToLeave() }
+            try checkStart()
             guard away else {  // never let the agent start on its own app
                 throw DeviceError(message: String(localized: "Lan Agent is still on screen"))
             }
@@ -109,11 +126,13 @@ extension AppModel {
                 await feed.settled()
                 mark(changed ? "screen changed and settled" : "no screen change seen in 3 s; settled")
             }
+            try checkStart()
             mark("verifying first task frame")
             let firstFrame = try await feed.currentFrame()
             // With no departure gesture, a currently usable frame is sufficient. A quiet screen can be
             // validated by the board heartbeat; foreground departures still need a frame after leaving.
             try await feed.requireFrame(after: alreadyAway ? nil : left)
+            try checkStart()
             if alreadyAway { mark("already in background; current frame verified") }
             mark("first frame: " + firstFrame)
             try agent.start(task, traceStarted: true)
@@ -121,9 +140,10 @@ extension AppModel {
             say("started: \(task)")
             began(task, early: true)
         } catch {
-            say("cannot start: \(error.localizedDescription)")
-            traces.write(feed.frame, kind: "step", ["action": .str("error"),
-                                                    "reason": .str("cannot start: \(error.localizedDescription)"),
+            let cancelled = error is CancellationError
+            say(cancelled ? "start: cancelled" : "cannot start: \(error.localizedDescription)")
+            traces.write(feed.frame, kind: "step", ["action": .str(cancelled ? "stopped" : "error"),
+                                                    "reason": .str(cancelled ? "start cancelled" : "cannot start: \(error.localizedDescription)"),
                                                     "startup_stage": .str(startupStage), "video": .obj(feed.diagnostics)])
             var failedMetrics = metrics.snapshot()
             failedMetrics["startup_stage"] = startupStage
@@ -131,12 +151,13 @@ extension AppModel {
             videoSink = nil
             saveVideoFrame(feed.frame)
             videoDir = nil
-            if liveRequested { live.end((.failure, String(localized: "Could not start"))) }
+            traces.finish()
+            if liveRequested { live.end((cancelled ? .idle : .failure, cancelled ? String(localized: "Stopped") : String(localized: "Could not start"))) }
             if !watching { keepAwake.stop() }  // WeChat watch keeps it on between checks
             endBackgroundTask()
             runs.reload()
-            runMood = .failure
-            if !watching {  // watch counts failed checks itself and tells the user once it gives up
+            runMood = cancelled ? nil : .failure
+            if !watching && !cancelled {  // watch counts failed checks itself and tells the user once it gives up
                 notifier.post(.failed, title: String(localized: "Could not start"),
                               body: error.localizedDescription, run: runID)
                 openReview(run: runID)
@@ -146,6 +167,7 @@ extension AppModel {
 
     /// Emergency stop: cancel the agent and release the mouse button.
     func stopAgent() async {
+        runStartGate.cancel()
         stopWatch(String(localized: "stopped by you"))  // a stop from anywhere also ends WeChat watch
         answerHelp(.stop)
         mockJob?.cancel()
@@ -204,6 +226,7 @@ extension AppModel {
         videoSink = nil
         saveVideoFrame(feed.frame)  // the last screen too, however the run ended
         videoDir = nil
+        traces.finish()
         help = nil
         takingOver = false
         recovering = nil
@@ -384,7 +407,7 @@ extension AppModel {
 
     /// Each frame is written at once, so a run that stops or fails early still has its video.
     func saveVideoFrame(_ jpeg: Data?) {
-        guard let jpeg, let dir = videoDir else { return }
-        try? jpeg.write(to: dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000)).jpg"))
+        guard let jpeg, videoDir != nil else { return }
+        traces.writeVideo(jpeg)
     }
 }

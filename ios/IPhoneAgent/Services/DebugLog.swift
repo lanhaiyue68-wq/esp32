@@ -33,6 +33,15 @@ enum DebugLog {
         }
     }
 
+    /// Flush queued writes before deleting so old lines cannot reappear after a clear.
+    static func clear() throws {
+        try queue.sync {
+            for file in [url, old] where FileManager.default.fileExists(atPath: file.path) {
+                try FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
     static func write(_ text: String) {
         let time = Date()
         lock.lock(); let hidden = secrets; lock.unlock()

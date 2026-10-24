@@ -43,7 +43,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Runs")
                 } footer: {
-                    Text("Every run keeps a low-frame-rate video of the mirrored screen, next to the step screenshots, for the review.")
+                    Text("Run diagnostics are cleaned automatically. Manage saved logs, recent video frames and export files in Logs and Cache.")
                 }
                 Section {
                     NavigationLink { DiagnosticsView(app: app, metrics: app.metrics, board: board, feed: app.feed) } label: {
@@ -60,6 +60,9 @@ struct SettingsView: View {
                 Section {
                     NavigationLink { PrivacySettingsView(app: app, runs: app.runs) } label: {
                         SettingsLabel(title: "Privacy", symbol: "hand.raised.fill", color: .blue)
+                    }
+                    NavigationLink { LogsView(app: app) } label: {
+                        SettingsLabel(title: "Logs and Cache", symbol: "externaldrive", color: .orange)
                     }
                     NavigationLink { AboutView(app: app) } label: {
                         SettingsLabel(title: "About", symbol: "info", color: .gray)

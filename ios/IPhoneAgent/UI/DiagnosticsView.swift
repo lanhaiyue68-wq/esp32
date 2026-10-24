@@ -7,7 +7,6 @@ struct DiagnosticsView: View {
     @ObservedObject var board: BoardLink
     @ObservedObject var feed: VideoFeed
     @State private var busy = false
-    @State private var shareURL: URL?
 
     var body: some View {
         List {
@@ -16,7 +15,7 @@ struct DiagnosticsView: View {
                 test("Snap latency", "camera.viewfinder") { await app.snapTest() }
                 test("LLM ping", "bolt") { await app.pingLLM() }
                 test("Background test (10 min)", "moon.zzz") { await app.backgroundTest() }
-                Button { export() } label: { Label("Export traces", systemImage: "square.and.arrow.up") }
+                NavigationLink { LogsView(app: app) } label: { Label("Logs and Cache", systemImage: "externaldrive") }
             }
             SwiftUI.Section("BLE") {
                 row("App-side video kbps", f(metrics.bleKbps))
@@ -64,7 +63,6 @@ struct DiagnosticsView: View {
         }
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $shareURL) { ShareSheet(items: [$0]) }
     }
 
     private func test(_ title: LocalizedStringKey, _ symbol: String, _ run: @escaping () async -> Void) -> some View {
@@ -80,10 +78,6 @@ struct DiagnosticsView: View {
             }
         }
         .disabled(busy)
-    }
-
-    private func export() {
-        do { shareURL = try TraceStore.zip(app.traces.root) } catch { app.say("export: \(error.localizedDescription)") }
     }
 
     private func row(_ k: LocalizedStringKey, _ v: String) -> some View { ValueRow(title: k, value: v) }

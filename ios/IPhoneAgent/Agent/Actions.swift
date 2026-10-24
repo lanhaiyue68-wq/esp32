@@ -55,9 +55,12 @@ enum Actions {
 
     /// Parse a THINK / DO… reply (an optional ZH line is kept); the thought goes on the first action.
     static func parseActions(_ text: String) throws -> [JObject] {
-        let thought = firstGroup(#"^\s*THINK\s*[:：]\s*(.*?)\s*$"#, in: text, multiline: true)
-        let zh = firstGroup(#"^\s*ZH\s*[:：]\s*(.*?)\s*$"#, in: text, multiline: true)
-        var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: text).map(parseCommand).prefix(6).map { $0 }
+        // Some models join THINK and DO on one line (log24). Accept only that explicit labelled form.
+        let normalized = text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
+                                                   with: "$1\n$2", options: .regularExpression)
+        let thought = firstGroup(#"^\s*THINK\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
+        let zh = firstGroup(#"^\s*ZH\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
+        var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: normalized).map(parseCommand).prefix(6).map { $0 }
         guard !acts.isEmpty else { throw ParseError(message: "no DO line in reply: \(text.prefix(200))") }
         acts[0] = JObject([("thought", .str(thought ?? "")), ("thought_zh", .str(zh ?? ""))]).merging(acts[0])
         return acts

@@ -28,5 +28,8 @@ final class CrashReports: NSObject, MXMetricManagerSubscriber {
             try? p.jsonRepresentation().write(to: Self.dir.appendingPathComponent(name))
             DebugLog.write("diagnostics: \(kinds.isEmpty ? "report" : kinds.joined(separator: ", ")) from iOS, saved \(name)")
         }
+        let documents = Self.dir.deletingLastPathComponent()
+        do { try DiagnosticFiles(documents: documents, temporary: FileManager.default.temporaryDirectory).maintainReports() }
+        catch { DebugLog.write("diagnostic report cleanup: \(error.localizedDescription)") }
     }
 }

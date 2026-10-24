@@ -27,6 +27,7 @@ enum RunShare {
         let stage = fm.temporaryDirectory.appendingPathComponent("iPhone-Agent-runs")
         try? fm.removeItem(at: stage)
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: stage) }
         for run in runs {
             let out = stage.appendingPathComponent(run.lastPathComponent)
             try fm.createDirectory(at: out.appendingPathComponent("video"), withIntermediateDirectories: true)

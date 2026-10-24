@@ -12,6 +12,7 @@ extension AppModel {
     /// The model is never asked to do this.
     func leaveApp() async -> Bool {
         for method in ["home swipe", "home swipe again"] {  // one flick sometimes does not take (logs(11))
+            if Task.isCancelled || runStartGate.cancelled || !startingAgent && !agent.running { return false }
             if inBackground { return true }
             do {
                 switch method {
@@ -66,7 +67,7 @@ extension AppModel {
     private func waitForBackground(_ seconds: Double) async -> Bool {
         let deadline = now() + seconds
         while !inBackground {
-            if now() > deadline { return false }
+            if Task.isCancelled || runStartGate.cancelled || (!startingAgent && !agent.running) || now() > deadline { return false }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         return true
