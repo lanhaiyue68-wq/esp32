@@ -7216,6 +7216,66 @@
           }
         }
       }
+    },
+    "Allow phone tasks from WeChat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许通过微信执行手机任务"
+          }
+        }
+      }
+    },
+    "Phone Tasks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机任务"
+          }
+        }
+      }
+    },
+    "List both a chat and its permitted sender before phone tasks can run." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先填写会话名和允许下指令的发言人，手机任务才会执行。"
+          }
+        }
+      }
+    },
+    "An exactly listed sender in a listed chat can ask this iPhone to use other apps, then receive the result here. Add your private chat name to both lists to give tasks privately. Groups still need an @mention or passphrase. ChatTool reply mode does not run phone tasks." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名单内会话中，名字完全匹配白名单的发言人可以让这台 iPhone 操作其他 App，结果会回到原会话。私聊下任务时，把私聊名同时加入会话范围和发言人白名单。群聊仍需 @ 本账号或口令。ChatTool 负责回复时不执行手机任务。"
+          }
+        }
+      }
+    },
+    "Reporting the phone task result…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在回报手机任务结果…"
+          }
+        }
+      }
+    },
+    "The task result could not be sent. Start watching to retry its report." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务结果暂时发不出去。重新开始守候可续发结果，不会重做任务。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

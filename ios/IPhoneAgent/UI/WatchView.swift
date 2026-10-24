@@ -8,6 +8,7 @@ struct WatchView: View {
     @AppStorage(WatchSettings.targetsKey) private var targets = ""
     @AppStorage(WatchSettings.interjectKey) private var interject = false
     @AppStorage(WatchSettings.sendersKey) private var senders = ""
+    @AppStorage(WatchSettings.phoneTasksKey) private var phoneTasks = false
     @AppStorage(WatchSettings.passphrasesKey) private var passphrases = WatchSettings.defaultPassphrase
     @AppStorage(WatchSettings.myNamesKey) private var myNames = ""
     @AppStorage(WatchSettings.instructionKey) private var instruction = WatchSettings.defaultInstruction
@@ -47,6 +48,18 @@ struct WatchView: View {
                                     : "Every private chat is read. Groups only when listed here; Official Accounts and service notices never.")
                 }
                 triggers
+                Section {
+                    Toggle("Allow phone tasks from WeChat", isOn: $phoneTasks)
+                        .disabled(serverOn && serverReplies)
+                    if phoneTasks && (WatchSettings.lines(senders).isEmpty || WatchSettings.lines(targets).isEmpty) {
+                        Text("List both a chat and its permitted sender before phone tasks can run.")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("Phone Tasks")
+                } footer: {
+                    Text("An exactly listed sender in a listed chat can ask this iPhone to use other apps, then receive the result here. Add your private chat name to both lists to give tasks privately. Groups still need an @mention or passphrase. ChatTool reply mode does not run phone tasks.")
+                }
                 Section("How to Reply") {
                     TextField("How replies should sound", text: $instruction, axis: .vertical)
                         .lineLimit(2...8)

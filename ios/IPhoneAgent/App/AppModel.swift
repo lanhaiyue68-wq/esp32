@@ -108,6 +108,8 @@ import UIKit
     var watchAnswered: [String: Double] = [:]  // a message answered, by WatchReport.answerKey: when
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
+    var watchTaskReply = WatchTaskReply.saved() { didSet { WatchTaskReply.save(watchTaskReply) } }
+    var watchTaskReplyFailures = 0
     var lastWidgetReload = 0.0
 
     init() {
