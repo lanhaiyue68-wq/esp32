@@ -94,6 +94,14 @@
 - 证据../out/build52-local-navigation；下一步同一单会话/同网络模型对比51与52“列表到读消息”耗时、对象准确性、暂停恢复和无重复发送。
 
 
+## 2026-10-25 — build57：沒鍵盤不准輸入、校準不學邊緣探測點、輸入框精準點（Claude Code）
+
+日誌27（build56）：主人任務「你现在给测试群发个消息我看一下」點輸入框 (0.42,0.925) 實際落在 y≈0.885，鍵盤沒彈出，模型連打 7 次 nihaoya；quickSend 同因貼上不顯示，退回 agent（多 20–30 s）；第二輪本機打開點後標題未出現即判 unverified。校準探測點 2 卡在 x=0.998 卻進了 seen，x 修正崩掉（重放：0.5 落 0.532；只用可用點 0.498），所以 probe check 一直 ±4%。最後螢幕鏡像中斷（snap: no video）。
+源碼 2027c77：AgentLoop.keyboardGuard（watch runs 開啟；無鍵盤拒絕 type 並 aimNext，連續 2 次放行）；Pointer.applyProbe 只學 ProbeFit.usable 的軸；TouchCalibration 加 (0.5,0.9) 探測點；quickSend 點輸入框 aim；WatchChatOpen 點後標題沒出現再看一次。
+驗證：run 40144177481 設備 Release + 294 XCTest 全過（新增 TapAccuracyTests 2 項）。未真機驗證。
+交付：E:/桌面/Lan-Agent-build57-unsigned.ipa，5,069,511 bytes，SHA256 ab7a5a8fc75be8cda168edd24c52cdf9de178f0b02217f2cb2b53204b9984968；56 回收，51 保留。
+下一步：使用者裝 57 後重新校準（應 ±1–2%），再跑同一任務回傳日誌。
+
 ## 2026-10-25 — build56：多會話本機打開、全會話本機發送、每階段模型次數（Claude Code）
 
 依日誌26耗時盤點：多會話打開 6–35 s、發送 15–76 s 都是 agent run（兩條本機快路只限單一會話）。
