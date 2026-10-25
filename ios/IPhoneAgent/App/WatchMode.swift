@@ -1360,23 +1360,34 @@ extension AppModel {
     /// back from another WeChat chat; or WeChat again through Lan Agent. Every step is checked on a fresh frame and
     /// anything unclear stops here (the agent's run takes over as before).
     private func walkToChat(_ chat: String, look: () async -> Data?) async -> Bool {
-        var hopped = false
-        for _ in 0..<5 {
+        var hopped = false, blindBacks = 0
+        for _ in 0..<7 {
             // Lan Agent in front: a tap would land on this app
             guard watching, !Task.isCancelled, UIApplication.shared.applicationState != .active,
                   let frame = await look() else { return false }
             if WatchReport.navigationChat(in: frame, targets: [chat]) == chat { return true }
             if let row = WatchChatOpen.row(of: chat, in: frame) {
+                DebugLog.write("watch: walk: \(chat)'s row on the list; tapping it")
                 try? await pointer.tap(row.x, row.y)
                 continue
             }
-            if WatchListReturn.view(in: frame, chat: "") == .list { return false }  // on the list, the row not in view
+            if WatchListReturn.view(in: frame, chat: "") == .list {  // on the list, the row not in view
+                DebugLog.write("watch: walk: on the list but \(chat)'s row is not in view")
+                return false
+            }
             let known = WatchReport.navigationChat(in: frame, targets: WatchSettings.rules.targets)
-            if known != nil {  // another WeChat chat we know: its back chevron
+            // Another WeChat chat we know, or (twice) a screen we cannot name: the back chevron at the top left. Build 68:
+            // the @ task ended in 虾笔刀陪跑学员元群, not on the list, so the walk hopped through Lan Agent back to that
+            // same group and gave up (7 s), and the agent took 48 s more.
+            if known != nil || blindBacks < 2 {
+                if known == nil { blindBacks += 1 }
+                DebugLog.write("watch: walk: back from \(known ?? "an unlisted screen")")
                 try? await pointer.tap(0.06, 0.088)
+                try? await Task.sleep(nanoseconds: 400_000_000)  // the list slides in
                 continue
             }
             guard !hopped else { return false }
+            DebugLog.write("watch: walk: not WeChat by its look; back through Lan Agent")
             hopped = true
             let inWeChat = await hopToWeChat(seesWeChat: {
                 guard let f = await look() else { return false }
