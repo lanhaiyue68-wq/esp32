@@ -19,6 +19,11 @@ enum DebugLog {
         return f
     }()
 
+    /// Settings › Diagnostics: debug lines go through the board to its cable (the computer), and the computer can
+    /// start or stop a run (firmware v34 takes those only from a cable, never over Bluetooth). Off by default.
+    static let computerKey = "debugToComputerV1"
+    static var toComputer: Bool { UserDefaults.standard.bool(forKey: computerKey) }
+
     /// Strings never to write (e.g. the API key); replaced by "‹redacted›".
     static func redact(_ values: [String]) {
         let keep = values.filter { $0.count >= 6 }

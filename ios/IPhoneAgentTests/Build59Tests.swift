@@ -41,6 +41,15 @@ import XCTest
         XCTAssertEqual(CandidatePicker.shows("他正在恢复", lines: ["它正在回复"]), 0, "a homophone is not the text")
     }
 
+    func testComputerLogsAreOffUnlessSwitchedOn() {
+        let d = UserDefaults.standard, old = d.object(forKey: DebugLog.computerKey)
+        defer { if let old { d.set(old, forKey: DebugLog.computerKey) } else { d.removeObject(forKey: DebugLog.computerKey) } }
+        d.removeObject(forKey: DebugLog.computerKey)
+        XCTAssertFalse(DebugLog.toComputer)
+        d.set(true, forKey: DebugLog.computerKey)
+        XCTAssertTrue(DebugLog.toComputer)
+    }
+
     func testNineKeyKeyboardIsRecognized() {
         func row(_ labels: [String], y: Double) -> [CandidatePicker.Piece] {
             labels.enumerated().map { .init(text: $0.element, box: CGRect(x: 0.1 + 0.25 * Double($0.offset), y: y, width: 0.2, height: 0.04)) }

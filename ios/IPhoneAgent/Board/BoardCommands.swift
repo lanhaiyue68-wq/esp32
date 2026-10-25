@@ -95,9 +95,7 @@ extension HIDDevice {
     func handleReply(_ line: String) {
         let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("app ") {
-#if DEBUG && ENABLE_APP_RELAY
-            onAppCommand?(String(text.dropFirst(4)))
-#endif
+            onAppCommand?(String(text.dropFirst(4)))  // AppModel acts on it only with Send Logs to Computer on
             return
         }
         if text.hasPrefix("log ") { return }  // our own log lines, relayed to the harness

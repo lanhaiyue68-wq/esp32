@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject var settings: Settings
     @ObservedObject var board: BoardLink
     @AppStorage(MockMode.key) private var demoData = false
+    @AppStorage(DebugLog.computerKey) private var toComputer = false
 
     var body: some View {
         NavigationStack {
@@ -50,12 +51,13 @@ struct SettingsView: View {
                         SettingsLabel(title: "Diagnostics", symbol: "waveform.path.ecg", color: .green)
                     }
                     Toggle(isOn: $demoData) { SettingsLabel(title: "Demo data", symbol: "theatermasks", color: .purple) }
+                    Toggle(isOn: $toComputer) { SettingsLabel(title: "Send logs to the computer", symbol: "cable.connector", color: .orange) }
                     Button { settings.onboarded = false; app.setupPage = .welcome } label: {
                         SettingsLabel(title: "Run setup again", symbol: "arrow.counterclockwise", color: .gray)
                     }
                     .tint(.primary)
                 } footer: {
-                    Text("Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app.")
+                    Text("Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app. Send logs to the computer passes this app's debug lines through the board to the computer on its cable, which may then start or stop a run; leave it off unless you are testing.")
                 }
                 Section {
                     NavigationLink { PrivacySettingsView(app: app, runs: app.runs) } label: {

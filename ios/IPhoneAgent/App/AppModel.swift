@@ -137,14 +137,13 @@ import UIKit
         pointer.log = say
         pointer.screenAspect = { DeviceScreen.aspect }
         pointer.locate = { [weak self] jpeg in await self?.locatePointer(jpeg) }
-#if DEBUG && ENABLE_APP_RELAY
         DebugLog.relay = { [weak self] line in
+            guard DebugLog.toComputer else { return }
             // DebugLog.write runs on any thread (MetricKit delivers crash reports on a background queue).
             let relay = { MainActor.assumeIsolated { if !MockMode.on { self?.board.commands.relayLog(line) } } }
             Thread.isMainThread ? relay() : DispatchQueue.main.async(execute: relay)
         }
-        board.commands.onAppCommand = { [weak self] line in self?.handleAppCommand(line) }
-#endif
+        board.commands.onAppCommand = { [weak self] line in if DebugLog.toComputer { self?.handleAppCommand(line) } }
         DebugLog.write("app launched \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "")"
                        + " (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? ""))")
         settingsSink = settings.$configurationRevision.dropFirst().sink { [weak self] _ in
