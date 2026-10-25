@@ -116,6 +116,10 @@ extension Pointer: Gestures {}
     var keyboardGuard = false
     private var noKeyboard = 0
     private var aimNext = false  // the next tap finds the pointer on screen first
+    /// WeChat watch: text this run typed and then sent (Return, or a tap on 发送 at the bottom right). Typing it again
+    /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
+    private var sentTexts: Set<String> = []
+    private var unsent: String?  // typed, not sent yet
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
     private var deadTaps: [JObject] = []
@@ -329,6 +333,23 @@ extension Pointer: Gestures {}
     static let noInkReason = "The stroke left no line on the canvas: no drawing tool is active, so the drag only moved the "
         + "canvas. Look at the controls on screen and work out which one is the drawing tool (a button you already tried that "
         + "changed nothing is not it), select it, then draw again. It is not done until lines show."
+    static let sentAgainReason = "Not typed: this run already typed this text and sent it. Look for its bubble: if it "
+        + "shows, the task is done, finish with done. If it is still in the input box, tap 发送 instead; never type it again."
+
+    /// The text as typed, for telling a repeat: quotes and spaces the model adds around it do not count.
+    static func typedKey(_ text: String) -> String {
+        text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
+    }
+
+    /// Return, or a tap where 发送 sits (next to the box, or the keyboard's bottom-right key).
+    static func sends(_ act: JObject) -> Bool {
+        switch act["action"]?.str {
+        case "key": return ["enter", "return"].contains(act["combo"]?.str?.lowercased() ?? "")
+        case "tap": return (act["x"]?.double ?? 0) >= 800 && (act["y"]?.double ?? 0) >= 500
+        default: return false
+        }
+    }
+
     static let noKeyboardReason = "Not typed: no keyboard is on screen, so the input box is not focused (the last tap "
         + "missed it). Tap the input box again (this tap is aimed) and type only once the keyboard shows."
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
@@ -417,7 +438,7 @@ extension Pointer: Gestures {}
     func run() async {
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
-        (noKeyboard, aimNext) = (0, false)
+        (noKeyboard, aimNext, sentTexts, unsent) = (0, false, [], nil)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -622,7 +643,12 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
                     return false
                 }
-                if name == "type" { noKeyboard = 0 }
+                if name == "type", keyboardGuard, sentTexts.contains(Self.typedKey(act["text"]?.str ?? "")) {
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
+                    return false
+                }
+                if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? "") }
+                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false

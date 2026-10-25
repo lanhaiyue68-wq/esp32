@@ -42,6 +42,26 @@ import UIKit
         XCTAssertEqual(phone.typed, 1)
     }
 
+    /// logs28: the phone task sent "你好" to 测试群 with 发送, typed it again, sent it again, and was typing a third time.
+    func testTextAlreadySentInThisRunIsNotTypedAgain() async throws {
+        let screen = FakeScreen(); screen.frame = frame(keyboard: true)
+        let phone = AimGestures()
+        let replies = ["THINK: Type.\nDO: type hello", "THINK: Send.\nDO: tap 900 845", "THINK: Type it.\nDO: type \"hello\"",
+                       "THINK: It shows.\nDO: done sent"]
+        let actor = FakeModel { n in replies[min(n, replies.count) - 1] }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: FakeModel { _ in "1. Send it" }, trace: nil)
+        agent.directStart = true
+        agent.keyboardGuard = true
+        let ended = expectation(description: "agent completed")
+        agent.onFinish = { ended.fulfill() }
+        try agent.start("给测试群发你好")
+        await fulfillment(of: [ended], timeout: 15)
+        agent.stop()
+        XCTAssertEqual(phone.typed, 1)
+        XCTAssertTrue(agent.steps.contains { $0["reason"] == .str(AgentLoop.sentAgainReason) })
+        XCTAssertEqual(AgentLoop.typedKey(" “你好” "), "你好")
+    }
+
     func testAProbeStoppedAtTheEdgeIsNotLearned() {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let pointer = Pointer(device: FakeDevice(), calibrationFile: file)

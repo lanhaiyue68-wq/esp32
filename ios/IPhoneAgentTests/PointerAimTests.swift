@@ -75,14 +75,27 @@ import XCTest
         XCTAssertFalse(p.stale)
     }
 
-    /// Being stopped by the border hides how far the pointer overshot: stale even when the reading looks close.
-    func testPinnedAtBorderNearTargetStillMarksStale() async throws {
+    /// A target near the border: the reading close to it is corrected like any miss and still lands.
+    func testATargetNearTheBorderIsStillReached() async throws {
         let phone = SimPhone(w: 445, h: 620)
         let p = pointer(phone)
         try await p.tap(0.30, 0.95, aim: true)
         let hit = try XCTUnwrap(phone.clicks.last)
         XCTAssertEqual(hit.y, 0.95, accuracy: Pointer.aimTolerance)
-        XCTAssertTrue(p.stale)
+    }
+
+    /// logs28: aiming at the back arrow (0.06, 0.09) found the pointer at (0.034, 0.069), a small miss near the
+    /// corner. It must not mark a good calibration stale.
+    func testASmallMissNearTheCornerKeepsTheCalibration() async throws {
+        let phone = SimPhone(w: 494, h: 1110)
+        let p = pointer(phone)
+        var first = true
+        p.finder = { _, _ in
+            defer { first = false }
+            return first ? CGPoint(x: 0.034, y: 0.069) : phone.seen()
+        }
+        try await p.tap(0.06, 0.09, aim: true)
+        XCTAssertFalse(p.stale)
     }
 
     /// Stale: every later tap aims (log25's first tap was a plain one and clicked the corner), the app asks to

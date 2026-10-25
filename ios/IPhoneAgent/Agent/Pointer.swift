@@ -219,9 +219,10 @@ import Foundation
         return try await measure(x, y, model: false)
     }
 
-    /// Stopped by the screen border: near the edge and past the target towards it (f, t: found, target on one axis).
+    /// Stopped by the screen border: near the edge and past the target towards it by more than maxMiss (f, t: found,
+    /// target on one axis). Closer than that it is an ordinary miss (logs28: the back arrow at 0.06, found at 0.034).
     private static func stopped(_ f: Double, _ t: Double) -> Bool {
-        (f > 1 - edge && f > t + aimTolerance) || (f < edge && f < t - aimTolerance)
+        (f > 1 - edge && f > t + maxMiss) || (f < edge && f < t - maxMiss)
     }
 
     private func pinned(_ p: CGPoint, _ x: Double, _ y: Double) -> Bool {
