@@ -54,7 +54,7 @@ import XCTest
     /// had none of the WeChat steps; it sent 这不是简简单单 without the @ and reported failure.
     func testPhoneTasksCarryTheWeChatMentionAndOwnerSteps() {
         let task = WatchSettings.ownerTask(chat: "蓝海乐", task: "去群里@群主说这不是简简单单吗", phone: true)
-        for part in ["选择提醒的人", "拼音", "第一个", "一字不差", "只发一次"] { XCTAssertTrue(task.contains(part), part) }
+        for part in ["选择提醒的人", "拼音", "第一个", "一字不差", "只发一次", "不要把这句指令原文当内容"] { XCTAssertTrue(task.contains(part), part) }
     }
 
     func testNineKeyKeyboardIsRecognized() {
