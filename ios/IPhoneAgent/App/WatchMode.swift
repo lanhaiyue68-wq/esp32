@@ -532,11 +532,29 @@ enum WatchReport {
         struct Box: Decodable { var reply: String?; var task: String? }
         let clean = { (s: String?) in (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
         if let data = object(answer) {
-            guard let box = try? JSONDecoder().decode(Box.self, from: data) else { return nil }
-            return (clean(box.reply), clean(box.task))
+            if let box = try? JSONDecoder().decode(Box.self, from: data) { return (clean(box.reply), clean(box.task)) }
+            // Straight quotes inside a value (发"你好") break the JSON: the two fields by their keys (build 65 lost a
+            // passcode task to "decision unavailable").
+            return loose(String(decoding: data, as: UTF8.self)).map { (clean($0.reply), clean($0.task)) }
         }
         let words = answer.trimmingCharacters(in: CharacterSet(charactersIn: " \n\"“”'「」"))
         return words.isEmpty || answer.contains("{") ? nil : (words, "")
+    }
+
+    private static func loose(_ json: String) -> (reply: String, task: String)? {
+        let pattern = #"^\{\s*"reply"\s*:\s*"(.*)"\s*,\s*"task"\s*:\s*"(.*)"\s*\}$"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: .dotMatchesLineSeparators),
+              let m = re.firstMatch(in: json, range: NSRange(json.startIndex..., in: json)),
+              let r = Range(m.range(at: 1), in: json), let t = Range(m.range(at: 2), in: json) else { return nil }
+        return (String(json[r]), String(json[t]))
+    }
+
+    /// The navigator's chat as the listed name: it shortens a remark now and then (蓝海乐 for 主人蓝海乐, build 65, and
+    /// every read after it was a destination mismatch). Only a unique listed name; readChat still checks the title.
+    static func listed(_ chat: String, _ targets: [String]) -> String {
+        if targets.contains(chat) { return chat }
+        let found = targets.filter { $0.contains(chat) || chat.contains($0) }
+        return found.count == 1 ? found[0] : chat
     }
 
     @MainActor static func decide(_ prompt: String, client: ChatModel, onReply: (String) -> Void,
@@ -929,7 +947,8 @@ extension AppModel {
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
             guard let opened = await watchRun(WatchSettings.openTask(rules), plan: WatchSettings.openPlan(rules),
                                              navigation: rules.single ? nil : rules) else { return (false, false) }
-            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened) else { return (true, false) }  // nothing unread
+            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) })
+            else { return (true, false) }  // nothing unread
             guard let look = await readChat(open) else { return (false, false) }
             (chat, screen) = (open, look)
         }
@@ -963,19 +982,24 @@ extension AppModel {
                 // (build 62: an @-the-owner task without the passcode got "好的，我这就去…" and then nothing).
                 let needsPasscode = !owner && rules.phoneTasks && !rules.senders.isEmpty
                     && due.allSatisfy { rules.senders.contains($0.sender) && !$0.group && !$0.verified }
-                guard let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
+                // The passcode is the owner saying "do this": no model decides whether it is a task (build 65: the
+                // decision came back broken and the task was lost), and "收到" goes out ~2 s sooner.
+                let request = owner ? WatchSettings.phoneRequest(due, rules) : nil
+                DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
+                let decided: (reply: String, task: String)
+                if let request {
+                    decided = ("收到，我去处理。", request)
+                } else if let answer = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner,
                                                                            needsPasscode: needsPasscode),
-                                               rollback: { self.watchLast[chat] = before }) else {
+                                               rollback: { self.watchLast[chat] = before }) {
+                    decided = answer
+                } else {
                     DebugLog.write("watch: decision unavailable; new messages preserved for retry")
                     return (false, false)
                 }
                 reply = WatchSettings.typeable(decided.reply)
                 task = owner && !decided.task.isEmpty ? decided.task : nil
-                // The passcode is the owner saying "do this": a phone request runs even when the model left task empty.
-                let request = owner ? WatchSettings.phoneRequest(due, rules) : nil
-                DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), task \(task != nil || request != nil)")
-                if let request, task == nil { task = request }
                 if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
                     phoneMessages = due
                     task = original
@@ -1104,7 +1128,7 @@ extension AppModel {
                 if let read = WatchReport.screen(reply.text) {
                     let screen = WatchSettings.masked(WatchReport.privateSenders(read, chat: chat), pin: pin)
                     guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules) else {
-                        DebugLog.write("watch: read destination mismatch; ignoring this check")
+                        DebugLog.write("watch: read destination mismatch (read “\(screen.title)” for “\(chat)”); ignoring this check")
                         return nil
                     }
                     return screen
@@ -1130,9 +1154,13 @@ extension AppModel {
             return nil
         }
         do {
-            return try await WatchReport.decide(prompt, client: client, onReply: { answer in
+            var said = ""
+            let result = try await WatchReport.decide(prompt, client: client, onReply: { answer in
+                said = answer
                 traces.write(kind: "watch decide", ["prompt": .str(String(prompt.suffix(1500))), "reply": .str(answer)])
             }, rollback: rollback)
+            if result == nil { DebugLog.write("watch: decision not usable: \(WatchSettings.hidePIN(said, WatchSettings.ownerPIN).prefix(160))") }
+            return result
         } catch {
             DebugLog.write("watch: deciding the reply failed: \(error.localizedDescription)")
             return nil

@@ -28,6 +28,16 @@ import XCTest
         XCTAssertEqual(WatchReport.privateSenders(group, chat: "测试群").lines[0].sender, "蓝海乐", "a group keeps its names")
     }
 
+    /// build 65: a broken decision lost the task, then the navigator's 蓝海乐 for 主人蓝海乐 made every read a mismatch.
+    func testStraightQuotesInADecisionAndAShortenedChatNameAreRecovered() {
+        let d = WatchReport.decision(#"{"reply":"收到","task":"去测试群发"你好""}"#)
+        XCTAssertEqual(d?.reply, "收到"); XCTAssertEqual(d?.task, #"去测试群发"你好""#)
+        XCTAssertNil(WatchReport.decision(#"{"reply":"收到","#))
+        XCTAssertEqual(WatchReport.listed("蓝海乐", ["主人蓝海乐", "测试群"]), "主人蓝海乐")
+        XCTAssertEqual(WatchReport.listed("测试群", ["主人蓝海乐", "测试群"]), "测试群")
+        XCTAssertEqual(WatchReport.listed("群", ["测试群", "虾笔刀群"]), "群", "not unique: left for readChat to refuse")
+    }
+
     func testPasscodeInAGroupProvesNothingButIsStillHidden() {
         let read = WatchReport.Screen(title: "测试群(3)", group: true, lines: [line("@蓝 #8642 打开备忘录")])
         let screen = WatchSettings.masked(read, pin: "#8642")
