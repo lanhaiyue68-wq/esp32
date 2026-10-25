@@ -181,3 +181,7 @@ App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）�
 已知问题：日志24中模型把实际主画面误称为白板画布，未确定是点击落点/打开App动作还是模型理解导致。53不宣称复杂任务全部恢复，也未真机测速；下一步需真机逐步对照。用户可继续使用51，53作为可回退测试版。
 
 路由/工具：共享skill-routing-reminder与Agent Router预检；实际使用systematic-debugging、test-driven-development、verification-before-completion、computer-use；官方gh CLI、Edge CUA、Headroom先压缩长证据、Swift tree-sitter语法检查。未安装新技能/插件，未改模型、固件、网络或权限。证据在E:/AgentStorage/esp32/out/build53-stability-log-cleanup（verification.json、workflow.json、red-verification.json、green-ci.log、*.headroom.json、checkpoint.json、diagnosis-and-changes.md、协作者完成截图）。
+
+## 2026-10-25 build65
+- 真機 build64：主人帶口令任務沒跑（私聊發言人被讀成「蓝海乐」，白名單是「主人蓝海乐」）；開會話標題看漏白等 20 s；回列表 4.4 s 0 次模型。
+- build65：私聊發言人＝會話名、口令請求即任務、開會話不對準＋多看 3 次。308 XCTest 全過（run 40188830238）。IPA SHA256 65e22db90b37eed3409715a2d377f22c8c67c2e9ddc455416d513e5968eeea88。
