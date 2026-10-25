@@ -293,8 +293,9 @@ enum WatchSettings {
     /// Step 4: the reply, from the recent chat, the user's rules and the chosen knowledge.
     /// Step 4: what to do about the messages that called for it: a reply to type, or, when the owner asks for
     /// something only the phone can find out or do (who the group owner is, @ someone), a task for the agent.
+    /// needsPasscode: the owner's own private chat, but this message did not carry the passcode (no task can run).
     static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String,
-                              owner: Bool) -> String {
+                              owner: Bool, needsPasscode: Bool = false) -> String {
         let history = recent.suffix(20).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
         let asks = due.map { "\($0.sender)：\($0.text)" }.joined(separator: "\n")
         let phone = owner && phoneRequest(due, r) != nil
@@ -312,7 +313,11 @@ enum WatchSettings {
               就给出 task：一句完整的中文操作说明，写清要找什么、最后要在这个会话里发出什么（要@人就写“@某某”，执行时会从成员列表里选人，\
               这样才是真的@）。能直接从上面的聊天或知识库回答的，只用 reply。
               """
-            : "说这话的不是主人：只能用 reply 回答，不能给 task。"
+            : needsPasscode
+            ? """
+              这条消息来自主人的账号，但没有带口令：手机和微信里的操作都不能做，也不要答应去做（不要说“我这就去”“马上办”）。              对方要你去做事时，reply 只写：“要我去做这件事，请在消息开头带上口令再发一次。”；只是聊天就正常回答。
+              """
+            : "说这话的不是主人：只能用 reply 回答，不能给 task，也不要答应去做任何要在手机或微信里操作的事（不要说“我这就去”“马上办”）。"
         return """
         你是用户在微信里的分身，正在替他在\(group ? "群聊" : "私聊")“\(chat)”里回复。\(r.myNames.isEmpty ? "" : "别人用“@\(r.myNames[0])”叫的就是你。")
         最近的聊天（从早到晚）：
@@ -945,8 +950,13 @@ extension AppModel {
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let owner = !rules.senders.isEmpty && due.allSatisfy { WatchSettings.isOwner($0, rules) }
+                // The owner's account in a private chat without the passcode: say why nothing runs, never "我这就去"
+                // (build 62: an @-the-owner task without the passcode got "好的，我这就去…" and then nothing).
+                let needsPasscode = !owner && rules.phoneTasks && !rules.senders.isEmpty
+                    && due.allSatisfy { rules.senders.contains($0.sender) && !$0.group && !$0.verified }
                 guard let decided = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
-                                                                           due: due, r: rules, knowledge: knowledge, owner: owner),
+                                                                           due: due, r: rules, knowledge: knowledge, owner: owner,
+                                                                           needsPasscode: needsPasscode),
                                                rollback: { self.watchLast[chat] = before }) else {
                     DebugLog.write("watch: decision unavailable; new messages preserved for retry")
                     return (false, false)
