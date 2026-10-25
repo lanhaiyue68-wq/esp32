@@ -187,3 +187,4 @@ App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）�
 - build65：私聊發言人＝會話名、口令請求即任務、開會話不對準＋多看 3 次。308 XCTest 全過（run 40188830238）。IPA SHA256 65e22db90b37eed3409715a2d377f22c8c67c2e9ddc455416d513e5968eeea88。
 - build66/67：口令請求不經模型直接執行、決定 JSON 寬鬆解析、導航名映射、口令全形/空格、開始守候記錄設定。310 XCTest 全過（run 40190002249）。IPA SHA256 ad5dcf93d2a36bedb81a38712dd89cd107cb0428cd5cf55d5dcae5ebe928eef5。
 - build68：真機 67 跑通但 3 分 44 秒；第二任務已發出卻回報「没弄成」→ 改成如實回報＋發出後 5 步收工。311 XCTest 全過（run 40192373741）。IPA SHA256 872bf9d4e6afbf7fed49293c0e964435a2154602968c24692529c5d35c5d8bb7。
+- build69：真機 68 @群主任務正確完成與回報；回報走回私聊改為先點返回。311 XCTest 全過（run 40194087422）。IPA SHA256 d8c6b5220ed5ec8c1b71144c0e86c998cf5bf027eaf9a3c7a94b6a0a782a980e。
