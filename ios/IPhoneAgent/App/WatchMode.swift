@@ -140,14 +140,17 @@ enum WatchSettings {
     /// a private chat that held it are `proven`; in a group it proves nothing (everyone there has seen it).
     static func masked(_ screen: WatchReport.Screen, pin: String) -> WatchReport.Screen {
         guard pin.count >= 4 else { return screen }
+        let pattern = pinPattern(pin)
         var out = screen
         out.lines = screen.lines.map { line in
-            guard !line.mine, line.text.contains(pin) else { return line }
+            guard !line.mine, line.text.range(of: pattern, options: .regularExpression) != nil else { return line }
             var l = line
-            l.text = line.text.replacingOccurrences(of: pin, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            l.text = line.text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             if screen.group {
                 DebugLog.write("watch: the phone-task passcode showed in a group; not accepted there, change it in Lan Agent")
             } else {
+                DebugLog.write("watch: passcode seen in \(screen.title)")
                 out.proven.insert(WatchReport.proofKey(l))
             }
             return l
@@ -156,7 +159,18 @@ enum WatchSettings {
     }
 
     static func hidePIN(_ text: String, _ pin: String) -> String {
-        pin.count >= 4 ? text.replacingOccurrences(of: pin, with: "‹passcode›") : text
+        pin.count >= 4 ? text.replacingOccurrences(of: pinPattern(pin), with: "‹passcode›", options: .regularExpression) : text
+    }
+
+    /// The passcode as the read may write it: any spacing between its characters, and full-width forms (＃８６４２ for
+    /// #8642, as a Chinese keyboard types it).
+    static func pinPattern(_ pin: String) -> String {
+        pin.filter { !$0.isWhitespace }.map { c -> String in
+            let s = String(c), wide = s.applyingTransform(.fullwidthToHalfwidth, reverse: true) ?? s
+            let narrow = s.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? s
+            let forms = Set([s, wide, narrow]).sorted().map { NSRegularExpression.escapedPattern(for: $0) }
+            return forms.count == 1 ? forms[0] : "(?:" + forms.joined(separator: "|") + ")"
+        }.joined(separator: #"\s*"#)
     }
 
     /// Before typing in a send run. Refused when the chat on screen is not the destination (logs26: the report for
@@ -786,7 +800,14 @@ extension AppModel {
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
         watchJob = Task { [weak self] in await self?.watchLoop() }
-        DebugLog.write("watch: started")
+        let r = WatchSettings.rules, pin = WatchSettings.ownerPIN
+        // What owner authority hangs on, once per start (build 64–65: a passcode task never ran, and nothing said why).
+        DebugLog.write("watch: started; chats \(r.targets), senders \(r.senders), phone tasks \(r.phoneTasks), "
+                       + "passcode \(pin.count >= 4 ? "set" : "NOT SET")")
+        if r.phoneTasks, pin.count < 4 { DebugLog.write("watch: phone tasks are on but no passcode is set: no task can run") }
+        for s in r.senders where !r.targets.contains(s) {
+            DebugLog.write("watch: sender \(s) is not one of the chats: in a private chat the sender is the chat's name")
+        }
         return nil
     }
 

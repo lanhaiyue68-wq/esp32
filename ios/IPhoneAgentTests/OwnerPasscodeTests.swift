@@ -53,6 +53,18 @@ import XCTest
         XCTAssertEqual(WatchSettings.hidePIN("a #8642 b", "#8642"), "a ‹passcode› b")
     }
 
+    /// A Chinese keyboard types ＃８６４２; the read may space it out.
+    func testFullWidthOrSpacedPasscodeStillProvesTheOwner() {
+        for typed in ["＃８６４２ 去测试群发你好", "# 8642 去测试群发你好", "#8642去测试群发你好"] {
+            let read = WatchReport.Screen(title: "蓝海乐", group: false, lines: [line(typed)])
+            let screen = WatchSettings.masked(read, pin: "#8642")
+            XCTAssertEqual(screen.lines[0].text, "去测试群发你好", typed)
+            XCTAssertTrue(screen.proven.contains(WatchReport.proofKey(screen.lines[0])), typed)
+        }
+        let other = WatchReport.Screen(title: "蓝海乐", group: false, lines: [line("#8643 去测试群发你好")])
+        XCTAssertTrue(WatchSettings.masked(other, pin: "#8642").proven.isEmpty)
+    }
+
     func testOwnerNeedsListedSenderPrivateChatAndProof() {
         let r = WatchSettings.Rules(targets: ["蓝海乐"], senders: ["蓝海乐"])
         let m = ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "打开备忘录", verified: true)
