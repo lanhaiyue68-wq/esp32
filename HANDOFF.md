@@ -1,3 +1,9 @@
+## 2026-10-25 — build60：快速發送看動作後的畫面；手機任務帶上微信 @／群主步驟（Claude Code）
+
+在 PC 經「發送日誌到電腦」（韌體 v34）看 build59 真機：私聊回覆內容正確但花 48 s——quickSend 打完 0.5 s 拿「目前畫面」（安靜畫面板子約 2 fps，拿到打字前的）→ 核對失敗 → 清框、貼上兩次 → agent 重打才送出；下一則回覆 6 s 正常。主人任務「去虾笔刀群@群主说这不是简简单单吗」走手機任務，提示詞沒有 @／群主步驟，打字走模型挑候選：在真實群送出「这不是简简单单」（無 @、少「吗」），回報失敗。
+源碼 bdbf512：quickSend look() 改用 feed.afterAction(since:)；手機任務提示加群主＝成員第一位、@ 流程（@→選擇提醒的人→搜尋拼音＋回車→點完全同名）、一字不差並只發一次；手機任務 fastText 也開（快打＋整句核對，失敗改貼上）。
+驗證：run 40155406025 設備 Release＋303 XCTest 全過。IPA 5,092,225 bytes，SHA256 fe195cfcad100b205511f96697cdb3bc18773188ac0b5a4dc3266b7f262c66b5；桌面只放 IPA，59 回收，51 保留。真機待驗。
+
 ## 2026-10-25 — build59＋韌體 v33/v34：PC 實測結論進 App（Claude Code）
 
 App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）；stale 不再讓每下都 aim（像素找游標在畫面變化時誤判，logs29）；quickSend 點輸入框不 aim；送出前清框（cmd+a、backspace：草稿、滑過鍵盤的亂碼）；watch 打字先試「拼音分詞每段 space 取首選、最後整句核對」（CandidatePicker.shows，跨行合併比對），對不上就清框改原貼上；九宮格鍵盤偵測並記錄提示（CandidatePicker.nineKey）；設定「發送日誌到電腦」（預設關）取代 Debug 專用的 ENABLE_APP_RELAY。
