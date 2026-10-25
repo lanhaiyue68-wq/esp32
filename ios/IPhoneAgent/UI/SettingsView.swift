@@ -51,13 +51,12 @@ struct SettingsView: View {
                         SettingsLabel(title: "Diagnostics", symbol: "waveform.path.ecg", color: .green)
                     }
                     Toggle(isOn: $demoData) { SettingsLabel(title: "Demo data", symbol: "theatermasks", color: .purple) }
-                    Toggle(isOn: $toComputer) { SettingsLabel(title: "Send logs to the computer", symbol: "cable.connector", color: .orange) }
                     Button { settings.onboarded = false; app.setupPage = .welcome } label: {
                         SettingsLabel(title: "Run setup again", symbol: "arrow.counterclockwise", color: .gray)
                     }
                     .tint(.primary)
                 } footer: {
-                    Text("Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app. Send logs to the computer passes this app's debug lines through the board to the computer on its cable, which may then start or stop a run; leave it off unless you are testing.")
+                    Text("Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app.")
                 }
                 Section {
                     NavigationLink { PrivacySettingsView(app: app, runs: app.runs) } label: {
@@ -66,9 +65,13 @@ struct SettingsView: View {
                     NavigationLink { LogsView(app: app) } label: {
                         SettingsLabel(title: "Logs and Cache", symbol: "externaldrive", color: .orange)
                     }
+                    // Apart from Demo data: next to it, it was switched on by mistake (logs(30) were all a demo run).
+                    Toggle(isOn: $toComputer) { SettingsLabel(title: "Send logs to the computer", symbol: "cable.connector", color: .teal) }
                     NavigationLink { AboutView(app: app) } label: {
                         SettingsLabel(title: "About", symbol: "info", color: .gray)
                     }
+                } footer: {
+                    Text("Send logs to the computer passes this app's debug lines through the board to the computer on its cable, which may then start or stop a run; leave it off unless you are testing.")
                 }
             }
             .navigationTitle("Settings")

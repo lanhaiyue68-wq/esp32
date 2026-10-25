@@ -1538,12 +1538,22 @@
         }
       }
     },
-    "Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app. Send logs to the computer passes this app's debug lines through the board to the computer on its cable, which may then start or stop a run; leave it off unless you are testing." : {
+    "Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "演示数据会模拟小板、一次完成的运行和整个设置流程，无需硬件即可试用。退出并重新打开 App 后生效。“发送日志到电脑”会把本 App 的调试日志经开发板的数据线传到电脑，电脑也可以开始或停止任务；不测试时请保持关闭。"
+            "value" : "演示数据会模拟小板、一次完成的运行和整个设置流程，无需硬件即可试用。退出并重新打开 App 后生效。"
+          }
+        }
+      }
+    },
+    "Send logs to the computer passes this app's debug lines through the board to the computer on its cable, which may then start or stop a run; leave it off unless you are testing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“发送日志到电脑”会把本 App 的调试日志经开发板的数据线传到电脑，电脑也可以开始或停止任务；不测试时请保持关闭。"
           }
         }
       }

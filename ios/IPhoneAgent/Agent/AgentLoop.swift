@@ -124,6 +124,10 @@ extension Pointer: Gestures {}
     /// WeChat watch: text this run typed and then sent (Return, or a tap on 发送 at the bottom right). Typing it again
     /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
     private var sentTexts: Set<String> = []
+    /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
+    /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
+    /// next to the box, which the tap check above missed, typed the text again, and left it in the box).
+    private var typedBase: [String: Int] = [:]
     private var unsent: String?  // typed, not sent yet
     private var boxCleared = false  // a send run emptied the box before its first type
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
@@ -351,7 +355,7 @@ extension Pointer: Gestures {}
     static func sends(_ act: JObject) -> Bool {
         switch act["action"]?.str {
         case "key": return ["enter", "return"].contains(act["combo"]?.str?.lowercased() ?? "")
-        case "tap": return (act["x"]?.double ?? 0) >= 800 && (act["y"]?.double ?? 0) >= 500
+        case "tap": return (act["x"]?.double ?? 0) >= 800 && (act["y"]?.double ?? 0) >= 400  // 发送 by the box: ~0.49
         default: return false
         }
     }
@@ -444,7 +448,7 @@ extension Pointer: Gestures {}
     func run() async {
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
-        (noKeyboard, aimNext, sentTexts, unsent, boxCleared) = (0, false, [], nil, false)
+        (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -652,6 +656,14 @@ extension Pointer: Gestures {}
                 if name == "type", keyboardGuard, sentTexts.contains(Self.typedKey(act["text"]?.str ?? "")) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
                     return false
+                }
+                if name == "type", keyboardGuard, let shown = screen?.frame {
+                    let text = act["text"]?.str ?? "", key = Self.typedKey(text), count = CandidatePicker.shows(text, in: shown)
+                    if let base = typedBase[key], count > base {
+                        record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
+                        return false
+                    }
+                    if typedBase[key] == nil { typedBase[key] = count }
                 }
                 if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? "") }
                 if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil }
