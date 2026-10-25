@@ -442,6 +442,15 @@ enum WatchReport {
     /// A read line's key in Screen.proven.
     static func proofKey(_ l: Line) -> String { l.sender + "\u{1}" + l.text }
 
+    /// In a private chat everyone but me is the chat itself, whatever the read wrote above the bubble (build 64: 蓝海乐
+    /// for the chat 主人蓝海乐, so the owner's passcode task read as a stranger's and never ran).
+    static func privateSenders(_ s: Screen, chat: String) -> Screen {
+        guard !s.group else { return s }
+        var out = s
+        out.lines = s.lines.map { $0.mine ? $0 : Line(sender: chat, text: $0.text, mine: false) }
+        return out
+    }
+
     private static func fullTitle(_ text: String) -> String {
         text.replacingOccurrences(of: #"\s*[（(]\s*\d+\s*[）)]\s*$"#, with: "", options: .regularExpression)
             .filter { !$0.isWhitespace }
@@ -963,6 +972,10 @@ extension AppModel {
                 }
                 reply = WatchSettings.typeable(decided.reply)
                 task = owner && !decided.task.isEmpty ? decided.task : nil
+                // The passcode is the owner saying "do this": a phone request runs even when the model left task empty.
+                let request = owner ? WatchSettings.phoneRequest(due, rules) : nil
+                DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), task \(task != nil || request != nil)")
+                if let request, task == nil { task = request }
                 if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
                     phoneMessages = due
                     task = original
@@ -1089,7 +1102,7 @@ extension AppModel {
                                                                     text: "读出这张截图里的消息。", image: frame, maxTokens: 1500, temperature: 0)
                 traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(WatchSettings.hidePIN(reply.text, pin))])
                 if let read = WatchReport.screen(reply.text) {
-                    let screen = WatchSettings.masked(read, pin: pin)
+                    let screen = WatchSettings.masked(WatchReport.privateSenders(read, chat: chat), pin: pin)
                     guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules) else {
                         DebugLog.write("watch: read destination mismatch; ignoring this check")
                         return nil

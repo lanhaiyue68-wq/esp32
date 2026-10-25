@@ -16,6 +16,18 @@ import XCTest
         XCTAssertFalse(screen.proven.contains(WatchReport.proofKey(screen.lines[1])))
     }
 
+    /// build 64: the read wrote 蓝海乐 above the owner's bubbles in the chat 主人蓝海乐; the white list holds 主人蓝海乐.
+    func testInAPrivateChatTheSenderIsTheChatWhateverTheReadWrote() {
+        let read = WatchReport.Screen(title: "主人蓝海乐", group: false, lines: [line("#8642 去测试群发你好"), line("好的", mine: true)])
+        let screen = WatchSettings.masked(WatchReport.privateSenders(read, chat: "主人蓝海乐"), pin: "#8642")
+        let m = ReadMessage(chat: "主人蓝海乐", group: false, sender: screen.lines[0].sender, text: screen.lines[0].text,
+                            atMe: false, verified: screen.proven.contains(WatchReport.proofKey(screen.lines[0])))
+        XCTAssertTrue(WatchSettings.isOwner(m, WatchSettings.Rules(targets: ["主人蓝海乐"], senders: ["主人蓝海乐"])))
+        XCTAssertEqual(screen.lines[1].sender, "", "my own lines stay mine")
+        let group = WatchReport.Screen(title: "测试群(3)", group: true, lines: [line("你好")])
+        XCTAssertEqual(WatchReport.privateSenders(group, chat: "测试群").lines[0].sender, "蓝海乐", "a group keeps its names")
+    }
+
     func testPasscodeInAGroupProvesNothingButIsStillHidden() {
         let read = WatchReport.Screen(title: "测试群(3)", group: true, lines: [line("@蓝 #8642 打开备忘录")])
         let screen = WatchSettings.masked(read, pin: "#8642")

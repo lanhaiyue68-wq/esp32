@@ -107,7 +107,7 @@ import Foundation
             case .row(let point):
                 guard allowed() else { return .deferred }
                 tapped = true
-                try await phone.tap(point.x, point.y, aim: true)
+                try await phone.tap(point.x, point.y, aim: false)  // firmware v33 lands plain taps; aiming jiggled ~3 s
                 let ended = now()
                 await screen.afterAction(since: ended)
                 guard allowed() else { return .deferred }
@@ -141,17 +141,22 @@ import Foundation
             case .unknown: return .fallback
             case .row(let chat, let point):
                 tapped = true
-                try await phone.tap(point.x, point.y, aim: true)
+                try await phone.tap(point.x, point.y, aim: false)  // firmware v33 lands plain taps; aiming jiggled ~3 s
                 let ended = now()
                 await screen.afterAction(since: ended)
                 guard allowed() else { return .deferred }
                 try await screen.requireFrame(after: ended)
                 guard allowed(), let after = screen.frame else { return .deferred }
                 if title(after) == chat { return .opened(chat) }
-                // logs27: the title was not up yet on the first frame after the tap; one more settled look
-                await screen.afterAction(since: now())
-                guard allowed(), let later = screen.frame else { return .deferred }
-                return title(later) == chat ? .opened(chat) : .unverified
+                // logs27: the title was not up yet on the first frame after the tap. build 64: two looks within ~1 s
+                // still missed it, and the next check came 20 s later already in the chat. Up to three more, 0.6 s apart.
+                for _ in 0..<3 {
+                    await screen.afterAction(since: now())
+                    guard allowed(), let later = screen.frame else { return .deferred }
+                    if title(later) == chat { return .opened(chat) }
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                }
+                return .unverified
             }
         } catch {
             if !allowed() { return .deferred }
