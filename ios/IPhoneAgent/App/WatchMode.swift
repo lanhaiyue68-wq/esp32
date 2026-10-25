@@ -454,8 +454,11 @@ enum WatchReport {
         return matches.count == 1 ? matches[0] : nil
     }
 
+    /// The text recognizer is given a band wider than the title row (navigationChat keeps only what sits in it): on
+    /// the 8%-high band alone it read the back arrow and the "…" but not 蓝海乐 (logs31's title bar, reproduced on the
+    /// simulator), so a report was refused 15 times as "not the chat 蓝海乐".
     static func navigationChat(in frame: Data, targets: [String]) -> String? {
-        navigationChat(rows: CandidatePicker.rows(in: frame, top: 0.055, bottom: 0.135), targets: targets)
+        navigationChat(rows: CandidatePicker.rows(in: frame, top: 0.02, bottom: 0.22), targets: targets)
     }
 
     static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules) -> Bool {
