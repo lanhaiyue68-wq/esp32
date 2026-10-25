@@ -1225,7 +1225,17 @@ extension AppModel {
         }
         do {
             // logs26: a report meant for 蓝海乐 went into 测试群. Paste only where the title says it is the chat.
-            guard let first = await look(), WatchReport.navigationChat(in: first, targets: [chat]) == chat else {
+            // After a task the phone is elsewhere: walk back on the phone first (build 62: ~50 s reports, the agent
+            // finding the chat step by step).
+            var first = await look()
+            if first.map({ WatchReport.navigationChat(in: $0, targets: [chat]) == chat }) != true {
+                let began = now()
+                let arrived = await walkToChat(chat, look: look)
+                DebugLog.write("watch: quick send: walked to \(chat) on the phone: \(arrived ? "yes" : "no")"
+                               + String(format: " (%.1f s)", now() - began))
+                if arrived { first = await look() } else { first = nil }
+            }
+            guard let first, WatchReport.navigationChat(in: first, targets: [chat]) == chat else {
                 DebugLog.write("watch: quick send: \(chat) is not the chat on screen; the agent finds it")
                 return .notTried
             }
@@ -1270,6 +1280,38 @@ extension AppModel {
             DebugLog.write("watch: quick send failed: \(error.localizedDescription)")
             return .notTried
         }
+    }
+
+    /// From wherever the phone is to the chat `chat`, with no model call: the chat itself; its row on the chat list;
+    /// back from another WeChat chat; or WeChat again through Lan Agent. Every step is checked on a fresh frame and
+    /// anything unclear stops here (the agent's run takes over as before).
+    private func walkToChat(_ chat: String, look: () async -> Data?) async -> Bool {
+        var hopped = false
+        for _ in 0..<5 {
+            // Lan Agent in front: a tap would land on this app
+            guard watching, !Task.isCancelled, UIApplication.shared.applicationState != .active,
+                  let frame = await look() else { return false }
+            if WatchReport.navigationChat(in: frame, targets: [chat]) == chat { return true }
+            if let row = WatchChatOpen.row(of: chat, in: frame) {
+                try? await pointer.tap(row.x, row.y)
+                continue
+            }
+            if WatchListReturn.view(in: frame, chat: "") == .list { return false }  // on the list, the row not in view
+            let known = WatchReport.navigationChat(in: frame, targets: WatchSettings.rules.targets)
+            if known != nil {  // another WeChat chat we know: its back chevron
+                try? await pointer.tap(0.06, 0.088)
+                continue
+            }
+            guard !hopped else { return false }
+            hopped = true
+            let inWeChat = await hopToWeChat(seesWeChat: {
+                guard let f = await look() else { return false }
+                return WatchListReturn.view(in: f, chat: "") == .list
+                    || WatchReport.navigationChat(in: f, targets: WatchSettings.rules.targets) != nil
+            })
+            if !inWeChat { return false }
+        }
+        return false
     }
 
     /// True when the newest own message in the chat is `text`, by its words: the read writes punctuation its own way

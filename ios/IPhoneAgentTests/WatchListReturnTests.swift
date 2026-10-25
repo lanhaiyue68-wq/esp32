@@ -58,14 +58,14 @@ import UIKit
                                     fallback: { fallbacks += 1; return false })
         XCTAssertFalse(ok)
         XCTAssertEqual(state.pending, "客户群")
-        XCTAssertEqual(phone.calls, ["tap"])
+        XCTAssertEqual(phone.calls, ["tap", "tap"], "a second back before the model")
         XCTAssertEqual(fallbacks, 1)
         // The next attempt recovers navigation only. It neither reads nor sends a message.
         let recovered = await state.resume(phone: phone, screen: screen, canAct: { true },
                                             inspect: { _, _ in .list }, fallback: { false })
         XCTAssertTrue(recovered)
         XCTAssertNil(state.pending)
-        XCTAssertEqual(phone.calls, ["tap"])
+        XCTAssertEqual(phone.calls, ["tap", "tap"])
     }
 
     func testFallbackCompletionAloneCannotClaimAVisibleList() async {

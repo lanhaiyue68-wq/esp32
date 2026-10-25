@@ -92,6 +92,14 @@ import UIKit
         XCTAssertEqual(chat, "张三")
     }
 
+    /// The report's way back: the owner's chat row by its (now unique) remark, on the list only.
+    func testTheReportFindsTheOwnersRowOnTheList() {
+        let rows = list([("测试群", 0.20), ("主人蓝海乐", 0.29)])
+        XCTAssertEqual(WatchChatOpen.row(of: "主人蓝海乐", rows: rows)?.y ?? 0, 0.301, accuracy: 0.002)
+        XCTAssertNil(WatchChatOpen.row(of: "张三", rows: list([("张三", 0.20), ("张三", 0.29)])), "a name shown twice")
+        XCTAssertNil(WatchChatOpen.row(of: "测试群", rows: Array(rows.dropLast())), "not the chat list")
+    }
+
     func testOnlyAKeyboardDownTapIsKeptAsTheInputBox() {
         XCTAssertTrue(WatchSettings.usableBox(CGPoint(x: 0.45, y: 0.925)))
         XCTAssertFalse(WatchSettings.usableBox(CGPoint(x: 0.45, y: 0.55)), "the box with the keyboard up")

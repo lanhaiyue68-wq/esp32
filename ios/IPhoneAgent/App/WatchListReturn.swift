@@ -62,12 +62,22 @@ import Foundation
         do {
             let current = try await look()
             if current == .list { pending = nil; return true }
-            if case .chat(let point) = current {
-                guard allowed() else { return false }
-                try await phone.tap(point.x, point.y, aim: true)
+            // Plain taps (firmware v33 lands them; the pixel finder misread changing screens), and a second look and a
+            // second back before the model: the list often was still sliding in at the first look (return runs of
+            // ~10 s with 3 model calls, build 62 on the PC harness).
+            var view = current
+            for _ in 0..<2 {
+                guard case .chat(let point) = view, allowed() else { break }
+                try await phone.tap(point.x, point.y, aim: false)
                 let ended = now()
                 await screen.afterAction(since: ended)
-                if try await look(after: ended) == .list { pending = nil; return true }
+                view = try await look(after: ended)
+                if view == .list { pending = nil; return true }
+                if view == .unknown {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    view = try await look()
+                    if view == .list { pending = nil; return true }
+                }
             }
             // One bounded navigation run, never another message read/send. A model's "done" alone is insufficient.
             guard allowed() else { return false }

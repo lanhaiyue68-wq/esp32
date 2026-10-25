@@ -36,6 +36,20 @@ import Foundation
         }.map(\.box)
     }
 
+    /// The row of `chat` on the chat list: one exact title with its preview (the report's way back to the owner's
+    /// chat). Nil off the list, for a name shown twice, or one not in view.
+    static func row(of chat: String, rows: [[CandidatePicker.Piece]]) -> CGPoint? {
+        guard WatchListReturn.view(rows: rows, chat: "") == .list else { return nil }
+        let name = chat.filter { !$0.isWhitespace }
+        guard !name.isEmpty else { return nil }
+        let found = titles(rows, name)
+        return found.count == 1 ? CGPoint(x: 0.5, y: found[0].midY) : nil
+    }
+
+    static func row(of chat: String, in frame: Data) -> CGPoint? {
+        row(of: chat, rows: CandidatePicker.rows(in: frame, top: 0.055, bottom: 1))
+    }
+
     /// Several listed chats ("only these chats"): the topmost listed chat whose avatar carries WeChat's red unread
     /// badge, picked on the list itself instead of by an agent run (logs26: 6–35 s). `badge` tells whether the avatar
     /// next to a title box is badged. "Nothing unread" only when every listed chat shows exactly once; a duplicate

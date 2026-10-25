@@ -27,6 +27,24 @@ extension AppModel {
         return filled ? .filled : .refused
     }
 
+    /// WeChat to the front from wherever a task left the phone: Lan Agent first (the app switch back, as the paste's
+    /// hop), then weixin://. `seesWeChat` ends it early when the switch back already landed in WeChat.
+    func hopToWeChat(seesWeChat: () async -> Bool) async -> Bool {
+        if UIApplication.shared.applicationState != .active {
+            var front = false
+            for _ in 1...2 where !front {
+                do { try await pointer.previousApp() } catch { return false }
+                front = await waitForState(.active, within: 2.5)
+                if !front, await seesWeChat() { return true }
+            }
+            guard front else { return false }
+        }
+        guard let wechat = URL(string: "weixin://"), await UIApplication.shared.open(wechat),
+              await waitForState(.background, within: 3) else { return false }
+        try? await Task.sleep(nanoseconds: 600_000_000)  // WeChat redraws
+        return true
+    }
+
     private func waitForState(_ state: UIApplication.State, within seconds: Double) async -> Bool {
         let deadline = now() + seconds
         while UIApplication.shared.applicationState != state {
