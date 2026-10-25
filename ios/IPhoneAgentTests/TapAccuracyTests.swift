@@ -85,6 +85,31 @@ import UIKit
         XCTAssertTrue(agent.steps.contains { $0["reason"] == .str(AgentLoop.sentAgainReason) })
     }
 
+    /// build 67: the @ went out, then the model kept looking until the step limit and the owner was told "没弄成".
+    func testARunThatSentEndsSoonAfterAndSaysWhatWentOut() async throws {
+        let screen = FakeScreen(); screen.frame = frame(keyboard: true)
+        let phone = AimGestures()
+        let actor = FakeModel { n in
+            ["THINK: Type.\nDO: type 这不是简简单单吗", "THINK: Send.\nDO: tap 900 845"].dropFirst(n - 1).first
+                ?? "THINK: Check once more.\nDO: tap \(300 + 10 * n) 300"
+        }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: FakeModel { _ in "1. Send it" }, trace: nil)
+        agent.directStart = true
+        agent.keyboardGuard = true
+        agent.endAfterSend = 2
+        let ended = expectation(description: "agent completed")
+        agent.onFinish = { ended.fulfill() }
+        try agent.start("去测试群发这不是简简单单吗")
+        await fulfillment(of: [ended], timeout: 15)
+        agent.stop()
+        XCTAssertEqual(agent.steps.last?["action"], .str("done"))
+        XCTAssertLessThan(agent.steps.count, 10)
+        let answer = agent.steps.last?["answer"]?.str ?? ""
+        XCTAssertEqual(WatchReport.sendAnswer(answer), "已发出“这不是简简单单吗”")
+        XCTAssertTrue(WatchSettings.severalParts("先去测试群发你好，然后告诉我"))
+        XCTAssertFalse(WatchSettings.severalParts("去测试群@一下群主"))
+    }
+
     func testAProbeStoppedAtTheEdgeIsNotLearned() {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let pointer = Pointer(device: FakeDevice(), calibrationFile: file)

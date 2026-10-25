@@ -219,6 +219,11 @@ enum WatchSettings {
     /// Sent when the owner's phone task got stuck or ran out of steps.
     static let taskFailedReply = "这个我没弄成，你再说具体点？"
 
+    /// A task with more than one thing to do in order (再/然后…): no early end after its first send.
+    static func severalParts(_ task: String) -> Bool {
+        ["再", "然后", "接着", "之后", "并且", "同时", "顺便", "另外"].contains { task.contains($0) }
+    }
+
     /// A reply the board can type: what a pinyin keyboard has keys for. "～" or an emoji made every type fail
     /// ("unsupported keyboard text"), the send ran out of steps three times and the messages went unanswered
     /// (logs(13): "抱歉刚才没及时回复你～"). nil when nothing is left.
@@ -1052,12 +1057,19 @@ extension AppModel {
             guard watching, !Task.isCancelled else { return (false, false) }
             if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
             DebugLog.write("watch: owner task in \(chat): \(task)")
+            // One thing to send: the run ends 5 quiet steps after it went out (build 67: an @ was sent, then 30 more
+            // steps of looking until the step limit). A task with several parts keeps its steps.
+            agent.endAfterSend = phone && !WatchSettings.severalParts(task) ? 5 : nil
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
                                       stepLimit: phone ? agent.maxSteps : 25, fastText: true, directStart: phone)
+            agent.endAfterSend = nil
             if phone, let source = phoneMessages.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
-                var result = done == nil ? WatchSettings.taskFailedReply
+                // A run that sent something did not "fail": say what went out rather than "没弄成".
+                let partial = agent.sent.isEmpty ? nil
+                    : WatchReport.sendAnswer(AgentLoop.sentAnswer(agent.sent)).map { $0 + "，但没能确认全部做完，你看一下。" }
+                var result = done == nil ? partial.flatMap(WatchSettings.typeable) ?? WatchSettings.taskFailedReply
                     : done.flatMap(WatchReport.sendAnswer).flatMap(WatchSettings.typeable) ?? "任务已结束，但没有取得可回报的结果。"
                 if PrivacyGuard.check(result, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
                     result = "任务已结束，结果含有受保护信息，未发送详情。"

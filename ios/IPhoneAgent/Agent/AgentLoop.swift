@@ -124,6 +124,12 @@ extension Pointer: Gestures {}
     /// WeChat watch: text this run typed and then sent (Return, or a tap on 发送 at the bottom right). Typing it again
     /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
     private var sentTexts: Set<String> = []
+    /// What this run sent, for a run that ended without "done" (build 67: an @ went out, the model kept looking until
+    /// the step limit, and the owner was told "这个我没弄成").
+    var sent: [String] { sentTexts.sorted() }
+    /// WeChat phone task with one thing to send: done this many steps after a send with nothing typed since. nil: off.
+    var endAfterSend: Int?
+    private var quietSinceSend = 0
     /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
     /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
     /// next to the box, which the tap check above missed, typed the text again, and left it in the box).
@@ -347,6 +353,13 @@ extension Pointer: Gestures {}
         + "shows, the task is done, finish with done. If it is still in the input box, tap 发送 instead; never type it again."
 
     /// The text as typed, for telling a repeat: quotes and spaces the model adds around it do not count.
+    /// A run's outcome from what it sent, in the {"send": …} form WatchReport.sendAnswer reads.
+    static func sentAnswer(_ sent: [String]) -> String {
+        let words = sent.filter { $0.count > 1 }.map { "“\($0)”" }.joined(separator: "、")
+        let text = words.isEmpty ? "消息已按要求发出" : "已发出\(words)"
+        return #"{"send":""# + text.replacingOccurrences(of: "\"", with: "") + #""}"#
+    }
+
     static func typedKey(_ text: String) -> String {
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
     }
@@ -449,6 +462,7 @@ extension Pointer: Gestures {}
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
+        quietSinceSend = 0
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -476,6 +490,13 @@ extension Pointer: Gestures {}
                         continue
                     }
                     failures = 0
+                    if let n = endAfterSend, !sentTexts.isEmpty, unsent == nil {
+                        quietSinceSend += 1
+                        if quietSinceSend > n {
+                            record(nil, ["action": .str("done"), "answer": .str(Self.sentAnswer(sent))])
+                            return finish()
+                        }
+                    }
                 } catch let e as BlindError {
                     record(nil, ["action": .str("paused"), "reason": .str(e.reason)])
                     guard try await askForHelp() else { return finish() }
@@ -665,8 +686,8 @@ extension Pointer: Gestures {}
                     }
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
-                if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? "") }
-                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil }
+                if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? ""); quietSinceSend = 0 }
+                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil; quietSinceSend = 0 }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
