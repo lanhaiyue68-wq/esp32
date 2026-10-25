@@ -129,6 +129,8 @@ extension Pointer: Gestures {}
     var sent: [String] { sentTexts.sorted() }
     /// WeChat phone task with one thing to send: done this many steps after a send with nothing typed since. nil: off.
     var endAfterSend: Int?
+    /// Quick pinyin that came out wrong, across runs (WeChat watch resets it when a watch starts).
+    var pinyinMisses = 0
     private var quietSinceSend = 0
     /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
     /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
@@ -192,6 +194,14 @@ extension Pointer: Gestures {}
         if let shot { shots[steps.count] = shot }
         steps.append(JObject([("t", .num(now())), ("shot", .bool(shot != nil))]).merging(step))
         trace?.write(kind: "step", step)
+        // What each step did, on the computer too (build 69: "kept going back and forth between two screens", and the
+        // log held only timings).
+        let fields = ["x", "y", "text", "key", "reason", "answer"].compactMap { k -> String? in
+            guard let v = step[k] else { return nil }
+            let s = v.str ?? v.double.map { String(format: "%.0f", $0) } ?? ""
+            return s.isEmpty ? nil : "\(k) \(s.prefix(40))"
+        }
+        DebugLog.write("act \(steps.count): \(step["action"]?.str ?? "?") \(fields.joined(separator: ", "))")
         onStep?()
     }
 
@@ -843,7 +853,8 @@ extension Pointer: Gestures {}
     /// Anything else it typed is cleared, and the paste goes on as before. Never on the 9-key pinyin keyboard, which
     /// turns letters into digit keys ("nihao" came out as 你哄啊).
     private func typedQuickly(_ text: String, phone: Gestures) async throws -> Bool {
-        guard let start = await freshFrame() else { return false }
+        // Twice wrong in this watch (a keyboard the pinyin does not suit): the paste goes first, ~8 s saved a send.
+        guard pinyinMisses < 2, let start = await freshFrame() else { return false }
         if CandidatePicker.nineKey(in: start) {
             DebugLog.write("type: the keyboard is 9-key pinyin; switch to the full pinyin keyboard (拼音-全键盘) in iOS Settings")
             return false
@@ -858,7 +869,8 @@ extension Pointer: Gestures {}
         if let shown = after, CandidatePicker.shows(text, in: shown) > before { return true }
         try await phone.key("cmd+a")
         try await phone.key("backspace")
-        DebugLog.write("type: the pinyin did not come out as the text; cleared it")
+        pinyinMisses += 1
+        DebugLog.write("type: the pinyin did not come out as the text; cleared it (miss \(pinyinMisses))")
         return false
     }
 

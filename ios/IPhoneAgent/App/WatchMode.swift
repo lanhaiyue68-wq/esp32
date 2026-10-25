@@ -219,6 +219,16 @@ enum WatchSettings {
     /// Sent when the owner's phone task got stuck or ran out of steps.
     static let taskFailedReply = "这个我没弄成，你再说具体点？"
 
+    /// "再去做一遍", "再来一次", "重新做"…: nothing but "again" means the last task, word for word. Anything more is
+    /// a task of its own.
+    static func redo(_ request: String, last: String?) -> String {
+        guard let last, !last.isEmpty else { return request }
+        let bare = request.filter { !$0.isWhitespace && !"，。！？,.!?~～".contains($0) }
+        let again = ["再去做一遍", "再做一遍", "再来一遍", "再来一次", "再做一次", "再去做一次", "重新做", "重新做一遍",
+                     "再试一次", "再试一遍", "重来", "再去一遍", "再弄一遍", "再弄一次"]
+        return again.contains(bare) ? last : request
+    }
+
     /// A task with more than one thing to do in order (再/然后…): no early end after its first send.
     static func severalParts(_ task: String) -> Bool {
         ["再", "然后", "接着", "之后", "并且", "同时", "顺便", "另外"].contains { task.contains($0) }
@@ -800,6 +810,7 @@ extension AppModel {
         watchInterjectedAt = [:]
         watchRetries = [:]
         watchTaskReplyFailures = 0
+        agent.pinyinMisses = 0
         watchListReturn.pending = nil
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
@@ -1010,7 +1021,10 @@ extension AppModel {
                     && due.allSatisfy { rules.senders.contains($0.sender) && !$0.group && !$0.verified }
                 // The passcode is the owner saying "do this": no model decides whether it is a task (build 65: the
                 // decision came back broken and the task was lost), and "收到" goes out ~2 s sooner.
-                let request = owner ? WatchSettings.phoneRequest(due, rules) : nil
+                // "再去做一遍" alone tells the phone nothing (build 69: 40 steps, then "没弄成"): the last task again.
+                let request = (owner ? WatchSettings.phoneRequest(due, rules) : nil).map {
+                    WatchSettings.redo($0, last: watchLastTask[chat])
+                }
                 DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
                 let decided: (reply: String, task: String)
                 if let request {
@@ -1028,7 +1042,8 @@ extension AppModel {
                 task = owner && !decided.task.isEmpty ? decided.task : nil
                 if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
                     phoneMessages = due
-                    task = original
+                    task = WatchSettings.redo(original, last: watchLastTask[chat])
+                    watchLastTask[chat] = task
                     if reply == nil { reply = "收到，我去处理。" }
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
@@ -1266,7 +1281,7 @@ extension AppModel {
         }
         // Pinyin, first candidate per chunk, one look: ~1 s where the paste's trip through Lan Agent took ~5 s.
         func typedQuickly() async throws -> Bool {
-            guard let start = await look() else { return false }
+            guard agent.pinyinMisses < 2, let start = await look() else { return false }
             if CandidatePicker.nineKey(in: start) {
                 DebugLog.write("watch: quick send: 9-key pinyin keyboard; pasting (switch to 拼音-全键盘 in iOS Settings)")
                 return false
@@ -1278,7 +1293,8 @@ extension AppModel {
             if let s = shown, CandidatePicker.shows(text, in: s) > before { return true }
             try await pointer.key("cmd+a")
             try await pointer.key("backspace")
-            DebugLog.write("watch: quick send: the pinyin did not come out as the text; cleared it, pasting")
+            agent.pinyinMisses += 1
+            DebugLog.write("watch: quick send: the pinyin did not come out as the text; cleared it, pasting (miss \(agent.pinyinMisses))")
             return false
         }
         // Cmd+V, iOS's paste prompt answered, and true when the text newly shows (looked at twice).

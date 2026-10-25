@@ -76,3 +76,14 @@ import XCTest
         XCTAssertFalse(CandidatePicker.nineKey(rows: [row(["q", "w", "e", "r", "t", "y"], y: 0.7)]))
     }
 }
+
+/// build 69: "再去做一遍" reached the phone as just those words; 40 steps, then "没弄成".
+@MainActor final class RedoTaskTests: XCTestCase {
+    func testAgainAloneMeansTheLastTask() {
+        let last = "去虾笔刀陪跑学员元群里@一下群主"
+        XCTAssertEqual(WatchSettings.redo("再去做一遍", last: last), last)
+        XCTAssertEqual(WatchSettings.redo(" 再来一次！", last: last), last)
+        XCTAssertEqual(WatchSettings.redo("再去测试群发个你好", last: last), "再去测试群发个你好", "more than again: a task of its own")
+        XCTAssertEqual(WatchSettings.redo("再去做一遍", last: nil), "再去做一遍")
+    }
+}
