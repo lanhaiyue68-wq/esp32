@@ -98,20 +98,20 @@ import XCTest
         XCTAssertFalse(p.stale)
     }
 
-    /// Stale: every later tap aims (log25's first tap was a plain one and clicked the corner), the app asks to
-    /// calibrate, the flag survives a restart, and a new calibration clears it.
-    func testStaleCalibrationAimsPlainTapsUntilRecalibrated() async throws {
+    /// Stale: the app asks to calibrate, the flag survives a restart, and a new calibration clears it. Plain taps no
+    /// longer aim because of it: the pixel finder misread changing screens and walked the pointer off target (logs29).
+    func testStaleCalibrationAsksToCalibrateWithoutAimingPlainTaps() async throws {
         let phone = SimPhone(w: 445, h: 620)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let p = Pointer(device: phone, calibrationFile: file)
         p.finishCalibration(x: 200 / 494, y: 200 / 1110)
-        p.finder = { _, _ in phone.seen() }
+        var looks = 0
+        p.finder = { _, _ in looks += 1; return phone.seen() }
         try await p.tap(0.85, 0.59, aim: true)
         XCTAssertTrue(p.stale)
+        let before = looks
         try await p.tap(0.30, 0.40)  // no aim asked
-        let hit = try XCTUnwrap(phone.clicks.last)
-        XCTAssertEqual(hit.x, 0.30, accuracy: Pointer.aimTolerance)
-        XCTAssertEqual(hit.y, 0.40, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(looks, before, "a plain tap does not look for the pointer")
         XCTAssertTrue(Pointer(device: phone, calibrationFile: file).stale)
         p.finishCalibration(x: 0.45, y: 0.32)
         XCTAssertFalse(p.stale)

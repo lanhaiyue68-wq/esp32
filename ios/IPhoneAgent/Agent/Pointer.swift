@@ -328,10 +328,14 @@ import Foundation
         (pos, moves) = ((0, 0), 0)
     }
 
-    /// aim: find the pointer on screen first (slower); worth it when a tap just missed.
+    /// aim: find the pointer on screen first (slower); worth it when a tap just missed. Every tap starts from the
+    /// corner: relative moves drifted 5–7% within a few gestures (PC harness, 2026-10-25), and with firmware v33 the
+    /// corner costs ~0.2 s and is done before the move. A stale calibration no longer aims every tap: the pixel finder
+    /// misread changing screens and walked the pointer off target (logs29).
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
-        try await point(x, y, aim: aim || stale)
+        pos = nil
+        try await point(x, y, aim: aim)
         try await device.send("click")
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
@@ -449,6 +453,58 @@ import Foundation
                 try await sendKeyboard(run.text)
             }
         }
+    }
+
+    /// WeChat watch: each Chinese chunk as pinyin, committed with space (the first candidate), with no look per
+    /// chunk; the caller checks the field once. On the full pinyin keyboard this typed a 20-character sentence right
+    /// in 3 s, against 15.7 s looking at the candidates (PC harness, 2026-10-25).
+    func typeQuick(_ text: String) async throws {
+        drawChain = false
+        let runs = Self.typingRuns(text)
+        for run in runs {
+            if run.kind == .chinese {
+                guard !Self.pinyin(run.text).isEmpty else { throw DeviceError(message: "cannot transliterate this Han text") }
+            } else { _ = try Self.keyboardChunks(run.text) }
+        }
+        for run in runs {
+            try Task.checkCancellation()
+            switch run.kind {
+            case .chinese:
+                for chunk in Self.quickChunks(run.text) {
+                    try await sendKeyboard(Self.pinyin(chunk))
+                    try await device.send("key space")
+                }
+            case .latin:
+                try await device.send("key capslock")
+                try await Task.sleep(nanoseconds: 300_000_000)
+                try await sendKeyboard(run.text)
+                try await device.send("key capslock")
+                try await Task.sleep(nanoseconds: 300_000_000)
+            case .other:
+                try await sendKeyboard(run.text)
+            }
+        }
+    }
+
+    /// Chinese in chunks of whole words of up to 6 characters (a longer word stays whole), the size the pinyin
+    /// keyboard offers as one first candidate.
+    static func quickChunks(_ han: String) -> [String] {
+        let text = han as NSString, cf = han as CFString
+        let tokenizer = CFStringTokenizerCreate(nil, cf, CFRangeMake(0, text.length), kCFStringTokenizerUnitWordBoundary,
+                                                Locale(identifier: "zh_CN") as CFLocale)
+        var words: [String] = []
+        while !CFStringTokenizerAdvanceToNextToken(tokenizer).isEmpty {
+            let r = CFStringTokenizerGetCurrentTokenRange(tokenizer)
+            words.append(text.substring(with: NSRange(location: r.location, length: r.length)))
+        }
+        if words.joined() != han { words = han.map(String.init) }  // the tokenizer skipped something: by character
+        var chunks: [String] = [], current = ""
+        for word in words {
+            if !current.isEmpty && current.count + word.count > 6 { chunks.append(current); current = "" }
+            current += word
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
     }
 
     static func keyboardChunks(_ text: String) throws -> [String] {

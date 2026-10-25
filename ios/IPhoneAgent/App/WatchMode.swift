@@ -1170,7 +1170,24 @@ extension AppModel {
         // A tap where the box sits without the keyboard hits the space bar while the keyboard is up (logs(17)).
         func focusBox() async throws {
             if let now = await look(), CandidatePicker.keyboardUp(in: now) { return }
-            try await pointer.tap(box.x, box.y, aim: true)
+            try await pointer.tap(box.x, box.y)
+        }
+        // Pinyin, first candidate per chunk, one look: ~1 s where the paste's trip through Lan Agent took ~5 s.
+        func typedQuickly() async throws -> Bool {
+            guard let start = await look() else { return false }
+            if CandidatePicker.nineKey(in: start) {
+                DebugLog.write("watch: quick send: 9-key pinyin keyboard; pasting (switch to 拼音-全键盘 in iOS Settings)")
+                return false
+            }
+            let before = CandidatePicker.shows(text, in: start)
+            try await pointer.typeQuick(text)
+            var shown = await look()
+            if let s = shown, CandidatePicker.shows(text, in: s) <= before { shown = await look() }
+            if let s = shown, CandidatePicker.shows(text, in: s) > before { return true }
+            try await pointer.key("cmd+a")
+            try await pointer.key("backspace")
+            DebugLog.write("watch: quick send: the pinyin did not come out as the text; cleared it, pasting")
+            return false
         }
         // Cmd+V, iOS's paste prompt answered, and true when the text newly shows (looked at twice).
         func paste() async throws -> Bool {
@@ -1195,15 +1212,21 @@ extension AppModel {
                 return .notTried
             }
             try await focusBox()  // before the hop: WeChat on screen, steady, so the keyboard check can be trusted
-            guard await hopToPaste(text) == .filled else { return .notTried }
-            // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and no
-            // keyboard is on screen, the box cleared first (logs(20): the space bar again).
-            var landed = try await paste()
-            if !landed, let now = await look(), !CandidatePicker.keyboardUp(in: now) {
-                try await pointer.key("cmd+a")
-                try await pointer.key("backspace")
-                try await pointer.tap(box.x, box.y, aim: true)
+            // A draft (PC harness: 你好 left in 测试群) or text a swipe typed would join the reply: empty the box first.
+            try await pointer.key("cmd+a")
+            try await pointer.key("backspace")
+            var landed = try await typedQuickly()
+            if !landed {
+                guard await hopToPaste(text) == .filled else { return .notTried }
+                // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and
+                // no keyboard is on screen, the box cleared first (logs(20): the space bar again).
                 landed = try await paste()
+                if !landed, let now = await look(), !CandidatePicker.keyboardUp(in: now) {
+                    try await pointer.key("cmd+a")
+                    try await pointer.key("backspace")
+                    try await pointer.tap(box.x, box.y)
+                    landed = try await paste()
+                }
             }
             guard landed else {
                 try await pointer.key("cmd+a")

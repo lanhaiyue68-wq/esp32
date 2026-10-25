@@ -68,6 +68,26 @@ enum CandidatePicker {
         count(text, lines: rows(in: jpeg, top: 0.3, bottom: 0.9).map { $0.map(\.text).joined() })
     }
 
+    /// How often the whole of `text` (letters and digits) shows in the lower part of the screen, the rows joined so a
+    /// wrapped input box counts: typed text is confirmed when this goes up.
+    static func shows(_ text: String, in jpeg: Data) -> Int {
+        shows(text, lines: rows(in: jpeg, top: 0.3, bottom: 0.95).map { $0.map(\.text).joined() })
+    }
+
+    static func shows(_ text: String, lines: [String]) -> Int {
+        let probe = bare(text)
+        guard probe.count >= 2 else { return 0 }
+        return bare(lines.joined()).components(separatedBy: probe).count - 1
+    }
+
+    /// The 9-key pinyin keyboard, by its key labels: it turns the board's letter keys into digit keys.
+    static func nineKey(in jpeg: Data) -> Bool { nineKey(rows: rows(in: jpeg, top: 0.6, bottom: 1)) }
+
+    static func nineKey(rows: [[Piece]]) -> Bool {
+        let labels: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"]
+        return rows.flatMap { $0 }.filter { labels.contains($0.text) }.count >= 3
+    }
+
     static func count(_ text: String, lines: [String]) -> Int {
         let probe = String(bare(text).prefix(6))
         guard probe.count >= 2 else { return 0 }  // too short to tell apart: not confirmed

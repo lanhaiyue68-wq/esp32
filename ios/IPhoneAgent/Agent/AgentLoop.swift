@@ -23,6 +23,11 @@ struct InputNeedsVerification: LocalizedError {
     func goHome() async throws
     func goBack() async throws
     func reset() async throws
+    func typeQuick(_ text: String) async throws
+}
+
+extension Gestures {
+    func typeQuick(_ text: String) async throws { try await type(text) }
 }
 
 extension Pointer: Gestures {}
@@ -120,6 +125,7 @@ extension Pointer: Gestures {}
     /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
     private var sentTexts: Set<String> = []
     private var unsent: String?  // typed, not sent yet
+    private var boxCleared = false  // a send run emptied the box before its first type
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
     private var deadTaps: [JObject] = []
@@ -438,7 +444,7 @@ extension Pointer: Gestures {}
     func run() async {
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
-        (noKeyboard, aimNext, sentTexts, unsent) = (0, false, [], nil)
+        (noKeyboard, aimNext, sentTexts, unsent, boxCleared) = (0, false, [], nil, false)
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -732,6 +738,19 @@ extension Pointer: Gestures {}
     private func typeFast(_ text: String) async throws {
         guard let phone else { return }
         if typedInto == nil { typedInto = lastTap }
+        if returnSends && !boxCleared {  // a draft, or text a swipe across the keyboard typed, would join the reply
+            boxCleared = true             // (PC harness: 你好 left in 测试群's box; 给我们发微吧 from a home flick)
+            try await phone.key("cmd+a")
+            try await phone.key("backspace")
+        }
+        if Pasteboard.needed(text), try await typedQuickly(text, phone: phone) {
+            if returnSends {
+                try await phone.key("enter")
+                returnSent = true
+                return DebugLog.write("type: typed as pinyin, seen in the field, sent with Return")
+            }
+            return DebugLog.write("type: typed as pinyin and seen in the field")
+        }
         if Pasteboard.needed(text), !pasteHopOff {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
             if hop == .lost {  // not sure which app is in front now: look again, and type from here on
@@ -785,6 +804,29 @@ extension Pointer: Gestures {}
                 rest = input.remaining
             }
         }
+    }
+
+    /// Pinyin with the first candidate per chunk and one look at the end; true when the whole text newly shows.
+    /// Anything else it typed is cleared, and the paste goes on as before. Never on the 9-key pinyin keyboard, which
+    /// turns letters into digit keys ("nihao" came out as 你哄啊).
+    private func typedQuickly(_ text: String, phone: Gestures) async throws -> Bool {
+        guard let start = await freshFrame() else { return false }
+        if CandidatePicker.nineKey(in: start) {
+            DebugLog.write("type: the keyboard is 9-key pinyin; switch to the full pinyin keyboard (拼音-全键盘) in iOS Settings")
+            return false
+        }
+        let before = CandidatePicker.shows(text, in: start)
+        try await phone.typeQuick(text)
+        var after = await freshFrame()
+        if let shown = after, CandidatePicker.shows(text, in: shown) <= before {  // the frame may predate the last key
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            after = await freshFrame()
+        }
+        if let shown = after, CandidatePicker.shows(text, in: shown) > before { return true }
+        try await phone.key("cmd+a")
+        try await phone.key("backspace")
+        DebugLog.write("type: the pinyin did not come out as the text; cleared it")
+        return false
     }
 
     /// Cmd+V, answering iOS's paste prompt if it comes up, and true when the text newly shows on screen (looked at
