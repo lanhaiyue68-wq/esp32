@@ -50,6 +50,13 @@ import XCTest
         XCTAssertTrue(DebugLog.toComputer)
     }
 
+    /// 59 on the PC harness: a passcode task "@ the owner and say 这不是简简单单吗" ran as a phone task, whose prompt
+    /// had none of the WeChat steps; it sent 这不是简简单单 without the @ and reported failure.
+    func testPhoneTasksCarryTheWeChatMentionAndOwnerSteps() {
+        let task = WatchSettings.ownerTask(chat: "蓝海乐", task: "去群里@群主说这不是简简单单吗", phone: true)
+        for part in ["选择提醒的人", "拼音", "第一个", "一字不差", "只发一次"] { XCTAssertTrue(task.contains(part), part) }
+    }
+
     func testNineKeyKeyboardIsRecognized() {
         func row(_ labels: [String], y: Double) -> [CandidatePicker.Piece] {
             labels.enumerated().map { .init(text: $0.element, box: CGRect(x: 0.1 + 0.25 * Double($0.offset), y: y, width: 0.2, height: 0.04)) }
