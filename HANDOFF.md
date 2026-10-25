@@ -1,3 +1,9 @@
+## 2026-10-25 — build59＋韌體 v33/v34：PC 實測結論進 App（Claude Code）
+
+App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）；stale 不再讓每下都 aim（像素找游標在畫面變化時誤判，logs29）；quickSend 點輸入框不 aim；送出前清框（cmd+a、backspace：草稿、滑過鍵盤的亂碼）；watch 打字先試「拼音分詞每段 space 取首選、最後整句核對」（CandidatePicker.shows，跨行合併比對），對不上就清框改原貼上；九宮格鍵盤偵測並記錄提示（CandidatePicker.nineKey）；設定「發送日誌到電腦」（預設關）取代 Debug 專用的 ENABLE_APP_RELAY。
+韌體：v33 藍牙回角落 6 報告送完才回 ok；v34 App 的 log 只從有線口輸出、app 指令只收有線口（out/v34/v34-app.bin，經 COM6 寫 0x10000；v31/v32/v33 備份在 out/）。
+驗證：run 40154261139 設備 Release＋302 XCTest 全過（新增 Build59Tests 6 項、改寫 stale 測試）。IPA 5,091,483 bytes，SHA256 dbff3630633c55ea5a9b3a6295d788cc35157306922fc8fcedc5c0bd83dbdc1f，App/Widget 59，iOS 18，無內建 key；桌面只放 IPA，58 回收，51 保留。真機尚未驗證：需使用者安裝 59、鏡像切回小板、開「發送日誌到電腦」，再由 PC 經 COM6 看 App 日誌並下 app run。
+
 ## 2026-10-25 — build58：同一次執行不重發已發文字；角落小偏差不算撞邊（Claude Code）
 
 日誌28（build57）：校準 ±0.2%（修好）。主人任務「你现在给测试群发个消息我看一下」在測試群用發送鍵發了「你好」，又輸入再發一次，第三次輸入中被 loop 保護判失敗。build55 的發送防呆只在 sendReply 執行；主人任務沒有。另：瞄準返回鍵 (0.06,0.09) 找到游標 (0.034,0.069) 被當成撞邊 → 誤標校準失效。
