@@ -30,7 +30,7 @@ struct DiagnosticsView: View {
                 row("Capture source", feed.source.rawValue)
                 row("iOS", UIDevice.current.systemVersion)
                 if feed.isNative {
-                    row("Capture status", feed.nativeStatus)
+                    row("Capture status", feed.captureReadinessText)
                     row("Pixels", "\(Int(feed.size.width)) x \(Int(feed.size.height))")
                     row("Confirmation age", feed.confirmedAt > 0 ? String(format: "%.2f s", now() - feed.confirmedAt) : "–")
                 }

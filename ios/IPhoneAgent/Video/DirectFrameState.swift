@@ -52,4 +52,12 @@ struct DirectFrameState {
     private static func fresh(_ timestamp: Double, at: Double) -> Bool {
         timestamp.isFinite && at.isFinite && timestamp > 0 && timestamp <= at + 0.05 && at - timestamp <= 2
     }
+
+    /// Queue arrival is not capture time. Both values must come from the same system clock.
+    static func localTimestamp(sampleTime: Double, clockTime: Double, receivedAt: Double) -> Double? {
+        let age = clockTime - sampleTime
+        guard sampleTime.isFinite, sampleTime > 0, clockTime.isFinite, receivedAt.isFinite,
+              age >= -0.05, age <= 2 else { return nil }
+        return receivedAt - max(0, age)
+    }
 }

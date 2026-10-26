@@ -142,7 +142,7 @@ struct SeePage: View {
                            message: "通过系统整屏共享读取画面，继续使用现有无线控制。")
                 Panel {
                     VStack(alignment: .leading, spacing: Space.m) {
-                        Label(feed.nativeStatus, systemImage: streaming ? "checkmark.circle.fill" : "rectangle.on.rectangle")
+                        Label(feed.captureReadinessText, systemImage: streaming ? "checkmark.circle.fill" : "rectangle.on.rectangle")
                         Text("请选择共享整个屏幕。切到其他 App 后保持共享和手机解锁。")
                             .font(.subheadline).foregroundStyle(.secondary)
                         if feed.sharingActive {
@@ -150,6 +150,7 @@ struct SeePage: View {
                         } else {
                             Button(feed.requestingSharing ? "等待系统确认…" : "开始共享整个屏幕") { feed.startNativeSharing() }
                                 .disabled(feed.requestingSharing)
+                            if feed.requestingSharing { Button("取消等待") { feed.stopNativeSharing() } }
                         }
                         if let jpeg = feed.frame, let image = UIImage(data: jpeg) {
                             Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 240)

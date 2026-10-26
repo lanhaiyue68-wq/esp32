@@ -121,6 +121,12 @@ extension ScreenSource {
     private var ownerID = UUID()
     var isNative: Bool { source == .direct }
     var confirmedAt: Double { isNative ? directState.confirmedAt : updated }
+    var captureReadinessText: String {
+        if isNative && sharingActive && directState.hasFrame && !directState.usable(at: now()) {
+            return "超过 2 秒未收到系统画面确认，请停止后重新共享整个屏幕"
+        }
+        return nativeStatus
+    }
     var freshnessProofAt: Double { isNative ? directState.confirmedAt : capturedAt > 0 ? capturedAt : updated }
     @Published private(set) var frame: Data?
     @Published private(set) var size = CGSize.zero
@@ -252,7 +258,7 @@ extension ScreenSource {
             try Task.checkCancellation()
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
             guard sharingActive, now() < deadline else {
-                throw BlindError(reason: "直接取屏尚未就绪：\(nativeStatus)。请回 App 重新共享整个屏幕")
+                throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕")
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
@@ -263,7 +269,7 @@ extension ScreenSource {
         let t = now()
         return ["connected": .bool(device?.connected == true), "mirroring": .bool(mirroring),
                 "capture_source": .str(source.rawValue), "sharing_active": .bool(sharingActive),
-                "capture_status": .str(nativeStatus), "os_version": .str(UIDevice.current.systemVersion),
+                "capture_status": .str(captureReadinessText), "os_version": .str(UIDevice.current.systemVersion),
                 "confirmation_age_s": confirmedAt > 0 ? .num(max(0, t - confirmedAt)) : .null,
                 "stream_on": .bool(streamOn), "has_frame": .bool(frame != nil), "broken": .bool(broken),
                 "decoded_ms": .int(decodedBoardMs), "latest_board_ms": latestBoardMs.map { .int($0) } ?? .null,

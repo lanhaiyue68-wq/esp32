@@ -133,13 +133,17 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
               let raw = info.first?[.status] as? Int, let status = SCFrameStatus(rawValue: raw) else {
             unavailable("系统尚未提供完整画面"); return
         }
-        let clock = CMClockGetTime(CMClockGetHostTimeClock()).seconds
-        let pts = CMSampleBufferGetPresentationTimeStamp(sample).seconds
-        let age = clock - pts
-        guard age.isFinite, age >= -0.05, age <= 2 else {
+        let clock: Double, timestamp: Double
+        if let ticks = info.first?[.displayTime] as? UInt64, ticks > 0 {
+            clock = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+            timestamp = CMClockMakeHostTimeFromSystemUnits(ticks).seconds
+        } else {
+            clock = CMClockGetTime(stream.synchronizationClock ?? CMClockGetHostTimeClock()).seconds
+            timestamp = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+        }
+        guard let captured = DirectFrameState.localTimestamp(sampleTime: timestamp, clockTime: clock, receivedAt: now()) else {
             unavailable("系统画面已过期，等待新画面"); return
         }
-        let captured = now() - max(0, age)
         switch status {
         case .complete:
             guard let pixels = CMSampleBufferGetImageBuffer(sample) else { unavailable("画面缺少像素"); return }

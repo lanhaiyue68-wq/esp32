@@ -3,6 +3,13 @@ import XCTest
 @testable import CapturePolicy
 
 final class DirectFrameTests: XCTestCase {
+    func testCaptureTimeUsesSystemClockRatherThanQueueArrival() {
+        XCTAssertEqual(DirectFrameState.localTimestamp(sampleTime: 50, clockTime: 50.5, receivedAt: 100), 99.5)
+        XCTAssertNil(DirectFrameState.localTimestamp(sampleTime: 40, clockTime: 50.5, receivedAt: 100))
+        XCTAssertNil(DirectFrameState.localTimestamp(sampleTime: .nan, clockTime: 50.5, receivedAt: 100))
+        XCTAssertNil(DirectFrameState.localTimestamp(sampleTime: 60, clockTime: 50.5, receivedAt: 100))
+        XCTAssertNil(DirectFrameState.localTimestamp(sampleTime: 0, clockTime: 0, receivedAt: 100))
+    }
     func testFreshDisplayFrameCanAuthorizeAction() {
         let id = UUID(); var state = DirectFrameState(); state.begin(id, fullDisplay: true)
         XCTAssertTrue(state.complete(id, sequence: 1, capturedAt: 10, at: 10.1))
