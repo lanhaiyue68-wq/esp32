@@ -662,7 +662,10 @@ extension Pointer: Gestures {}
                     DebugLog.write("loop: back and forth twice; going on, the move back is refused from now on")
                 }
             }
-            if name == "done", let missing = inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps) {
+            let unsentReason: String? = endAfterSend != nil && unsent != nil
+                ? "The requested message still awaits sending. Inspect the current draft, correct any visible mistake, send once, then verify a NEW matching message before claiming done."
+                : nil
+            if name == "done", let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) {
                 doneRejected += 1
                 if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
                     record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])

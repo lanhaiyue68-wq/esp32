@@ -152,7 +152,7 @@ enum CandidatePicker {
     }
 
     static func shows(_ text: String, rows: [[Piece]]) -> Int {
-        shows(text, lines: aboveKeyboard(rows).map { $0.map(\.text).joined() })
+        shows(text, lines: aligned(aboveKeyboard(rows)).map { $0.map(\.text).joined() })
     }
 
     static func shows(_ text: String, lines: [String]) -> Int {
