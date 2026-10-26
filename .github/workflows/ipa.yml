@@ -20,7 +20,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Direct capture frame policy
         run: |
-          swiftc IPhoneAgent/Video/DirectFrameState.swift ../tools/direct-capture-tests/main.swift -o "$RUNNER_TEMP/direct-capture-tests"
+          testFramework="$(xcode-select -p)/Platforms/MacOSX.platform/Developer/Library/Frameworks"
+          swiftc -F "$testFramework" -Xlinker -rpath -Xlinker "$testFramework" IPhoneAgent/Video/DirectFrameState.swift ../tools/direct-capture-tests/main.swift -o "$RUNNER_TEMP/direct-capture-tests"
           "$RUNNER_TEMP/direct-capture-tests"
       - name: XcodeGen
         run: |
