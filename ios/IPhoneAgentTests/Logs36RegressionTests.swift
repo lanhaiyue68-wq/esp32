@@ -45,6 +45,42 @@ import XCTest
         XCTAssertEqual(CandidatePicker.shows("你好", lines: ["你好"]), 1)
     }
 
+    func testARealLeftwardMouseNudgeIsStillFound() throws {
+        let vision = VisionTests()
+        let point = try XCTUnwrap(Vision.pointer(vision.screen(pointer: (274, 856)), vision.screen(pointer: (262, 856)),
+                                                near: CGPoint(x: 0.5, y: 0.8), shift: -12.0 / 498))
+        XCTAssertEqual(point.x * 498, 274, accuracy: 3)
+        XCTAssertEqual(point.y * 1080, 856, accuracy: 3)
+    }
+
+    func testANewMatchingBubbleKeepsDuplicateSendProtection() {
+        let before = InputFieldVerificationTests.screen(input: "hello", candidate: "我")
+        let draft = InputFieldVerificationTests.screen(input: "hellop", candidate: "我")
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let after = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { _ in
+            UIImage(data: draft)!.draw(in: CGRect(x: 0, y: 0, width: 720, height: 1560))
+            ("hello" as NSString).draw(at: CGPoint(x: 450, y: 550),
+                withAttributes: [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white])
+        }.jpegData(compressionQuality: 0.9)!
+        XCTAssertNil(CandidatePicker.mistypedDraft("hello", before: before, after: after))
+    }
+
+    func testUnchangedOrUnreadableDraftDoesNotAuthorizeAnotherSend() {
+        let frame = InputFieldVerificationTests.screen(input: "hello", candidate: "我")
+        XCTAssertNil(CandidatePicker.mistypedDraft("hello", before: frame, after: frame))
+        XCTAssertNil(CandidatePicker.mistypedDraft("hello", before: frame, after: Data([0])))
+    }
+
+    func testAMessageStillAwaitingSendCannotBeClaimedAsComplete() async throws {
+        let actor = FakeModel { n in n == 1 ? "DO: type hello" : "DO: done Sent hello" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.endAfterSend = 2
+        _ = try await agent.step()
+        let ended = try await agent.step()
+        XCTAssertFalse(ended)
+        XCTAssertEqual(agent.steps.last?["action"], .str("done rejected"))
+    }
+
     func testLongChineseReportUsesExactPasteBeforeHomophonePronePinyin() async throws {
         let text = "已尝试发送你好，但未能确认任务完成，请先查看目标应用里的结果。"
         let screen = FakeScreen(); screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")

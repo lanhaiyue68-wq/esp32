@@ -134,6 +134,27 @@ enum Vision {
         if Double(xs.max()! - xs.min()!) > 0.15 * Double(w) || Double(ys.max()! - ys.min()!) > 0.07 * Double(h) {
             return nil  // not one compact spot
         }
+        // A blinking text caret is compact too (logs36). Movement must have both a departure and an arrival,
+        // and transport the same pixels horizontally. One disappearing shape must never steer the mouse.
+        let deltas = hits.map { x, y in Int(b.px[(y + top) * w + x + left]) - Int(a.px[(y + top) * w + x + left]) }
+        let minimum = max(8, hits.count / 10)
+        guard deltas.filter({ $0 > 30 }).count >= minimum,
+              deltas.filter({ $0 < -30 }).count >= minimum else { return nil }
+        let distance = abs(shift * Double(w)), direction = shift < 0 ? -1 : 1
+        guard distance >= 1 else { return nil }
+        var translated = false
+        // The saved mouse scale may be slightly wrong: allow that drift while requiring the commanded direction.
+        for length in max(1, Int(distance * 0.5))...max(1, Int(ceil(distance * 1.5))) {
+            let dx = direction * length
+            let matches = hits.filter { x, y in
+                let px = x + left, py = y + top
+                guard px + dx >= 0, px + dx < w, px - dx >= 0, px - dx < w else { return false }
+                return abs(Int(a.px[py * w + px]) - Int(b.px[py * w + px + dx])) <= 30
+                    && abs(Int(b.px[py * w + px]) - Int(a.px[py * w + px - dx])) <= 30
+            }.count
+            if matches * 3 >= hits.count * 2 { translated = true; break }
+        }
+        guard translated else { return nil }
         let cx = Double(xs.reduce(0, +)) / Double(hits.count) + Double(left)
         let cy = Double(ys.reduce(0, +)) / Double(hits.count) + Double(top)
         return CGPoint(x: cx / Double(w) - shift / 2, y: cy / Double(h))

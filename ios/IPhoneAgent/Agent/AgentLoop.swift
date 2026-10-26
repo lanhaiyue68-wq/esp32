@@ -133,6 +133,7 @@ extension Pointer: Gestures {}
     /// WeChat watch: text this run typed and then sent (Return, or a tap on 发送 at the bottom right). Typing it again
     /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
     private var sentTexts: Set<String> = []
+    private var sendCorrections = 0
     /// What this run sent, for a run that ended without "done" (build 67: an @ went out, the model kept looking until
     /// the step limit, and the owner was told "这个我没弄成").
     var sent: [String] { sentTexts.sorted() }
@@ -488,6 +489,7 @@ extension Pointer: Gestures {}
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
+        sendCorrections = 0
         quietSinceSend = 0
         pendingInput = inputToInspect
         if let inputToInspect { unsent = Self.typedKey(inputToInspect) }
@@ -620,6 +622,7 @@ extension Pointer: Gestures {}
         for (i, planned) in acts.enumerated() {
             var act = planned.act
             let name = act["action"]?.str ?? ""
+            var justSent: String?
             if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil, !["wait", "done", "fail"].contains(name) {
                 record(planned.shot, ["action": .str("send verification"), "reason": .str(Self.sendVerificationReason)])
                 return false
@@ -758,6 +761,7 @@ extension Pointer: Gestures {}
                 }
                 if let text = unsent, Self.sends(act) {
                     sentTexts.insert(text); unsent = nil; pendingInput = nil; quietSinceSend = 0
+                    justSent = text
                 }
                 lastActed = now()
                 let s = lastActed - started
@@ -779,6 +783,15 @@ extension Pointer: Gestures {}
                 // The rest of a type/send/navigation batch was planned before the send. Drop it and verify afresh.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                if let text = justSent, sendCorrections < 2, let before = seen, let after = screen?.frame,
+                   let draft = CandidatePicker.mistypedDraft(text, before: before, after: after) {
+                    sendCorrections += 1
+                    sentTexts.remove(text); unsent = text; pendingInput = text; quietSinceSend = 0
+                    record(after, ["action": .str("send missed"), "reason": .str(
+                        "The send tap added a letter to the SAME input field: \(draft). No new matching message is visible. "
+                        + "The message was not sent. Correct only the visible extra characters, then send once and verify. "
+                        + "Do not retype or replace text that is already correct.")])
+                }
                 return false
             }
             if startsDrawing, drawing.contains(name) {
@@ -893,7 +906,7 @@ extension Pointer: Gestures {}
     /// turns letters into digit keys ("nihao" came out as 你哄啊).
     private func typedQuickly(_ text: String, phone: Gestures) async throws -> Bool {
         // Repeatedly unsupported keyboards use paste first until the next watch starts.
-        guard pinyinMisses < 2, let start = await freshFrame() else { return false }
+        guard !Pasteboard.prefersExact(text), pinyinMisses < 2, let start = await freshFrame() else { return false }
         if CandidatePicker.nineKey(in: start) {
             pinyinMisses += 1
             DebugLog.write("type: the keyboard is 9-key pinyin; switch to the full pinyin keyboard (拼音-全键盘) in iOS Settings")

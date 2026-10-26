@@ -1359,7 +1359,7 @@ extension AppModel {
         }
         // Pinyin, first candidate per chunk, one look: ~1 s where the paste's trip through Lan Agent took ~5 s.
         func typedQuickly() async throws -> Bool {
-            guard agent.pinyinMisses < 2, let start = await look() else { return false }
+            guard !Pasteboard.prefersExact(text), agent.pinyinMisses < 2, let start = await look() else { return false }
             if CandidatePicker.nineKey(in: start) {
                 agent.pinyinMisses += 1
                 DebugLog.write("watch: quick send: 9-key pinyin keyboard; pasting (switch to 拼音-全键盘 in iOS Settings)")

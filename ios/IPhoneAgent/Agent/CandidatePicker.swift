@@ -67,7 +67,49 @@ enum CandidatePicker {
 
     private static func letterKeys(_ row: [Piece]) -> Bool {
         let labels = row.map(\.text).joined().lowercased().filter { !$0.isWhitespace }
-        return labels.count >= 6 && ["qwertyuiop", "asdfghjkl", "zxcvbnm"].contains { $0.contains(labels) }
+        guard labels.count >= 6 else { return false }
+        return ["qwertyuiop", "asdfghjkl", "zxcvbnm"].contains { keys in
+            if keys.contains(labels) { return true }
+            // OCR may omit a key. Keep the ordering and require keys spread across the screen, rather than
+            // rejecting the whole keyboard because one letter was missed (also broke candidate-strip removal).
+            guard keys.count - labels.count >= 0, keys.count - labels.count <= 2, row.count >= 4,
+                  let left = row.map(\.box.minX).min(), let right = row.map(\.box.maxX).max(), right - left > 0.5 else { return false }
+            var cursor = keys.startIndex
+            for letter in labels {
+                guard let index = keys[cursor...].firstIndex(of: letter) else { return false }
+                cursor = keys.index(after: index)
+            }
+            return true
+        }
+    }
+
+    /// A send tap hit a letter key: the same pre-send field now contains the requested text plus a short suffix.
+    /// Only this positive evidence can undo send protection. Empty/unreadable fields or a new matching bubble
+    /// cannot authorize another send. Geometry comes from the observed draft, not a particular app layout.
+    static func mistypedDraft(_ text: String, before: Data, after: Data) -> String? {
+        let expected = bare(text)
+        guard expected.count >= 2 else { return nil }
+        let old = aligned(aboveKeyboard(rows(in: before, top: 0.3, bottom: 1)))
+        let currentRows = rows(in: after, top: 0.3, bottom: 1)
+        guard keyboardUp(rows: currentRows), let field = old.last(where: { row in
+            bare(row.map(\.text).joined()) == expected && (row.first?.box.midY ?? 0) >= 0.35
+        }) else { return nil }
+        let box = field.map(\.box).reduce(CGRect.null) { $0.union($1) }
+        let current = aligned(aboveKeyboard(currentRows))
+        func sameLine(_ row: [Piece]) -> Bool {
+            guard let first = row.first else { return false }
+            return abs(first.box.midY - box.midY) < max(0.015, box.height)
+                && abs(first.box.minX - box.minX) < 0.05
+        }
+        guard let row = current.first(where: sameLine) else { return nil }
+        let actual = bare(row.map(\.text).joined())
+        guard actual.hasPrefix(expected) else { return nil }
+        let suffix = actual.dropFirst(expected.count)
+        guard (1...3).contains(suffix.count), suffix.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        let previousBubbles = shows(text, lines: old.filter { !sameLine($0) }.map { $0.map(\.text).joined() })
+        let currentBubbles = shows(text, lines: current.filter { !sameLine($0) }.map { $0.map(\.text).joined() })
+        guard currentBubbles <= previousBubbles else { return nil }
+        return row.map(\.text).joined()
     }
 
     /// Exclude the keyboard and its suggestion strip. A disappearing suggestion must not cancel out a new copy
@@ -116,7 +158,17 @@ enum CandidatePicker {
     static func shows(_ text: String, lines: [String]) -> Int {
         let probe = bare(text)
         guard probe.count >= 2 else { return 0 }
-        return bare(lines.joined()).components(separatedBy: probe).count - 1
+        let words = lines.map(bare).filter { !$0.isEmpty }
+        var count = 0
+        for start in words.indices {
+            var joined = ""
+            for word in words[start...] {
+                joined += word
+                if joined == probe { count += 1; break }
+                if !probe.hasPrefix(joined) { break }
+            }
+        }
+        return count  // whole OCR lines, including wrapped fields; “你好p” is not “你好”
     }
 
     /// The 9-key pinyin keyboard, by its key labels: it turns the board's letter keys into digit keys.
@@ -193,6 +245,12 @@ enum PasteHopResult { case filled, refused, lost }
 
 /// The general pasteboard, for pasting a reply.
 enum Pasteboard {
+    /// Long Chinese text has many homophones. Use the exact clipboard route before committing first IME
+    /// candidates; short greetings can still use the faster locally checked pinyin path.
+    static func prefersExact(_ text: String) -> Bool {
+        needed(text) && (text.count > 6 || text.contains("\n"))
+    }
+
     /// True when some character is not on a US keyboard (Chinese, full-width punctuation, emoji).
     static func needed(_ text: String) -> Bool {
         !text.unicodeScalars.allSatisfy { (32...126).contains($0.value) || $0 == "\n" || $0 == "\t" }
