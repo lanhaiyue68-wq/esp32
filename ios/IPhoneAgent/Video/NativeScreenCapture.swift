@@ -117,7 +117,7 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
     private let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
     private var sequence: UInt64 = 0
     private var lastRender = -Double.infinity
-    private var pending: (CVPixelBuffer, Double)?
+    private var pending: (CVPixelBuffer, Double, Int32)?
     private var pendingConfirmation: Double?
     private var lastProof = -Double.infinity
     private var flushScheduled = false
@@ -147,8 +147,10 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
         switch status {
         case .complete:
             guard let pixels = CMSampleBufferGetImageBuffer(sample) else { unavailable("画面缺少像素"); return }
+            let orientation = (info.first?[.videoOrientation] as? NSNumber)?.uint32Value ?? CGImagePropertyOrientation.up.rawValue
+            guard CGImagePropertyOrientation(rawValue: orientation) != nil else { unavailable("未知画面方向"); return }
             // Keep one newest frame; never build a conversion backlog.
-            pending = (pixels, captured)
+            pending = (pixels, captured, Int32(orientation))
             pendingConfirmation = nil
             if now() - lastRender >= 0.25 { flush() }
             else if !flushScheduled {
@@ -180,12 +182,12 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
     }
 
     private func flush() {
-        guard let (pixels, timestamp) = pending else { return }
+        guard let (pixels, timestamp, orientation) = pending else { return }
         pending = nil
         let began = now()
         lastRender = began; lastProof = began
         autoreleasepool {
-            let image = CIImage(cvPixelBuffer: pixels)
+            let image = CIImage(cvPixelBuffer: pixels).oriented(forExifOrientation: orientation)
             guard image.extent.width > 0, image.extent.height > image.extent.width else {
                 unavailable("请保持手机竖屏；横屏画面暂停操作"); return
             }

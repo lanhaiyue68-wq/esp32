@@ -123,7 +123,9 @@ struct WatchView: View {
             }
             if let problem { Text(verbatim: problem).foregroundStyle(.red) }
         } footer: {
-            Text("While watching, leave this iPhone to the agent and keep Screen Mirroring on. Waiting costs nothing; the model is asked only when WeChat changes or at the regular check.")
+            Text(app.feed.isNative
+                 ? "监听期间保持整屏共享和手机解锁。等待本身不调用模型，只在微信变化或定期检查时请求模型。"
+                 : "While watching, leave this iPhone to the agent and keep Screen Mirroring on. Waiting costs nothing; the model is asked only when WeChat changes or at the regular check.")
         }
     }
 

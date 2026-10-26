@@ -133,7 +133,7 @@ import UIKit
     private func videoCalibrate(noTaps: Bool) async {
         let diagnosis = noTaps ? Self.noTapsText : nil
         guard mirroring else { return failed(diagnosis ?? String(localized: "Mirroring is off, so the pointer can't be seen.")) }
-        guard FrameMode.current == .stream else {  // the video finder needs the live stream
+        guard app.feed.isNative || FrameMode.current == .stream else {
             app.say("calibration: video fallback skipped in snap mode")
             return failed(diagnosis ?? String(localized: "Pointer not found on screen."))
         }
@@ -156,7 +156,7 @@ import UIKit
     }
 
     static var noTapsText: String {
-        String(localized: "Clicks aren't reaching the screen — is AssistiveTouch on and the board plugged into this iPhone?")
+        String(localized: "Clicks aren't reaching the screen. Check AssistiveTouch and the existing pointer control connection.")
     }
 
     func finished(_ error: Double) {
