@@ -1,6 +1,6 @@
 # Validation guide
 
-1. Dispatch ipa.yml on codex/fix-logs32-task-execution; inspect the exact run SHA and complete results.
+1. Push the source to main in private winesettbumpas609-boop/esp32-iphone-agent-build to trigger ipa.yml; inspect the exact run SHA and complete results. The original draft branch remains codex/fix-logs32-task-execution; its repository owner currently cannot start Actions because of billing/quota.
 2. Confirm all Logs36RegressionTests, general input and learning visibility tests pass along with the full old suite.
 3. In the signed build75, open Home > Learning and Settings > Learning. Old lessons, if any, must display with their true sources; an empty store must not show example learning.
 4. Run a task, then inspect its recent learning status. An eligible review may add up to three real lessons; skipped/failed reviews must say why without inventing lessons.

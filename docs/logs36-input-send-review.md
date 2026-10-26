@@ -26,4 +26,6 @@ Observed sequence in trace `20261027-060307`:
 
 Route: `systematic-debugging` for evidence and root cause; `test-driven-development` for reproductions, following the shared skill routing reminder. The repair is a bounded bug fix to the existing capture feature, not a new subsystem.
 
-Initial reproductions are in `ios/IPhoneAgentTests/Logs36RegressionTests.swift`. Production changes and final CI results are pending. No raw user chat or screenshot is part of these tests.
+Reproductions are in `ios/IPhoneAgentTests/Logs36RegressionTests.swift`; the shared Unicode/multiline and learning cases are in `LearningVisibilityTests.swift`. Pointer pairing, exact full-text matching, split-row handling, bounded positive-evidence draft recovery and unsent completion guards are implemented. The general text/learning extension is documented in `specs/003-reliable-input-learning` and `docs/build75-reliable-input-learning.md`.
+
+Final source a98364cf8df689bd7ca2a342ce54e25084e0202a passed [run40418981465](https://github.com/winesettbumpas609-boop/esp32-iphone-agent-build/actions/runs/40418981465): device Release compilation, 393 simulator tests and eight direct-frame policy tests, all successful. No raw user chat or screenshot is part of these tests. Physical-phone operation is not established by CI.

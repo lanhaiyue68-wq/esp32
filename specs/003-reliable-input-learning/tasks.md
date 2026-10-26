@@ -7,8 +7,8 @@
 - [x] T005 [US2] Extend LessonBook.swift with observable provenance, usage and bounded review status; integrate RunSession.swift and AgentLoop.swift.
 - [x] T006 [US2] Expose real ExperienceStore entries and add native LearningView.swift linked from HomeView.swift, SettingsView.swift and PrivacyViews.swift; localize labels.
 - [x] T007 [US3] Add per-lesson disable/delete and clear controls with late-review protection; test persistence and retrieval exclusions.
-- [ ] T008 Run complete device build, simulator suite and workflow policy tests on exact final SHA; repair actual failures.
-- [ ] T009 Converge spec/plan/tasks against implementation, review the changes, update project checkpoints and draft PR.
-- [ ] T010 Verify artifact build/version/hash and deliver build75 unsigned IPA on E:/桌面; state physical-phone validation limits.
+- [x] T008 Run complete device build, simulator suite and workflow policy tests on exact final SHA; repair actual failures.
+- [x] T009 Converge spec/plan/tasks against implementation, review the changes, update project checkpoints and draft PR.
+- [x] T010 Verify artifact build/version/hash and deliver build75 unsigned IPA on E:/桌面; state physical-phone validation limits.
 
 Dependencies: T002 before T003; T004 before T005; T005 before T006/T007; T008 after all implementation; T009/T010 after passing verification. Work is sequential in this session; no automatic sub-agent delegation.
