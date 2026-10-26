@@ -98,6 +98,9 @@ import UIKit
         agent.directStart = true
         agent.keyboardGuard = true
         agent.endAfterSend = 2
+        // Keep this send-completion fixture on its fake keyboard path. Exact-paste routing for long
+        // Chinese is covered separately; the simulator's real UIPasteboard must not choose this path.
+        agent.pasteHop = { _ in .refused }
         let ended = expectation(description: "agent completed")
         agent.onFinish = { ended.fulfill() }
         try agent.start("去测试群发这不是简简单单吗")

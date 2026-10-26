@@ -883,8 +883,11 @@ extension Pointer: Gestures {}
                 trace?.write(screen?.frame, kind: "input verification", ["method": .str("paste"), "verified": .bool(false)])
                 throw InputNeedsVerification(expected: text, remaining: "", fieldMayBeComplete: true)
             } else {
-                DebugLog.write("type: the pasteboard refused the text; typing")
+                DebugLog.write("type: the pasteboard refused the text")
             }
+        }
+        guard !Pasteboard.requiresPaste(text) else {
+            throw DeviceError(message: "Exact paste is unavailable for this text. Keyboard fallback cannot preserve it safely; no replacement text was typed.")
         }
         var rest = text
         while true {

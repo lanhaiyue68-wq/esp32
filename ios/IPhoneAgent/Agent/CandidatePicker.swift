@@ -145,7 +145,7 @@ enum CandidatePicker {
         shows(text, in: jpeg)
     }
 
-    /// How often the whole of `text` (letters and digits) shows above the keyboard, the rows joined so a
+    /// How often the whole of `text` shows above the keyboard, the rows joined so a
     /// wrapped input box counts: typed text is confirmed when this goes up.
     static func shows(_ text: String, in jpeg: Data) -> Int {
         shows(text, rows: rows(in: jpeg, top: 0.3, bottom: 1))
@@ -156,9 +156,16 @@ enum CandidatePicker {
     }
 
     static func shows(_ text: String, lines: [String]) -> Int {
-        let probe = bare(text)
+        func visibleText(_ value: String) -> String {
+            // OCR may split a wrapped field or use half-width punctuation. Operators, punctuation and
+            // letter case still carry meaning; removing them would verify "!=" as "==" or "Send!" as "Send?".
+            let folded = value.precomposedStringWithCanonicalMapping
+                .folding(options: .widthInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+            return String(folded.filter { !$0.isWhitespace })
+        }
+        let probe = visibleText(text)
         guard probe.count >= 2 else { return 0 }
-        let words = lines.map(bare).filter { !$0.isEmpty }
+        let words = lines.map(visibleText).filter { !$0.isEmpty }
         var count = 0
         for start in words.indices {
             var joined = ""
@@ -248,8 +255,13 @@ enum Pasteboard {
     /// Choose by keyboard capability, for every task. Enter/Tab can submit or move focus rather than insert
     /// code whitespace; unsupported scripts must never be dropped or transliterated into different content.
     @MainActor static func prefersExact(_ text: String) -> Bool {
+        requiresPaste(text) || (needed(text) && text.count > 6)
+    }
+
+    /// These characters cannot safely fall back to keyboard input if exact paste is unavailable.
+    /// Long Chinese may still use verified pinyin, but Enter/Tab and unsupported scripts cannot.
+    @MainActor static func requiresPaste(_ text: String) -> Bool {
         if text.contains("\n") || text.contains("\r") || text.contains("\t") { return true }
-        if needed(text) && text.count > 6 { return true }
         return Pointer.typingRuns(text).contains { run in
             run.kind != .chinese && (try? Pointer.keyboardChunks(run.text)) == nil
         }

@@ -44,15 +44,16 @@ import XCTest
     }
 
     func testUnavailableExactPasteDoesNotTypeCodeAsPrematureEnterKeys() async {
-        let text = "let a = 1\nprint(a)"
-        let encoded = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
-        let model = FakeModel { _ in "DO: type \(encoded)" }
-        let phone = FakeGestures()
-        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: model, planner: model, trace: nil)
-        agent.pasteHop = { _ in .refused }
-        do { _ = try await agent.step(); XCTFail("must stop before unsafe keyboard input") }
-        catch { XCTAssertTrue(error is DeviceError) }
-        XCTAssertTrue(phone.calls.isEmpty)
+        for text in ["let a = 1\nprint(a)", "name\tvalue", "🎉", "こんにちは", "مرحبا"] {
+            let encoded = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
+            let model = FakeModel { _ in "DO: type \(encoded)" }
+            let phone = FakeGestures()
+            let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: model, planner: model, trace: nil)
+            agent.pasteHop = { _ in .refused }
+            do { _ = try await agent.step(); XCTFail("must stop before unsafe keyboard input: \(text)") }
+            catch { XCTAssertTrue(error is DeviceError) }
+            XCTAssertTrue(phone.calls.isEmpty)
+        }
     }
 
     func testActualLessonReferencesAreCountedAndPersisted() throws {
@@ -154,6 +155,7 @@ import XCTest
         let model = FakeModel { _ in "DO: wait" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: model, planner: model, trace: nil)
         agent.lessons = book
+        agent.task = "Set an alarm"
         _ = try await agent.step()
         _ = try await agent.step()
         XCTAssertEqual(book.lessons.first?.uses, 1)
