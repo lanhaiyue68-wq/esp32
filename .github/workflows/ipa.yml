@@ -11,13 +11,17 @@ on:
 
 jobs:
   ipa:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     defaults:
       run:
         working-directory: ios
     steps:
       - uses: actions/checkout@v5
+      - name: Direct capture frame policy
+        run: |
+          swiftc IPhoneAgent/Video/DirectFrameState.swift ../tools/direct-capture-tests/main.swift -o "$RUNNER_TEMP/direct-capture-tests"
+          "$RUNNER_TEMP/direct-capture-tests"
       - name: XcodeGen
         run: |
           xcodebuild -version
