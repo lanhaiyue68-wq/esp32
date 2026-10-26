@@ -2,8 +2,10 @@ import XCTest
 @testable import IPhoneAgent
 
 @MainActor final class DirectCaptureTests: XCTestCase {
+    private var retainedDevice: DirectDevice?
     private func ready() -> (VideoFeed, DirectDevice, UUID) {
         let device = DirectDevice(), feed = VideoFeed(source: .direct), id = UUID()
+        retainedDevice = device
         feed.device = device
         feed.receiveDirect(.began(id))
         feed.receiveDirect(.frame(id, 1, Data([1, 2, 3]), 360, 780, now(), 2))
@@ -24,7 +26,7 @@ import XCTest
     func testBoardMirrorStatusAndPixelsCannotOverrideDirectSource() {
         let (feed, _, _) = ready()
         feed.mirroring = false
-        feed.status(BoardStatus(ap: "idle", up: 0, video_ms: 0))
+        feed.status(BoardStatus(up: 0, video_ms: 0, ap: "idle"))
         feed.receive(Data([1, 2, 3]))
         feed.show(Data([9]), width: 12, height: 20)
         XCTAssertEqual(feed.frame, Data([1, 2, 3]))
@@ -80,6 +82,8 @@ import XCTest
         XCTAssertEqual(feed.updated, changed)
         XCTAssertEqual(feed.capturedAt, captured)
         XCTAssertGreaterThanOrEqual(feed.confirmedAt, boundary)
+        let fresh = await feed.fresh(since: captured, timeout: 0.01)
+        XCTAssertEqual(fresh, feed.frame)
     }
 
     func testMissingNativeSharingDoesNotFallBackToBoardSnapshot() async {

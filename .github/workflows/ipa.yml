@@ -43,6 +43,8 @@ jobs:
           build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
           echo "app: $app, build $build"
           /usr/libexec/PlistBuddy -c 'Print UIBackgroundModes' "$app/Info.plist"
+          # A guarded source file must not silently disappear under an older SDK.
+          otool -L "$app/IPhoneAgent" | grep ScreenCaptureKit
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
           (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
           shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256

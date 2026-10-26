@@ -231,6 +231,12 @@ import UIKit
         if metrics.suspensions > before { DebugLog.write(String(format: "app: resumed after %.0f s suspended", gap)) }
         if agent.running, now() - lastStreamLog >= 10 {
             lastStreamLog = now()
+            if feed.isNative {
+                DebugLog.write(String(format: "capture: direct, converted %.1f fps, pixel age %.2f s, proof age %.2f s, %@",
+                                      metrics.fps, feed.capturedAt > 0 ? now() - feed.capturedAt : -1,
+                                      feed.confirmedAt > 0 ? now() - feed.confirmedAt : -1, feed.nativeStatus))
+                return
+            }
             let s = board.status
             DebugLog.write(String(format: "stream: decoded %.1f fps, BLE in %.0f kbps (board %.0f kbps out, AirPlay %.0f kbps %.1f fps), frame age %.1f s, drops %d",
                                   metrics.fps, metrics.bleKbps, s?.ble?.kbps ?? 0, s?.kbps ?? 0, s?.fps ?? 0,

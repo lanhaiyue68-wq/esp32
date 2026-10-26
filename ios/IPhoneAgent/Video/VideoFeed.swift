@@ -8,6 +8,7 @@ import UIKit
     var frame: Data? { get }
     var updated: Double { get }
     var capturedAt: Double { get }
+    var freshnessProofAt: Double { get }
     var aspect: Double { get }
     /// After a gesture that ended at `since`: wait until the screen shows its result (and fetch it, in snap mode).
     func afterAction(since: Double) async
@@ -76,6 +77,7 @@ enum CaptureSource: String, CaseIterable {
 }
 
 extension ScreenSource {
+    var freshnessProofAt: Double { capturedAt > 0 ? capturedAt : updated }
     func afterAction(since: Double) async { await settled() }
     func requireFrame(after: Double? = nil) async throws {
         try Task.checkCancellation()
@@ -99,7 +101,7 @@ extension ScreenSource {
     /// The first frame captured after `since` (received, when capture times are unknown), or nil if none in time.
     func fresh(since: Double, timeout: Double = 0.8) async -> Data? {
         let deadline = now() + timeout
-        while (capturedAt > 0 ? capturedAt : updated) <= since {
+        while freshnessProofAt <= since {
             if Task.isCancelled { return nil }
             if now() > deadline { return nil }
             try? await Task.sleep(nanoseconds: 20_000_000)
@@ -119,6 +121,7 @@ extension ScreenSource {
     private var ownerID = UUID()
     var isNative: Bool { source == .direct }
     var confirmedAt: Double { isNative ? directState.confirmedAt : updated }
+    var freshnessProofAt: Double { isNative ? directState.confirmedAt : capturedAt > 0 ? capturedAt : updated }
     @Published private(set) var frame: Data?
     @Published private(set) var size = CGSize.zero
     @Published private(set) var note = ""  // last decoder problem, shown in Diagnostics

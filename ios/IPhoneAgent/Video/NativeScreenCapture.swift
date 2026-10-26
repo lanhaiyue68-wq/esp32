@@ -118,6 +118,8 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
     private var sequence: UInt64 = 0
     private var lastRender = -Double.infinity
     private var pending: (CVPixelBuffer, Double)?
+    private var pendingConfirmation: Double?
+    private var lastProof = -Double.infinity
     private var flushScheduled = false
 
     init(generation: UUID, deliver: @escaping (DirectCaptureEvent) -> Void) {
@@ -143,6 +145,7 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
             guard let pixels = CMSampleBufferGetImageBuffer(sample) else { unavailable("画面缺少像素"); return }
             // Keep one newest frame; never build a conversion backlog.
             pending = (pixels, captured)
+            pendingConfirmation = nil
             if now() - lastRender >= 0.25 { flush() }
             else if !flushScheduled {
                 flushScheduled = true
@@ -151,8 +154,13 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
                 }
             }
         case .idle:
-            flush() // The last changed pixels must precede their idle confirmation.
-            sequence += 1; deliver(.idle(generation, sequence, captured))
+            if pending != nil {
+                // The scheduled flush publishes the last changed pixels before this proof.
+                pendingConfirmation = captured
+            } else if now() - lastProof >= 0.25 {
+                lastProof = now()
+                sequence += 1; deliver(.idle(generation, sequence, captured))
+            }
         case .stopped:
             unavailable("系统已停止提供画面，请重新共享整个屏幕")
         case .blank, .suspended, .started:
@@ -163,7 +171,7 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
     }
 
     private func unavailable(_ reason: String) {
-        pending = nil
+        pending = nil; pendingConfirmation = nil
         sequence += 1; deliver(.unavailable(generation, sequence, reason))
     }
 
@@ -171,7 +179,7 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
         guard let (pixels, timestamp) = pending else { return }
         pending = nil
         let began = now()
-        lastRender = began
+        lastRender = began; lastProof = began
         autoreleasepool {
             let image = CIImage(cvPixelBuffer: pixels)
             guard image.extent.width > 0, image.extent.height > image.extent.width else {
@@ -188,6 +196,10 @@ private final class DirectScreenOutput: NSObject, SCStreamOutput {
             guard CGImageDestinationFinalize(destination) else { unavailable("画面编码失败"); return }
             sequence += 1
             deliver(.frame(generation, sequence, data as Data, cg.width, cg.height, timestamp, (now() - began) * 1000))
+            if let confirmation = pendingConfirmation, confirmation >= timestamp {
+                sequence += 1; deliver(.idle(generation, sequence, confirmation))
+            }
+            pendingConfirmation = nil
         }
     }
 }
