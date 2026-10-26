@@ -138,10 +138,12 @@ extension Pointer: Gestures {}
     var sent: [String] { sentTexts.sorted() }
     /// A single-message task gets this many read-only looks to verify a send; no confirmation means failure. nil: off.
     var endAfterSend: Int?
-    /// Quick pinyin that came out wrong, across runs (WeChat watch resets it when a watch starts).
+    /// Unsupported quick-Pinyin keyboards seen across runs; OCR uncertainty never disables normal typing.
     var pinyinMisses = 0
     private var quietSinceSend = 0
     private var pendingInput: String?
+    /// Text already entered by a quick send, handed over for visual inspection without retyping.
+    var inputToInspect: String?
     /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
     /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
     /// next to the box, which the tap check above missed, typed the text again, and left it in the box).
@@ -487,7 +489,8 @@ extension Pointer: Gestures {}
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         quietSinceSend = 0
-        pendingInput = nil
+        pendingInput = inputToInspect
+        if let inputToInspect { unsent = Self.typedKey(inputToInspect) }
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
@@ -889,9 +892,10 @@ extension Pointer: Gestures {}
     /// Uncertain text stays in the field for the next model look. Never on the 9-key pinyin keyboard, which
     /// turns letters into digit keys ("nihao" came out as 你哄啊).
     private func typedQuickly(_ text: String, phone: Gestures) async throws -> Bool {
-        // Twice wrong in this watch (a keyboard the pinyin does not suit): the paste goes first, ~8 s saved a send.
+        // Repeatedly unsupported keyboards use paste first until the next watch starts.
         guard pinyinMisses < 2, let start = await freshFrame() else { return false }
         if CandidatePicker.nineKey(in: start) {
+            pinyinMisses += 1
             DebugLog.write("type: the keyboard is 9-key pinyin; switch to the full pinyin keyboard (拼音-全键盘) in iOS Settings")
             return false
         }

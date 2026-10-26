@@ -78,6 +78,33 @@ import XCTest
         XCTAssertEqual(agent.steps.last?["action"], .str("compose"))
     }
 
+    func testQuickSendHandoffCanSendExistingTextWithoutRetypingIt() async {
+        let actor = FakeModel { n in
+            if n == 1 { return "DO: type 你好" }
+            return n == 2 ? "DO: key enter" : "DO: done New requested message is visible"
+        }
+        let phone = FakeGestures()
+        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.inputToInspect = "你好"; agent.directStart = true; agent.endAfterSend = 5
+        await agent.run()
+        XCTAssertEqual(phone.calls, ["key"])
+        XCTAssertEqual(agent.sent, ["你好"])
+        XCTAssertEqual(agent.steps.last?["action"], .str("done"))
+        XCTAssertTrue(agent.steps.contains { $0["action"] == .str("blocked") })
+    }
+
+    func testInspectionAllowsAnExplicitCorrectionBeforeTypingAgain() async {
+        let actor = FakeModel { n in
+            n == 1 ? "DO: key cmd+a\nDO: type 你好\nDO: key enter" : "DO: done Corrected message is visible"
+        }
+        let phone = FakeGestures()
+        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.inputToInspect = "你好"; agent.directStart = true; agent.endAfterSend = 5
+        await agent.run()
+        XCTAssertEqual(phone.calls, ["key", "type", "key"])
+        XCTAssertEqual(agent.steps.last?["action"], .str("done"))
+    }
+
     static func screen(input: String, candidate: String) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
         return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in

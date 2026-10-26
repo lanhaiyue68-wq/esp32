@@ -325,6 +325,16 @@ enum WatchSettings {
     }
     static let tapSendPlan = "1. Tap 发送 next to the input box.\n2. When the message shows as a green bubble, done."
 
+    static func inspectInputTask(chat: String, text: String) -> String {
+        """
+        在微信会话“\(chat)”里，程序已经尝试输入“\(text)”，本机文字识别尚未确认。
+        先看当前输入框和会话标题，不能把键盘候选词当成输入框文字。
+        如果输入框完整等于“\(text)”，直接发送一次，不要删除、重打或粘贴。
+        只有亲眼看到错字或输入框为空时才明确修正；不要因为识别不确定而清空重输。
+        发送后确认这条新消息出现在当前会话才完成，不要把之前的同文气泡当成刚发送的消息。
+        """
+    }
+
     /// The steps of sendTask: fixed, so no planner call.
     static func sendPlan(chat: String, back: Bool) -> String {
         """
@@ -1306,6 +1316,13 @@ extension AppModel {
                 let ok = await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
                 if ok, back { watchListReturn.pending = chat }
                 return ok
+            case .needsInspection:
+                agent.endAfterSend = 5
+                defer { agent.endAfterSend = nil }
+                let ok = await watchRun(WatchSettings.inspectInputTask(chat: chat, text: text), stepLimit: 12,
+                                        directStart: true, sendTo: chat, inspectInput: text) != nil
+                if ok, back { watchListReturn.pending = chat }
+                return ok
             case .notTried: break
             }
         }
@@ -1317,7 +1334,7 @@ extension AppModel {
         return ok
     }
 
-    enum QuickSend { case sent, inBox, notTried }
+    enum QuickSend { case sent, inBox, needsInspection, notTried }
 
     /// A reply without an agent run, once any send showed where the input box is (WatchSettings.inputBox), in the chat
     /// whose title is on screen. Each step is checked on the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
@@ -1344,6 +1361,7 @@ extension AppModel {
         func typedQuickly() async throws -> Bool {
             guard agent.pinyinMisses < 2, let start = await look() else { return false }
             if CandidatePicker.nineKey(in: start) {
+                agent.pinyinMisses += 1
                 DebugLog.write("watch: quick send: 9-key pinyin keyboard; pasting (switch to 拼音-全键盘 in iOS Settings)")
                 return false
             }
@@ -1352,11 +1370,8 @@ extension AppModel {
             var shown = await look()
             if let s = shown, CandidatePicker.shows(text, in: s) <= before { shown = await look() }
             if let s = shown, CandidatePicker.shows(text, in: s) > before { return true }
-            try await pointer.key("cmd+a")
-            try await pointer.key("backspace")
-            agent.pinyinMisses += 1
-            DebugLog.write("watch: quick send: the pinyin did not come out as the text; cleared it, pasting (miss \(agent.pinyinMisses))")
-            return false
+            traces.write(shown, kind: "input verification", ["method": .str("quick pinyin"), "verified": .bool(false)])
+            throw InputNeedsVerification(expected: text, remaining: "", fieldMayBeComplete: true)
         }
         // Cmd+V, iOS's paste prompt answered, and true when the text newly shows (looked at twice).
         func paste() async throws -> Bool {
@@ -1401,21 +1416,12 @@ extension AppModel {
                     DebugLog.write("watch: quick send: destination not verified after paste hop; the agent finds it")
                     return .notTried
                 }
-                // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and
-                // no keyboard is on screen, the box cleared first (logs(20): the space bar again).
+                // An uncertain paste stays in the field for inspection; never clear and paste it a second time.
                 landed = try await paste()
-                if !landed, let now = await look(), !CandidatePicker.keyboardUp(in: now) {
-                    try await pointer.key("cmd+a")
-                    try await pointer.key("backspace")
-                    try await pointer.tap(box.x, box.y)
-                    landed = try await paste()
-                }
             }
             guard landed else {
-                try await pointer.key("cmd+a")
-                try await pointer.key("backspace")
-                DebugLog.write("watch: quick send: the paste did not show the text; cleared it, the agent sends")
-                return .notTried
+                traces.write(feed.frame, kind: "input verification", ["method": .str("quick paste"), "verified": .bool(false)])
+                return .needsInspection
             }
             try await pointer.key("enter")
             try? await Task.sleep(nanoseconds: 700_000_000)
@@ -1431,6 +1437,9 @@ extension AppModel {
             DebugLog.write("watch: quick send: sent and seen in \(chat)")
             watchHandled += 1
             return .sent
+        } catch let input as InputNeedsVerification where input.fieldMayBeComplete {
+            DebugLog.write("watch: quick send: kept the field for visual inspection")
+            return .needsInspection
         } catch {
             DebugLog.write("watch: quick send failed: \(error.localizedDescription)")
             return .notTried
@@ -1489,7 +1498,8 @@ extension AppModel {
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
-                          directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil) async -> String? {
+                          directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil,
+                          inspectInput: String? = nil) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
@@ -1518,6 +1528,8 @@ extension AppModel {
             return WatchSettings.sendRefusal(chat: chat, inChat: inChat,
                                              shown: frame.map { CandidatePicker.count(text, in: $0) } ?? 0, baseline: &baseline)
         }
+        agent.inputToInspect = inspectInput
+        defer { agent.inputToInspect = nil }
         await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
                   directStart: directStart, keyboardGuard: true)
