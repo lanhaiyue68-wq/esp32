@@ -56,6 +56,7 @@ extension Pointer: Gestures {}
     /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
     var lessons: LessonBook?
     private var learnedThrough = -1
+    private var lessonRun = UUID().uuidString
     /// Plans dropped in a row because the screen moved while the model answered. A plan goes ahead when the
     /// model, looking at a newer screen, chose the same spot again (a live clock icon, a video or an animated
     /// background never hold still), or after two drops when nothing changed where it lands; after five, the
@@ -303,6 +304,8 @@ extension Pointer: Gestures {}
         defer { reporting?.onProgress = nil }
         let reply: ChatResult
         do {
+            let quoted = lessons?.relevant(to: task).filter { system.contains($0.text) } ?? []
+            lessons?.markUsed(quoted, run: trace?.dir?.lastPathComponent ?? lessonRun, task: task)
             reply = try await llm.chat(system: system, text: prompt, image: frame,
                                        maxTokens: Self.maxTokens[role] ?? 1000, temperature: temperature)
         } catch {
@@ -496,7 +499,7 @@ extension Pointer: Gestures {}
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
-        lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
+        lessonRun = UUID().uuidString
         if !applied.isEmpty || !Prompts.userRules.isEmpty {
             trace?.write(kind: "lessons", ["lessons": .arr(applied.map { .str($0.text) }), "rules_md": .bool(!Prompts.userRules.isEmpty)])
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
@@ -858,7 +861,7 @@ extension Pointer: Gestures {}
             }
             return DebugLog.write("type: typed as pinyin and seen in the field")
         }
-        if Pasteboard.needed(text), !pasteHopOff {
+        if Pasteboard.needed(text) || Pasteboard.prefersExact(text), !pasteHopOff {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
             if hop == .lost {  // no further typing or sending when the app switch lost its destination
                 pasteHopOff = true
@@ -1096,7 +1099,10 @@ extension Pointer: Gestures {}
             // further so the ends overlap.
             try await phone.drag(circle(p("x"), p("y"), p("r"), aspect: screen?.aspect ?? 9 / 19.5,
                                         extra: p("r") < 0.06 ? 0.25 : 0), hold: true)
-        case "type": if fastText { try await typeFast(a["text"]?.str ?? "") } else { try await phone.type(a["text"]?.str ?? "") }
+        case "type":
+            let text = a["text"]?.str ?? ""
+            if fastText || Pasteboard.prefersExact(text) { try await typeFast(text) }
+            else { try await phone.type(text) }
         case "key": try await phone.key(a["combo"]?.str ?? "")
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()

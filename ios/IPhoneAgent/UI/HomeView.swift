@@ -33,6 +33,11 @@ struct HomeView: View {
                 if let stage = app.recovering { RecoveryPanel(app: app, stage: stage) }
                 if agent.running || app.runMood != nil { liveSection }
                 taskSection
+                Section {
+                    NavigationLink { LearningView(app: app) } label: {
+                        Label("Learning", systemImage: "brain.head.profile")
+                    }
+                }
                 intentSection
             }
             .listStyle(.insetGrouped)

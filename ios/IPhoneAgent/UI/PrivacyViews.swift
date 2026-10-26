@@ -65,11 +65,12 @@ struct PrivacySettingsView: View {
             Section {
                 Toggle("Learn from operation feedback", isOn: $learning)
                 Text("Remembered cases: \(learnedCount)").foregroundStyle(.secondary)
+                NavigationLink("View lessons and learning activity") { LearningView(app: app) }
                 Button("Clear learned cases", role: .destructive) {
                     app.agent.experience?.clear(); app.agent.lessons?.clear(); learnedCount = 0
                 }
             } footer: {
-                Text("Stored on this iPhone only: up to 128 tap positions (256 KB) and up to 200 lessons in words (400 KB): your notes, accepted AI hints and the app's own review of each run, each kept with the task it came from, so words from a task stay too. Lessons for similar tasks are sent to the model with the request. No screenshots are kept. Live screens are always checked before acting.")
+                Text("Learning stores no screenshots. Up to 200 lessons (400 KB), 128 feedback cases (256 KB) and 24 review records (32 KB) are kept locally. Browsing this page makes no model requests.")
             }
             if keep { export }
         }

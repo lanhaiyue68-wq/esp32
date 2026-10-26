@@ -56,8 +56,10 @@ Actions:
   path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing; joins are straight)
   path smooth X1 Y1 X2 Y2 X3 Y3 …  (the same stroke as a smooth curve through the points)
   circle X Y R              (draw a circle centered at X Y; R is the radius in x units)
-  type TEXT                 (tap the input field first; Chinese is fine, it goes in through the phone's pinyin
-                             keyboard; never press capslock yourself, type switches to English for Latin text)
+  type TEXT                 (tap the input field first; never press capslock yourself)
+  type "JSON string"        (use JSON quoting for exact text, code, leading/trailing spaces, quotes, emoji or
+                             multiple lines; escape newline as \n, tab as \t, quote as \" and backslash as \\;
+                             keep it on ONE DO line. The app chooses verified typing or exact paste.)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
   home | back | wait
   replan                    (the plan no longer fits the screen)
@@ -75,5 +77,6 @@ use candidate paging or the on-screen keyboard when needed. Do not blindly press
 or retype the same composition. Inspect the committed text before continuing with the
 history's `remaining` text. If exact text cannot be selected or verified, ask for help
 or report failure; never report successful input based only on the Pinyin spelling.
-Unsupported emoji/scripts require the on-screen keyboard. Do not resend an entire
+Unsupported emoji/scripts use exact paste when available; if paste is unavailable, inspect the on-screen keyboard.
+Do not resend an entire
 partly typed message after a timeout; inspect the existing field and enter only what is missing.

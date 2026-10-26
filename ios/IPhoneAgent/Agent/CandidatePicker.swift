@@ -245,10 +245,14 @@ enum PasteHopResult { case filled, refused, lost }
 
 /// The general pasteboard, for pasting a reply.
 enum Pasteboard {
-    /// Long Chinese text has many homophones. Use the exact clipboard route before committing first IME
-    /// candidates; short greetings can still use the faster locally checked pinyin path.
-    static func prefersExact(_ text: String) -> Bool {
-        needed(text) && (text.count > 6 || text.contains("\n"))
+    /// Choose by keyboard capability, for every task. Enter/Tab can submit or move focus rather than insert
+    /// code whitespace; unsupported scripts must never be dropped or transliterated into different content.
+    @MainActor static func prefersExact(_ text: String) -> Bool {
+        if text.contains("\n") || text.contains("\r") || text.contains("\t") { return true }
+        if needed(text) && text.count > 6 { return true }
+        return Pointer.typingRuns(text).contains { run in
+            run.kind != .chinese && (try? Pointer.keyboardChunks(run.text)) == nil
+        }
     }
 
     /// True when some character is not on a US keyboard (Chinese, full-width punctuation, emoji).

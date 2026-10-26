@@ -1,6 +1,666 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Learning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自主学习"
+          }
+        }
+      }
+    },
+    "Learning is unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习记录暂不可用"
+          }
+        }
+      }
+    },
+    "Automatic lessons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动学习的经验"
+          }
+        }
+      }
+    },
+    "Your corrections and accepted hints" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的纠正与采纳的建议"
+          }
+        }
+      }
+    },
+    "Measured feedback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作反馈"
+          }
+        }
+      }
+    },
+    "Related lessons are included in later task requests. This is local experience memory, not model-weight training. A reference does not prove success." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相关经验会带入后续任务请求。这是本地经验记忆，不是重新训练模型；引用过不代表操作已成功。"
+          }
+        }
+      }
+    },
+    "Learning is off. Existing records remain visible, but are neither collected nor included in new requests." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习已关闭。已有记录仍可查看，但不再收集新记录，也不再带入新的请求。"
+          }
+        }
+      }
+    },
+    "Clear all learning records" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空全部学习记录"
+          }
+        }
+      }
+    },
+    "Clear all learning records?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空全部学习记录？"
+          }
+        }
+      }
+    },
+    "Learning stores no screenshots. Up to 200 lessons (400 KB), 128 feedback cases (256 KB) and 24 review records (32 KB) are kept locally. Browsing this page makes no model requests." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习库不保存截图。本地最多保留 200 条文字经验（400 KB）、128 条操作反馈（256 KB）和 24 条复盘记录（32 KB）。查看此页不调用模型。"
+          }
+        }
+      }
+    },
+    "Saved lessons, feedback and review records will be removed. A review already in progress cannot restore them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将移除已保存的经验、反馈和复盘记录；进行中的复盘结果不能把它们恢复。"
+          }
+        }
+      }
+    },
+    "No lessons yet. Completed tasks may produce evidence-based lessons; your review corrections are also saved here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有经验。完成的任务可能提炼出有证据的经验；你在任务复盘中写下的纠正也会保存在这里。"
+          }
+        }
+      }
+    },
+    "Automatic review" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动复盘"
+          }
+        }
+      }
+    },
+    "Your correction or accepted hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的纠正或采纳的建议"
+          }
+        }
+      }
+    },
+    "Disabled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停用"
+          }
+        }
+      }
+    },
+    "Referenced in %lld tasks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已被 %lld 次任务引用"
+          }
+        }
+      }
+    },
+    "Saved lessons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存的经验"
+          }
+        }
+      }
+    },
+    "No review records yet. New tasks will show whether review ran, saved a lesson, was skipped or failed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有复盘记录。新任务会显示是否进行了复盘、保存经验、跳过或失败。"
+          }
+        }
+      }
+    },
+    "Saved or reinforced: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存或强化：%lld 条"
+          }
+        }
+      }
+    },
+    "Recent learning activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近学习记录"
+          }
+        }
+      }
+    },
+    "No measured feedback yet. Unconfirmed taps and your explicit operation reviews appear here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有操作反馈。未确认生效的点击，以及你明确标记的操作对错会显示在这里。"
+          }
+        }
+      }
+    },
+    "Corrected position: %lld, %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "纠正后位置：%lld，%lld"
+          }
+        }
+      }
+    },
+    "Observations: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "观察次数：%lld"
+          }
+        }
+      }
+    },
+    "Operation feedback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作反馈"
+          }
+        }
+      }
+    },
+    "Unconfirmed means the action lacked confirmation. These cases are evidence for checking a live screen, not permission to replay a saved position." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“未确认”表示没有确认操作生效。这些记录用于辅助检查当前画面，不能直接照着旧坐标点击。"
+          }
+        }
+      }
+    },
+    "Use in related future tasks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于后续相关任务"
+          }
+        }
+      }
+    },
+    "Changes apply to future requests; requests already sent cannot be changed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改对后续请求生效；已经发出的请求无法更改。"
+          }
+        }
+      }
+    },
+    "Learned or reinforced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习或强化时间"
+          }
+        }
+      }
+    },
+    "Reinforced by tasks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源任务次数"
+          }
+        }
+      }
+    },
+    "Where it came from" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习来源"
+          }
+        }
+      }
+    },
+    "Older records have no reference counter." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "旧版记录没有引用次数。"
+          }
+        }
+      }
+    },
+    "Last referenced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近引用时间"
+          }
+        }
+      }
+    },
+    "Not referenced yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未被引用"
+          }
+        }
+      }
+    },
+    "Actual references" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实际引用记录"
+          }
+        }
+      }
+    },
+    "Counted when the lesson is included in a model request, once per task. This does not mean the operation succeeded." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经验实际放入模型请求时才计数，每次任务只计一次。这不代表操作已经成功。"
+          }
+        }
+      }
+    },
+    "Delete lesson" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这条经验"
+          }
+        }
+      }
+    },
+    "Lesson no longer exists" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条经验已不存在"
+          }
+        }
+      }
+    },
+    "Lesson details" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经验详情"
+          }
+        }
+      }
+    },
+    "Delete this lesson?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这条经验？"
+          }
+        }
+      }
+    },
+    "Open source task review" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看来源任务复盘"
+          }
+        }
+      }
+    },
+    "Source log is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源日志已清理或不可用。"
+          }
+        }
+      }
+    },
+    "Reviewing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在复盘"
+          }
+        }
+      }
+    },
+    "Evidence saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存经验"
+          }
+        }
+      }
+    },
+    "No reliable new lesson" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可靠的新经验"
+          }
+        }
+      }
+    },
+    "Review skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过复盘"
+          }
+        }
+      }
+    },
+    "Review failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复盘失败"
+          }
+        }
+      }
+    },
+    "Review interrupted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复盘已中断"
+          }
+        }
+      }
+    },
+    "Unconfirmed operation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未确认生效的操作"
+          }
+        }
+      }
+    },
+    "Confirmed by you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你确认正确的操作"
+          }
+        }
+      }
+    },
+    "Rejected by you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你标记错误的操作"
+          }
+        }
+      }
+    },
+    "Corrected by you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你纠正过的操作"
+          }
+        }
+      }
+    },
+    "View lessons and learning activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看经验与学习记录"
+          }
+        }
+      }
+    },
+    "Review interrupted; no new lesson was saved." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复盘已中断，没有保存新的经验。"
+          }
+        }
+      }
+    },
+    "Saved or reinforced evidence from this task." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存或强化来自此任务的经验。"
+          }
+        }
+      }
+    },
+    "No reliable new lesson was found." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到可靠的新经验。"
+          }
+        }
+      }
+    },
+    "Task did not finish; no successful route was inferred." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务未完成，不把推测的路线当成成功经验。"
+          }
+        }
+      }
+    },
+    "No executed phone action to review." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可复盘的手机执行动作。"
+          }
+        }
+      }
+    },
+    "Too many stale or waiting steps to learn a reliable route." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过期或等待步骤过多，无法提炼可靠路线。"
+          }
+        }
+      }
+    },
+    "Reviewing the recorded task steps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在复盘本次任务记录的步骤。"
+          }
+        }
+      }
+    },
+    "Review failed; check the model connection. No new lesson was saved." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复盘失败，请检查模型连接；没有保存新的经验。"
+          }
+        }
+      }
+    },
     "Logs and Cache" : {
       "extractionState" : "manual",
       "localizations" : {

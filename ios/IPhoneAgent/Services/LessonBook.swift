@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// What the user taught in Review, kept as their own sentences and handed to the planner and the actor on
@@ -11,8 +12,8 @@ import Foundation
 /// of that run wrong in Review drops them: the user's correction replaces what the model believed.
 /// A lesson learned again is not stored twice: the kept one is reinforced (`seen`). At the cap, the self-learned
 /// lessons that no run has used or re-learned for longest go first, not simply the oldest.
-@MainActor final class LessonBook {
-    struct Lesson: Codable, Equatable {
+@MainActor final class LessonBook: ObservableObject {
+    struct Lesson: Codable, Equatable, Identifiable {
         var id: String      // "<run>:review:<step>", "<run>:hint:<n>", "<run>:auto:<n>": re-learning a run replaces them
         var task: String
         var text: String
@@ -22,13 +23,30 @@ import Foundation
         var used: Date? = nil      // when a run was last given it
         var seen: Int? = nil       // how many runs drew it (nil = 1)
         var from: [String]? = nil  // the runs (groups) that drew it; correcting any of them drops it
+        var disabled: Bool? = nil
+        var uses: Int? = nil
+        var lastRun: String? = nil
+        var lastTask: String? = nil
+    }
+
+    enum ReviewState: String, Codable { case reviewing, learned, noLesson, skipped, failed, interrupted }
+    struct ReviewEvent: Codable, Identifiable {
+        var id: String
+        var task: String
+        var date: Date
+        var state: ReviewState
+        var reason: String
+        var retained: Int
     }
 
     static let limit = 200
     private let file: URL?
     private let clock: () -> Date
-    private(set) var lessons: [Lesson] = []
-    var enabled = true { didSet { epoch += 1 } }
+    @Published private(set) var lessons: [Lesson] = []
+    @Published private(set) var activity: [ReviewEvent] = []
+    @Published var enabled = true {
+        didSet { if oldValue != enabled { invalidateReviews() } }
+    }
     var count: Int { lessons.count }
     /// Bumped by clear() and the learning switch: a run review that started before cannot write afterwards.
     private(set) var epoch = 0
@@ -44,6 +62,11 @@ import Foundation
 
     init(file: URL?, clock: @escaping () -> Date = Date.init) {
         self.file = file; self.clock = clock
+        if let journal = activityFile, let data = try? Data(contentsOf: journal), data.count <= 32_000,
+           let saved = try? JSONDecoder().decode([ReviewEvent].self, from: data) {
+            activity = Array(saved.prefix(24))
+            interruptReviews()
+        }
         guard let file, let data = try? Data(contentsOf: file) else { return }
         if data.count <= Self.readLimit, let saved = try? JSONDecoder().decode([Lesson].self, from: data) {
             lessons = Array(saved.sorted { $0.updated > $1.updated }.prefix(Self.limit))
@@ -64,7 +87,55 @@ import Foundation
         }
     }
 
-    func clear() { lessons = []; epoch += 1; save() }
+    func clear() { lessons = []; activity = []; epoch += 1; save(); saveActivity() }
+
+    func setEnabled(_ enabled: Bool, id: String) {
+        guard let i = lessons.firstIndex(where: { $0.id == id }), (lessons[i].disabled != true) != enabled else { return }
+        lessons[i].disabled = !enabled
+        invalidateReviews()
+        save()
+    }
+
+    func remove(id: String) {
+        guard lessons.contains(where: { $0.id == id }) else { return }
+        lessons.removeAll { $0.id == id }
+        invalidateReviews()
+        save()
+    }
+
+    private var activityFile: URL? { file?.appendingPathExtension("activity.json") }
+
+    private func invalidateReviews() { epoch += 1; interruptReviews() }
+
+    private func interruptReviews() {
+        var changed = false
+        for i in activity.indices where activity[i].state == .reviewing {
+            activity[i].state = .interrupted
+            activity[i].reason = "Review interrupted; no new lesson was saved."
+            changed = true
+        }
+        if changed { saveActivity() }
+    }
+
+    func recordReview(_ run: String, task: String, state: ReviewState, reason: String, retained: Int = 0,
+                      epoch: Int? = nil) {
+        guard enabled, !run.isEmpty, epoch == nil || epoch == self.epoch, !revoked.contains(run + ":auto") else { return }
+        activity.removeAll { $0.id == run }
+        activity.insert(ReviewEvent(id: run, task: String(task.prefix(Self.taskChars)), date: clock(), state: state,
+                                    reason: String(reason.prefix(160)), retained: max(0, min(Self.limit, retained))), at: 0)
+        activity = Array(activity.prefix(24))
+        saveActivity()
+    }
+
+    private func saveActivity() {
+        guard let file = activityFile else { return }
+        var data = (try? JSONEncoder().encode(activity)) ?? Data()
+        while data.count > 32_000, !activity.isEmpty {
+            activity.removeLast()
+            data = (try? JSONEncoder().encode(activity)) ?? Data()
+        }
+        try? data.write(to: file, options: .atomic)
+    }
 
     static func aboutFreeformPen(_ text: String) -> Bool {
         let app = text.contains("无边记") || text.localizedCaseInsensitiveContains("freeform")
@@ -108,11 +179,17 @@ import Foundation
     static let autoLimit = 60
 
     /// The lessons a run was given: they count as in use, so the cap drops the ones nobody needs any more first.
-    func markUsed(_ picked: [Lesson]) {
+    func markUsed(_ picked: [Lesson], run: String = "", task: String = "") {
         let ids = Set(picked.map(\.id))
         guard enabled, !ids.isEmpty else { return }
         let t = clock()
-        for i in lessons.indices where ids.contains(lessons[i].id) { lessons[i].used = t }
+        for i in lessons.indices where ids.contains(lessons[i].id) && lessons[i].disabled != true {
+            guard run.isEmpty || lessons[i].lastRun != run else { continue }
+            lessons[i].used = t
+            lessons[i].uses = min(1_000_000, max(0, lessons[i].uses ?? 0) + 1)
+            lessons[i].lastRun = run.isEmpty ? nil : String(run.prefix(160))
+            lessons[i].lastTask = task.isEmpty ? nil : String(task.prefix(Self.taskChars))
+        }
         save()
     }
 
@@ -168,6 +245,7 @@ import Foundation
 
     func forget(group: String) {
         revoked.insert(group)
+        invalidateReviews()
         let before = lessons.count
         lessons.removeAll { $0.id.hasPrefix(group + ":") || ($0.from ?? []).contains(group) }
         if lessons.count != before { save() }
@@ -226,8 +304,12 @@ import Foundation
     /// so does the user correcting that run meanwhile.
     func learnFromRun(_ run: String, task: String, lessons found: [String], epoch: Int? = nil) {
         let group = run + ":auto"
-        guard epoch == nil || epoch == self.epoch, !revoked.contains(group) else { return }
+        guard enabled, epoch == nil || epoch == self.epoch, !revoked.contains(group) else { return }
         learn(group: group, task: task, items: found.enumerated().map { ("\($0.offset)", $0.element) }, auto: true)
+        let retained = lessons.filter { $0.id.hasPrefix(group + ":") || ($0.from ?? []).contains(group) }.count
+        recordReview(run, task: task, state: retained > 0 ? .learned : .noLesson,
+                     reason: retained > 0 ? "Saved or reinforced evidence from this task." : "No reliable new lesson was found.",
+                     retained: retained, epoch: epoch)
     }
 
     /// Accepted "Optimize with AI" hints: they now reach every similar task, saved as an intent or not.
@@ -239,7 +321,8 @@ import Foundation
     /// equals), then at most four self-learned ones.
     func relevant(to task: String, max: Int = 10) -> [Lesson] {
         guard enabled else { return [] }
-        return ranked(task, lessons.filter { $0.auto != true }, max: max) + ranked(task, lessons.filter { $0.auto == true }, max: 4)
+        let active = lessons.filter { $0.disabled != true }
+        return ranked(task, active.filter { $0.auto != true }, max: max) + ranked(task, active.filter { $0.auto == true }, max: 4)
     }
 
     private func ranked(_ task: String, _ pool: [Lesson], max: Int) -> [Lesson] {

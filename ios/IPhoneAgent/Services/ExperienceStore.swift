@@ -1,16 +1,17 @@
+import Combine
 import Foundation
 
 /// Local case memory, not model-weight training. Only measured uncertainty and explicit human verdicts
 /// enter it: a screen change or a model's `done` is never a positive training label.
-@MainActor final class ExperienceStore {
+@MainActor final class ExperienceStore: ObservableObject {
     static let enabledKey = "experienceLearningV1"
-    var enabled = true
+    @Published var enabled = true
     enum Verdict: String, Codable { case unconfirmed, userConfirmed, userRejected, userCorrected }
     struct Move: Codable, Equatable {
         var kind: String
         var values: [Int]
     }
-    struct Entry: Codable {
+    struct Entry: Codable, Identifiable {
         var id: String
         var goal: UInt64
         var tokens: [UInt64]
@@ -27,7 +28,7 @@ import Foundation
     }
     private let file: URL?
     private let clock: () -> Date
-    private var entries: [Entry] = []
+    @Published private(set) var entries: [Entry] = []
     var count: Int { entries.count }
 
     init(file: URL?, clock: @escaping () -> Date = Date.init) {

@@ -59,6 +59,9 @@ struct SettingsView: View {
                     Text("Demo data fakes a board, a finished run and the whole setup, to try the app without hardware. Takes effect after you quit and reopen the app.")
                 }
                 Section {
+                    NavigationLink { LearningView(app: app) } label: {
+                        SettingsLabel(title: "Learning", symbol: "brain.head.profile", color: .purple)
+                    }
                     NavigationLink { PrivacySettingsView(app: app, runs: app.runs) } label: {
                         SettingsLabel(title: "Privacy", symbol: "hand.raised.fill", color: .blue)
                     }

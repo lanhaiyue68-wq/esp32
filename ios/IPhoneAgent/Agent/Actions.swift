@@ -24,7 +24,11 @@ enum Actions {
         let name = head.lowercased()
         guard let keys = actions[name] else { throw ParseError(message: "unknown action: \(line.prefix(100))") }
         if let first = keys.first, textArgs.contains(first) {
-            let text = rest.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let raw = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A JSON string keeps code indentation, literal quotes and escaped newlines in one DO line.
+            // Plain legacy commands remain literal: a path containing \n must not become a newline.
+            let decoded = raw.hasPrefix("\"") ? try? JSONDecoder().decode(String.self, from: Data(raw.utf8)) : nil
+            let text = decoded ?? raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             return ["action": .str(name), first: .str(text)]
         }
         let tokens = matches(#"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"#, in: rest)

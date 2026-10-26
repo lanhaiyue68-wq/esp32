@@ -285,20 +285,34 @@ extension AppModel {
     func learnFromRun(_ run: String, task: String, steps: [JObject]) async {
         // Only from a run that got there: after a failed one the model can only guess the right way, and those guesses
         // ("tap the pencil at the bottom right") taught the next runs to repeat the mistake (traces(44)).
-        guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty,
-              steps.last?["action"]?.str == "done",
-              steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }),
-              LessonBook.worthReviewing(steps) else { return }
+        guard let lessons = agent.lessons, lessons.enabled, !MockMode.on, !run.isEmpty else { return }
+        let skipped: String?
+        if steps.last?["action"]?.str != "done" {
+            skipped = "Task did not finish; no successful route was inferred."
+        } else if !steps.contains(where: { !StepText.notMoves.contains($0["action"]?.str ?? "") }) {
+            skipped = "No executed phone action to review."
+        } else if !LessonBook.worthReviewing(steps) {
+            skipped = "Too many stale or waiting steps to learn a reliable route."
+        } else { skipped = nil }
+        if let skipped {
+            lessons.recordReview(run, task: task, state: .skipped, reason: skipped)
+            return
+        }
         let epoch = lessons.epoch  // a clear, the switch or a correction while the model answers wins over the reply
+        lessons.recordReview(run, task: task, state: .reviewing, reason: "Reviewing the recorded task steps.", epoch: epoch)
         do {
             let reply = try await settings.client("planner").chat(system: LessonBook.reflectionPrompt,
                                                                   text: LessonBook.reflectionInput(task: task, steps: steps),
                                                                   image: nil, maxTokens: 600, temperature: 0.2)
             let found = LessonBook.parseLessons(reply.text)
             lessons.learnFromRun(run, task: task, lessons: found, epoch: epoch)
-            if runID == run { traces.write(kind: "learned", ["lessons": .arr(found.map { .str($0) })]) }
-            DebugLog.write("learned: \(found.count) lesson(s) from run \(run)")
+            guard lessons.enabled, epoch == lessons.epoch else { return }
+            let retained = lessons.activity.first { $0.id == run }?.retained ?? 0
+            if runID == run { traces.write(kind: "learned", ["retained": .int(retained)]) }
+            DebugLog.write("learned: \(retained) retained lesson(s) from run \(run)")
         } catch {
+            lessons.recordReview(run, task: task, state: .failed,
+                                 reason: "Review failed; check the model connection. No new lesson was saved.", epoch: epoch)
             DebugLog.write("learning after the run failed: \(error.localizedDescription)")
         }
     }
