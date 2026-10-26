@@ -189,3 +189,8 @@ App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）�
 - build68：真機 67 跑通但 3 分 44 秒；第二任務已發出卻回報「没弄成」→ 改成如實回報＋發出後 5 步收工。311 XCTest 全過（run 40192373741）。IPA SHA256 872bf9d4e6afbf7fed49293c0e964435a2154602968c24692529c5d35c5d8bb7。
 - build69：真機 68 @群主任務正確完成與回報；回報走回私聊改為先點返回。311 XCTest 全過（run 40194087422）。IPA SHA256 d8c6b5220ed5ec8c1b71144c0e86c998cf5bf027eaf9a3c7a94b6a0a782a980e。
 - build70：redo＝上個任務、拼音錯兩次改貼上、每步動作進日誌。312 XCTest 全過（run 40196349637）。IPA SHA256 7256aa20393c591f0baff1c44b2036d1471dea94f4ae3479ad3585cfaf594f92。
+
+
+## 2026-10-26 — logs(32) repair / build71
+
+Implemented cross-app paste restoration/verification, merged keyboard OCR recognition, concrete retry inheritance, bounded Home recovery, and read-only send confirmation. Source commit: `400d296`. Unsigned Release device build and 340 XCTest passed: https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40323966996. Verified build71 IPA copied to `E:/桌面/Lan-Agent-build71-unsigned.ipa`; build70 preserved. Signing/install and physical iPhone retest remain. See HANDOFF.md for exact paths and evidence.

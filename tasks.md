@@ -113,3 +113,11 @@
 - [x] 设备Release、274XCTest、IPA校验、桌面交付与51回退保护。
 - [ ] 真机确认首次守候出发、停止不续跑、清理保留配置及实际速度。
 - [ ] 逐步对照主画面误认白板的点击落点与模型判断。
+
+
+## 2026-10-26 — logs(32) repair / build71
+
+- [x] Diagnose task traces and identify wrong-app paste, lost retry goal, Home loop and duplicate sends.
+- [x] Implement targeted fixes and regression tests.
+- [x] Compile unsigned Release, pass all 340 XCTest, validate IPA version/CRC/SHA256, and place build71 on desktop.
+- [ ] Sign/install build71 through the existing user tool and physically retest Claude/「重新去做」/single-send behavior.

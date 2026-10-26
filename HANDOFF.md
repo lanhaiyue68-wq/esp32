@@ -1,3 +1,24 @@
+## 2026-10-26 — build71：修复 logs(32) 的跨 App 输入、重试与重复发送
+
+目标：执行「去 Claude 说一句你好」时不因中文输入回退切到微信；「没有做好，重新去做」继承原目标；完成核验不再次发消息。
+
+根因证据：日志包含 `paste hop: pasteboard filled, back in WeChat`，Claude 键盘可见却被拦截；重试只剩笼统指令；Home 和重规划记录掩盖无效动作。原始日志留在本机，未纳入仓库。
+
+实现：
+- `App/PasteHop.swift`、新增 `App/PasteRoundTrip.swift`：记录源画面，反向撤销最多两次 App 切换；新画面的文字与布局均匹配才允许粘贴，目标不明暂停或终止。`Agent/Pointer.swift` 提供反向切换。
+- `Agent/CandidatePicker.swift`：识别 OCR 合并的 QWERTY 键盘行。
+- `App/WatchMode.swift`：准确继承重试目标；无历史目标就要求完整指令；粘贴后重核会话；未确认成功时不声称完成。
+- `Agent/AgentLoop.swift`：跨重规划保留真实动作结果，Home 失败只尝试一次键盘替代；单条消息发送后只读核验；发送命令成功后才记录尝试。
+- 新增 `LoopSafetyTests`、`PasteRoundTripTests`、`KeyboardRecognitionTests`、`WatchTaskRetryTests`，调整 `TapAccuracyTests`。
+
+验证：代码提交 `400d2961c45193edac68a57d56a25e2193b64cd4`，macOS unsigned Release 编译成功，340 XCTest / 0 失败，CI https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40323966996。此前 RED run 40322733053 重现粘贴协调器与键盘识别的预期失败。135 Swift 文件语法检查、`git diff --check` 通过。
+
+交付：`E:/桌面/Lan-Agent-build71-unsigned.ipa`，5,124,102 bytes，SHA256 `566c038119b57f8885c91c4e5d6a3e1f76473fb9c80c8a1cf8671b428cc04e31`。App/Widget 均 build71；ZIP CRC 和 CI 校验值一致；build70 保留。
+
+路由与工具：本轮先读共享 skill-routing-reminder；debug 路由命中 systematic-debugging、test-driven-development、verification-before-completion；长日志和代码检查使用本地 Headroom。使用 gh/GitHub 现有 macOS CI、tree-sitter Swift 和 Python ZIP/plist 校验。无新插件、系统配置或设备固件改动。
+
+剩余验证：IPA 未签名、未安装到真机。需沿用现有签名工具安装，再测试 Claude 输入、原句重试和只发送一次；真实 App 切换及画面识别仍需手机确认。Windows 本机不具备 Xcode。
+
 ## 2026-10-25 — build64：回報在手機上走回會話；回列表先看兩次（Claude Code）
 
 計時（build62/63 即時日誌）：回報約 50 s（任務後 agent 一步步找主人私聊）、回列表約 10 s/3 次模型、開會話約 10 s（兩個同名「蓝海乐」；使用者已改唯一備註）。

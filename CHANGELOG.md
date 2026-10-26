@@ -1,5 +1,12 @@
 # Changelog
 
+## Build 71 (2026-10-26)
+
+- Restore and verify the original app after a clipboard hop; stop typing when the destination cannot be verified.
+- Recognize joined QWERTY OCR labels and preserve the concrete goal for bare retry requests.
+- Bound unchanged Home recovery, verify a single send without sending again, and report unconfirmed outcomes accurately.
+- Unsigned device build and all 340 simulator tests passed (CI 40323966996); physical iPhone verification pending.
+
 ## Unreleased (main)
 
 - No computer: the ESP32 is the AirPlay receiver (ported from UxPlay) with its own hotspot, and talks to a new

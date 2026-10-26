@@ -102,3 +102,10 @@ GREEN 证据：工作流 40051367358，57e066330899ff5882cedf8d852045ab56dddfe0�
 - 已修复本轮编译错误：AboutView不能直接修改AppModel.log(private(set))，通过AppModel.clearLog()清空。
 - 构建环境：旧仓库付款/额度阻止已记录；用户授权的新私人仓库运行成功。
 - 未解决/需真机：模型将主画面误认白板画布；未验证实际点击落点、完整任务正确性或速度。51保护保留，53为测试版。
+
+
+## 2026-10-26 — logs(32) / build71
+
+Fixed in source (400d296): clipboard fallback hardcoded WeChat; OCR-joined QWERTY labels not recognized; bare retry「重新去做」lost original goal; planner records hid repeated unchanged gestures; automatic done after unverified send; failed send gestures recorded as sent. 340 XCTest pass and unsigned device build succeeds.
+
+Known verification gap: no physical iPhone install/test yet. Clipboard restore requires matching fresh readable source content and layout; if the screen changes or cannot be verified it deliberately stops without pasting. No claim of universal task success.
