@@ -15,7 +15,10 @@ import Foundation
                 hops += 1
                 if await waitForAgent(), isActive() { break }
             }
-            guard !Task.isCancelled, isActive() else { return .lost }
+            guard !Task.isCancelled, isActive() else {
+                DebugLog.write("paste hop: Lan Agent not reached after \(hops) switches")
+                return .lost
+            }
             let filled = put(text)
             // Undo every switch, including switches through an unrelated app. Filling the clipboard alone is
             // insufficient: Cmd+V is allowed only when a fresh frame confirms the original destination.
@@ -33,17 +36,20 @@ import Foundation
     static func matchesSource(_ before: Data, _ after: Data) -> Bool {
         guard let a = Vision.image(before), let b = Vision.image(after),
               a.width == b.width, a.height == b.height else { return false }
-        // Ignore the status bar and keyboard. Match readable content as well as layout: two dark chat apps can
+        // Ignore the status bar, input field and keyboard. Match readable content as well as layout: two dark chat apps can
         // otherwise have almost identical coarse images. Unreadable screens cannot authorize a paste.
         func words(_ data: Data) -> String {
-            CandidatePicker.bare(CandidatePicker.rows(in: data, top: 0.06, bottom: 0.6)
+            CandidatePicker.bare(CandidatePicker.rows(in: data, top: 0.06, bottom: 0.48)
                 .flatMap { $0 }.map(\.text).joined()).lowercased()
         }
         let source = words(before)
-        guard source.count >= 2, source == words(after) else { return false }
+        guard source.count >= 2, source == words(after) else {
+            DebugLog.write("paste hop: stable content text not matched")
+            return false
+        }
         let x = Vision.gray(a, 24, 48).px, y = Vision.gray(b, 24, 48).px
         var total = 0, changed = 0, count = 0
-        for row in 3..<29 {
+        for row in 3..<23 {
             for col in 0..<24 {
                 let i = row * 24 + col, difference = abs(Int(x[i]) - Int(y[i]))
                 total += difference
@@ -51,6 +57,8 @@ import Foundation
                 count += 1
             }
         }
-        return Double(total) / Double(count) <= 8 && Double(changed) / Double(count) <= 0.05
+        let matched = Double(total) / Double(count) <= 8 && Double(changed) / Double(count) <= 0.05
+        if !matched { DebugLog.write("paste hop: stable content layout not matched") }
+        return matched
     }
 }

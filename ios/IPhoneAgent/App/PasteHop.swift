@@ -6,7 +6,14 @@ import UIKit
 extension AppModel {
     func hopToPaste(_ text: String) async -> PasteHopResult {
         guard UIApplication.shared.applicationState == .background else { return .lost }
-        do { try await feed.requireFrame(after: nil) } catch { return .lost }
+        // The caller may just have cleared a failed Pinyin attempt. A merely recent frame can still contain that
+        // temporary text, which made the same chat look different after returning from Lan Agent (logs33).
+        let sourceAt = now()
+        await feed.afterAction(since: sourceAt)
+        do { try await feed.requireFrame(after: sourceAt) } catch {
+            DebugLog.write("paste hop: source frame freshness unverified")
+            return .lost
+        }
         guard let source = feed.frame, Vision.image(source) != nil else { return .lost }
         pasteHopping = true
         defer { pasteHopping = false }
@@ -26,7 +33,10 @@ extension AppModel {
             await self.waitForState(.active, within: 2.5)
         }, put: { Pasteboard.put($0) }, verifySource: {
             await self.feed.afterAction(since: returnedAt)
-            do { try await self.feed.requireFrame(after: returnedAt) } catch { return false }
+            do { try await self.feed.requireFrame(after: returnedAt) } catch {
+                DebugLog.write("paste hop: return frame freshness unverified")
+                return false
+            }
             guard UIApplication.shared.applicationState == .background, let returned = self.feed.frame else { return false }
             return PasteRoundTrip.matchesSource(source, returned)
         })

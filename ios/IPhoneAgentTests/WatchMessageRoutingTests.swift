@@ -60,4 +60,18 @@ import XCTest
         let screen = try XCTUnwrap(WatchReport.screen(#"{"title":"蓝海乐","group":false,"messages":[{"sender":"蓝海乐","kind":"file","text":"Lan-Agent-build71-unsigned.ipa","mine":false},{"sender":"蓝海乐","kind":"text","text":"帮我看一下这个文件","mine":false}]}"#))
         XCTAssertEqual(screen.lines.map(\.text), ["[文件]", "帮我看一下这个文件"])
     }
+
+    func testVisionReadHistoryAndPasscodeVerificationReachTheOriginalTaskTogether() throws {
+        let raw = try XCTUnwrap(WatchReport.screen(##"{"title":"蓝海乐","group":false,"messages":[{"text":"Lan-Agent-build71-unsigned.ipa","mine":false},{"text":"#8642 去 claude 说一句你好","mine":false}]}"##))
+        let screen = WatchSettings.masked(WatchReport.privateSenders(raw, chat: "蓝海乐"), pin: "#8642")
+        let history = [WatchReport.Line(sender: "蓝海乐", text: "[文件]", mine: false)]
+        let fresh = WatchReport.new(screen.lines, history: history)
+        let due = fresh.map { line in
+            ReadMessage(chat: "蓝海乐", group: screen.group, sender: line.sender, text: line.text,
+                        verified: screen.proven.contains(WatchReport.proofKey(line)))
+        }.filter { WatchSettings.fires($0, rules) }
+        XCTAssertEqual(due.count, 1)
+        XCTAssertTrue(try XCTUnwrap(due.first).verified)
+        XCTAssertEqual(WatchSettings.phoneRequest(WatchSettings.phoneSources(due, rules), rules), "去 claude 说一句你好")
+    }
 }

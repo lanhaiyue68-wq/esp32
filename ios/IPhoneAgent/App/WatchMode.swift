@@ -132,7 +132,9 @@ enum WatchSettings {
     }
 
     /// Sources selected for the phone executor; kept separate from the ordinary conversation.
-    static func phoneSources(_ messages: [ReadMessage], _ r: Rules) -> [ReadMessage] { messages }
+    static func phoneSources(_ messages: [ReadMessage], _ r: Rules) -> [ReadMessage] {
+        messages.filter { phoneRequest([$0], r) != nil }
+    }
 
     /// Owner authority (tasks, not replies): a listed sender, in a private chat, whose message held the passcode.
     static func isOwner(_ m: ReadMessage, _ r: Rules) -> Bool {
@@ -193,6 +195,7 @@ enum WatchSettings {
     /// A reply is due: the sender is whitelisted (or there is no whitelist) and the text @mentions one of the user's
     /// names or holds a passphrase. Plain text matching, so the model cannot talk itself into or out of it.
     static func fires(_ m: ReadMessage, _ r: Rules) -> Bool {
+        guard !WatchReport.attachmentOnly(m.text) else { return false }
         let allowed = r.senders.isEmpty || r.senders.contains { m.sender == $0 || m.sender.contains($0) }
         guard allowed else { return false }
         if !m.group { return true }  // a private chat is talking to this account: no @ needed
@@ -345,10 +348,11 @@ enum WatchSettings {
         return """
         核对截图是否为微信会话“\(chat)”，顶部标题必须照抄实际内容，即使与目标不同。\(mine)
         从上到下列出截图里能看清的每条消息（最多 20 条），只输出一行 JSON，不要别的文字：
-        {"title":"顶部标题","group":true,"messages":[{"sender":"发言人","text":"消息内容","mine":false}]}
+        {"title":"顶部标题","group":true,"messages":[{"sender":"发言人","kind":"text","text":"消息内容","mine":false}]}
         规则：title 照抄顶部的会话名（不要括号里的人数）；这不是微信聊天界面就写 ""，messages 写 []。group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
         左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，
-        语音写 [语音]，文件写 [文件]。气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
+        kind 写 text、file、image、voice 或 sticker。语音写 [语音]，文件卡片必须 kind=file、text=[文件]，不要把文件名当成对方说的话，不要打开文件，也不要猜文件内容。
+        气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
         时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
         """
     }
@@ -502,6 +506,15 @@ enum WatchReport {
     struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line]; var proven: Set<String> = [] }
 
+    /// A file card is context, not a question or an executable instruction. Older reads omitted `kind` and
+    /// alternated between a bare filename and [文件]; normalize both for history matching as well as replies.
+    static func attachmentOnly(_ text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["[文件]", "[檔案]", "[File]"].contains(text) { return true }
+        let filename = #"^[A-Za-z0-9_().+\-]+\.(?:ipa|zip|rar|7z|pdf|docx?|xlsx?|pptx?|txt|csv|json|log|swift|py|js|ts|html|css|c|cpp|h)(?:\s+\d+(?:\.\d+)?\s*[KMG]?B)?$"#
+        return text.range(of: filename, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     /// A read line's key in Screen.proven.
     static func proofKey(_ l: Line) -> String { l.sender + "\u{1}" + l.text }
 
@@ -556,11 +569,12 @@ enum WatchReport {
 
     /// Step 2's reply as lines; nil when it is not the expected JSON.
     static func screen(_ reply: String) -> Screen? {
-        struct Row: Decodable { var sender: String?; var text: String?; var mine: Bool? }
+        struct Row: Decodable { var sender: String?; var text: String?; var mine: Bool?; var kind: String? }
         struct Box: Decodable { var title: String?; var group: Bool?; var messages: [Row]? }
         guard let data = object(reply), let box = try? JSONDecoder().decode(Box.self, from: data), let rows = box.messages else { return nil }
         let lines = rows.compactMap { row -> Line? in
-            let text = (row.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw = (row.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = row.kind?.lowercased() == "file" || attachmentOnly(raw) ? "[文件]" : raw
             guard !text.isEmpty else { return nil }
             let mine = row.mine ?? false
             return Line(sender: mine ? "我" : (row.sender ?? "").trimmingCharacters(in: .whitespaces), text: text, mine: mine)
@@ -696,7 +710,8 @@ enum WatchReport {
     /// to the next, does not make the same message look new.
     static func key(_ l: Line) -> String {
         let first = l.text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? l.text
-        return (l.mine ? "我" : l.sender) + "\u{1F}" + first.filter { !$0.isWhitespace }
+        let text = attachmentOnly(l.text) ? "[文件]" : first.filter { !$0.isWhitespace }
+        return (l.mine ? "我" : l.sender) + "\u{1F}" + text
     }
 }
 
@@ -1036,6 +1051,7 @@ extension AppModel {
 
         var reply: String?, task: String?
         var phoneMessages: [ReadMessage] = []
+        var responding: [ReadMessage] = []
         var answering: WatchReport.Line?  // the newest message being answered: the reply must show up after it
         if !rules.serverReplies && !read.isEmpty {
             // ChatTool's guard against running one message twice: the same words from the same person in this chat
@@ -1045,10 +1061,12 @@ extension AppModel {
             let afterMine = fresh.lastIndex(where: { $0.mine }).map { fresh.count - 1 - $0 } ?? fresh.count
             let pending = read.suffix(fresh.suffix(afterMine).filter { !$0.mine }.count)
             let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
+            responding = due
             if let last = due.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
-                let owner = !rules.senders.isEmpty && due.allSatisfy { WatchSettings.isOwner($0, rules) }
+                let sources = WatchSettings.phoneSources(due, rules)
+                let owner = !sources.isEmpty || !rules.senders.isEmpty && due.allSatisfy { WatchSettings.isOwner($0, rules) }
                 // The owner's account in a private chat without the passcode: say why nothing runs, never "我这就去"
                 // (build 62: an @-the-owner task without the passcode got "好的，我这就去…" and then nothing).
                 let needsPasscode = !owner && rules.phoneTasks && !rules.senders.isEmpty
@@ -1056,8 +1074,12 @@ extension AppModel {
                 // The passcode is the owner saying "do this": no model decides whether it is a task (build 65: the
                 // decision came back broken and the task was lost), and "收到" goes out ~2 s sooner.
                 // "再去做一遍" alone tells the phone nothing (build 69: 40 steps, then "没弄成"): the last task again.
-                let original = owner ? WatchSettings.phoneRequest(due, rules) : nil
+                let original = WatchSettings.phoneRequest(sources, rules)
                 let request = original.flatMap { WatchSettings.resolvedPhoneTask($0, last: watchLastTask[chat]) }
+                if original != nil {
+                    responding = sources
+                    if let last = sources.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
+                }
                 DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
                 let decided: (reply: String, task: String)
                 if let request {
@@ -1076,7 +1098,7 @@ extension AppModel {
                 reply = WatchSettings.typeable(decided.reply)
                 task = owner && !decided.task.isEmpty ? decided.task : nil
                 if task != nil, let request {
-                    phoneMessages = due
+                    phoneMessages = sources
                     task = request
                     watchLastTask[chat] = request
                     if reply == nil { reply = "收到，我去处理。" }
@@ -1091,6 +1113,9 @@ extension AppModel {
             return (false, false)
         }
         var sent = true  // false: what was due did not go out
+        let answerIndex = read.lastIndex { item in
+            answering.map { item.sender == $0.sender && item.text == $0.text } ?? false
+        }
         // The reply first, then the owner's phone task: a task takes a minute or more and the person who just asked
         // "在不在" waited for all of it (traces(39)).
         if let text = reply {
@@ -1098,8 +1123,8 @@ extension AppModel {
                 DebugLog.write("watch: reply withheld: \(why)")
                 sent = false
             } else if await sendReply(text, chat: chat, back: !rules.single && task == nil, after: answering) {
-                if let i = read.indices.last { read[i].replied = text }
-                for m in read where WatchSettings.fires(m, rules) { watchAnswered[WatchReport.answerKey(m)] = now() }
+                if let i = answerIndex { read[i].replied = text }
+                for m in responding { watchAnswered[WatchReport.answerKey(m)] = now() }
             } else { sent = false }
         }
         if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
@@ -1123,18 +1148,18 @@ extension AppModel {
                 }
                 watchTaskReply = WatchTaskReply(chat: chat, sender: source.sender, text: result)
                 for m in phoneMessages { watchAnswered[WatchReport.answerKey(m)] = now() }
-                if let i = read.indices.last { read[i].replied += "【待回报】" + result }
+                if let i = answerIndex { read[i].replied += "【待回报】" + result }
             } else if let done, watching, !Task.isCancelled {
                 // What it found is sent from here: going back to the chat to type it, the agent forgot what it had
                 // found and went to look again until it ran out of steps (logs(14)).
                 if let answer = WatchReport.sendAnswer(done).flatMap(WatchSettings.typeable), !answer.isEmpty {
                     _ = await sendReply(answer, chat: chat, back: !rules.single)
                 }
-                if let i = read.indices.last { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
+                if let i = answerIndex { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
             } else if watching && !Task.isCancelled {  // stuck or out of steps: say so once instead of trying again and again
                 DebugLog.write("watch: owner task not done in \(chat)")
                 _ = await sendReply(WatchSettings.taskFailedReply, chat: chat, back: !rules.single)
-                if let i = read.indices.last { read[i].replied += "【未完成】" + task }
+                if let i = answerIndex { read[i].replied += "【未完成】" + task }
             }
         } else if reply == nil, task == nil, !rules.single {
             watchListReturn.pending = chat
