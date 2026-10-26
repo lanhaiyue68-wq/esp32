@@ -48,6 +48,34 @@ import XCTest
         XCTAssertEqual(agent.pinyinMisses, 0)
     }
 
+    func testUncertainPinyinIsLeftForInspectionWithoutDeletingOrPasting() async throws {
+        let screen = FakeScreen(); screen.frame = Self.screen(input: "", candidate: "我")
+        // An unreadable or partial frame is uncertainty, not evidence that the field needs replacing.
+        let phone = InputGestures(screen: screen, typed: Self.screen(input: "", candidate: "我"))
+        let actor = FakeModel { _ in "DO: type 你好" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.fastText = true
+        var pasteCalls = 0
+        agent.pasteHop = { _ in pasteCalls += 1; return .lost }
+        _ = try await agent.step()
+        XCTAssertEqual(phone.calls, ["type"])
+        XCTAssertEqual(pasteCalls, 0)
+        XCTAssertEqual(agent.steps.last?["action"], .str("compose"))
+        XCTAssertTrue(agent.steps.last?["reason"]?.str?.contains("Do not clear") == true)
+    }
+
+    func testUncertainPasteIsNotDeletedAndRetyped() async throws {
+        let screen = FakeScreen(); screen.frame = Self.screen(input: "", candidate: "我")
+        let phone = InputGestures(screen: screen, typed: Self.screen(input: "", candidate: "我"))
+        let actor = FakeModel { _ in "DO: type 你好" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.fastText = true; agent.pinyinMisses = 2
+        agent.pasteHop = { _ in .filled }
+        _ = try await agent.step()
+        XCTAssertEqual(phone.calls, ["cmd+v"])
+        XCTAssertEqual(agent.steps.last?["action"], .str("compose"))
+    }
+
     static func screen(input: String, candidate: String) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
         return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
