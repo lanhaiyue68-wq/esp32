@@ -39,6 +39,12 @@ import XCTest
             "a suggestion must not be counted when a key was missed")
     }
 
+    func testAnExtraLetterIsNotVerifiedAsTheRequestedText() {
+        XCTAssertEqual(CandidatePicker.shows("你好", lines: ["你好p"]), 0)
+        XCTAssertEqual(CandidatePicker.shows("hello", lines: ["hellop"]), 0)
+        XCTAssertEqual(CandidatePicker.shows("你好", lines: ["你好"]), 1)
+    }
+
     func testLongChineseReportUsesExactPasteBeforeHomophonePronePinyin() async throws {
         let text = "已尝试发送你好，但未能确认任务完成，请先查看目标应用里的结果。"
         let screen = FakeScreen(); screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
