@@ -17,4 +17,11 @@ final class KeyboardRecognitionTests: XCTestCase {
             XCTAssertFalse(CandidatePicker.keyboardUp(rows: [[piece(label, 0.68)]]), label)
         }
     }
+    func testOCRFragmentsOnTheSameKeyboardRowAreCombined() {
+        let keys = ["qwer", "tyuiop"].enumerated().map { i, text in
+            CandidatePicker.Piece(text: text, box: CGRect(x: Double(i) * 0.45, y: 0.65, width: 0.4, height: 0.035))
+        }
+        XCTAssertTrue(CandidatePicker.keyboardUp(rows: keys.map { [$0] }))
+    }
+
 }

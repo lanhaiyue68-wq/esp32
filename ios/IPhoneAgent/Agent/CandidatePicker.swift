@@ -78,6 +78,10 @@ enum CandidatePicker {
         shows(text, lines: rows(in: jpeg, top: 0.3, bottom: 0.95).map { $0.map(\.text).joined() })
     }
 
+    static func shows(_ text: String, rows: [[Piece]]) -> Int {
+        shows(text, lines: rows.map { $0.map(\.text).joined() })
+    }
+
     static func shows(_ text: String, lines: [String]) -> Int {
         let probe = bare(text)
         guard probe.count >= 2 else { return 0 }

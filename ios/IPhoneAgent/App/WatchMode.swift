@@ -255,7 +255,7 @@ enum WatchSettings {
 
     /// `attempted` records accepted send gestures, not proof of delivery. Only a done action with a useful result
     /// can report success; a failure or stop must leave the result uncertain without inviting another send.
-    static func phoneTaskResult(action: String?, answer: String?, attempted: [String]) -> String {
+    static func phoneTaskResult(action: String?, answer: String?, attempted: [String], reason: String? = nil) -> String {
         if action == "done", let answer, let result = WatchReport.sendAnswer(answer).flatMap(typeable) {
             return result
         }

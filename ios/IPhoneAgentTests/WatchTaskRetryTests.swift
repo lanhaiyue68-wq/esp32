@@ -67,4 +67,12 @@ import XCTest
         XCTAssertFalse(report.contains("已尝试发送"))
         XCTAssertFalse(report.contains("已发出"))
     }
+    func testLostPasteReportsTheInputFailureInsteadOfAnUnexplainedIncompleteTask() {
+        let report = WatchSettings.phoneTaskResult(action: "paused", answer: nil, attempted: [],
+            reason: "paste target could not be verified after switching apps; no text was pasted")
+        XCTAssertTrue(report.contains("输入"))
+        XCTAssertTrue(report.contains("粘贴"))
+        XCTAssertTrue(report.contains("没有执行发送"))
+    }
+
 }
