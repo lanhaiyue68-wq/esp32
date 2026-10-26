@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import CapturePolicy
 
 final class DirectFrameTests: XCTestCase {
     func testFreshDisplayFrameCanAuthorizeAction() {
@@ -59,12 +60,3 @@ final class DirectFrameTests: XCTestCase {
     }
 }
 
-XCTMain([testCase([
-    ("testFreshDisplayFrameCanAuthorizeAction", DirectFrameTests.testFreshDisplayFrameCanAuthorizeAction),
-    ("testAppOnlyFramesCannotAuthorizePhoneControl", DirectFrameTests.testAppOnlyFramesCannotAuthorizePhoneControl),
-    ("testIdleConfirmsOnlyExistingUnchangedPixels", DirectFrameTests.testIdleConfirmsOnlyExistingUnchangedPixels),
-    ("testStoppedOrReplacedSessionCannotReviveOldPixels", DirectFrameTests.testStoppedOrReplacedSessionCannotReviveOldPixels),
-    ("testSuspendedPixelsStayInvalidUntilCompleteFrame", DirectFrameTests.testSuspendedPixelsStayInvalidUntilCompleteFrame),
-    ("testOutOfOrderCallbacksCannotOverwriteNewPixels", DirectFrameTests.testOutOfOrderCallbacksCannotOverwriteNewPixels),
-    ("testInvalidOrQueuedOldTimestampsAreRejected", DirectFrameTests.testInvalidOrQueuedOldTimestampsAreRejected)
-])])
