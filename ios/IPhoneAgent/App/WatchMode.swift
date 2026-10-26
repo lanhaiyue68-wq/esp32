@@ -219,14 +219,45 @@ enum WatchSettings {
     /// Sent when the owner's phone task got stuck or ran out of steps.
     static let taskFailedReply = "这个我没弄成，你再说具体点？"
 
-    /// "再去做一遍", "再来一次", "重新做"…: nothing but "again" means the last task, word for word. Anything more is
-    /// a task of its own.
+    /// Only a retry with no new destination or action may inherit a previous task. The log's "重新去做" was not in
+    /// the old list; failure feedback and references such as "刚才没做好" also describe the same task, not a new one.
+    static func isRedo(_ request: String) -> Bool {
+        let simplified: [Character: Character] = ["來": "来", "試": "试", "這": "这", "剛": "刚", "條": "条",
+                                                    "個": "个", "務": "务", "執": "执", "請": "请", "幫": "帮",
+                                                    "沒": "没", "敗": "败", "對": "对"]
+        let bare = String(request.filter { !$0.isWhitespace && !"，。！？,.!?~～".contains($0) }
+            .map { simplified[$0] ?? $0 })
+        let reference = "(?:刚才|刚刚|上次|这次|上一条|上一个|之前|这个|那个)(?:的)?(?:任务|指令|事情)?"
+        let feedback = "(?:(?:没有|没)(?:做好|做完|完成)|(?:执行)?失败了|不对)"
+        let retry = "(?:再去做|再做|再来|重新去做|重新做|再试|重试|重来|再去|再弄|重新执行)(?:一遍|一次)?"
+        let pattern = "^(?:(?:请|麻烦|你|帮我)|\(reference)|\(feedback))*\(retry)(?:一下|一遍|一次|吧|看看|\(reference))*$"
+        return !bare.isEmpty && bare.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// A retry after relaunch has no remembered goal. Ask for the full task instead of asking a model to invent one.
+    static func resolvedPhoneTask(_ request: String, last: String?) -> String? {
+        guard isRedo(request) else { return request }
+        guard let last, !last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isRedo(last) else { return nil }
+        return last
+    }
+
+    static let missingRetryTaskReply = "请把要重做的完整任务再发一次，我这里没有上一条任务。"
+
     static func redo(_ request: String, last: String?) -> String {
-        guard let last, !last.isEmpty else { return request }
-        let bare = request.filter { !$0.isWhitespace && !"，。！？,.!?~～".contains($0) }
-        let again = ["再去做一遍", "再做一遍", "再来一遍", "再来一次", "再做一次", "再去做一次", "重新做", "重新做一遍",
-                     "再试一次", "再试一遍", "重来", "再去一遍", "再弄一遍", "再弄一次"]
-        return again.contains(bare) ? last : request
+        resolvedPhoneTask(request, last: last) ?? request
+    }
+
+    /// `attempted` records accepted send gestures, not proof of delivery. Only a done action with a useful result
+    /// can report success; a failure or stop must leave the result uncertain without inviting another send.
+    static func phoneTaskResult(action: String?, answer: String?, attempted: [String]) -> String {
+        if action == "done", let answer, let result = WatchReport.sendAnswer(answer).flatMap(typeable) {
+            return result
+        }
+        let words = attempted.compactMap(typeable).map { "“\($0)”" }.joined(separator: "、")
+        if !words.isEmpty {
+            return "已尝试发送\(words)，但未能确认任务完成，请先查看目标应用里的结果。"
+        }
+        return "这次任务未能确认完成，请先查看目标应用里的结果。"
     }
 
     /// A task with more than one thing to do in order (再/然后…): no early end after its first send.
@@ -1022,13 +1053,14 @@ extension AppModel {
                 // The passcode is the owner saying "do this": no model decides whether it is a task (build 65: the
                 // decision came back broken and the task was lost), and "收到" goes out ~2 s sooner.
                 // "再去做一遍" alone tells the phone nothing (build 69: 40 steps, then "没弄成"): the last task again.
-                let request = (owner ? WatchSettings.phoneRequest(due, rules) : nil).map {
-                    WatchSettings.redo($0, last: watchLastTask[chat])
-                }
+                let original = owner ? WatchSettings.phoneRequest(due, rules) : nil
+                let request = original.flatMap { WatchSettings.resolvedPhoneTask($0, last: watchLastTask[chat]) }
                 DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
                 let decided: (reply: String, task: String)
                 if let request {
                     decided = ("收到，我去处理。", request)
+                } else if original != nil {
+                    decided = (WatchSettings.missingRetryTaskReply, "")
                 } else if let answer = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner,
                                                                            needsPasscode: needsPasscode),
@@ -1040,10 +1072,10 @@ extension AppModel {
                 }
                 reply = WatchSettings.typeable(decided.reply)
                 task = owner && !decided.task.isEmpty ? decided.task : nil
-                if task != nil, let original = WatchSettings.phoneRequest(due, rules) {
+                if task != nil, let request {
                     phoneMessages = due
-                    task = WatchSettings.redo(original, last: watchLastTask[chat])
-                    watchLastTask[chat] = task
+                    task = request
+                    watchLastTask[chat] = request
                     if reply == nil { reply = "收到，我去处理。" }
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
@@ -1072,8 +1104,8 @@ extension AppModel {
             guard watching, !Task.isCancelled else { return (false, false) }
             if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
             DebugLog.write("watch: owner task in \(chat): \(task)")
-            // One thing to send: the run ends 5 quiet steps after it went out (build 67: an @ was sent, then 30 more
-            // steps of looking until the step limit). A task with several parts keeps its steps.
+            // After one requested send, the remaining steps verify its result without another send or navigation.
+            // A task with several parts keeps its ordinary steps.
             agent.endAfterSend = phone && !WatchSettings.severalParts(task) ? 5 : nil
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
                                       stepLimit: phone ? agent.maxSteps : 25, fastText: true, directStart: phone)
@@ -1081,11 +1113,8 @@ extension AppModel {
             if phone, let source = phoneMessages.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
-                // A run that sent something did not "fail": say what went out rather than "没弄成".
-                let partial = agent.sent.isEmpty ? nil
-                    : WatchReport.sendAnswer(AgentLoop.sentAnswer(agent.sent)).map { $0 + "，但没能确认全部做完，你看一下。" }
-                var result = done == nil ? partial.flatMap(WatchSettings.typeable) ?? WatchSettings.taskFailedReply
-                    : done.flatMap(WatchReport.sendAnswer).flatMap(WatchSettings.typeable) ?? "任务已结束，但没有取得可回报的结果。"
+                var result = WatchSettings.phoneTaskResult(action: agent.steps.last?["action"]?.str,
+                                                           answer: done, attempted: agent.sent)
                 if PrivacyGuard.check(result, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
                     result = "任务已结束，结果含有受保护信息，未发送详情。"
                 }
@@ -1336,6 +1365,10 @@ extension AppModel {
             var landed = try await typedQuickly()
             if !landed {
                 guard await hopToPaste(text) == .filled else { return .notTried }
+                guard let returned = await look(), WatchReport.navigationChat(in: returned, targets: [chat]) == chat else {
+                    DebugLog.write("watch: quick send: destination not verified after paste hop; the agent finds it")
+                    return .notTried
+                }
                 // Back from Lan Agent: paste first (the box keeps its keyboard); a tap only when that did not land and
                 // no keyboard is on screen, the box cleared first (logs(20): the space bar again).
                 landed = try await paste()

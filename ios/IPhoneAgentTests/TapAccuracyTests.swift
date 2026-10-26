@@ -85,13 +85,14 @@ import UIKit
         XCTAssertTrue(agent.steps.contains { $0["reason"] == .str(AgentLoop.sentAgainReason) })
     }
 
-    /// build 67: the @ went out, then the model kept looking until the step limit and the owner was told "没弄成".
-    func testARunThatSentEndsSoonAfterAndSaysWhatWentOut() async throws {
+    /// Sending once enters read-only verification; completion still needs a fresh confirmation of the requested result.
+    func testARunThatSentCompletesWhenTheActorVerifiesTheRequestedMessage() async throws {
         let screen = FakeScreen(); screen.frame = frame(keyboard: true)
         let phone = AimGestures()
         let actor = FakeModel { n in
             ["THINK: Type.\nDO: type 这不是简简单单吗", "THINK: Send.\nDO: tap 900 845"].dropFirst(n - 1).first
-                ?? "THINK: Check once more.\nDO: tap \(300 + 10 * n) 300"
+                ?? "THINK: The newly sent 这不是简简单单吗 bubble is visible in 测试群.\nDO: done "
+                    + AgentLoop.sentAnswer(["这不是简简单单吗"])
         }
         let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: FakeModel { _ in "1. Send it" }, trace: nil)
         agent.directStart = true
@@ -104,10 +105,34 @@ import UIKit
         agent.stop()
         XCTAssertEqual(agent.steps.last?["action"], .str("done"))
         XCTAssertLessThan(agent.steps.count, 10)
+        XCTAssertEqual(phone.typed, 1)
+        XCTAssertEqual(phone.aims.count, 1, "only the original send tap was dispatched")
         let answer = agent.steps.last?["answer"]?.str ?? ""
         XCTAssertEqual(WatchReport.sendAnswer(answer), "已发出“这不是简简单单吗”")
         XCTAssertTrue(WatchSettings.severalParts("先去测试群发你好，然后告诉我"))
         XCTAssertFalse(WatchSettings.severalParts("去测试群@一下群主"))
+    }
+
+    func testAnActorThatKeepsTappingAfterSendingCannotActOrClaimSuccess() async throws {
+        let screen = FakeScreen(); screen.frame = frame(keyboard: true)
+        let phone = AimGestures()
+        let actor = FakeModel { n in
+            ["DO: type hello", "DO: tap 900 845"].dropFirst(n - 1).first
+                ?? "DO: tap \(300 + 10 * n) 300"
+        }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor,
+                              planner: FakeModel { _ in "1. Send hello once, then verify" }, trace: nil)
+        agent.directStart = true; agent.keyboardGuard = true; agent.endAfterSend = 2
+        let ended = expectation(description: "verification is bounded")
+        agent.onFinish = { ended.fulfill() }
+        try agent.start("去测试群发 hello，只发一次")
+        await fulfillment(of: [ended], timeout: 15)
+        agent.stop()
+        XCTAssertEqual(phone.typed, 1)
+        XCTAssertEqual(phone.aims.count, 1, "the attempted verification taps never reach the phone")
+        XCTAssertEqual(agent.steps.last?["action"], .str("fail"))
+        XCTAssertTrue(agent.steps.last?["reason"]?.str?.contains("could not verify") == true)
+        XCTAssertFalse(agent.steps.contains { $0["action"] == .str("done") })
     }
 
     func testAProbeStoppedAtTheEdgeIsNotLearned() {

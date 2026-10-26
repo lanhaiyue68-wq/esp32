@@ -62,6 +62,8 @@ extension Pointer: Gestures {}
     private var bounceRefused = 0
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
+    /// A Home flick that changed nothing gets one keyboard alternative, never another identical flick.
+    private var homeRecoveryTried = false
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
@@ -127,7 +129,7 @@ extension Pointer: Gestures {}
     /// What this run sent, for a run that ended without "done" (build 67: an @ went out, the model kept looking until
     /// the step limit, and the owner was told "这个我没弄成").
     var sent: [String] { sentTexts.sorted() }
-    /// WeChat phone task with one thing to send: done this many steps after a send with nothing typed since. nil: off.
+    /// A single-message task gets this many read-only looks to verify a send; no confirmation means failure. nil: off.
     var endAfterSend: Int?
     /// Quick pinyin that came out wrong, across runs (WeChat watch resets it when a watch starts).
     var pinyinMisses = 0
@@ -361,6 +363,10 @@ extension Pointer: Gestures {}
         + "changed nothing is not it), select it, then draw again. It is not done until lines show."
     static let sentAgainReason = "Not typed: this run already typed this text and sent it. Look for its bubble: if it "
         + "shows, the task is done, finish with done. If it is still in the input box, tap 发送 instead; never type it again."
+    static let sendVerificationReason = "This run already issued the send command for the requested message. "
+        + "Do not send it again, type anything, or navigate away. Inspect the CURRENT requested chat and confirm that "
+        + "the newly sent message matches the original Goal; an older matching bubble is not confirmation. "
+        + "Only wait, done after verification, or fail if the result cannot be verified."
 
     /// The text as typed, for telling a repeat: quotes and spaces the model adds around it do not count.
     /// A run's outcome from what it sent, in the {"send": …} form WatchReport.sendAnswer reads.
@@ -473,6 +479,7 @@ extension Pointer: Gestures {}
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         quietSinceSend = 0
+        homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
         lessons?.markUsed(applied)  // lessons in use are the last ones the cap drops
@@ -503,7 +510,8 @@ extension Pointer: Gestures {}
                     if let n = endAfterSend, !sentTexts.isEmpty, unsent == nil {
                         quietSinceSend += 1
                         if quietSinceSend > n {
-                            record(nil, ["action": .str("done"), "answer": .str(Self.sentAnswer(sent))])
+                            record(nil, ["action": .str("fail"),
+                                         "reason": .str("could not verify the sent message; not sending again to avoid duplicates")])
                             return finish()
                         }
                     }
@@ -600,6 +608,10 @@ extension Pointer: Gestures {}
         for (i, planned) in acts.enumerated() {
             var act = planned.act
             let name = act["action"]?.str ?? ""
+            if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil, !["wait", "done", "fail"].contains(name) {
+                record(planned.shot, ["action": .str("send verification"), "reason": .str(Self.sendVerificationReason)])
+                return false
+            }
             if i > 0, ["tap", "done", "fail"].contains(name) {
                 // Inspect drawing/typing before a later UI tap or a terminal claim about its result.
                 timing.frameMs += try await settle()
@@ -607,6 +619,7 @@ extension Pointer: Gestures {}
                 return false
             }
             if name == "replan" || stuck {
+                if stuck { act["performed"] = .bool(false) }
                 record(planned.shot, act)
                 try await replan(stuck: true) // preserve recovery reason and completed work in the planner context
                 return false
@@ -646,7 +659,9 @@ extension Pointer: Gestures {}
             if name != "done" && name != "fail" {
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
-                if i == 0, seen != screen?.frame, Vision.changed(seen, screen?.frame, ignore: spots) {
+                // Home and wait do not use coordinates or the current focus. Animation cannot make their target stale.
+                if i == 0, !["home", "wait"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
+                   Vision.changed(seen, screen?.frame, ignore: spots) {
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
                     // still (a live clock icon, a video, an animated background): when the model, looking again at a
@@ -697,7 +712,6 @@ extension Pointer: Gestures {}
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
                 if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? ""); quietSinceSend = 0 }
-                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil; quietSinceSend = 0 }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
@@ -717,6 +731,8 @@ extension Pointer: Gestures {}
                     timing.frameMs += try await settle()
                     return false // inspect candidates before any further action in the batch
                 }
+                // A rejected command did not send anything. Commit only after the gesture succeeds.
+                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil; quietSinceSend = 0 }
                 lastActed = now()
                 let s = lastActed - started
                 timing.hidMs += s * 1000
@@ -732,6 +748,12 @@ extension Pointer: Gestures {}
             if returnSent {  // sent and checked: nothing is left to look at or tap
                 record(nil, ["action": .str("done"), "answer": .str("sent with Return")])
                 return true
+            }
+            if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil {
+                // The rest of a type/send/navigation batch was planned before the send. Drop it and verify afresh.
+                timing.frameMs += try await settle()
+                steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                return false
             }
             if startsDrawing, drawing.contains(name) {
                 // A first stroke may pan a canvas if the drawing tool was not actually active.
@@ -919,17 +941,23 @@ extension Pointer: Gestures {}
         return (now() - started) * 1000
     }
 
-    /// The previous round changed nothing on screen, so a tap may have landed off target.
-    private var missed: Bool { steps.last?["changed"] == .bool(false) }
+    private static let observedActions: Set<String> = ["tap", "swipe", "back", "home", "key", "type", "path", "circle", "compose"]
+    /// Planner and guard records never erase the result of the last actual gesture.
+    private var lastObservedAction: JObject? {
+        steps.last { Self.observedActions.contains($0["action"]?.str ?? "") && $0["performed"] != .bool(false) }
+    }
+    private var missed: Bool { lastObservedAction?["changed"] == .bool(false) }
 
     /// True when the actor picks the same action as its last limit-1 moves and the last one did nothing.
     /// Repeating a move that still changes the screen (e.g. scrolling down a long list) is progress, not a loop.
     func repeating(_ act: JObject, limit: Int = 3) -> Bool {
         if act["action"] == .str("tap"), act["precise"] == .bool(true),
-           steps.last?["precise"] != .bool(true) {
+           lastObservedAction?["precise"] != .bool(true) {
             return false // this bounded delivery-mode retry must execute before the generic loop guard
         }
-        let moves = steps.filter { $0["plan"] == nil }.suffix(limit - 1)
+        let moves = steps.filter {
+            Self.observedActions.contains($0["action"]?.str ?? "") && $0["performed"] != .bool(false)
+        }.suffix(limit - 1)
         return moves.count == limit - 1 && moves.allSatisfy { Actions.sameTarget($0, act) }
             && moves.last?["changed"] != .bool(true)
     }
@@ -973,6 +1001,7 @@ extension Pointer: Gestures {}
             }
         }
         var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(recentActions)\n\nNext action?"
+        if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
@@ -984,7 +1013,19 @@ extension Pointer: Gestures {}
                     + " Reply with one brief THINK line followed immediately by valid DO lines; no extra explanation."
                 continue
             }
-            if missed, let last = steps.last, Actions.sameTarget(acts[0], last) {
+            if missed, let last = lastObservedAction, acts[0]["action"] == .str("home"),
+               last["action"] == .str("home") || last["home_recovery"] == .bool(true) {
+                if !homeRecoveryTried {
+                    homeRecoveryTried = true
+                    return [Planned(act: ["action": .str("key"), "combo": .str("cmd+h"), "home_recovery": .bool(true),
+                                          "reason": .str("Home changed nothing; trying keyboard Home once"),
+                                          "think_s": .num(seconds)], shot: frame)]
+                }
+                return [Planned(act: ["action": .str("fail"),
+                                      "reason": .str("Home changed nothing after the keyboard fallback; the Home route could not be verified"),
+                                      "think_s": .num(seconds)], shot: frame)]
+            }
+            if missed, let last = lastObservedAction, Actions.sameTarget(acts[0], last) {
                 if acts[0]["action"] == .str("tap") {
                     if last["precise"] == .bool(true) {
                         let reason = "tap target unchanged after a precision retry; inspect another route, keep completed work"
