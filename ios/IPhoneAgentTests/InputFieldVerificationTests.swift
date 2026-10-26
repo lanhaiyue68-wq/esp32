@@ -36,7 +36,9 @@ import XCTest
 
     func testVerifiedPinyinIsKeptWithoutClearingOrSwitchingApps() async throws {
         let screen = FakeScreen(); screen.frame = Self.screen(input: "", candidate: "你好")
+        XCTAssertEqual(CandidatePicker.shows("你好", in: screen.frame!), 0)
         let phone = InputGestures(screen: screen, typed: Self.screen(input: "你好", candidate: "我"))
+        XCTAssertEqual(CandidatePicker.shows("你好", in: phone.typed), 1)
         let actor = FakeModel { _ in "DO: type 你好" }
         let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
         agent.fastText = true
@@ -46,6 +48,7 @@ import XCTest
         XCTAssertEqual(phone.calls, ["type"], "a verified greeting must not be deleted")
         XCTAssertEqual(pasteCalls, 0, "successful Pinyin needs no app switch")
         XCTAssertEqual(agent.pinyinMisses, 0)
+        XCTAssertEqual(agent.steps.last?["action"], .str("type"), "OCR confirms the input without requiring fallback")
     }
 
     func testUncertainPinyinIsLeftForInspectionWithoutDeletingOrPasting() async throws {

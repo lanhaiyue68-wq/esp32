@@ -98,13 +98,12 @@ enum CandidatePicker {
         return CGPoint(x: p.box.midX, y: p.box.midY)
     }
 
-    /// How often the start of `text` (letters and digits only) shows in the lower part of the screen: a paste is
-    /// confirmed when this goes up, so text already in a bubble above does not count.
+    /// How often the whole `text` shows above the keyboard. A paste must add the whole text, not just its prefix.
     static func count(_ text: String, in jpeg: Data) -> Int {
         shows(text, in: jpeg)
     }
 
-    /// How often the whole of `text` (letters and digits) shows in the lower part of the screen, the rows joined so a
+    /// How often the whole of `text` (letters and digits) shows above the keyboard, the rows joined so a
     /// wrapped input box counts: typed text is confirmed when this goes up.
     static func shows(_ text: String, in jpeg: Data) -> Int {
         shows(text, rows: rows(in: jpeg, top: 0.3, bottom: 1))
