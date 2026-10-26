@@ -45,6 +45,12 @@ import XCTest
         XCTAssertEqual(CandidatePicker.shows("你好", lines: ["你好"]), 1)
     }
 
+    func testSeparateOCRPiecesOnTheSameLineCannotHideAnExtraLetter() {
+        let han = CandidatePicker.Piece(text: "你好", box: CGRect(x: 0.04, y: 0.48, width: 0.1, height: 0.03))
+        let latin = CandidatePicker.Piece(text: "p", box: CGRect(x: 0.145, y: 0.48, width: 0.03, height: 0.03))
+        XCTAssertEqual(CandidatePicker.shows("你好", rows: [[han], [latin]]), 0)
+    }
+
     func testARealLeftwardMouseNudgeIsStillFound() throws {
         let vision = VisionTests()
         let point = try XCTUnwrap(Vision.pointer(vision.screen(pointer: (274, 856)), vision.screen(pointer: (262, 856)),
