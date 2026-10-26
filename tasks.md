@@ -121,3 +121,11 @@
 - [x] Implement targeted fixes and regression tests.
 - [x] Compile unsigned Release, pass all 340 XCTest, validate IPA version/CRC/SHA256, and place build71 on desktop.
 - [ ] Sign/install build71 through the existing user tool and physically retest Claude/「重新去做」/single-send behavior.
+
+
+## 2026-10-26 — logs33 / build72
+
+- [x] Trace file-name/history drift and mixed old-file/passcode command downgrade.
+- [x] Implement per-message task routing, attachment normalization/reply suppression, and paste comparison correction.
+- [x] Prove new cases fail before fixes; pass full 348 XCTest and unsigned device build; verify/copy build72 IPA.
+- [ ] Sign/install on the iPhone and retest old files plus a new authenticated Claude command, no irrelevant file reply, and single-send behavior.

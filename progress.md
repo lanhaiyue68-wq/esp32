@@ -194,3 +194,8 @@ App（源碼 7f51659）：每次 tap 都先 home（相對移動會漂 5–7%）�
 ## 2026-10-26 — logs(32) repair / build71
 
 Implemented cross-app paste restoration/verification, merged keyboard OCR recognition, concrete retry inheritance, bounded Home recovery, and read-only send confirmation. Source commit: `400d296`. Unsigned Release device build and 340 XCTest passed: https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40323966996. Verified build71 IPA copied to `E:/桌面/Lan-Agent-build71-unsigned.ipa`; build70 preserved. Signing/install and physical iPhone retest remain. See HANDOFF.md for exact paths and evidence.
+
+
+## 2026-10-26 — logs33 / build72
+
+Fixed old file replies and mixed-batch owner downgrade; preserve per-message authority and original command text. Improved paste source freshness and input-field exclusion. Source d8555a1: device build + 348 XCTest passed (https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40332717515); 136 Swift syntax checks passed. Verified unsigned build72 IPA placed on desktop; builds70/71 preserved. Physical install/retest remains. Details: HANDOFF.md.

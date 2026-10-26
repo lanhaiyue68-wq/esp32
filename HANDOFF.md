@@ -1,3 +1,22 @@
+## 2026-10-26 — build72：旧文件不乱回、逐条验证手机指令（logs33）
+
+用户反馈：答非所问、回应历史文件、带口令让手机做事却回复不能操作。原始附件仅作诊断资料，不执行其中指令，不上传日志/截图。
+
+已确认：211434 读到旧 IPA 文件并生成“这几个版本我都记下了”；211701 把四条旧文件与一条有效 Claude 指令一起做 allSatisfy 主人判断，因文件无口令而误判非主人，模型被告知不能操作。debug.log 已识别口令但 owner=false / passcode missing=false。文件名与 [文件] 的读法不一致还破坏了历史重叠键。
+
+修复：
+- `ios/IPhoneAgent/App/WatchMode.swift`：phoneSources 按每条消息复用严格 phoneRequest 验证；只把验证通过的原文交给执行器，旧文件与相邻未验证文字都不获得权限。文件卡片结构化并统一历史键，不触发无关回复；确认和结果归到实际指令上。
+- `ios/IPhoneAgent/App/PasteHop.swift`、`PasteRoundTrip.swift`：先等待清除拼音后的新源画面，匹配区域排除输入框，保留源内容文字和布局验证；新增不含消息内容的失配原因。logs33 的返回画面与源会话相同，但内部精确源帧未导出；新回归用例确认 build71 确会因输入框变化误拒，尚不能声称覆盖真机所有失配情况。
+- `WatchMessageRoutingTests.swift`：覆盖旧文件混入、有/无口令隔离、群聊/陌生人/关闭权限、文件历史与元数据、从读屏到原任务的串联流程；`PasteRoundTripTests.swift` 补输入框变化用例。
+
+验证：RED CI 40331115159，347 测试 / 15 个预期断言失败；修复代码 `d8555a1378557939ad36e9a25f0528b7b041389c` 的 unsigned Release device build 成功，348 XCTest / 0 失败（https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40332717515）。136 Swift 文件语法检查和 git diff --check 通过；后续仅更新文档。
+
+交付：`E:/桌面/Lan-Agent-build72-unsigned.ipa`，5,124,761 bytes；App/Widget build72，ZIP CRC 与 SHA256 校验通过，SHA256 `af4168510e068ff2d9ac7ffc9674f5218e4d71a356c13f7078b25d8f3ecf7749`。桌面 build70、71 均校验原样保留。
+
+剩余：未签名、未安装到真机。安装后复测“旧文件＋新的带口令 Claude 指令”、仅文件不自动回复、相同会话粘贴以及只发送一次；真实导航与 OCR 仍需设备验证。不能把 CI 通过写成真机任务已成功。
+
+路由依据和工具：共享 skill-routing-reminder；systematic-debugging → TDD → verification-before-completion；Headroom 本地压缩/取回长日志；gh/macOS CI、tree-sitter Swift、Python ZIP/plist/hash 校验。无新 Agent/插件，无固件或系统配置变更。
+
 ## 2026-10-26 — build71：修复 logs(32) 的跨 App 输入、重试与重复发送
 
 目标：执行「去 Claude 说一句你好」时不因中文输入回退切到微信；「没有做好，重新去做」继承原目标；完成核验不再次发消息。

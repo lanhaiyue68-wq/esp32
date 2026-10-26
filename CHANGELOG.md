@@ -1,5 +1,12 @@
 # Changelog
 
+## Build 72 (2026-10-26)
+
+- Route each verified owner instruction independently; neighboring old files and unverified messages cannot downgrade or inherit its authority.
+- Normalize file cards for history matching and suppress attachment-only chat replies.
+- Capture a fresh paste source after clearing input, exclude the changing input field from destination comparison, and log non-content verification reasons.
+- Unsigned device build and all 348 simulator tests passed (CI 40332717515); physical iPhone testing remains pending.
+
 ## Build 71 (2026-10-26)
 
 - Restore and verify the original app after a clipboard hop; stop typing when the destination cannot be verified.

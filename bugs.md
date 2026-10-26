@@ -109,3 +109,10 @@ GREEN 证据：工作流 40051367358，57e066330899ff5882cedf8d852045ab56dddfe0�
 Fixed in source (400d296): clipboard fallback hardcoded WeChat; OCR-joined QWERTY labels not recognized; bare retry「重新去做」lost original goal; planner records hid repeated unchanged gestures; automatic done after unverified send; failed send gestures recorded as sent. 340 XCTest pass and unsigned device build succeeds.
 
 Known verification gap: no physical iPhone install/test yet. Clipboard restore requires matching fresh readable source content and layout; if the screen changes or cannot be verified it deliberately stops without pasting. No claim of universal task success.
+
+
+## 2026-10-26 — logs33 / build72
+
+Fixed in source d8555a1: an entire due-message batch required owner proof, so unverified old files blocked an individually valid task. Bare filename/[文件] OCR differences made historical cards look new; file-only cards triggered irrelevant replies. Acknowledgements now reference the selected command.
+
+Build71 regression addressed: paste fingerprint included the input field, so transient Pinyin/clearing state could reject the same conversation. Fresh source capture and comparison above the input field pass a targeted regression. Exact internal source frames are absent from logs33, so device confirmation is still required; wrong-app rejection remains. 348 XCTest and device build pass.
