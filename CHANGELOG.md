@@ -1,5 +1,12 @@
 # Changelog
 
+## Build 73 (2026-10-26)
+
+- Verify complete typed text above the keyboard, excluding changing candidates; combine OCR fragments of key rows.
+- Keep correct or uncertain text in place instead of deleting it and switching apps to paste. Hand quick-send uncertainty to visual inspection with existing input preserved; block blind retyping while allowing explicit correction.
+- Explain input-stage paste-target failures and capture both clipboard boundary frames in the normal local trace. Destination verification remains required.
+- Unsigned device build and all 359 simulator tests passed (CI 40341342030); physical iPhone verification pending.
+
 ## Build 72 (2026-10-26)
 
 - Route each verified owner instruction independently; neighboring old files and unverified messages cannot downgrade or inherit its authority.

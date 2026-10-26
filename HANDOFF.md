@@ -1,3 +1,17 @@
+## 2026-10-26 — build73：保留已输入文字（logs34，已验证交付）
+
+目标：解释 Claude 输入你好后退出并报告未完成；修正用户补充的“正常输入到框里后被删除再粘贴”。附件仅作证据，原始日志与截图留本机，不上传。
+
+证据：220416 step40 画面为空输入框＋候选词你好；step41 paused = paste target could not be verified after switching apps; no text was pasted。debug20811/20812 拼音＋空格，20817–20819 自动全选删除，再切换写剪贴板；20857 原内容文字不匹配，退出后回微信报告。内部源/返回帧未导出，不能断言具体返回哪个 App 或同 App 哪部分变了。
+
+已实现：CandidatePicker 在键盘上方核验完整文字、排除候选词并合并同高度 OCR 键盘片段；AgentLoop 和微信 quickSend 都取消“不确定就全选删除重贴”，保留当前内容交给下一次视觉核对。AgentLoop pendingInput 阻止盲目重打，明确修正键后才允许继续输入；quickSend 通过 inputToInspect 交接且不开启自动清框。PasteHop 保留严格目标验证并补源/返回画面到本机正常诊断；WatchMode 报告具体输入/粘贴原因，不再只给笼统未完成。
+
+验证状态：RED 40338807504 /355测试9失败，扩展 RED 40339071043 /357测试12失败（包括确认输入后误走粘贴、未确认粘贴被删除重打）。核心 GREEN 40340011272 /357测试0失败、device build成功；最终 CI 40341342030（代码7a7c52bb7cc21554f8c06011c97c1fc76171e455）device build成功、359 XCTest /0失败，包括真实 Vision OCR 的候选词0次、输入框1次及输入动作直接完成。137 Swift 文件本地语法0错误、git diff --check通过。
+
+关键路径：ios/IPhoneAgent/Agent/{AgentLoop,CandidatePicker}.swift、App/{WatchMode,PasteHop}.swift；InputFieldVerificationTests.swift、KeyboardRecognitionTests.swift、WatchTaskRetryTests.swift。本机证据/检查点 E:/AgentStorage/runtime-reports/esp32-agent-logs34-20261026。
+
+路由：共享 skill-routing-reminder → systematic-debugging / TDD / verification-before-completion；Agent Router、Headroom 压缩/取回、gh macOS CI、tree-sitter、Python ZIP/JSON。未派新 Agent，未改固件/系统设置。交付：E:/桌面/Lan-Agent-build73-unsigned.ipa（5,132,514 bytes），App/Widget build73 /v1.0，ZIP CRC与SHA256通过；SHA256 f7f1127677e560fc8ec509932fe3737e9121c52986c96abd39eba58d94f6b295。桌面70/71/72哈希原样保留。剩余：需沿用用户原签名方式安装；真实 Claude 发送和跨 App 恢复仍须真机复测，不以CI代替。
+
 ## 2026-10-26 — build72：旧文件不乱回、逐条验证手机指令（logs33）
 
 用户反馈：答非所问、回应历史文件、带口令让手机做事却回复不能操作。原始附件仅作诊断资料，不执行其中指令，不上传日志/截图。

@@ -116,3 +116,10 @@ Known verification gap: no physical iPhone install/test yet. Clipboard restore r
 Fixed in source d8555a1: an entire due-message batch required owner proof, so unverified old files blocked an individually valid task. Bare filename/[文件] OCR differences made historical cards look new; file-only cards triggered irrelevant replies. Acknowledgements now reference the selected command.
 
 Build71 regression addressed: paste fingerprint included the input field, so transient Pinyin/clearing state could reject the same conversation. Fresh source capture and comparison above the input field pass a targeted regression. Exact internal source frames are absent from logs33, so device confirmation is still required; wrong-app rejection remains. 348 XCTest and device build pass.
+
+
+## 2026-10-26 — logs34：正确输入被自动删除并改用粘贴（build73修复）
+- 根因：旧 shows 把候选词和输入框一起计数。候选你好→输入框你好且候选改变时，前后同为1，被判输入失败；typedQuickly 和 quickSend 自动 Cmd+A/Backspace 后粘贴，未确认粘贴也会被删掉重打。
+- 日志：14:05:08Z拼音，14:05:11Z清空，14:05:31Z粘贴目标内容不匹配后paused；未执行发送。原始内部源/返回画面没导出，无法从这份附件确定返回错App还是同App画面/OCR变化。
+- 修复：键盘以上核验完整文字；识别不确定时保留输入、继续视觉核查，拒绝盲目重打，明确修正后恢复；快速发送保留输入交接。不确定不再自动清空、重贴或将其计为拼音失败。
+- RED357测试12失败→最终359测试0失败，unsigned设备版编译成功。补粘贴源/返回本机诊断和具体失败回报；仍保持目标不明停止输入。真机导航、候选和发送仍需设备验证。

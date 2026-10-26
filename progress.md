@@ -199,3 +199,10 @@ Implemented cross-app paste restoration/verification, merged keyboard OCR recogn
 ## 2026-10-26 — logs33 / build72
 
 Fixed old file replies and mixed-batch owner downgrade; preserve per-message authority and original command text. Improved paste source freshness and input-field exclusion. Source d8555a1: device build + 348 XCTest passed (https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40332717515); 136 Swift syntax checks passed. Verified unsigned build72 IPA placed on desktop; builds70/71 preserved. Physical install/retest remains. Details: HANDOFF.md.
+
+
+## 2026-10-26 — logs34 / build73 完成代码修复与交付
+- 修复正常拼音输入后被清空重贴：核验排除键盘候选，普通执行和微信 quickSend 都保留不确定文字、交给视觉核对；执行器拒绝盲目重打，明确修正后可继续。
+- 失败报告具体说明停在输入/粘贴核验，源和返回帧进入正常本机诊断；不放宽目标验证。
+- RED 40339071043：357测试12失败；最终 https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40341342030：unsigned device build成功、359测试0失败；代码7a7c52b。本地137 Swift语法0错误，diff check通过。
+- 桌面 E:/桌面/Lan-Agent-build73-unsigned.ipa，5,132,514 bytes，SHA256 f7f1127677e560fc8ec509932fe3737e9121c52986c96abd39eba58d94f6b295。App/Widget73、ZIP CRC/哈希通过，旧70/71/72保留。未签名安装或完成真机复测。

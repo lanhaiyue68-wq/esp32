@@ -129,3 +129,11 @@
 - [x] Implement per-message task routing, attachment normalization/reply suppression, and paste comparison correction.
 - [x] Prove new cases fail before fixes; pass full 348 XCTest and unsigned device build; verify/copy build72 IPA.
 - [ ] Sign/install on the iPhone and retest old files plus a new authenticated Claude command, no irrelevant file reply, and single-send behavior.
+
+
+## 2026-10-26 — logs34 / build73
+- [x] 对照 Claude 输入、清空、粘贴切换和回微信回报的日志。
+- [x] 排除键盘候选计数、取消两个输入路径的破坏性回退并保留视觉交接。
+- [x] 验证候选词/输入框真实 Vision OCR、已输入内容交接发送、明确错字修正、未确认输入不重贴；359测试通过。
+- [x] 校验 build73 IPA 并放桌面，保留旧版，更新 PR与交接。
+- [ ] 使用原有签名方式安装后真机复测 Claude 你好：文字保留、只发一次、有结果后完成；需要粘贴时核查跨 App 画面。
