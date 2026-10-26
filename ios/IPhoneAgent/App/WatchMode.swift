@@ -263,6 +263,9 @@ enum WatchSettings {
         if !words.isEmpty {
             return "已尝试发送\(words)，但未能确认任务完成，请先查看目标应用里的结果。"
         }
+        if action == "paused", reason == "paste target could not be verified after switching apps; no text was pasted" {
+            return "任务停在输入阶段，切换后无法确认粘贴目标，已停止操作，没有执行发送。"
+        }
         return "这次任务未能确认完成，请先查看目标应用里的结果。"
     }
 
@@ -1142,7 +1145,8 @@ extension AppModel {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
                 var result = WatchSettings.phoneTaskResult(action: agent.steps.last?["action"]?.str,
-                                                           answer: done, attempted: agent.sent)
+                                                           answer: done, attempted: agent.sent,
+                                                           reason: agent.steps.last?["reason"]?.str)
                 if PrivacyGuard.check(result, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
                     result = "任务已结束，结果含有受保护信息，未发送详情。"
                 }

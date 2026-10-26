@@ -9,7 +9,14 @@ struct BlindError: LocalizedError {
 struct InputNeedsVerification: LocalizedError {
     let expected: String
     let remaining: String
-    var errorDescription: String? { "Inspect the Pinyin candidates for \(expected); do not assume the first candidate is correct." }
+    var fieldMayBeComplete = false
+    var errorDescription: String? {
+        fieldMayBeComplete
+            ? "Text was entered but local OCR could not confirm it. Inspect the CURRENT input field for \(expected). "
+              + "Do not clear, retype, or paste over correct text. If it is already correct, send it once; "
+              + "otherwise explicitly correct only the visible mistake before sending."
+            : "Inspect the Pinyin candidates for \(expected); do not assume the first candidate is correct."
+    }
 }
 
 /// What AgentLoop does on the phone (Pointer, or a fake in tests).
@@ -134,6 +141,7 @@ extension Pointer: Gestures {}
     /// Quick pinyin that came out wrong, across runs (WeChat watch resets it when a watch starts).
     var pinyinMisses = 0
     private var quietSinceSend = 0
+    private var pendingInput: String?
     /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
     /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
     /// next to the box, which the tap check above missed, typed the text again, and left it in the box).
@@ -479,6 +487,7 @@ extension Pointer: Gestures {}
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         quietSinceSend = 0
+        pendingInput = nil
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
@@ -692,6 +701,13 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(refused)])  // never typed
                     return false
                 }
+                if name == "type", let pendingInput {
+                    record(planned.shot, ["action": .str("blocked"),
+                        "reason": .str("Text was already entered: \(pendingInput). Inspect the current field. "
+                            + "Do not clear, retype, or paste over correct text; send it once if correct. "
+                            + "Only use explicit correction keys if a visible mistake needs fixing.")])
+                    return false
+                }
                 if name == "type", keyboardGuard, noKeyboard < 2, let shown = screen?.frame, Vision.image(shown) != nil,
                    !CandidatePicker.keyboardUp(in: shown) {
                     noKeyboard += 1
@@ -725,14 +741,21 @@ extension Pointer: Gestures {}
                 momentum = name == "swipe"
                 do { try await perform(act) }
                 catch let input as InputNeedsVerification {
+                    if input.fieldMayBeComplete { pendingInput = input.expected }
                     lastActed = now()
                     record(planned.shot, ["action": .str("compose"), "expected": .str(input.expected),
-                                          "remaining": .str(input.remaining), "reason": .str(input.localizedDescription)])
+                                          "remaining": .str(input.remaining), "reason": .str(input.localizedDescription),
+                                          "field_may_be_complete": .bool(input.fieldMayBeComplete)])
                     timing.frameMs += try await settle()
                     return false // inspect candidates before any further action in the batch
                 }
                 // A rejected command did not send anything. Commit only after the gesture succeeds.
-                if let text = unsent, Self.sends(act) { sentTexts.insert(text); unsent = nil; quietSinceSend = 0 }
+                if name == "key", ["cmd+a", "backspace", "delete"].contains(act["combo"]?.str?.lowercased() ?? "") {
+                    pendingInput = nil
+                }
+                if let text = unsent, Self.sends(act) {
+                    sentTexts.insert(text); unsent = nil; pendingInput = nil; quietSinceSend = 0
+                }
                 lastActed = now()
                 let s = lastActed - started
                 timing.hidMs += s * 1000
@@ -797,7 +820,7 @@ extension Pointer: Gestures {}
     }
 
     /// Text in without a model look per phrase. A paste when iOS lets this app fill the pasteboard and the text then
-    /// newly shows on screen (read on this phone); anything else the paste put in the field is cleared. Else pinyin,
+    /// newly shows on screen (read on this phone); uncertain input stays for inspection. Else pinyin,
     /// each candidate found on the candidate row (CandidatePicker) and tapped. A candidate not found that way is left
     /// to the model as before (InputNeedsVerification, a "compose" step).
     private func typeFast(_ text: String) async throws {
@@ -823,17 +846,9 @@ extension Pointer: Gestures {}
                 throw BlindError(reason: "paste target could not be verified after switching apps; no text was pasted")
             }
             if hop == .filled {
-                // Paste first, tap after. Back from Lan Agent the box usually still has the keyboard, and a tap where
-                // it sits without one hit the space bar whenever the first frame back did not show the keyboard yet
-                // (logs(17), logs(20)). Only a paste that did not land, with no keyboard on screen, clears the box,
-                // taps it and pastes once more (never twice into the same box).
-                var pasted = try await pasteChecked(text, phone: phone)
-                if !pasted, pasteHop != nil, let field = lastTap, let now = await freshFrame(), !CandidatePicker.keyboardUp(in: now) {
-                    try await phone.key("cmd+a")
-                    try await phone.key("backspace")
-                    try await phone.tap(field.x, field.y, aim: false)
-                    pasted = try await pasteChecked(text, phone: phone)
-                }
+                // A missing keyboard or uncertain OCR does not prove the paste missed. Keep the field and inspect
+                // it rather than deleting a potentially correct result and issuing another paste (logs34).
+                let pasted = try await pasteChecked(text, phone: phone)
                 if pasted {
                     if returnSends {  // checked: exactly this text is in the box. The run ends here: a look at the
                         // empty box afterwards tapped "发送" on the keyboard's space bar (logs(20)).
@@ -843,9 +858,8 @@ extension Pointer: Gestures {}
                     }
                     return DebugLog.write("type: pasted and seen in the field")
                 }
-                try await phone.key("cmd+a")
-                try await phone.key("backspace")
-                DebugLog.write("type: the paste did not show the text; cleared the field, typing it instead")
+                trace?.write(screen?.frame, kind: "input verification", ["method": .str("paste"), "verified": .bool(false)])
+                throw InputNeedsVerification(expected: text, remaining: "", fieldMayBeComplete: true)
             } else {
                 DebugLog.write("type: the pasteboard refused the text; typing")
             }
@@ -872,7 +886,7 @@ extension Pointer: Gestures {}
     }
 
     /// Pinyin with the first candidate per chunk and one look at the end; true when the whole text newly shows.
-    /// Anything else it typed is cleared, and the paste goes on as before. Never on the 9-key pinyin keyboard, which
+    /// Uncertain text stays in the field for the next model look. Never on the 9-key pinyin keyboard, which
     /// turns letters into digit keys ("nihao" came out as 你哄啊).
     private func typedQuickly(_ text: String, phone: Gestures) async throws -> Bool {
         // Twice wrong in this watch (a keyboard the pinyin does not suit): the paste goes first, ~8 s saved a send.
@@ -889,11 +903,9 @@ extension Pointer: Gestures {}
             after = await freshFrame()
         }
         if let shown = after, CandidatePicker.shows(text, in: shown) > before { return true }
-        try await phone.key("cmd+a")
-        try await phone.key("backspace")
-        pinyinMisses += 1
-        DebugLog.write("type: the pinyin did not come out as the text; cleared it (miss \(pinyinMisses))")
-        return false
+        trace?.write(after, kind: "input verification", ["method": .str("pinyin"), "verified": .bool(false)])
+        DebugLog.write("type: pinyin unconfirmed; kept the field for inspection")
+        throw InputNeedsVerification(expected: text, remaining: "", fieldMayBeComplete: true)
     }
 
     /// Cmd+V, answering iOS's paste prompt if it comes up, and true when the text newly shows on screen (looked at

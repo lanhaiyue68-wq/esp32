@@ -15,6 +15,7 @@ extension AppModel {
             return .lost
         }
         guard let source = feed.frame, Vision.image(source) != nil else { return .lost }
+        agent.trace?.write(source, kind: "paste target", ["stage": .str("source")])
         pasteHopping = true
         defer { pasteHopping = false }
         var returnedAt = now()
@@ -38,7 +39,9 @@ extension AppModel {
                 return false
             }
             guard UIApplication.shared.applicationState == .background, let returned = self.feed.frame else { return false }
-            return PasteRoundTrip.matchesSource(source, returned)
+            let matched = PasteRoundTrip.matchesSource(source, returned)
+            self.agent.trace?.write(returned, kind: "paste target", ["stage": .str("return"), "matched": .bool(matched)])
+            return matched
         })
         DebugLog.write("paste hop: \(result), original target \(result == .lost ? "unverified" : "verified")")
         return result

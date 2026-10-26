@@ -42,7 +42,7 @@ enum CandidatePicker {
 
     /// Key labels of the iPhone keyboards (9-key and full pinyin, English).
     static let keyboardWords: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ", "空格", "space",
-                                             "return", "确认", "发送", "分隔", "选拼音", "选定", "换行", "123"]
+                                             "return", "确认", "发送", "分隔", "选拼音", "选定", "换行", "123", "拼"]
 
     /// True when the on-screen keyboard is up: its key labels in the lower part of the screen. Back from Lan Agent the
     /// box often still has the keyboard, and a tap where the box sits without it hit the space bar (logs(17)).
@@ -50,11 +50,43 @@ enum CandidatePicker {
 
     static func keyboardUp(rows: [[Piece]]) -> Bool {
         if rows.flatMap({ $0 }).filter({ keyboardWords.contains($0.text) }).count >= 2 { return true }
-        return rows.contains { row in
-            // OCR sometimes joins a whole QWERTY row into one word instead of emitting individual key labels.
-            let labels = row.map(\.text).joined().lowercased().filter { !$0.isWhitespace }
-            return labels.count >= 6 && ["qwertyuiop", "asdfghjkl", "zxcvbnm"].contains { $0.contains(labels) }
+        return aligned(rows).contains(where: letterKeys)
+    }
+
+    /// Vision can return each key, several keys, or a whole row as separate observations.
+    private static func aligned(_ rows: [[Piece]]) -> [[Piece]] {
+        var result: [[Piece]] = []
+        for p in rows.flatMap({ $0 }).sorted(by: { $0.box.midY < $1.box.midY }) {
+            if let last = result.last, let first = last.first,
+               abs(first.box.midY - p.box.midY) < max(first.box.height, p.box.height) * 0.6 {
+                result[result.count - 1].append(p)
+            } else { result.append([p]) }
         }
+        return result.map { $0.sorted { $0.box.minX < $1.box.minX } }
+    }
+
+    private static func letterKeys(_ row: [Piece]) -> Bool {
+        let labels = row.map(\.text).joined().lowercased().filter { !$0.isWhitespace }
+        return labels.count >= 6 && ["qwertyuiop", "asdfghjkl", "zxcvbnm"].contains { $0.contains(labels) }
+    }
+
+    /// Exclude the keyboard and its suggestion strip. A disappearing suggestion must not cancel out a new copy
+    /// in the field (logs34), nor can a suggestion confirm text that never reached the field.
+    private static func aboveKeyboard(_ rows: [[Piece]]) -> [[Piece]] {
+        let lines = aligned(rows)
+        let nineKeyLabels: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"]
+        guard let first = lines.first(where: { letterKeys($0) || $0.filter { nineKeyLabels.contains($0.text) }.count >= 2 }),
+              let top = first.map(\.box.minY).min(), let height = first.map(\.box.height).max() else { return rows }
+        // The candidate strip is immediately above the first key row. Account for its height even when OCR
+        // misses the candidates; when readable, exclude the nearest strip explicitly.
+        var boundary = top - max(0.045, height * 2.5)
+        if let strip = lines.last(where: { row in
+            guard let bottom = row.map(\.box.maxY).max() else { return false }
+            return bottom < top && top - bottom < 0.08
+        }), let stripTop = strip.map(\.box.minY).min() {
+            boundary = min(boundary, stripTop)
+        }
+        return rows.filter { $0.allSatisfy { $0.box.maxY < boundary } }
     }
 
     /// The "允许粘贴" button of iOS's paste prompt ("微信" wants to paste from "Lan Agent"), if it is up. iOS asks at every
@@ -69,17 +101,17 @@ enum CandidatePicker {
     /// How often the start of `text` (letters and digits only) shows in the lower part of the screen: a paste is
     /// confirmed when this goes up, so text already in a bubble above does not count.
     static func count(_ text: String, in jpeg: Data) -> Int {
-        count(text, lines: rows(in: jpeg, top: 0.3, bottom: 0.9).map { $0.map(\.text).joined() })
+        shows(text, in: jpeg)
     }
 
     /// How often the whole of `text` (letters and digits) shows in the lower part of the screen, the rows joined so a
     /// wrapped input box counts: typed text is confirmed when this goes up.
     static func shows(_ text: String, in jpeg: Data) -> Int {
-        shows(text, lines: rows(in: jpeg, top: 0.3, bottom: 0.95).map { $0.map(\.text).joined() })
+        shows(text, rows: rows(in: jpeg, top: 0.3, bottom: 1))
     }
 
     static func shows(_ text: String, rows: [[Piece]]) -> Int {
-        shows(text, lines: rows.map { $0.map(\.text).joined() })
+        shows(text, lines: aboveKeyboard(rows).map { $0.map(\.text).joined() })
     }
 
     static func shows(_ text: String, lines: [String]) -> Int {
