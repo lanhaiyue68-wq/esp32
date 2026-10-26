@@ -76,6 +76,7 @@
 	<array>
 		<string>bluetooth-central</string>
 		<string>audio</string>
+		<string>screen-capture</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

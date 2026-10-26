@@ -7,11 +7,16 @@ struct StatusChips: View {
     @ObservedObject var board: BoardLink
     @ObservedObject var pointer: Pointer
     @ObservedObject var calibrator: AutoCalibrator
+    @ObservedObject var feed: VideoFeed
+
+    init(app: AppModel, board: BoardLink, pointer: Pointer, calibrator: AutoCalibrator) {
+        self.app = app; self.board = board; self.pointer = pointer; self.calibrator = calibrator; self.feed = app.feed
+    }
 
     var body: some View {
         FlowLayout(spacing: Space.s) {
             chip("Board", "cable.connector", ok: board.connected, page: .connect)
-            chip("Mirroring", "rectangle.on.rectangle", ok: board.connected && board.status?.ap == "streaming", page: .see)
+            chip(feed.isNative ? "直接取屏" : "Mirroring", "rectangle.on.rectangle", ok: feed.isNative ? feed.mirroring : board.connected && board.status?.ap == "streaming", page: .see)
             chip("Mouse", "cursorarrow", ok: board.connected && board.status?.usb == "ok", page: .act)
             chip(calibrator.busy ? "Calibrating" : "Pointer", "scope", ok: pointer.calibrated, busy: calibrator.busy, page: .act)
             chip("Model", "brain", ok: app.modelReady && app.modelOK != false, page: .brain)

@@ -27,6 +27,13 @@ struct DiagnosticsView: View {
                 row("Status age", String(format: "%.1f s", metrics.statusAge))
             }
             SwiftUI.Section("Video") {
+                row("Capture source", feed.source.rawValue)
+                row("iOS", UIDevice.current.systemVersion)
+                if feed.isNative {
+                    row("Capture status", feed.nativeStatus)
+                    row("Pixels", "\(Int(feed.size.width)) x \(Int(feed.size.height))")
+                    row("Confirmation age", feed.confirmedAt > 0 ? String(format: "%.2f s", now() - feed.confirmedAt) : "–")
+                }
                 row("AirPlay kbps", f(board.status?.kbps))
                 row("AirPlay fps", f(board.status?.fps, "%.1f"))
                 row("IDR interval (board / app)", "\(board.status?.idr.map { "\($0) ms" } ?? "–") / \(f(metrics.idrIntervalMs)) ms")

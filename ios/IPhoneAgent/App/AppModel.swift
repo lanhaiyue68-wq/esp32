@@ -15,7 +15,7 @@ import UIKit
 
     let settings = Settings()
     let board = BoardLink(mock: MockMode.on)
-    let feed = VideoFeed()
+    let feed = VideoFeed(source: MockMode.on ? .mirror : .preferred)
     let metrics = Metrics()
     let traces = MockMode.on
         ? TraceStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("demo-traces"))
@@ -78,6 +78,7 @@ import UIKit
     /// stopped as if mirroring were gone (logs(16)). It counts as lost after 10 s of it, or at once when the session
     /// itself is gone ("idle").
     func noteMirroring(_ ap: String?) {
+        guard !feed.isNative else { return }
         if ap == "streaming" { (notStreamingSince, feed.mirroring) = (nil, true); return }
         if ap == "connected", feed.mirroring {
             let since = notStreamingSince ?? now()
@@ -147,6 +148,7 @@ import UIKit
         board.commands.onAppCommand = { [weak self] line in if DebugLog.toComputer { self?.handleAppCommand(line) } }
         DebugLog.write("app launched \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "")"
                        + " (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? ""))")
+        DebugLog.write("capture: \(feed.source.rawValue), iOS \(UIDevice.current.systemVersion)")
         settingsSink = settings.$configurationRevision.dropFirst().sink { [weak self] _ in
             self?.modelOK = nil
             self?.modelError = nil
@@ -158,8 +160,9 @@ import UIKit
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
             self?.noteMirroring(s.ap)
-            self?.feed.tcp.update(ip: s.ip, token: self?.board.net?.video_token, boardHasClient: s.tcp.map { $0 > 0 },
+            if self?.feed.isNative == false { self?.feed.tcp.update(ip: s.ip, token: self?.board.net?.video_token, boardHasClient: s.tcp.map { $0 > 0 },
                                   boardResumes: (s.fw.flatMap { Int($0.dropFirst()) } ?? 0) >= 29)
+            }
             self?.feed.status(s)
             self?.metrics.status(s)
             self?.logStatus(s)
@@ -168,6 +171,10 @@ import UIKit
             guard let self else { return }
             feed.resetStream()
             metrics.mtu = board.mtu
+            if feed.isNative {
+                Task { [weak self] in try? await self?.board.commands.send("stream off") }
+                return
+            }
             if agent.running && !MockMode.on && FrameMode.current == .stream {  // the board forgot `stream on`: the paused run needs the screen back
                 Task { [weak self] in
                     do { try await self?.feed.stream(true); DebugLog.write("recover: BLE back, stream on again") } catch {
@@ -216,6 +223,7 @@ import UIKit
 
     /// Every second: metrics; a suspension note; the stream's numbers every 10 s while a run goes.
     private func tick() {
+        if feed.isNative { feed.objectWillChange.send() } // Readiness expires even if the system stops callbacks.
         let before = metrics.suspensions, gap = now() - lastTick
         metrics.tick()
         lastTick = now()
@@ -233,16 +241,34 @@ import UIKit
     /// A command timed out: video may be starving the board's control traffic. Stop the stream and run
     /// snap-per-step for the rest of this run (the next run streams again).
     private func commandTimedOut(_ command: String) async {
+        guard !feed.isNative else {
+            DebugLog.write("cmd timeout during direct capture: \(command.prefix(30))")
+            return
+        }
         DebugLog.write("cmd timeout on '\(command.prefix(30))': stream off, snap-per-step for this run")
         FrameMode.fallback = .snap
         if feed.streamOn { _ = try? await feed.stream(false) }
     }
 
     func setFrameMode(_ mode: FrameMode) {
+        guard !feed.isNative else { return }
         FrameMode.current = mode
         say("frame mode: \(mode.rawValue)")
         if mode == .stream && agent.running { Task { try? await feed.stream(true) } }
         if mode == .snap && feed.streamOn { Task { try? await feed.stream(false) } }
+    }
+
+    var canChangeCaptureSource: Bool {
+        !startingAgent && !agent.running && !watching && !calibrator.busy && !recorder.recording
+    }
+
+    func selectCaptureSource(_ source: CaptureSource) {
+        guard canChangeCaptureSource else { return }
+        feed.selectSource(source)
+        if feed.isNative {
+            joinTask?.cancel()
+            Task { [weak self] in try? await self?.board.commands.send("stream off") }
+        }
     }
 
     /// The run paused for the board (line) or goes on (nil).
@@ -270,6 +296,7 @@ import UIKit
     /// iOS drops the video decoder when the app goes to the background and says so only at the next frame, which a
     /// still Home Screen never sends. During a run, rebuild it from the cached GOP shortly after leaving.
     private func refreshDecoderSoon() {
+        guard !feed.isNative else { return }
         guard agent.running || startingAgent else { return }
         let transitionAt = now()
         Task { [weak self] in

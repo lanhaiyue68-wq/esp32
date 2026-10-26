@@ -61,6 +61,20 @@ enum FrameMode: String {
     }
 }
 
+enum CaptureSource: String, CaseIterable {
+    case direct, mirror
+    static var directAvailable: Bool {
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *) { return true }
+        #endif
+        return false
+    }
+    static var preferred: Self {
+        guard directAvailable else { return .mirror }
+        return Self(rawValue: UserDefaults.standard.string(forKey: "captureSourceV1") ?? "") ?? .direct
+    }
+}
+
 extension ScreenSource {
     func afterAction(since: Double) async { await settled() }
     func requireFrame(after: Double? = nil) async throws {
@@ -96,6 +110,15 @@ extension ScreenSource {
 
 /// The phone's screen, mirrored over AirPlay to the board and forwarded over BLE, as JPEG frames.
 @MainActor final class VideoFeed: ObservableObject, ScreenSource {
+    @Published private(set) var source: CaptureSource
+    @Published private(set) var nativeStatus = "请开始共享整个屏幕"
+    @Published private(set) var requestingSharing = false
+    @Published private(set) var sharingActive = false
+    private var directState = DirectFrameState()
+    private var nativeOwner: AnyObject?
+    private var ownerID = UUID()
+    var isNative: Bool { source == .direct }
+    var confirmedAt: Double { isNative ? directState.confirmedAt : updated }
     @Published private(set) var frame: Data?
     @Published private(set) var size = CGSize.zero
     @Published private(set) var note = ""  // last decoder problem, shown in Diagnostics
@@ -113,7 +136,11 @@ extension ScreenSource {
     private var statusAt = 0.0
     private var latestBoardMs: Int?
     private var decodedBoardMs = 0
-    var mirroring = false  // board status says ap == streaming
+    private var mirrorOn = false
+    var mirroring: Bool {
+        get { isNative ? directState.usable(at: now()) : mirrorOn }
+        set { mirrorOn = newValue }
+    }
     var metrics: Metrics?
     weak var device: HIDDevice?
 
@@ -121,11 +148,13 @@ extension ScreenSource {
     private let decoder = H264Decoder()
     let tcp = VideoTCP()  // video over the board's Wi-Fi when it is reachable
 
-    init() {
+    init(source: CaptureSource = .mirror) {
+        self.source = source
         tcp.onChunk = { [weak self] in self?.receive($0) }
         decoder.onFrame = { [weak self] f in DispatchQueue.main.async { self?.publish(f) } }
         decoder.onError = { [weak self] msg in
             DispatchQueue.main.async {
+                guard self?.isNative == false else { return }
                 let bg = UIApplication.shared.applicationState == .background
                 self?.note = bg ? "\(msg) [in background]" : msg
                 self?.metrics?.decodeError(background: bg)
@@ -136,10 +165,103 @@ extension ScreenSource {
 
     var live: Bool { mirroring && frame != nil && !broken && (device?.connected ?? false) }
 
+    func selectSource(_ next: CaptureSource) {
+        guard next != source, next != .direct || CaptureSource.directAvailable else { return }
+        stopNativeSharing()
+        source = next
+        resetPixels()
+        streamOn = false
+        if !isNative { resetStream() }
+        tcp.update(ip: nil)
+        UserDefaults.standard.set(next.rawValue, forKey: "captureSourceV1")
+        DebugLog.write("capture: source \(next.rawValue)")
+    }
+
+    func startNativeSharing() {
+        guard isNative, !requestingSharing, !sharingActive else { return }
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *) {
+            stopNativeSharing()
+            requestingSharing = true
+            nativeStatus = "请在系统提示中共享整个屏幕"
+            let token = UUID(); ownerID = token
+            let owner = NativeScreenCapture { [weak self] event in
+                guard let self, self.ownerID == token, self.isNative else { return }
+                self.receiveDirect(event)
+            }
+            nativeOwner = owner
+            owner.present()
+            return
+        }
+        #endif
+        nativeStatus = "直接取屏需要 iOS 27 真机"
+    }
+
+    func stopNativeSharing() {
+        ownerID = UUID()
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *), let owner = nativeOwner as? NativeScreenCapture { owner.stop() }
+        #endif
+        nativeOwner = nil
+        directState.stop()
+        requestingSharing = false; sharingActive = false
+        if isNative { resetPixels(); nativeStatus = "共享已停止，请重新共享整个屏幕" }
+    }
+
+    /// Internal event boundary is shared by the system output and source-routing tests.
+    func receiveDirect(_ event: DirectCaptureEvent) {
+        guard isNative else { return }
+        switch event {
+        case .began(let id):
+            directState.begin(id, fullDisplay: true)
+            resetPixels(); sharingActive = true; requestingSharing = false
+            nativeStatus = "已共享整屏，等待完整画面"
+        case .frame(let id, let seq, let jpeg, let width, let height, let timestamp, let ms):
+            guard !jpeg.isEmpty, width > 0, height > width,
+                  directState.complete(id, sequence: seq, capturedAt: timestamp, at: now()) else { return }
+            if frame != jpeg { frame = jpeg; updated = now() }
+            capturedAt = timestamp
+            size = CGSize(width: width, height: height)
+            broken = false; note = ""; nativeStatus = "整屏取屏中"
+            metrics?.frameDecoded(ms: ms)
+        case .idle(let id, let seq, let timestamp):
+            guard directState.idle(id, sequence: seq, confirmedAt: timestamp, at: now()) else { return }
+            // No duplicate JPEG publications: settling and recording depend on actual changed pixels.
+        case .unavailable(let id, let seq, let reason):
+            guard directState.generation == id, seq > directState.sequence else { return }
+            directState.invalidate(id, sequence: seq)
+            resetPixels(); nativeStatus = reason; note = reason
+        case .stopped(let id, let reason):
+            guard id == nil || id == directState.generation else { return }
+            directState.stop(); resetPixels()
+            sharingActive = false; requestingSharing = false; nativeStatus = reason; note = reason
+        }
+    }
+
+    private func resetPixels() {
+        frame = nil; size = .zero; updated = 0; capturedAt = 0; broken = false
+    }
+
+    private func requireDirectFrame(after: Double? = nil, wait: Double = 4) async throws {
+        guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+        let deadline = now() + max(0, min(wait, 4))
+        while !usable(after: after) {
+            try Task.checkCancellation()
+            guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+            guard sharingActive, now() < deadline else {
+                throw BlindError(reason: "直接取屏尚未就绪：\(nativeStatus)。请回 App 重新共享整个屏幕")
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
     /// Safe metadata for early failures too: no screenshots, Wi-Fi credentials or video tokens.
     var diagnostics: JObject {
         let t = now()
         return ["connected": .bool(device?.connected == true), "mirroring": .bool(mirroring),
+                "capture_source": .str(source.rawValue), "sharing_active": .bool(sharingActive),
+                "capture_status": .str(nativeStatus), "os_version": .str(UIDevice.current.systemVersion),
+                "confirmation_age_s": confirmedAt > 0 ? .num(max(0, t - confirmedAt)) : .null,
                 "stream_on": .bool(streamOn), "has_frame": .bool(frame != nil), "broken": .bool(broken),
                 "decoded_ms": .int(decodedBoardMs), "latest_board_ms": latestBoardMs.map { .int($0) } ?? .null,
                 "status_age_s": statusAt > 0 ? .num(max(0, t - statusAt)) : .null,
@@ -153,6 +275,7 @@ extension ScreenSource {
     /// The user is looking at the app meanwhile, so the snapshot gets `snapLimit` s and no second try.
     @discardableResult
     func prepareForRun(snapMode: Bool = false, wait: Double = 3, snapLimit: Double = 10) async throws -> String {
+        if isNative { try await requireDirectFrame(wait: wait); return "direct display" }
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
@@ -184,6 +307,7 @@ extension ScreenSource {
     /// and it works when the board's own buffer has overflowed. True when that gives a usable frame.
     @discardableResult
     func refreshDecoder(_ why: String, afterTransition: Double? = nil) async -> Bool {
+        if isNative { return usable() }
         if let afterTransition,
            !FrameFreshness.needsDecoderRefresh(decodedAt: updated, transitionAt: afterTransition, usable: usable()) {
             DebugLog.write("decoder: kept live session (usable frame decoded after background)")
@@ -220,11 +344,13 @@ extension ScreenSource {
     }
 
     private func usable(after: Double? = nil) -> Bool {
-        live && FrameFreshness.usable(frameAt: capturedAt, decodedMs: decodedBoardMs, latestMs: latestBoardMs,
+        if isNative { return live && directState.usable(at: now(), after: after) }
+        return live && FrameFreshness.usable(frameAt: capturedAt, decodedMs: decodedBoardMs, latestMs: latestBoardMs,
                                      statusAt: statusAt, at: now(), after: after, broken: broken)
     }
 
     func requireFrame(after: Double? = nil) async throws {
+        if isNative { try await requireDirectFrame(after: after); return }
         try Task.checkCancellation()
         guard device?.connected == true, mirroring else { throw BlindError() }
         if usable(after: after) { return }
@@ -237,6 +363,7 @@ extension ScreenSource {
 
     /// One `video` notify from BoardLink.
     func receive(_ chunk: Data) {
+        guard !isNative else { return }
         metrics?.videoBytes(chunk.count)
         let (dropsBefore, restartsBefore) = (assembler.drops, assembler.restarts)
         let unit = assembler.add(chunk)
@@ -260,6 +387,7 @@ extension ScreenSource {
     /// The link (re)connected: chunk numbering starts over, and nothing of the old stream may come back, neither
     /// a decode still in the queue nor its cached GOP (refreshDecoder would replay it as if it were current).
     func resetStream() {
+        guard !isNative else { return }
         assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
         decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false; liveUnitAt = -.infinity
         fed.removeAll(); fedOrder.removeAll(); tcp.fed(0)
@@ -287,6 +415,7 @@ extension ScreenSource {
     }
 
     private func publish(_ f: H264Decoder.Frame) {
+        guard !isNative else { return }
         guard f.generation == generation else { return }  // decoded from the stream before the last reconnect
         frame = f.jpeg
         decodedBoardMs = Int(f.unit.boardMs)
@@ -325,6 +454,7 @@ extension ScreenSource {
     /// `snapLimit` caps the snapshot (no second try) when someone is waiting on screen.
     @discardableResult
     func currentFrame(wait: Double = 3, snapLimit: Double? = nil) async throws -> String {
+        if isNative { try await requireDirectFrame(wait: wait); return "direct display" }
         try Task.checkCancellation()
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         guard mirroring else { throw VideoReadinessError.mirroringDisconnected }
@@ -361,6 +491,10 @@ extension ScreenSource {
     /// Ask the board for the current GOP and wait until it is decoded. Returns the latency in ms.
     @discardableResult
     func snap(timeout: Double? = nil) async throws -> Double {
+        if isNative {
+            let began = now(); try await requireDirectFrame(wait: timeout ?? 4)
+            return (now() - began) * 1000
+        }
         guard let device else { throw DeviceError(message: "board not connected") }
         let started = now()
         if let channel = device as? CommandChannel {
@@ -378,6 +512,7 @@ extension ScreenSource {
     }
 
     func stream(_ on: Bool) async throws {
+        guard !isNative else { return }
         try await device?.send("stream \(on ? "on" : "off")")
         streamOn = on
     }
@@ -387,6 +522,12 @@ extension ScreenSource {
     /// the screen did not change, but a broken stream (waiting for an IDR) needs a snap. Snap: give the UI a moment,
     /// snap, and snap once more if the GOP still ends before the action.
     func afterAction(since: Double) async {
+        if isNative {
+            await settled(quiet: 0.25, least: 0.15, most: 2)
+            do { try await requireDirectFrame(after: since) }
+            catch { DebugLog.write("direct frame after action: \(error.localizedDescription)") }
+            return
+        }
         let began = now()
         defer {
             DebugLog.write(String(format: "frame wait: after action %.0f ms, verified %@", (now() - began) * 1000,
@@ -424,7 +565,10 @@ extension ScreenSource {
     }
 
     /// The link dropped: the board forgets `stream on`.
-    func linkLost() { streamOn = false; statusAt = 0; broken = true }
+    func linkLost() {
+        guard !isNative else { return } // BLE reconnect must not destroy the independent sharing session.
+        streamOn = false; statusAt = 0; broken = true
+    }
 }
 
 

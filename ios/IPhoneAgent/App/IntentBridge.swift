@@ -31,7 +31,7 @@ extension AppModel {
             guard settings.isConfigured else { return String(localized: "Set up the model in Settings first.") }
             guard pointer.calibrated else { return String(localized: "Calibrate the pointer in Lan Agent first.") }
             guard await waitReady(mirroring: true, timeout: 20) else {
-                return String(localized: "The board or Screen Mirroring isn't ready. Connect the board and start Screen Mirroring.")
+                return feed.isNative ? "请连接开发板，并回 Lan Agent 共享整个屏幕。" : String(localized: "The board or Screen Mirroring isn't ready. Connect the board and start Screen Mirroring.")
             }
         }
         await run(task, intent: intent)
@@ -46,8 +46,9 @@ extension AppModel {
         var lines: [String] = []
         if MockMode.on { lines.append(String(localized: "Demo data is on.")) }
         lines.append(board.connected ? String(localized: "Board connected") : String(localized: "Board not connected"))
-        lines.append(feed.live || s?.ap == "streaming" ? String(localized: "Screen Mirroring on")
-                     : String(localized: "Screen Mirroring off"))
+        if feed.isNative { lines.append("直接取屏：\(feed.nativeStatus)") }
+        else { lines.append(feed.live || s?.ap == "streaming" ? String(localized: "Screen Mirroring on")
+                     : String(localized: "Screen Mirroring off")) }
         if pointer.calibrated {
             lines.append(pointer.quality.map { String(localized: "Calibrated, \(CalibrationText.percent($0))") }
                          ?? String(localized: "Calibrated"))

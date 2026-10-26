@@ -56,6 +56,11 @@ extension AppModel {
             return
         }
         guard !Task.isCancelled else { return }
+        if feed.isNative && !feed.live {
+            say("请先在取屏设置中共享整个屏幕，再开始任务。\(feed.nativeStatus)")
+            if UIApplication.shared.applicationState != .background { setupPage = .see }
+            return
+        }
         guard await calibrator.ensureCalibrated() else {
             say(String(localized: "The pointer isn't calibrated yet."))
             return
@@ -85,11 +90,11 @@ extension AppModel {
         traces.start(task: task)  // the run folder exists from here: a failed start keeps its log and video
         startVideo()
         FrameMode.fallback = nil  // each run starts in the chosen mode
-        let snapMode = FrameMode.current == .snap
+        let snapMode = !feed.isNative && FrameMode.current == .snap
         do {
             try checkStart()
             mark("video preflight")
-            say(String(localized: "Checking the mirrored screen…"))  // can take a few seconds; capped in prepareForRun
+            say(feed.isNative ? "正在检查直接取屏…" : String(localized: "Checking the mirrored screen…"))
             let source = try await feed.prepareForRun(snapMode: snapMode)
             try checkStart()
             mark("foreground frame verified: " + source)

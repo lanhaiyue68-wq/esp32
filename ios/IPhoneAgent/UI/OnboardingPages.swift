@@ -112,10 +112,15 @@ struct ConnectPage: View {
 struct SeePage: View {
     @ObservedObject var app: AppModel
     @ObservedObject var board: BoardLink
+    @ObservedObject var feed: VideoFeed
     @Binding var onWiFi: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    private var streaming: Bool { board.connected && board.status?.ap == "streaming" }
+    init(app: AppModel, board: BoardLink, onWiFi: Binding<Bool>) {
+        self.app = app; self.board = board; self.feed = app.feed; self._onWiFi = onWiFi
+    }
+
+    private var streaming: Bool { feed.isNative ? feed.mirroring : board.connected && board.status?.ap == "streaming" }
     // The board reports a connected station and this phone's video TCP: one Wi-Fi, no SSID access needed.
     private var joined: Bool {
         app.otherWiFi == nil && (onWiFi || app.join == .joined || app.hotspotSSID != nil || streaming || app.onSameWiFi)
@@ -124,6 +129,37 @@ struct SeePage: View {
 
     var body: some View {
         VStack(spacing: Space.xl) {
+            if CaptureSource.directAvailable {
+                Picker("取屏来源", selection: Binding(get: { feed.source }, set: { app.selectCaptureSource($0) })) {
+                    Text("直接取屏").tag(CaptureSource.direct)
+                    Text("镜像回传").tag(CaptureSource.mirror)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!app.canChangeCaptureSource)
+            }
+            if feed.isNative {
+                PageHeader(mood: streaming ? .success : .listening, title: "直接读取手机屏幕",
+                           message: "通过系统整屏共享读取画面，继续使用现有无线控制。")
+                Panel {
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        Label(feed.nativeStatus, systemImage: streaming ? "checkmark.circle.fill" : "rectangle.on.rectangle")
+                        Text("请选择共享整个屏幕。切到其他 App 后保持共享和手机解锁。")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        if feed.sharingActive {
+                            Button("停止屏幕共享", role: .destructive) { feed.stopNativeSharing() }
+                        } else {
+                            Button(feed.requestingSharing ? "等待系统确认…" : "开始共享整个屏幕") { feed.startNativeSharing() }
+                                .disabled(feed.requestingSharing)
+                        }
+                        if let jpeg = feed.frame, let image = UIImage(data: jpeg) {
+                            Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 240)
+                                .accessibilityLabel("直接取屏预览")
+                        }
+                    }
+                }
+                Text("画面在手机本地处理，仅在原有模型决策时提交截图。此模式无需开启 AirPlay 镜像，也无需 USB 连接。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else {
             PageHeader(mood: streaming ? .success : (app.join.busy || joined) ? .listening : failure != nil ? .failure : .idle,
                        title: "Let Me See the Screen",
                        message: "Screen Mirroring reaches the board over the Wi-Fi you both use.")
@@ -156,17 +192,19 @@ struct SeePage: View {
                 }
                 .font(.footnote).foregroundStyle(.secondary)
             }
+            }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: joined)
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: app.join)
-        .task {  // check once by itself, then keep checking every 2 s while on this step
+        .task(id: feed.source) {  // Direct capture does not depend on a board video/Wi-Fi session.
+            guard !feed.isNative else { return }
             if !joined { app.startJoin(auto: true) }
             while !Task.isCancelled && !streaming {
                 await app.refreshHotspot()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await app.refreshHotspot() } } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active && !feed.isNative { Task { await app.refreshHotspot() } } }
     }
 }
 
@@ -203,18 +241,18 @@ struct ActPage: View {
     @ObservedObject var pointer: Pointer
 
     private var mouse: Bool { MockMode.on || board.status?.usb == "ok" }
-    private var mirroring: Bool { MockMode.on || board.status?.ap == "streaming" }
+    private var mirroring: Bool { MockMode.on || app.feed.mirroring }
 
     var body: some View {
         VStack(spacing: Space.xl) {
             PageHeader(mood: pointer.calibrated ? .success : calibrator.busy ? .acting : .idle,
                        title: "Let Me Use the Pointer",
-                       message: "The board is a USB mouse. iOS shows its pointer only with AssistiveTouch on. Then I calibrate on a grid, like a 3D printer levelling its bed.")
+                       message: "使用现有控制连接。打开 AssistiveTouch 后，在网格上校准指针。")
             if !pointer.calibrated { MiniPhoneDemo(kind: .assistiveTouch) }
             Panel {
                 CheckRow(title: "Mouse connected", done: mouse, active: !mouse, waiting: board.connected && !mouse)
                 Divider().padding(.vertical, Space.s)
-                CheckRow(title: "Screen Mirroring on", done: mirroring, active: mouse && !mirroring)
+                CheckRow(title: app.feed.isNative ? "整屏共享已就绪" : "Screen Mirroring on", done: mirroring, active: mouse && !mirroring)
                 Divider().padding(.vertical, Space.s)
                 CheckRow(title: "Pointer calibrated", done: pointer.calibrated, active: mouse && mirroring && !pointer.calibrated,
                          waiting: calibrator.busy,

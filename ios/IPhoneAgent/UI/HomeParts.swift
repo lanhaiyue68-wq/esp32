@@ -76,7 +76,9 @@ struct RecoveryPanel: View {
                 Text(timerInterval: app.recoverySince...Date.distantFuture, countsDown: false)
                     .font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
             }
-            Text(verbatim: stage.line).font(.subheadline).foregroundStyle(.secondary)
+            Text(verbatim: app.feed.isNative && stage.part == .mirroring
+                 ? "系统屏幕共享已中断，请回取屏设置恢复整屏共享" : stage.line)
+                .font(.subheadline).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button(role: .destructive) { Task { await app.stopAgent() } } label: { Label("Stop", systemImage: "stop.fill") }

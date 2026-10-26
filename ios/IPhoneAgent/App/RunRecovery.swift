@@ -7,8 +7,9 @@ extension AppModel {
 
     func wireRecovery() {
         agent.link = { [unowned self] in
-            Recovery.Link(connected: board.connected, sta: board.status?.sta, ap: board.status?.ap,
-                          frameAt: FrameMode.current == .snap ? now() : feed.updated)  // snap mode: restore snaps a fresh one
+            Recovery.Link(connected: board.connected, sta: feed.isNative ? 1 : board.status?.sta,
+                          ap: feed.isNative ? (feed.mirroring ? "streaming" : "idle") : board.status?.ap,
+                          frameAt: feed.isNative ? feed.confirmedAt : FrameMode.current == .snap ? now() : feed.updated)
         }
         agent.onRecover = { [weak self] stage in self?.recover(stage) }
         agent.restore = { [weak self] in try await self?.restoreRun() }
@@ -26,10 +27,12 @@ extension AppModel {
         if stage.part != .board, was == nil || was?.part == .board, let up = board.status?.up, up < 60_000 {
             DebugLog.write("recover: board rebooted \(up / 1000) s ago (reset: \(board.status?.rst ?? "?"))")
         }
-        DebugLog.write("recover: \(stage.logLine)")
+        let line = feed.isNative && stage.part == .mirroring
+            ? "系统屏幕共享已中断，请回 App 恢复整屏共享" : stage.line
+        DebugLog.write("recover: \(feed.isNative && stage.part == .mirroring ? line : stage.logLine)")
         runMood = .listening
-        live.update(mood: .listening, step: moveCount, line: stage.line, phase: .running, status: stage.status)
-        if stage.ask { notifier.post(kind(stage.part), title: title(stage.part), body: stage.line, run: runID) }
+        live.update(mood: .listening, step: moveCount, line: line, phase: .running, status: stage.status)
+        if stage.ask { notifier.post(kind(stage.part), title: title(stage.part), body: line, run: runID) }
     }
 
     /// Live again: the board may have rebooted (stream off, button state unknown) and the screen moved on.
@@ -56,7 +59,7 @@ extension AppModel {
         switch part {
         case .board: return String(localized: "Board disconnected")
         case .hotspot: return String(localized: "The board lost its Wi-Fi")
-        case .mirroring: return String(localized: "Start Screen Mirroring to continue")
+        case .mirroring: return feed.isNative ? "恢复整屏共享以继续" : String(localized: "Start Screen Mirroring to continue")
         }
     }
 }

@@ -111,7 +111,7 @@ struct OnboardingView: View {
 
     // MARK: - per page state
 
-    private var streaming: Bool { board.connected && board.status?.ap == "streaming" }
+    private var streaming: Bool { feed.isNative ? feed.mirroring : board.connected && board.status?.ap == "streaming" }
 
     /// The page's goal is reached (drives auto-advance).
     private var pageDone: Bool {
@@ -128,7 +128,7 @@ struct OnboardingView: View {
     private var waiting: Bool {
         switch page {
         case .connect: return !board.connected && (board.scanning || board.connecting || board.linking)
-        case .see: return !streaming && (onHotspot || app.join.busy)
+        case .see: return feed.isNative ? feed.requestingSharing : !streaming && (onHotspot || app.join.busy)
         case .act: return calibrator.busy
         case .brain: return testing
         default: return false
@@ -149,6 +149,7 @@ struct OnboardingView: View {
         case .connect: return board.connected ? "Continue" : waiting ? "Looking for the board…" : "Scan Again"
         case .see:
             if streaming { return "Continue" }
+            if feed.isNative { return feed.sharingActive ? "等待完整画面…" : "共享整个屏幕" }
             if onHotspot { return "Waiting for mirroring…" }
             switch app.join {
             case .joining: return "Sending…"
@@ -170,7 +171,7 @@ struct OnboardingView: View {
         switch page {
         case .welcome: return accepted
         case .connect: return board.connected || (board.state == .poweredOn && !waiting)
-        case .see: return streaming || (!onHotspot && !app.join.busy)
+        case .see: return feed.isNative ? (streaming || !feed.sharingActive && !feed.requestingSharing) : streaming || (!onHotspot && !app.join.busy)
         case .act: return !calibrator.busy && (pointer.calibrated || actReady)
         case .brain: return !testing && (app.modelOK == true || app.modelReady)
         }
@@ -181,7 +182,7 @@ struct OnboardingView: View {
         case .connect where !board.connected:
             board.retryDiscovery()
         case .see where !streaming:
-            app.startJoin()
+            if feed.isNative { feed.startNativeSharing() } else { app.startJoin() }
         case .act where !pointer.calibrated:
             calibrator.calibrate(why: String(localized: "first setup"))
         case .brain where app.modelOK != true:
