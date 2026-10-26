@@ -818,9 +818,9 @@ extension Pointer: Gestures {}
         }
         if Pasteboard.needed(text), !pasteHopOff {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
-            if hop == .lost {  // not sure which app is in front now: look again, and type from here on
+            if hop == .lost {  // no further typing or sending when the app switch lost its destination
                 pasteHopOff = true
-                throw DeviceError(message: "switching to Lan Agent for the paste did not work; look at the screen again")
+                throw BlindError(reason: "paste target could not be verified after switching apps; no text was pasted")
             }
             if hop == .filled {
                 // Paste first, tap after. Back from Lan Agent the box usually still has the keyboard, and a tap where

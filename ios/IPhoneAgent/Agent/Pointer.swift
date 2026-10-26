@@ -601,6 +601,17 @@ import Foundation
         pos = nil  // the edge clamped the pointer: re-home before the next move
     }
 
+    /// Reverse a previousApp switch along the home bar, returning toward the original target app.
+    func nextApp() async throws {
+        drawChain = false
+        defer { pos = nil }
+        try await point(0.85, 1)
+        try await device.send("move 0 80")
+        try await device.send("press")
+        try await device.send("move \(-Int(0.65 * Double(span?.w ?? 400))) 0")
+        try await device.send("release")
+    }
+
     private func dx(_ x: Double) -> Int { Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven)) }
     private func dy(_ y: Double) -> Int { Int((min(max(fix(y, "y"), 0), 1) * Double(span!.h)).rounded(.toNearestOrEven)) }
 }

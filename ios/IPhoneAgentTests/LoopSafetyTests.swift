@@ -83,6 +83,24 @@ import XCTest
         do { _ = try await agent.step(); XCTFail("the keyboard command must fail") } catch {}
         XCTAssertTrue(agent.sent.isEmpty)
     }
+
+    func testALostPasteTargetStopsBeforeAnyTextOrSendCanReachAnotherApp() async throws {
+        let actor = FakeModel { _ in "DO: type 你好" }
+        let phone = FakeGestures()
+        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.fastText = true; agent.pinyinMisses = 2
+        agent.pasteHop = { _ in .lost }
+        do {
+            _ = try await agent.step()
+            XCTFail("an unknown paste destination must stop the run")
+        } catch is BlindError {
+            // A normal DeviceError would be replanned and could continue sending in the wrong app.
+        } catch {
+            XCTFail("the lost target must stop as a screen-safety error, got \(error)")
+        }
+        XCTAssertTrue(phone.calls.isEmpty)
+        XCTAssertTrue(agent.sent.isEmpty)
+    }
 }
 
 @MainActor private final class RejectingSendGestures: Gestures {

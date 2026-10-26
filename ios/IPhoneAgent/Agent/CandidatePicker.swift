@@ -50,7 +50,11 @@ enum CandidatePicker {
 
     static func keyboardUp(rows: [[Piece]]) -> Bool {
         if rows.flatMap({ $0 }).filter({ keyboardWords.contains($0.text) }).count >= 2 { return true }
-        return rows.contains { row in row.filter { $0.text.count == 1 && $0.text.first?.isLetter == true }.count >= 6 }  // a QWERTY row
+        return rows.contains { row in
+            // OCR sometimes joins a whole QWERTY row into one word instead of emitting individual key labels.
+            let labels = row.map(\.text).joined().lowercased().filter { !$0.isWhitespace }
+            return labels.count >= 6 && ["qwertyuiop", "asdfghjkl", "zxcvbnm"].contains { $0.contains(labels) }
+        }
     }
 
     /// The "允许粘贴" button of iOS's paste prompt ("微信" wants to paste from "Lan Agent"), if it is up. iOS asks at every
@@ -149,8 +153,7 @@ enum CandidatePicker {
     }
 }
 
-/// How putting a reply on the pasteboard went (AppModel.hopToPaste): filled, refused, or lost on the way (not back in
-/// WeChat, or never in Lan Agent).
+/// How putting text on the pasteboard went: filled, refused, or lost (the original target was not verified).
 enum PasteHopResult { case filled, refused, lost }
 
 /// The general pasteboard, for pasting a reply.

@@ -62,6 +62,11 @@ import XCTest
         XCTAssertFalse(PasteRoundTrip.matchesSource(labelledScreen("CLAUDE"), labelledScreen("WECHAT")))
     }
 
+    func testMissingOrUnreadableFramesCannotVerifyTheDestination() {
+        XCTAssertFalse(PasteRoundTrip.matchesSource(Data(), labelledScreen("CLAUDE")))
+        XCTAssertFalse(PasteRoundTrip.matchesSource(labelledScreen("CLAUDE"), Data()))
+    }
+
     private func labelledScreen(_ title: String) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
         return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
