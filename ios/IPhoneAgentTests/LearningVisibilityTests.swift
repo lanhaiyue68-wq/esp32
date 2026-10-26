@@ -155,12 +155,11 @@ import XCTest
         let model = FakeModel { _ in "DO: wait" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: model, planner: model, trace: nil)
         agent.lessons = book
-        agent.task = "Set an alarm"
         _ = try await agent.step()
         _ = try await agent.step()
         XCTAssertEqual(book.lessons.first?.uses, 1)
         XCTAssertNotNil(book.lessons.first?.lastRun)
-        XCTAssertEqual(book.lessons.first?.lastTask, agent.task)
+        XCTAssertNil(book.lessons.first?.lastTask, "This step-only fixture never started a named task; do not fabricate one")
     }
 
     func testLocalCompletionShortcutIsNotCountedAsAModelReference() async throws {
