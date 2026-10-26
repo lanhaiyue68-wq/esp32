@@ -67,6 +67,21 @@ import XCTest
         XCTAssertFalse(PasteRoundTrip.matchesSource(labelledScreen("CLAUDE"), Data()))
     }
 
+    func testInputFieldChangesDoNotHideTheSameVerifiedConversation() {
+        XCTAssertTrue(PasteRoundTrip.matchesSource(conversation(input: "nihao"), conversation(input: "")))
+    }
+
+    private func conversation(input: String) -> Data {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
+            UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 720, height: 1560))
+            for (text, y) in [("WECHAT OWNER", 170.0), ("HELLO THERE", 350.0), (input, 825.0)] {
+                (text as NSString).draw(at: CGPoint(x: 80, y: y),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white])
+            }
+        }.jpegData(compressionQuality: 0.9)!
+    }
+
     private func labelledScreen(_ title: String) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
         return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in

@@ -131,6 +131,9 @@ enum WatchSettings {
         return messages.map(\.text).joined(separator: "\n")
     }
 
+    /// Sources selected for the phone executor; kept separate from the ordinary conversation.
+    static func phoneSources(_ messages: [ReadMessage], _ r: Rules) -> [ReadMessage] { messages }
+
     /// Owner authority (tasks, not replies): a listed sender, in a private chat, whose message held the passcode.
     static func isOwner(_ m: ReadMessage, _ r: Rules) -> Bool {
         r.senders.contains(m.sender) && !m.group && m.verified
