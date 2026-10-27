@@ -1,137 +1,110 @@
 import UIKit
 
-/// Touch-probe calibration, like levelling a 3D printer bed: home the pointer, click at known mouse
-/// distances and catch where each click lands on this app's own screen. Stage 1 clicks twice on the
-/// diagonal for a rough fit; stage 2 clicks near the four corners (25% / 75%) and the centre, all from home,
-/// and fits mouse units → screen fraction per axis by least squares; stage 3 taps a check point.
+/// Catch real HID clicks on our overlay, measure a monotone map, then validate fresh
+/// clicks with the exact positioning path used by the agent. Nothing is saved early.
 extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
-
-    static let roughStops = [150, 350]
-    /// The last one is where chat input boxes sit (logs27: a tap there landed 4% high).
-    static let targets: [(Double, Double)] = [(0.25, 0.25), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.75, 0.75), (0.5, 0.9)]
+    static let roughStops = [75, 150]
+    static let targets: [(Double, Double)] = [
+        (0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.25), (0.5, 0.5),
+        (0.25, 0.75), (0.75, 0.75), (0.5, 0.9), (0.9, 0.5)]
+    // Test each low axis separately, away from the top-left system indicator.
+    static let checks: [(Double, Double)] = [(0.06, 0.5), (0.5, 0.09), (0.5, 0.62), (0.85, 0.87)]
     static let check = (x: 0.5, y: 0.62)
     static let tapTimeout = 3.0
-    static let maxCheckError = 0.05  // a check tap this far off means the fit is wrong: fail, not "calibrated"
+    static let maxCheckError = Pointer.calibrationTolerance
 
     func touchCalibrate(full: Bool) async throws -> TouchResult {
         let probe = app.probe, device = app.board.commands, pointer = app.pointer
-        var total = full ? Self.roughStops.count + Self.targets.count + 1 : 1
+        var accepted = false
+        defer { if !accepted { pointer.discardProbe() } }
         var clicks = 0, hits = 0
+        let total = Self.roughStops.count + Self.targets.count + 2 * Self.checks.count
+        var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
         phase = .homing
         try await pointer.reset()
 
-        /// Home, move by (ux, uy), click and wait for the tap. Every probe starts from home, like the agent's moves.
-        func click(_ ux: Int, _ uy: Int) async throws -> CGPoint? {
-            try await device.send("home")
-            try await device.send("move \(ux) \(uy)")
-            let sent = now()
-            try await device.send("click")
+        func record(_ ux: Int, _ uy: Int, _ p: CGPoint) {
+            samples.append((Double(ux), Double(uy), p.x, p.y))
+        }
+        func caught(since sent: Double, ux: Int, uy: Int) async -> CGPoint? {
             let p = await probe.tap(since: sent, timeout: Self.tapTimeout)
             clicks += 1
             progress = Progress(done: clicks, total: total)
             if let p {
                 hits += 1
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                app.say(String(format: "probe %d: move %d %d → (%.3f, %.3f) = %.0f, %.0f px", clicks, ux, uy, p.x, p.y,
-                               p.x * DeviceScreen.size.width * DeviceScreen.scale,
-                               p.y * DeviceScreen.size.height * DeviceScreen.scale))
-            } else {
-                app.say("probe \(clicks): move \(ux) \(uy) → no tap within \(Int(Self.tapTimeout)) s")
-            }
+                app.say(String(format: "probe %d: axis move %d %d → (%.3f, %.3f)", clicks, ux, uy, p.x, p.y))
+            } else { app.say("probe \(clicks): no confirmed click") }
             return p
         }
-
-        /// A click that never reached the app probably hit the AssistiveTouch button and opened its menu:
-        /// remember the spot and close the menu (esc, then a click on an empty area, which the probe swallows).
-        func missed(at fx: Double, _ fy: Double, empty: (Int, Int)?) async {
-            AssistiveTouchSpots.remember(x: fx, y: fy)
-            _ = try? await device.send("key esc")
-            if let (ex, ey) = empty {
-                _ = try? await device.send("home")
-                _ = try? await device.send("move \(ex) \(ey)")
-                _ = try? await device.send("click")
-            }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-
-        if !full {  // quick check after a reconnect: one tap at the check point
-            phase = .verifying
-            guard pointer.calibrated else { return .failed("not calibrated") }
-            try await pointer.point(Self.check.x, Self.check.y)
+        func click(_ ux: Int, _ uy: Int) async throws -> CGPoint? {
+            try await ProbeMotion.home(device)
+            try await ProbeMotion.move(device, ux, uy)
             let sent = now()
             try await device.send("click")
-            guard let p = await probe.tap(since: sent, timeout: Self.tapTimeout) else { return .noTaps }
-            let error = max(abs(p.x - Self.check.x), abs(p.y - Self.check.y))
-            app.say(String(format: "probe check: ±%.1f%%", error * 100))
-            if error <= Self.tolerance {
-                pointer.setQuality(error)
-                return .done(error)
-            }
-            return try await touchCalibrate(full: true)
-        }
-
-        var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
-        func record(_ ux: Int, _ uy: Int, _ p: CGPoint?) {
-            if let p { samples.append((Double(ux), Double(uy), p.x, p.y)) }
+            return await caught(since: sent, ux: ux, uy: uy)
         }
         func lines() -> (ProbeFit.Line, ProbeFit.Line)? {
             let xs = samples.filter { ProbeFit.usable($0.fx) }.map { ($0.ux, $0.fx) }
             let ys = samples.filter { ProbeFit.usable($0.fy) }.map { ($0.uy, $0.fy) }
-            guard let x = ProbeFit.line(xs) ?? xs.first.flatMap(ProbeFit.throughHome),
-                  let y = ProbeFit.line(ys) ?? ys.first.flatMap(ProbeFit.throughHome) else { return nil }
+            guard let x = ProbeFit.line(xs), let y = ProbeFit.line(ys) else { return nil }
             return (x, y)
         }
 
-        // stage 1: rough, on the diagonal
         phase = .probeA
         for u in Self.roughStops {
-            let p = try await click(u, u)
-            if p == nil && hits == 0 { return .noTaps }
-            if p == nil { _ = try? await device.send("key esc") }  // no fit yet to place the spot or an empty click
+            guard let p = try await click(u, u) else {
+                return hits == 0 ? .noTaps : .failed("粗校准点击未到达，未保存参数。")
+            }
             record(u, u, p)
         }
-        guard let rough = lines() else { return .failed("probe taps stuck at the screen edge") }
-
-        // stage 2: corners and centre
+        guard let rough = lines() else { return .failed("粗校准落点无有效跨度，未保存参数。") }
         phase = .probeB
-        let empty = (rough.0.units(for: 0.5), rough.1.units(for: 0.12))
-        for (fx, fy) in Self.targets {
-            let ux = rough.0.units(for: fx), uy = rough.1.units(for: fy)
-            guard ux > 0, uy > 0 else { continue }
-            if let p = try await click(ux, uy) { record(ux, uy, p); continue }
-            await missed(at: fx, fy, empty: empty)
-            // replace the probe with one a little closer to the centre
-            let rx = fx + (0.5 - fx) * 0.4, ry = fy + (0.5 - fy) * 0.4
-            guard rx != fx || ry != fy else { continue }
-            let vx = rough.0.units(for: rx), vy = rough.1.units(for: ry)
-            total += 1
-            app.say(String(format: "probe replaced: (%.2f, %.2f) → (%.2f, %.2f)", fx, fy, rx, ry))
-            if let p = try await click(vx, vy) { record(vx, vy, p) } else { await missed(at: rx, ry, empty: empty) }
+        for (x, y) in Self.targets {
+            let ux = max(1, rough.0.units(for: x)), uy = max(1, rough.1.units(for: y))
+            if let p = try await click(ux, uy) { record(ux, uy, p) }
+            else {
+                // A missed probe can be the floating AssistiveTouch control. Do not invent a location.
+                AssistiveTouchSpots.remember(x: x, y: y)
+                _ = try? await device.send("key esc")
+            }
         }
-        guard samples.count >= 4, let (lx, ly) = lines() else {
-            return .failed("only \(samples.count) of \(clicks) probe clicks arrived")
+        guard samples.count >= 8, let (lx, ly) = lines() else {
+            return .failed("有效校准点不足，未保存参数。")
         }
-        app.say(String(format: "probe fit: x = %.5f·u %+.3f, y = %.5f·u %+.3f, residual %.2f%% / %.2f%% (%@)",
-                       lx.a, lx.b, ly.a, ly.b, lx.rms * 100, ly.rms * 100,
-                       "\(Int(DeviceScreen.size.width))×\(Int(DeviceScreen.size.height)) pt @\(Int(DeviceScreen.scale))x"))
-        pointer.applyProbe(x: lx, y: ly, samples: samples)
+        guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { return .failed("校准落点无法建立有效映射，未保存参数。") }
+        guard pointer.probeScatter <= Self.maxCheckError else {
+            return .failed(String(format: "同距离落点波动 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
+        }
 
-        // stage 3: check with the agent's own move
         phase = .verifying
-        try await pointer.point(Self.check.x, Self.check.y)
-        let sent = now()
-        try await device.send("click")
-        clicks += 1
-        progress = Progress(done: clicks, total: total)
-        guard let p = await probe.tap(since: sent, timeout: Self.tapTimeout) else { return .done(max(lx.rms, ly.rms)) }
-        let error = max(abs(p.x - Self.check.x), abs(p.y - Self.check.y))
-        pointer.setQuality(error)
-        app.say(String(format: "probe check at (%.2f, %.2f): landed (%.3f, %.3f), ±%.1f%%", Self.check.x, Self.check.y,
-                       p.x, p.y, error * 100))
-        // A pinned axis can still fit two clean-looking points: a ±49.8% check once passed as "calibrated".
-        if error > Self.maxCheckError { return .failed(String(format: "check tap missed by ±%.1f%%", error * 100)) }
-        return .done(error)
+        // One bounded refinement followed by fresh validation; the final result includes all point errors.
+        for pass in 0..<2 {
+            var worst = pointer.probeScatter
+            var measured: [(Int, Int, CGPoint)] = []
+            for (x, y) in Self.checks {
+                try Task.checkCancellation()
+                let (ux, uy) = pointer.probeUnits(x, y), sent = now()
+                try await pointer.tap(x, y)
+                guard let p = await caught(since: sent, ux: ux, uy: uy) else {
+                    return .failed("验证点击未到达，未保存参数。")
+                }
+                let error = max(abs(p.x - x), abs(p.y - y))
+                worst = max(worst, error)
+                measured.append((ux, uy, p))
+                app.say(String(format: "probe check %d (%.2f, %.2f): landed (%.3f, %.3f), error %.1f%%", pass + 1, x, y, p.x, p.y, error * 100))
+            }
+            if worst <= Self.maxCheckError, pointer.setQuality(worst) {
+                accepted = true
+                return .done(pointer.quality ?? worst)
+            }
+            if pass == 0 {
+                for (ux, uy, p) in measured { record(ux, uy, p) }
+                guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { break }
+                guard pointer.probeScatter <= Self.maxCheckError else { break }
+            }
+        }
+        return .failed("多点验证误差超过 1.5%，未保存参数。")
     }
 }
 

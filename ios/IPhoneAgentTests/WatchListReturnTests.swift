@@ -23,7 +23,7 @@ import UIKit
         XCTAssertEqual(WatchListReturn.view(rows: [[piece("微信", x: 0.4, y: 0.4)], tabs], chat: "客户群"), .unknown)
     }
 
-    func testOneBackButtonTapVerifiesTheListWithoutAModelCall() async {
+    func testOneBackGestureVerifiesTheListWithoutAModelCall() async {
         let state = WatchListReturn(); state.pending = "客户群"
         let phone = FakeGestures(), screen = ReturnScreen()
         var fallbackCalls = 0
@@ -32,7 +32,7 @@ import UIKit
         }, fallback: { fallbackCalls += 1; return true })
         XCTAssertTrue(ok)
         XCTAssertNil(state.pending)
-        XCTAssertEqual(phone.calls, ["tap"])
+        XCTAssertEqual(phone.calls, ["back"])
         XCTAssertEqual(screen.afterCalls, 1)
         XCTAssertEqual(screen.boundaries.count, 2)
         XCTAssertNotNil(screen.boundaries.last.flatMap { $0 })
@@ -58,14 +58,14 @@ import UIKit
                                     fallback: { fallbacks += 1; return false })
         XCTAssertFalse(ok)
         XCTAssertEqual(state.pending, "客户群")
-        XCTAssertEqual(phone.calls, ["tap", "tap"], "a second back before the model")
+        XCTAssertEqual(phone.calls, ["back", "back"], "a second back before the model")
         XCTAssertEqual(fallbacks, 1)
         // The next attempt recovers navigation only. It neither reads nor sends a message.
         let recovered = await state.resume(phone: phone, screen: screen, canAct: { true },
                                             inspect: { _, _ in .list }, fallback: { false })
         XCTAssertTrue(recovered)
         XCTAssertNil(state.pending)
-        XCTAssertEqual(phone.calls, ["tap", "tap"])
+        XCTAssertEqual(phone.calls, ["back", "back"])
     }
 
     func testFallbackCompletionAloneCannotClaimAVisibleList() async {
@@ -101,7 +101,7 @@ import UIKit
                                     fallback: { XCTFail("stopped"); return false })
         XCTAssertFalse(ok)
         XCTAssertEqual(state.pending, "客户群")
-        XCTAssertEqual(phone.calls, ["tap"])
+        XCTAssertEqual(phone.calls, ["back"])
     }
 
     func testForegroundPauseIsDeferredInsteadOfCountingAsAFailedReturn() async {
@@ -124,7 +124,7 @@ import UIKit
             fallback: { XCTFail("paused after tap"); return false })
         XCTAssertEqual(outcome, .deferred)
         XCTAssertEqual(state.pending, "客户群")
-        XCTAssertEqual(phone.calls, ["tap"])
+        XCTAssertEqual(phone.calls, ["back"])
     }
 
     func testARealNavigationFailureIsStillCountedAsFailure() async {

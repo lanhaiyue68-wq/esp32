@@ -71,8 +71,8 @@ import UIKit
     /// Before a run: calibrate if needed and wait for it. True when the pointer is calibrated.
     func ensureCalibrated() async -> Bool {
         while busy { try? await Task.sleep(nanoseconds: 200_000_000) }
-        if !app.pointer.calibrated && boardReady { await run(why: String(localized: "before a run")) }
-        return app.pointer.calibrated
+        if needed && boardReady { await run(why: String(localized: "before a run")) }
+        return app.pointer.calibrated && !app.pointer.stale
     }
 
     /// One automatic calibration, on the board when the app is in front.
@@ -111,48 +111,21 @@ import UIKit
     private func runOnce() async {
         if MockMode.on { return await mockRun() }
         app.say("calibration: \(reason)")
-        var noTaps = false
         if boardOpen {
             do {
                 switch try await touchCalibrate(full: true) {
                 case .done(let error): return finished(error)
-                case .noTaps: noTaps = true
-                case .failed(let why): app.say("calibration: touch probe failed: \(why)")
+                case .noTaps: return failed(Self.noTapsText)
+                case .failed(let why): return failed(why)
                 }
             } catch {
                 if Task.isCancelled { return }
-                app.say("calibration: touch probe: \(error.localizedDescription)")
+                return failed(error.localizedDescription)
             }
         }
         if Task.isCancelled { return }
         progress = nil
-        await videoCalibrate(noTaps: noTaps)
-    }
-
-    /// The fallback: find the pointer in the mirrored video.
-    private func videoCalibrate(noTaps: Bool) async {
-        let diagnosis = noTaps ? Self.noTapsText : nil
-        guard mirroring else { return failed(diagnosis ?? String(localized: "Mirroring is off, so the pointer can't be seen.")) }
-        guard app.feed.isNative || FrameMode.current == .stream else {
-            app.say("calibration: video fallback skipped in snap mode")
-            return failed(diagnosis ?? String(localized: "Pointer not found on screen."))
-        }
-        do {
-            try await app.feed.stream(true)
-            defer { if !app.agent.running { Task { try? await app.feed.stream(false) } } }
-            let ok = try await app.pointer.startCalibration { [weak self] i in
-                self?.phase = [.homing, .probeA, .probeB][min(i, 2)]
-            }
-            if Task.isCancelled { return }
-            guard ok else { return failed(diagnosis ?? String(localized: "Pointer not found on screen.")) }
-            phase = .verifying
-            guard let error = try await app.pointer.verify() else {
-                return failed(diagnosis ?? String(localized: "Check point not found."))
-            }
-            finished(error)
-        } catch {
-            if !Task.isCancelled { failed(diagnosis ?? error.localizedDescription) }
-        }
+        failed("请回到 Lan Agent 的校准页面，完成实测点击校准后再开始任务。")
     }
 
     static var noTapsText: String {
@@ -160,6 +133,10 @@ import UIKit
     }
 
     func finished(_ error: Double) {
+        guard error.isFinite, error <= Self.maxCheckError else {
+            app.pointer.discardProbe()
+            return failed(String(format: "校准验证误差 %.1f%%，超过 1.5%%，没有保存。", error * 100))
+        }
         link = app.board.commands.links
         progress = nil
         problem = nil
@@ -177,6 +154,7 @@ import UIKit
 
     /// The board stays up with the problem, Try Again and "Tap the pointer yourself".
     private func failed(_ why: String) {
+        app.pointer.discardProbe()
         progress = nil
         problem = why
         phase = .failed
@@ -203,7 +181,14 @@ import UIKit
                 if let p = await app.probe.tap(since: since, timeout: 1) {
                     app.say(String(format: "calibration: tapped the pointer at (%.3f, %.3f)", p.x, p.y))
                     app.pointer.finishCalibration(x: p.x, y: p.y)
-                    return finished(app.pointer.quality ?? 0.01)
+                    // One human-picked point is only a rough estimate, never a fabricated 1% success.
+                    do {
+                        switch try await touchCalibrate(full: true) {
+                        case .done(let error): return finished(error)
+                        case .noTaps: return failed(Self.noTapsText)
+                        case .failed(let why): return failed(why)
+                        }
+                    } catch { return failed(error.localizedDescription) }
                 }
             }
         }

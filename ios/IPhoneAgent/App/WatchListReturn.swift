@@ -62,13 +62,12 @@ import Foundation
         do {
             let current = try await look()
             if current == .list { pending = nil; return true }
-            // Plain taps (firmware v33 lands them; the pixel finder misread changing screens), and a second look and a
-            // second back before the model: the list often was still sliding in at the first look (return runs of
-            // ~10 s with 3 model calls, build 62 on the PC harness).
+            // A middle-edge back gesture avoids the screen-sharing indicator above the back chevron.
+            // Wait for a fresh verified list before reading the next chat.
             var view = current
             for _ in 0..<2 {
-                guard case .chat(let point) = view, allowed() else { break }
-                try await phone.tap(point.x, point.y, aim: false)
+                guard case .chat = view, allowed() else { break }
+                try await phone.goBack()
                 let ended = now()
                 await screen.afterAction(since: ended)
                 view = try await look(after: ended)

@@ -18,7 +18,15 @@ import Foundation
     static let edge = 0.05                  // screen fraction; a pointer this close to the border, past its target, was stopped by it
 
     struct Span: Codable, Equatable { var w: Int, h: Int }
-    private struct Saved: Codable { var w: Int, h: Int, seen: [String: [[Double]]]?, quality: Double?, aspect: Double?, stale: Bool? }
+    private struct Saved: Codable {
+        var w: Int, h: Int, seen: [String: [[Double]]]?, quality: Double?, aspect: Double?, stale: Bool?
+        var maps: [String: ProbeMap]? = nil
+        var motionVersion: Int? = nil
+    }
+    static let calibrationTolerance = 0.015
+    private var maps: [String: ProbeMap]?
+    private var provisional = false
+    private var backup: Saved?
 
     let device: HIDDevice
     weak var screen: ScreenSource?
@@ -57,6 +65,9 @@ import Foundation
         if let data = try? Data(contentsOf: calibrationFile), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
             span = Span(w: saved.w, h: saved.h)
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
+            maps = saved.maps
+            // Build77 and earlier fitted a different movement path and must be measured again.
+            if saved.motionVersion != 1 { stale = true }
             for axis in ["x", "y"] {
                 seen[axis] = (saved.seen?[axis] ?? []).filter { $0.count == 2 }.map { ($0[0], $0[1]) }.suffix(12)
             }
@@ -129,6 +140,7 @@ import Foundation
 
     /// x, y: where the pointer ended up after startCalibration() (one point, picked by the user).
     func finishCalibration(x: Double, y: Double) {
+        maps = nil
         (quality, aspect, stale) = (nil, screenAspect(), false)
         span = Span(w: Int((Double(Self.calibrationMove) / x).rounded(.toNearestOrEven)), h: Int((Double(Self.calibrationMove) / y).rounded(.toNearestOrEven)))
         seen = ["x": [], "y": []]
@@ -137,32 +149,62 @@ import Foundation
 
     /// Touch-probe result: per-axis lines landed = a * units + b fitted from taps the app caught itself.
     /// The span is 1/a; every probe becomes a landing sample, so `fix` also corrects the offset b.
-    func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)]) {
+    @discardableResult func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)]) -> Bool {
+        if !provisional { backup = snapshot() }
+        provisional = true
+        let mx = ProbeMap(samples.map { ($0.ux, $0.fx) }), my = ProbeMap(samples.map { ($0.uy, $0.fy) })
+        guard let mx, let my, x.a.isFinite, y.a.isFinite, x.a > 0, y.a > 0 else { discardProbe(); return false }
+        maps = ["x": mx, "y": my]
         let s = Span(w: Int((1 / x.a).rounded()), h: Int((1 / y.a).rounded()))
         span = s
-        (quality, aspect, stale) = (max(x.rms, y.rms), screenAspect(), false)
+        (quality, aspect, stale) = (max(mx.scatter, my.scatter), screenAspect(), false)
         seen = ["x": [], "y": []]
         for p in samples {  // an axis stopped at the border is no landing (logs27: x 0.998 broke the x correction)
             if ProbeFit.usable(p.fx) { remember("x", (p.ux / Double(s.w), p.fx)) }
             if ProbeFit.usable(p.fy) { remember("y", (p.uy / Double(s.h), p.fy)) }
         }
         pos = nil
-        save()
         log(String(format: "calibration: touch probe span %d x %d, offset %.3f / %.3f, residual %.2f%%",
-                   s.w, s.h, x.b, y.b, max(x.rms, y.rms) * 100))
+                   s.w, s.h, x.b, y.b, max(mx.scatter, my.scatter) * 100))
+        return true
     }
 
     /// A measured check (e.g. a probe tap) as the current accuracy.
-    func setQuality(_ q: Double) {
-        quality = q
+    @discardableResult func setQuality(_ q: Double) -> Bool {
+        let measured = max(q, maps?.values.map(\.scatter).max() ?? 0)
+        guard q.isFinite, measured <= Self.calibrationTolerance else { discardProbe(); return false }
+        quality = measured
+        provisional = false
+        backup = nil
+        stale = false
         save()
+        return true
+    }
+
+    var probeScatter: Double { maps?.values.map(\.scatter).max() ?? 1 }
+
+    /// Failed/missing checks restore the previous parameters and mark them due for remeasurement.
+    func discardProbe() {
+        if provisional {
+            span = backup.map { Span(w: $0.w, h: $0.h) }
+            maps = backup?.maps
+            quality = backup?.quality
+            aspect = backup?.aspect
+            seen = (backup?.seen ?? [:]).mapValues { $0.map { ($0[0], $0[1]) } }
+        }
+        (provisional, backup, pos, stale) = (false, nil, nil, true)
+        save()
+    }
+
+    private func snapshot() -> Saved? {
+        guard let span else { return nil }
+        return Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
+                     aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: 1)
     }
 
     /// Calibration plus the observed landings, so the correction survives a restart.
     private func save() {
-        guard let span else { return }
-        let saved = Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
-                          aspect: aspect, stale: stale ? true : nil)
+        guard !provisional, let saved = snapshot() else { return }
         try? JSONEncoder().encode(saved).write(to: file)
     }
 
@@ -182,7 +224,7 @@ import Foundation
             throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
         }
         let miss = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
-        if miss <= Self.maxMiss && !pinned(found, x, y) {  // learn from normal drift only, never a stray reading
+        if maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
             remember("x", (fix(x, "x"), Double(found.x)))
             remember("y", (fix(y, "y"), Double(found.y)))
             save()
@@ -193,9 +235,9 @@ import Foundation
             let fx = Double(found.x), fy = Double(found.y)
             if abs(fx - x) <= Self.aimTolerance && abs(fy - y) <= Self.aimTolerance { break }
             if pinned(found, x, y) {
-                try await device.send("home")
+                if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
-                try await device.send("move \(ux) \(uy)")
+                if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
                 pos = (ux, uy)
                 guard let p = try await find(x, y) else {
                     pos = nil
@@ -207,7 +249,7 @@ import Foundation
                 continue
             }
             let mx = Int(((x - fx) * gain.w).rounded(.toNearestOrEven)), my = Int(((y - fy) * gain.h).rounded(.toNearestOrEven))
-            try await device.send("move \(mx) \(my)")  // fix this miss right away
+            if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
             if let p = pos { pos = (p.0 + mx, p.1 + my) }
             guard let p = try await find(x, y) else {
                 pos = nil
@@ -297,7 +339,8 @@ import Foundation
 
     /// How far the learned correction has moved targets away from the plain calibration (fraction of the screen).
     var drift: Double {
-        [0.2, 0.8].flatMap { t in ["x", "y"].map { abs(fix(t, $0) - t) } }.max() ?? 0
+        if maps != nil { return 0 }  // the nonlinear map is the calibration, not accumulated drift
+        return [0.2, 0.8].flatMap { t in ["x", "y"].map { abs(fix(t, $0) - t) } }.max() ?? 0
     }
 
     /// Demo data: pretend a calibration with this quality.
@@ -308,6 +351,9 @@ import Foundation
 
     /// The fraction to aim at so the pointer lands on t, from the line through the observed landings.
     func fix(_ t: Double, _ axis: String) -> Double {
+        if let map = maps?[axis], let span {
+            return Double(map.units(for: t)) / Double(axis == "x" ? span.w : span.h)
+        }
         let pts = seen[axis] ?? []
         guard pts.count >= 2 else { return t }
         let n = Double(pts.count)
@@ -319,18 +365,19 @@ import Foundation
         return abs(b) < 0.1 ? (t - b) / a : t
     }
 
-    private func moveTo(_ tx: Int, _ ty: Int, rehome: Bool = true) async throws {
+    private func moveTo(_ tx: Int, _ ty: Int, rehome: Bool = true, positioning: Bool = true) async throws {
         if link != device.links {  // new link: a dropped gesture may have left the button down
             try await device.send("release")
             (pos, link) = (nil, device.links)
         }
         if pos == nil || (rehome && moves >= Self.rehomeEvery) {
-            try await device.send("home")
+            if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
             (pos, moves) = ((0, 0), 0)
         }
         let (x, y) = pos!
         pos = nil  // unknown until the move succeeds
-        try await device.send("move \(tx - x) \(ty - y)")
+        if maps != nil && positioning { try await ProbeMotion.move(device, tx - x, ty - y) }
+        else { try await device.send("move \(tx - x) \(ty - y)") }
         (pos, moves) = ((tx, ty), moves + 1)
     }
 
@@ -340,7 +387,7 @@ import Foundation
         drawChain = false
         unitsSinceDrawHome = 0
         try await device.send("release")
-        try await device.send("home")
+        if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
         (pos, moves) = ((0, 0), 0)
     }
 
@@ -403,7 +450,7 @@ import Foundation
             }
             if strokeCommand != true || points.count <= 2 {
                 for p in points.dropFirst() {
-                    try await moveTo(dx(Double(p.x)), dy(Double(p.y)), rehome: false)  // never home mid-drag
+                    try await moveTo(dx(Double(p.x)), dy(Double(p.y)), rehome: false, positioning: false)  // preserve the drag trajectory
                 }
             }
             if hold { try await Task.sleep(nanoseconds: UInt64(Self.hold * 1e9)) }
@@ -628,6 +675,11 @@ import Foundation
         try await device.send("release")
     }
 
-    private func dx(_ x: Double) -> Int { Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven)) }
-    private func dy(_ y: Double) -> Int { Int((min(max(fix(y, "y"), 0), 1) * Double(span!.h)).rounded(.toNearestOrEven)) }
+    func probeUnits(_ x: Double, _ y: Double) -> (Int, Int) { (dx(x), dy(y)) }
+    private func dx(_ x: Double) -> Int {
+        maps?["x"]?.units(for: x) ?? Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven))
+    }
+    private func dy(_ y: Double) -> Int {
+        maps?["y"]?.units(for: y) ?? Int((min(max(fix(y, "y"), 0), 1) * Double(span!.h)).rounded(.toNearestOrEven))
+    }
 }
