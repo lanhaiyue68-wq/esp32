@@ -73,12 +73,13 @@ final class DiagnosticFilesTests: XCTestCase {
         _ = try storage.maintain(); try storage.clear()
         XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
     }
-    func testDefaultExportIncludesOnlyFiveRecentRunsAndNoVideo() throws {
+    func testDefaultExportRetainsTaskEvidenceAfterFiveInternalRunsAndNoVideo() throws {
         for n in 1...7 { _ = try run("2026102\(n)-000000"); _ = try put("Documents/traces/2026102\(n)-000000/video/1.jpg") }
         _ = try put("Documents/debug.log"); _ = try put("Documents/private.txt")
         let stage = try storage.exportStage()
         let folders = try FileManager.default.contentsOfDirectory(atPath: stage.appendingPathComponent("traces").path)
-        XCTAssertEqual(folders.count, 5); XCTAssertFalse(folders.contains("20261021-000000"))
+        XCTAssertEqual(folders.count, 7); XCTAssertTrue(folders.contains("20261021-000000"),
+            "an owner's failed task must survive subsequent navigation/report runs")
         XCTAssertFalse(FileManager.default.fileExists(atPath: stage.appendingPathComponent("private.txt").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: stage.appendingPathComponent("traces/20261027-000000/video").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: stage.appendingPathComponent("manifest.json").path))
