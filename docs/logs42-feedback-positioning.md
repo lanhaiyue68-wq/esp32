@@ -18,4 +18,14 @@ The existing pointer already has a bounded visual feedback controller. Reuse it 
 
 ## Status
 
-Investigation complete; regression tests written; production unchanged. CI execution and implementation pending.
+- RED against build80 (`f9b616c`, run40455498579): 17 targeted tests, 11 assertion failures. Plain taps clicked X0.453/0.532 for target0.5; missing feedback still allowed click/press. The nudge finder also mislocated an18px translation when the guessed distance was12px.
+- Initial implementation (`289f6ab`, run40456017510): the same17 targeted tests pass with0 failures. Saved calibration now requires measured feedback after restart; the original curve generator is unchanged. Raw scatter is retained, while final quality records actual corrected clicks.
+- Review RED (`04e1377`, run40456700733):21 targeted tests,2 failures. Mandatory exact-centre aiming prevented back/app-switch gestures when the visible cursor remained inset at the screen border. Added a scoped system-gesture edge-start policy (2.5% visible-centre inset only on an extreme target axis); the other axis and all ordinary/calibration taps keep the original0.8% aim tolerance. The1.5% real-click calibration gate is unchanged. A bottom pinning move is checked again before pressing.
+- Full simulator suite, Release compilation and build81 package verification pending. Simulator results do not certify the user's physical iPhone. No firmware flashing or USB connection is required.
+- Private build mirror: `caoshihui5211314-cloud/esp32-iphone-agent-build`; main account `lanhaiyue-web` has accepted collaborator access. Raw logs and images remain outside Git.
+
+## Files and validation
+
+`Pointer.swift` persists/enforces feedback and limits correction attempts; `Vision.swift` uses observed nudge translation; `TouchCalibration.swift` requires four fresh corrected physical clicks; `ProbeMap.swift` invalidates older open-loop calibration certification. `Logs42RegressionTests.swift` and `VisionTests.swift` cover the failure classes. The permanent IPA workflow runs the complete suite; the temporary diagnostic-only workflow is removed for final delivery.
+
+Routing: systematic-debugging → test-driven-development, bounded-repair triage with spec-kit-orchestration, existing-controller reuse with ponytail, verification-before-completion. Browser-only computer-use was needed for the new owner's private repository and invitation; subsequent builds use GitHub CLI.

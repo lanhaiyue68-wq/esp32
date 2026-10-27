@@ -16,6 +16,7 @@ import Foundation
     static let maxMiss = 0.06               // bigger misses are still corrected, but not learned from; they mark the calibration stale
     static let aimPasses = 3                // closed loop: look, correct, look again, at most this many corrections
     static let edge = 0.05                  // screen fraction; a pointer this close to the border, past its target, was stopped by it
+    private static let gestureEdgeInset = 0.025 // visible pointer centre can remain inside the border during a system edge gesture
 
     struct Span: Codable, Equatable { var w: Int, h: Int }
     private struct Saved: Codable {
@@ -220,23 +221,30 @@ import Foundation
         try? JSONEncoder().encode(saved).write(to: file)
     }
 
-    func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true) async throws {
+    func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim || requiresFeedback { try await self.aim(x, y) }
+        if aim || requiresFeedback { try await self.aim(x, y, edgeStart: edgeStart) }
     }
 
     /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
     /// Each correction measures the real scale (mouse units per screen) from how far it moved the pointer, so a stale
     /// span is fixed within a tap instead of overshooting once and clicking there. A pointer stopped by the border
     /// says nothing about the scale: home, move half way, and measure from the corner.
-    private func aim(_ x: Double, _ y: Double) async throws {
+    private func aim(_ x: Double, _ y: Double, edgeStart: Bool = false) async throws {
         guard let span, var found = try await find(x, y) else {
             log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
             throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
         }
-        let miss = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
-        if maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
+        // Only a system gesture may start from the visible cursor's border inset.
+        // The other axis, ordinary taps and all calibration points stay exact.
+        func error(_ found: Double, _ target: Double) -> Double {
+            if edgeStart && ((0...0.01).contains(target) && (0...Self.gestureEdgeInset).contains(found)
+                || (0.99...1).contains(target) && (1 - Self.gestureEdgeInset...1).contains(found)) { return 0 }
+            return target - found
+        }
+        let miss = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
+        if !edgeStart && maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
             remember("x", (fix(x, "x"), Double(found.x)))
             remember("y", (fix(y, "y"), Double(found.y)))
             save()
@@ -245,7 +253,7 @@ import Foundation
         var gain = (w: Double(span.w), h: Double(span.h))
         for _ in 0..<Self.aimPasses {
             let fx = Double(found.x), fy = Double(found.y)
-            if abs(fx - x) <= Self.aimTolerance && abs(fy - y) <= Self.aimTolerance { break }
+            if abs(error(fx, x)) <= Self.aimTolerance && abs(error(fy, y)) <= Self.aimTolerance { break }
             if pinned(found, x, y) {
                 if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
@@ -260,7 +268,7 @@ import Foundation
                 found = p
                 continue
             }
-            let mx = Int(((x - fx) * gain.w).rounded(.toNearestOrEven)), my = Int(((y - fy) * gain.h).rounded(.toNearestOrEven))
+            let mx = Int((error(fx, x) * gain.w).rounded(.toNearestOrEven)), my = Int((error(fy, y) * gain.h).rounded(.toNearestOrEven))
             if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
             if let p = pos { pos = (p.0 + mx, p.1 + my) }
             guard let p = try await find(x, y) else {
@@ -272,7 +280,7 @@ import Foundation
             found = p
         }
         if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
-        let remaining = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
+        let remaining = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
         guard remaining <= Self.aimTolerance else {
             pos = nil
             log(String(format: "aim (%.3f, %.3f): still at (%.3f, %.3f); click withheld", x, y, found.x, found.y))
@@ -438,7 +446,7 @@ import Foundation
         }
         let previous = startFromHome ? (0, 0) : (pos ?? (0, 0))
         let travel = hypot(Double(dx(Double(points[0].x)) - previous.0), Double(dy(Double(points[0].y)) - previous.1))
-        try await point(Double(points[0].x), Double(points[0].y), rehome: startFromHome)
+        try await point(Double(points[0].x), Double(points[0].y), rehome: startFromHome, edgeStart: !hold && !drawing)
         try await device.send("press")
         do {
             if points.count > 2, strokeCommand != false, let start = pos {
@@ -666,8 +674,9 @@ import Foundation
         // From the very bottom edge: coming down from the top after a re-home, the pointer stopped a little above the
         // home bar and the swipe only slid inside WeChat (logs(15)). An extra move down pins it against the edge.
         drawChain = false
-        try await point(0.2, 1)
+        try await point(0.2, 1, edgeStart: true)
         try await device.send("move 0 80")
+        if requiresFeedback { try await aim(0.2, 1, edgeStart: true) }
         try await device.send("press")
         try await device.send("move \(Int(0.65 * Double(span?.w ?? 400))) 0")
         try await device.send("release")
@@ -678,8 +687,9 @@ import Foundation
     func nextApp() async throws {
         drawChain = false
         defer { pos = nil }
-        try await point(0.85, 1)
+        try await point(0.85, 1, edgeStart: true)
         try await device.send("move 0 80")
+        if requiresFeedback { try await aim(0.85, 1, edgeStart: true) }
         try await device.send("press")
         try await device.send("move \(-Int(0.65 * Double(span?.w ?? 400))) 0")
         try await device.send("release")
