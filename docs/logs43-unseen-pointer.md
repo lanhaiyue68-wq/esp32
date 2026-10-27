@@ -28,3 +28,13 @@ Build81 made that detector a precondition for every ordinary click and gesture s
 - Precision taps (`aim: true`, e.g. a pending message's send button) stay strict: unseen or lost never clicks.
 - The calibration board shows plain white (corner squares only) during the four checks, so the check endpoints are
   measured on the background the detector handles. The real click landing still decides the 1.5% check.
+
+## logs44 / build83: checks correct from the real click
+
+- Build82 on the phone: the first check (0.06, 0.50) was still unseen on the plain board, the click landed at
+  (0.090, 0.493), 3.0% off, and calibration failed. The same curved command scatters by up to 5% between tries
+  (move 140 75 landed at x 0.480 and 0.530), so an unseen check can rarely pass 1.5%.
+- The board catches every real click. Each check now clicks once (pixel-corrected when seen, otherwise at the map
+  estimate, or in place if the pixel correction gave up), then up to twice moves the resting pointer by the measured
+  landing miss and clicks again. The final real landing must still be within 1.5%. The board waits 0.4 s to repaint
+  plain before the first check.

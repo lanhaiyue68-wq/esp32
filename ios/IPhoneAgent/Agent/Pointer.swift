@@ -423,6 +423,17 @@ import Foundation
         (pos, moves) = ((0, 0), 0)
     }
 
+    /// Calibration check: the pointer still rests where its real click landed; move it by the measured miss
+    /// (screen fractions) and click there, without re-homing.
+    func clickBy(_ ex: Double, _ ey: Double) async throws {
+        guard let span else { throw DeviceError(message: "pointer not calibrated") }
+        let mx = Int((ex * Double(span.w)).rounded(.toNearestOrEven)), my = Int((ey * Double(span.h)).rounded(.toNearestOrEven))
+        if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
+        if let p = pos { pos = (p.0 + mx, p.1 + my) }
+        try await device.send("click")
+        try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
     /// Every tap starts from the corner. Calibrations measured with endpoint
     /// feedback always verify again before clicking, even when callers omit aim.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {

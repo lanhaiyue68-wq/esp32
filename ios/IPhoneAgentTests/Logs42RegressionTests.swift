@@ -99,6 +99,18 @@ import XCTest
         XCTAssertEqual(try XCTUnwrap(phone.clicks.first).y, 0.62, accuracy: 0.01)
     }
 
+    // logs44: the first check was unseen and its real click landed at (0.090, 0.493) for (0.06, 0.50).
+    func testCalibrationLandingCorrectionMovesFromTheRestingPointerWithoutRehoming() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        phone.at = CGPoint(x: 0.090, y: 0.493)
+        try await p.clickBy(0.06 - 0.090, 0.50 - 0.493)
+        XCTAssertFalse(phone.sent.contains("home"), "the resting pointer is the known start; a re-home would re-randomize the curve")
+        let hit = try XCTUnwrap(phone.clicks.last)
+        XCTAssertEqual(hit.x, 0.06, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(hit.y, 0.50, accuracy: Pointer.aimTolerance)
+    }
+
     func testPrecisionTapStillNeverClicksUnseenWithFeedbackCalibration() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
