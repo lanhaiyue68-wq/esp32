@@ -9,6 +9,9 @@ import XCTest
     var connected = true
     var at = CGPoint.zero
     var clicks: [CGPoint] = []
+    var presses: [CGPoint] = []
+    var minimum = CGPoint.zero
+    var maximum = CGPoint(x: 1, y: 1)
     var sent: [String] = []
     private var homes = 0
 
@@ -16,8 +19,9 @@ import XCTest
     func send(_ command: String) async throws -> String {
         sent.append(command)
         if command == "curve" { return "on" }
-        if command == "home" { at = .zero; homes += 1 }
+        if command == "home" { at = minimum; homes += 1 }
         if command == "click" { clicks.append(at) }
+        if command == "press" { presses.append(at) }
         let parts = command.split(separator: " ")
         if parts.first == "move" {
             let x = Double(parts[1])!, y = Double(parts[2])!
@@ -25,7 +29,8 @@ import XCTest
             at.y += y / 650
             if abs(x) > 100 { at.x += homes.isMultiple(of: 2) ? 0.016 : -0.017 }
             if abs(y) > 200 { at.x += homes.isMultiple(of: 2) ? 0.016 : -0.030 }
-            at.x = min(max(at.x, 0), 1); at.y = min(max(at.y, 0), 1)
+            at.x = min(max(at.x, minimum.x), maximum.x)
+            at.y = min(max(at.y, minimum.y), maximum.y)
         }
         return ""
     }
@@ -93,5 +98,46 @@ import XCTest
         defer { try? FileManager.default.removeItem(at: file) }
         XCTAssertFalse(p.setQuality(0.02))
         XCTAssertTrue(p.stale)
+    }
+
+    func testBackGestureCanStartAtTheVisiblePointerInset() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        phone.minimum = CGPoint(x: 0.02, y: 0.012)
+        try await p.goBack()
+        let start = try XCTUnwrap(phone.presses.first)
+        XCTAssertEqual(start.x, 0.02, accuracy: 0.001)
+        XCTAssertEqual(start.y, 0.45, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(phone.sent.last, "release")
+    }
+
+    func testAppSwitchCanStartAtTheVisibleBottomInset() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        phone.maximum.y = 0.987
+        try await p.previousApp()
+        try await p.nextApp()
+        XCTAssertEqual(phone.presses.count, 2)
+        for start in phone.presses { XCTAssertEqual(start.y, 0.987, accuracy: 0.001) }
+        XCTAssertEqual(phone.presses[0].x, 0.2, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(phone.presses[1].x, 0.85, accuracy: Pointer.aimTolerance)
+    }
+
+    func testOrdinaryEdgeTapStillRequiresExactEndpoint() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        phone.minimum.x = 0.02
+        do { try await p.tap(0.005, 0.45); XCTFail("a border gesture allowance must never relax ordinary taps") }
+        catch is DeviceError { }
+        XCTAssertTrue(phone.clicks.isEmpty)
+    }
+
+    func testBackGestureCannotPressAwayFromTheBorder() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        phone.minimum.x = 0.04
+        do { try await p.goBack(); XCTFail("an observed pointer away from the border cannot start a system gesture") }
+        catch is DeviceError { }
+        XCTAssertTrue(phone.presses.isEmpty)
     }
 }
