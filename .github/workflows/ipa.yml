@@ -7,12 +7,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      test_scope:
-        description: Regression-only validation or full release validation
-        type: choice
-        options: [all, logs38]
-        default: all
 
 jobs:
   ipa:
@@ -37,14 +31,12 @@ jobs:
           brew install xcodegen
           xcodegen generate
       - name: Build (Release, device, unsigned)
-        if: inputs.test_scope != 'logs38'
         run: |
           set -o pipefail
           xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent -configuration Release \
             -destination generic/platform=iOS -derivedDataPath build-device \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build 2>&1 | tail -150
       - name: Package IPA
-        if: inputs.test_scope != 'logs38'
         run: |
           app=$(ls -d build-device/Build/Products/Release-iphoneos/*.app | head -1)
           build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
@@ -61,10 +53,7 @@ jobs:
           sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
           echo "simulator: $sim"
           status=0
-          tests=()
-          if [[ "$TEST_SCOPE" == logs38 ]]; then tests=(-only-testing:IPhoneAgentTests/Logs38RegressionTests); fi
           xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
-            "${tests[@]}" \
             -destination "platform=iOS Simulator,name=$sim" -destination-timeout 90 -derivedDataPath build-sim \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 90 -maximum-test-execution-time-allowance 120 \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log || status=$?
@@ -72,10 +61,7 @@ jobs:
           echo "---- failures (assertion lines kept even when the log is long)"
           grep -E "error: |Test Case .* failed|Failing tests:|^\s+[A-Za-z0-9]+Tests\.test" test.log | head -80 || true
           exit $status
-        env:
-          TEST_SCOPE: ${{ inputs.test_scope }}
       - uses: actions/upload-artifact@v4
-        if: inputs.test_scope != 'logs38'
         with:
           name: IPhoneAgent-unsigned-ipa
           path: |
