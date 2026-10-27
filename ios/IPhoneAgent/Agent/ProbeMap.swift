@@ -67,7 +67,7 @@ struct ProbeMap: Codable {
 /// Keep the user's Bezier motion enabled in calibration and runtime. Build79
 /// incorrectly persisted curve=off; recover that state before measured positioning.
 @MainActor enum ProbeMotion {
-    static let version = 3
+    static let version = 4
 
     static func home(_ device: HIDDevice) async throws {
         try Task.checkCancellation()

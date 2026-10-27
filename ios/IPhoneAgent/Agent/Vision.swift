@@ -109,7 +109,8 @@ enum Vision {
     /// Where the pointer is in `before`, given it moved right by `shift` (fraction of width) in `after`.
     ///
     /// Only the pointer moved between the two frames, so the changed pixels within `reach` of `near` are the
-    /// pointer at both spots; their centroid sits shift/2 to the right of the first one. nil if unclear.
+    /// pointer at both spots. `shift` bounds the search; the observed translation
+    /// determines the actual centre, without trusting the calibrated mouse scale.
     static func pointer(_ before: Data, _ after: Data, near: CGPoint, shift: Double,
                         reach: CGPoint = CGPoint(x: 0.12, y: 0.08)) -> CGPoint? {
         guard let ia = image(before), let ib = image(after), ia.width == ib.width, ia.height == ib.height else {
@@ -142,7 +143,7 @@ enum Vision {
               deltas.filter({ $0 < -30 }).count >= minimum else { return nil }
         let distance = abs(shift * Double(w)), direction = shift < 0 ? -1 : 1
         guard distance >= 1 else { return nil }
-        var translated = false
+        var best: (dx: Int, matches: Int)?
         // The saved mouse scale may be slightly wrong: allow that drift while requiring the commanded direction.
         for length in max(1, Int(distance * 0.5))...max(1, Int(ceil(distance * 1.5))) {
             let dx = direction * length
@@ -152,11 +153,14 @@ enum Vision {
                 return abs(Int(a.px[py * w + px]) - Int(b.px[py * w + px + dx])) <= 30
                     && abs(Int(b.px[py * w + px]) - Int(a.px[py * w + px - dx])) <= 30
             }.count
-            if matches * 3 >= hits.count * 2 { translated = true; break }
+            if matches * 3 >= hits.count * 2,
+               best == nil || matches > best!.matches {
+                best = (dx, matches)
+            }
         }
-        guard translated else { return nil }
+        guard let best else { return nil }
         let cx = Double(xs.reduce(0, +)) / Double(hits.count) + Double(left)
         let cy = Double(ys.reduce(0, +)) / Double(hits.count) + Double(top)
-        return CGPoint(x: cx / Double(w) - shift / 2, y: cy / Double(h))
+        return CGPoint(x: (cx - Double(best.dx) / 2) / Double(w), y: cy / Double(h))
     }
 }

@@ -1,7 +1,7 @@
 import UIKit
 
-/// Catch real HID clicks on our overlay, measure a monotone map, then validate fresh
-/// clicks with the exact positioning path used by the agent. Nothing is saved early.
+/// Catch real HID clicks on our overlay to estimate scale. Correct fresh curved
+/// endpoints visually, then confirm each with a real click before saving.
 extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
     static let roughStops = [75, 150]
@@ -19,7 +19,7 @@ extension AutoCalibrator {
         defer { if !accepted { pointer.discardProbe() } }
         var clicks = 0, hits = 0
         // Show the planned pass, not the maximum number including a possible retry.
-        var total = Self.roughStops.count + Self.targets.count + Self.checks.count
+        let total = Self.roughStops.count + Self.targets.count + Self.checks.count
         progress = Progress(done: 0, total: total)
         var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
         phase = .homing
@@ -73,41 +73,36 @@ extension AutoCalibrator {
         guard samples.count >= 6, let (lx, ly) = lines() else {
             return .failed("有效校准点不足，未保存参数。")
         }
-        guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { return .failed("校准落点无法建立有效映射，未保存参数。") }
-        guard pointer.probeScatter <= Self.maxCheckError else {
-            return .failed(String(format: "曲线移动采样偏差 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
+        guard pointer.applyProbe(x: lx, y: ly, samples: samples, feedback: true) else {
+            return .failed("校准落点无法建立有效映射，未保存参数。")
         }
+        app.say(String(format: "calibration: curved initial estimate scatter %.2f%%; endpoint feedback required", pointer.probeScatter * 100))
 
         phase = .verifying
-        // One bounded refinement followed by fresh validation; the final result includes all point errors.
-        for pass in 0..<2 {
-            var worst = pointer.probeScatter
-            var measured: [(Int, Int, CGPoint)] = []
-            for (x, y) in Self.checks {
-                try Task.checkCancellation()
-                let (ux, uy) = pointer.probeUnits(x, y), sent = now()
+        var worst = 0.0
+        for (x, y) in Self.checks {
+            try Task.checkCancellation()
+            let (ux, uy) = pointer.probeUnits(x, y), sent = now()
+            do {
                 try await pointer.tap(x, y)
-                guard let p = await caught(since: sent, ux: ux, uy: uy) else {
-                    return .failed("验证点击未到达，未保存参数。")
-                }
-                let error = max(abs(p.x - x), abs(p.y - y))
-                worst = max(worst, error)
-                measured.append((ux, uy, p))
-                app.say(String(format: "probe check %d (%.2f, %.2f): landed (%.3f, %.3f), error %.1f%%", pass + 1, x, y, p.x, p.y, error * 100))
+            } catch let error as DeviceError {
+                app.say("calibration: endpoint feedback failed: " + error.message)
+                return .failed("无法确认曲线终点，已停止点击，未保存参数。请确认共享画面里能看到指针。")
             }
-            if worst <= Self.maxCheckError, pointer.setQuality(worst) {
-                accepted = true
-                return .done(pointer.quality ?? worst)
+            guard let p = await caught(since: sent, ux: ux, uy: uy) else {
+                return .failed("验证点击未到达，未保存参数。")
             }
-            if pass == 0 {
-                total += Self.checks.count
-                progress = Progress(done: clicks, total: total)
-                for (ux, uy, p) in measured { record(ux, uy, p) }
-                guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { break }
-                guard pointer.probeScatter <= Self.maxCheckError else { break }
-            }
+            let error = max(abs(p.x - x), abs(p.y - y))
+            worst = max(worst, error)
+            app.say(String(format: "probe feedback check (%.2f, %.2f): landed (%.3f, %.3f), error %.1f%%", x, y, p.x, p.y, error * 100))
+            // A good pixel match cannot overrule the real click's measured position.
+            guard error <= Self.maxCheckError else { return .failed("曲线终点实测误差超过 1.5%，未保存参数。") }
         }
-        return .failed("多点验证误差超过 1.5%，未保存参数。")
+        if pointer.setQuality(worst) {
+            accepted = true
+            return .done(pointer.quality ?? worst)
+        }
+        return .failed("曲线终点实测误差超过 1.5%，未保存参数。")
     }
 }
 

@@ -22,11 +22,13 @@ import Foundation
         var w: Int, h: Int, seen: [String: [[Double]]]?, quality: Double?, aspect: Double?, stale: Bool?
         var maps: [String: ProbeMap]? = nil
         var motionVersion: Int? = nil
+        var requiresFeedback: Bool? = nil
     }
     static let calibrationTolerance = 0.015
     private var maps: [String: ProbeMap]?
     private var provisional = false
     private var backup: Saved?
+    private var requiresFeedback = false
 
     let device: HIDDevice
     weak var screen: ScreenSource?
@@ -66,8 +68,9 @@ import Foundation
             span = Span(w: saved.w, h: saved.h)
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             maps = saved.maps
-            // Build79 measured with Bezier disabled; those parameters must not be
-            // reported as validated after restoring the user's curve setting.
+            requiresFeedback = saved.requiresFeedback ?? false
+            // Older builds certified open-loop movement. Remeasure using endpoint
+            // feedback before treating those parameters as validated.
             if saved.motionVersion != ProbeMotion.version { stale = true }
             for axis in ["x", "y"] {
                 seen[axis] = (saved.seen?[axis] ?? []).filter { $0.count == 2 }.map { ($0[0], $0[1]) }.suffix(12)
@@ -107,6 +110,7 @@ import Foundation
         let (u1, x1, y1) = found[0], (u2, x2, y2) = found[1]
         let s = Span(w: Int((Double(u2 - u1) / (x2 - x1)).rounded(.toNearestOrEven)), h: Int((Double(u2 - u1) / (y2 - y1)).rounded(.toNearestOrEven)))
         span = s
+        requiresFeedback = false
         (quality, aspect, stale) = (nil, screenAspect(), false)
         seen = ["x": [], "y": []]
         for (units, x, y) in found {  // where each stop landed, so moves are corrected for the offset too
@@ -142,6 +146,7 @@ import Foundation
     /// x, y: where the pointer ended up after startCalibration() (one point, picked by the user).
     func finishCalibration(x: Double, y: Double) {
         maps = nil
+        requiresFeedback = false
         (quality, aspect, stale) = (nil, screenAspect(), false)
         span = Span(w: Int((Double(Self.calibrationMove) / x).rounded(.toNearestOrEven)), h: Int((Double(Self.calibrationMove) / y).rounded(.toNearestOrEven)))
         seen = ["x": [], "y": []]
@@ -150,13 +155,14 @@ import Foundation
 
     /// Touch-probe result: per-axis lines landed = a * units + b fitted from taps the app caught itself.
     /// The span is 1/a; every probe becomes a landing sample, so `fix` also corrects the offset b.
-    @discardableResult func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)]) -> Bool {
+    @discardableResult func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)], feedback: Bool = false) -> Bool {
         if !provisional { backup = snapshot() }
         provisional = true
         let mx = ProbeMap(samples.map { ($0.ux, $0.fx) }), my = ProbeMap(samples.map { ($0.uy, $0.fy) })
         guard let mx, let my, x.a.isFinite, y.a.isFinite, x.a > 0, y.a > 0 else { discardProbe(); return false }
         guard (1...100_000).contains(1 / x.a), (1...100_000).contains(1 / y.a) else { discardProbe(); return false }
         maps = ["x": mx, "y": my]
+        requiresFeedback = feedback
         let s = Span(w: Int((1 / x.a).rounded()), h: Int((1 / y.a).rounded()))
         span = s
         (quality, aspect, stale) = (max(mx.scatter, my.scatter), screenAspect(), false)
@@ -173,7 +179,9 @@ import Foundation
 
     /// A measured check (e.g. a probe tap) as the current accuracy.
     @discardableResult func setQuality(_ q: Double) -> Bool {
-        let measured = max(q, maps?.values.map(\.scatter).max() ?? 0)
+        // A feedback calibration certifies corrected physical endpoints. The raw
+        // map remains an uncertain initial estimate; retain its scatter separately.
+        let measured = requiresFeedback ? q : max(q, maps?.values.map(\.scatter).max() ?? 0)
         guard q.isFinite, measured <= Self.calibrationTolerance else { discardProbe(); return false }
         quality = measured
         provisional = false
@@ -190,6 +198,7 @@ import Foundation
         if provisional {
             span = backup.map { Span(w: $0.w, h: $0.h) }
             maps = backup?.maps
+            requiresFeedback = backup?.requiresFeedback ?? false
             quality = backup?.quality
             aspect = backup?.aspect
             seen = (backup?.seen ?? [:]).mapValues { $0.map { ($0[0], $0[1]) } }
@@ -201,7 +210,8 @@ import Foundation
     private func snapshot() -> Saved? {
         guard let span else { return nil }
         return Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
-                     aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: ProbeMotion.version)
+                     aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: ProbeMotion.version,
+                     requiresFeedback: requiresFeedback ? true : nil)
     }
 
     /// Calibration plus the observed landings, so the correction survives a restart.
@@ -213,7 +223,7 @@ import Foundation
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim { try await self.aim(x, y) }
+        if aim || requiresFeedback { try await self.aim(x, y) }
     }
 
     /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
@@ -231,7 +241,7 @@ import Foundation
             remember("y", (fix(y, "y"), Double(found.y)))
             save()
         }
-        if miss > Self.maxMiss || pinned(found, x, y) { markStale(miss, found, x, y) }
+        if !requiresFeedback && (miss > Self.maxMiss || pinned(found, x, y)) { markStale(miss, found, x, y) }
         var gain = (w: Double(span.w), h: Double(span.h))
         for _ in 0..<Self.aimPasses {
             let fx = Double(found.x), fy = Double(found.y)
@@ -393,10 +403,8 @@ import Foundation
         (pos, moves) = ((0, 0), 0)
     }
 
-    /// aim: find the pointer on screen first (slower); worth it when a tap just missed. Every tap starts from the
-    /// corner: relative moves drifted 5–7% within a few gestures (PC harness, 2026-10-25), and with firmware v33 the
-    /// corner costs ~0.2 s and is done before the move. A stale calibration no longer aims every tap: the pixel finder
-    /// misread changing screens and walked the pointer off target (logs29).
+    /// Every tap starts from the corner. Calibrations measured with endpoint
+    /// feedback always verify again before clicking, even when callers omit aim.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
         pos = nil
