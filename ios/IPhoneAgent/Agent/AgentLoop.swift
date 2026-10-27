@@ -793,6 +793,15 @@ extension Pointer: Gestures {}
                 // The rest of a type/send/navigation batch was planned before the send. Drop it and verify afresh.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+                if let text = justSent, let sendReceipt {
+                    let confirmed = await sendReceipt(text)
+                    try Task.checkCancellation()
+                    if confirmed {
+                        record(screen?.frame, ["action": .str("done"), "answer": .str("sent message verified after the original request"),
+                                               "source": .str("send receipt")])
+                        return true
+                    }
+                }
                 if name == "tap", let text = justSent, sendCorrections < 2, let before = seen, let after = screen?.frame {
                     var recovery: String?
                     if let draft = CandidatePicker.mistypedDraft(text, before: before, after: after) {

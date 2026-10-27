@@ -178,13 +178,14 @@ enum WatchSettings {
         }.joined(separator: #"\s*"#)
     }
 
+    /// An acknowledgement is a courtesy, not permission to execute an independently authenticated request.
+    static func canStartTask(replySent: Bool, sources: [ReadMessage], rules: Rules) -> Bool {
+        replySent || phoneRequest(sources, rules) != nil
+    }
+
     /// Before typing in a send run. Refused when the chat on screen is not the destination (logs26: the report for
     /// 蓝海乐 went into 测试群), or when the text already shows more often than when this run first typed it (logs26:
     /// sent with 发送, then typed and sent again with Return).
-    static func canStartTask(replySent: Bool, sources: [ReadMessage], rules: Rules) -> Bool {
-        replySent
-    }
-
     static func sendRefusal(chat: String, inChat: Bool, shown: Int, baseline: inout Int?) -> String? {
         guard inChat else {
             return "This screen is not the chat “\(chat)”. Go back to the chat list and open “\(chat)” first; never type this message in another chat."
@@ -708,8 +709,20 @@ enum WatchReport {
 
     /// True when an own message with these words comes after `after` (the message answered) on screen: an identical
     /// earlier reply higher up does not count (logs(19)). Without `after` on screen, any own message with them.
+    /// A receipt for this request, rather than an older same-prefix bubble anywhere in the history.
+    /// A structured read can vary sentence punctuation/line wrapping; operators and case remain significant.
     static func confirmedReply(_ text: String, after: Line?, in lines: [Line]) -> Bool {
-        replied(text, after: after, in: lines)
+        func key(_ value: String) -> String {
+            var value = value.precomposedStringWithCompatibilityMapping
+            for (wide, narrow) in [("，", ","), ("。", "."), ("！", "!"), ("？", "?"), ("：", ":"), ("；", ";")] {
+                value = value.replacingOccurrences(of: wide, with: narrow)
+            }
+            return value.filter { !$0.isWhitespace }
+        }
+        let expected = key(text)
+        guard !expected.isEmpty, let after, !key(after.text).isEmpty,
+              let anchor = lines.lastIndex(where: { !$0.mine && key($0.text) == key(after.text) }) else { return false }
+        return lines.dropFirst(anchor + 1).contains { $0.mine && key($0.text) == expected }
     }
 
     static func replied(_ text: String, after: Line?, in lines: [Line]) -> Bool {
@@ -1148,10 +1161,13 @@ extension AppModel {
                 for m in responding { watchAnswered[WatchReport.answerKey(m)] = now() }
             } else { sent = false }
         }
-        if let task, sent {  // something only the phone can do: the agent does it and sends the outcome itself
+        var taskStarted = false
+        if let task, WatchSettings.canStartTask(replySent: sent, sources: phoneMessages, rules: WatchSettings.rules) {
             let phone = !phoneMessages.isEmpty
             guard watching, !Task.isCancelled else { return (false, false) }
             if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
+            taskStarted = true
+            if !sent { DebugLog.write("watch: acknowledgement unverified; executing the independently authorized owner task") }
             DebugLog.write("watch: owner task in \(chat): \(task)")
             // After one requested send, the remaining steps verify its result without another send or navigation.
             // A task with several parts keeps its ordinary steps.
@@ -1187,7 +1203,7 @@ extension AppModel {
             watchListReturn.pending = chat
         }
 
-        if !sent, watching, watchRetries[chat, default: 0] < 2 {
+        if !sent, !taskStarted, watching, watchRetries[chat, default: 0] < 2 {
             // Cut off (the screen dropped, a run failed): read these again soon instead of losing them as seen.
             watchRetries[chat, default: 0] += 1
             watchLast[chat] = before
@@ -1320,15 +1336,16 @@ extension AppModel {
             case .sent:
                 if back { watchListReturn.pending = chat }
                 return true
-            case .inBox:  // typed and checked, but Return did not send it: only 发送 is left
-                let ok = await watchRun(WatchSettings.tapSendTask(chat: chat), plan: WatchSettings.tapSendPlan, stepLimit: 6) != nil
-                if ok, back { watchListReturn.pending = chat }
-                return ok
-            case .needsInspection:
+            case .inBox, .needsInspection:
                 agent.endAfterSend = 5
                 defer { agent.endAfterSend = nil }
-                let ok = await watchRun(WatchSettings.inspectInputTask(chat: chat, text: text), stepLimit: 12,
-                                        directStart: true, sendTo: chat, inspectInput: text) != nil
+                let result = await watchRun(WatchSettings.inspectInputTask(chat: chat, text: text), stepLimit: 12,
+                                            directStart: true, sendTo: chat, inspectInput: text, replyAfter: after)
+                var ok = result != nil
+                if !ok, watching, !Task.isCancelled, after != nil, agent.sent.contains(AgentLoop.typedKey(text)) {
+                    // The bubble may arrive after the first receipt read. Observe once more, never send again.
+                    ok = await sentAlready(text, chat: chat, after: after, strict: true)
+                }
                 if ok, back { watchListReturn.pending = chat }
                 return ok
             case .notTried: break
@@ -1499,15 +1516,16 @@ extension AppModel {
 
     /// True when the newest own message in the chat is `text`, by its words: the read writes punctuation its own way
     /// ("，" as ","), and comparing it whole took a sent reply for unsent, so it went out twice (logs(18)).
-    private func sentAlready(_ text: String, chat: String, after: WatchReport.Line?) async -> Bool {
+    private func sentAlready(_ text: String, chat: String, after: WatchReport.Line?, strict: Bool = false) async -> Bool {
         guard let screen = await readChat(chat) else { return false }
-        return WatchReport.replied(text, after: after, in: screen.lines)
+        return strict ? WatchReport.confirmedReply(text, after: after, in: screen.lines)
+                      : WatchReport.replied(text, after: after, in: screen.lines)
     }
 
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
                           directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil,
-                          inspectInput: String? = nil) async -> String? {
+                          inspectInput: String? = nil, replyAfter: WatchReport.Line? = nil) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
@@ -1537,7 +1555,14 @@ extension AppModel {
                                              shown: frame.map { CandidatePicker.count(text, in: $0) } ?? 0, baseline: &baseline)
         }
         agent.inputToInspect = inspectInput
-        defer { agent.inputToInspect = nil }
+        if let chat, let replyAfter {
+            agent.sendReceipt = { [weak self] text in
+                guard let self, self.watching, !Task.isCancelled else { return false }
+                let confirmed = await self.sentAlready(text, chat: chat, after: replyAfter, strict: true)
+                return self.watching && !Task.isCancelled && confirmed
+            }
+        } else { agent.sendReceipt = nil }
+        defer { agent.inputToInspect = nil; agent.sendReceipt = nil }
         await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
                   directStart: directStart, keyboardGuard: true)
