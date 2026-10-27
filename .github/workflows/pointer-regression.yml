@@ -1,0 +1,25 @@
+name: Pointer regression
+on:
+  workflow_dispatch:
+jobs:
+  regression:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Regression tests
+        working-directory: ios
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
+          xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
+            -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build-regression \
+            -only-testing:IPhoneAgentTests/Logs39RegressionTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: pointer-regression-log
+          path: ios/test.log
+          retention-days: 1
