@@ -25,3 +25,22 @@ The repair must retain correct text, require visual aim for a pending message's 
 Build76 implementation is ready for full CI. It measures the returned pointer after acknowledged probe movements, refuses an unverified precision click, aims the first send tap, and preserves the raw expected draft for exact inspection. Recovery requires two post-action observations of that same complete field and no new matching message, with at most two recoveries. Empty/unreadable fields retain protection. The export includes up to20 retained runs, within the existing20MB payload and80MB local budgets, excluding video.
 
 Physical-phone success is not claimed by these simulated tests. Original phone data remains outside Git.
+
+## Build validation
+
+The first validation attempt (run40426883061) completed the device build but stalled in the simulator stage without publishing any test progress. It was canceled; no passing test result is inferred. Its candidate IPA was removed locally and from Actions.
+
+Commit1926117 changes CI observability and publication only: stream test output, bound individual test execution, retain failed test logs for one day, and upload the IPA only after passing tests. App sources are identical to f9531e9. Replacement run40428771305 passed: Release device build,401 simulator tests and8 direct capture policy tests, all zero failures. The rendered post-probe pointer test passed in4.188 seconds. Source19261178cee60e645ce66efe4bee4117cc7aedf4 has the same app sources as f9531e9.
+
+Key implementation files:
+- ios/IPhoneAgent/Agent/Pointer.swift: actual post-probe position, acknowledgement timing, precision click precondition.
+- ios/IPhoneAgent/Agent/AgentLoop.swift: first-send aiming, raw draft retention, bounded evidence-based recovery.
+- ios/IPhoneAgent/Agent/CandidatePicker.swift: same-field/no-new-message observations.
+- ios/IPhoneAgent/Services/DiagnosticFiles.swift: bounded retained-history export.
+- ios/IPhoneAgentTests/Logs37RegressionTests.swift and DiagnosticFilesTests.swift: dispatch, rendered pixels, duplicate protection, export coverage.
+
+## Delivery and cleanup
+
+Verified unsigned build76 is E:/桌面/Lan-Agent-build76-unsigned.ipa (5,262,281 bytes), arm64, native ScreenCaptureKit linked, minimumOS18.0. SHA256:4bf606f017a5e9635fa028bdbb3b626e8efe0ca2965e51321541a65f3380f1c9. Requires signing; physical iPhone acceptance remains unverified.
+
+Desktop and artifact-cache build75 packages, both failed RED artifacts, the canceled candidate, and the duplicate downloaded build76 IPA were removed after verification. Only the final build76 artifact remains in the build repository; the desktop has one current IPA. Source and original diagnostics were retained. Future workflow uploads IPAs only after tests pass, with seven-day retention. Test-failure logs have one-day retention. Cleanup manifests and detailed verification stay in E:/AgentStorage/esp32/log37-inspection.
