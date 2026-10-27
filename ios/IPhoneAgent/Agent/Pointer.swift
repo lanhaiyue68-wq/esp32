@@ -66,8 +66,9 @@ import Foundation
             span = Span(w: saved.w, h: saved.h)
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             maps = saved.maps
-            // Build77 and earlier fitted a different movement path and must be measured again.
-            if saved.motionVersion != 1 { stale = true }
+            // Build78 could measure random firmware curves; those parameters cannot
+            // be reused after selecting straight motion.
+            if saved.motionVersion != ProbeMotion.version { stale = true }
             for axis in ["x", "y"] {
                 seen[axis] = (saved.seen?[axis] ?? []).filter { $0.count == 2 }.map { ($0[0], $0[1]) }.suffix(12)
             }
@@ -200,7 +201,7 @@ import Foundation
     private func snapshot() -> Saved? {
         guard let span else { return nil }
         return Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
-                     aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: 1)
+                     aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: ProbeMotion.version)
     }
 
     /// Calibration plus the observed landings, so the correction survives a restart.

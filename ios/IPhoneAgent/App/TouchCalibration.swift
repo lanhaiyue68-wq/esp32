@@ -6,8 +6,7 @@ extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
     static let roughStops = [75, 150]
     static let targets: [(Double, Double)] = [
-        (0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.25), (0.5, 0.5),
-        (0.25, 0.75), (0.75, 0.75), (0.5, 0.9), (0.9, 0.5)]
+        (0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.75), (0.9, 0.9)]
     // Test each low axis separately, away from the top-left system indicator.
     static let checks: [(Double, Double)] = [(0.06, 0.5), (0.5, 0.09), (0.5, 0.62), (0.85, 0.87)]
     static let check = (x: 0.5, y: 0.62)
@@ -19,7 +18,9 @@ extension AutoCalibrator {
         var accepted = false
         defer { if !accepted { pointer.discardProbe() } }
         var clicks = 0, hits = 0
-        let total = Self.roughStops.count + Self.targets.count + 2 * Self.checks.count
+        // Show the planned pass, not the maximum number including a possible retry.
+        var total = Self.roughStops.count + Self.targets.count + Self.checks.count
+        progress = Progress(done: 0, total: total)
         var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
         phase = .homing
         try await pointer.reset()
@@ -69,12 +70,12 @@ extension AutoCalibrator {
                 _ = try? await device.send("key esc")
             }
         }
-        guard samples.count >= 8, let (lx, ly) = lines() else {
+        guard samples.count >= 6, let (lx, ly) = lines() else {
             return .failed("有效校准点不足，未保存参数。")
         }
         guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { return .failed("校准落点无法建立有效映射，未保存参数。") }
         guard pointer.probeScatter <= Self.maxCheckError else {
-            return .failed(String(format: "同距离落点波动 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
+            return .failed(String(format: "直线移动采样偏差 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
         }
 
         phase = .verifying
@@ -99,6 +100,8 @@ extension AutoCalibrator {
                 return .done(pointer.quality ?? worst)
             }
             if pass == 0 {
+                total += Self.checks.count
+                progress = Progress(done: clicks, total: total)
                 for (ux, uy, p) in measured { record(ux, uy, p) }
                 guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { break }
                 guard pointer.probeScatter <= Self.maxCheckError else { break }

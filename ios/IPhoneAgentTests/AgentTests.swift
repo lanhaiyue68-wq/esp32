@@ -246,7 +246,7 @@ import XCTest
     var links = 1
     var connected = true
     var sent: [String] = []
-    func send(_ command: String) async throws -> String { sent.append(command); return "" }
+    func send(_ command: String) async throws -> String { sent.append(command); return command == "curve" ? "off" : "" }
     func waitConnected(_ timeout: TimeInterval) async -> Bool { connected }
 }
 

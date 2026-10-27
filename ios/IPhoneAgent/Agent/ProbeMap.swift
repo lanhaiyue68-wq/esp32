@@ -47,12 +47,33 @@ struct ProbeMap: Codable {
     }
 }
 
-/// Firmware sends diagonal reports at a different vector speed. Use identical, settled
-/// single-axis positioning in the probe and at runtime; drag trajectories keep their original shape.
+/// Use the same settled straight reports in calibration and runtime. v34's `move`
+/// otherwise defaults to random Bezier paths, even for single-axis commands.
 @MainActor enum ProbeMotion {
+    static let version = 2
+
     static func home(_ device: HIDDevice) async throws {
+        try Task.checkCancellation()
+        try await confirmStraightMotion(device)
         try await device.send("home")
         try await Task.sleep(nanoseconds: 150_000_000)
+    }
+
+    private static func confirmStraightMotion(_ device: HIDDevice) async throws {
+        let mode: String
+        do { mode = try await device.send("curve").trimmingCharacters(in: .whitespacesAndNewlines) }
+        catch let error as DeviceError where error.message.lowercased().contains("unknown command") {
+            // Firmware predating curve support always emits straight steps.
+            return
+        }
+        if mode == "off" { return }  // query only: do not rewrite board NVS on every gesture
+        guard mode == "on" else {
+            throw DeviceError(message: "无法确认开发板的直线移动模式，未执行定位。请检查连接后重试。")
+        }
+        let changed = try await device.send("curve off").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard changed == "off" else {
+            throw DeviceError(message: "开发板未确认关闭随机曲线移动，未执行定位。请检查连接后重试。")
+        }
     }
 
     static func move(_ device: HIDDevice, _ x: Int, _ y: Int) async throws {

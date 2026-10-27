@@ -131,6 +131,7 @@ import XCTest
     var clicks = 0
     func send(_ command: String) async throws -> String {
         let p = command.split(separator: " ")
+        if command == "curve" { return "off" }
         if p.first == "home" { at = .zero }
         if p.first == "click" { clicks += 1 }
         if p.first == "move" {
