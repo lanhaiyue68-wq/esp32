@@ -126,7 +126,7 @@ struct DiagnosticFiles {
         }
         for name in ["debug.log", "debug.1.log"] { try copy(documents.appendingPathComponent(name), to: stage.appendingPathComponent(name)) }
         for report in reports().prefix(policy.reportCount) { try copy(report, to: stage.appendingPathComponent("diagnostics").appendingPathComponent(report.lastPathComponent)) }
-        let folders = Array(runFolders().prefix(5))
+        let folders = Array(runFolders().prefix(policy.maxRuns))
         for folder in folders {
             let destination = stage.appendingPathComponent("traces").appendingPathComponent(folder.lastPathComponent)
             try fm.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -136,8 +136,8 @@ struct DiagnosticFiles {
             let images = children(folder).filter { $0.pathExtension == "jpg" }.sorted { $0.lastPathComponent > $1.lastPathComponent }
             for image in images { try copy(image, to: stage.appendingPathComponent("traces").appendingPathComponent(folder.lastPathComponent).appendingPathComponent(image.lastPathComponent)) }
         }
-        let manifest: [String: Any] = ["format": 1, "recentRunLimit": 5, "includedRuns": folders.count, "payloadLimitBytes": policy.exportBytes,
-            "copiedFiles": copied, "omittedFiles": omitted, "videoIncluded": false, "note": "Recent diagnostics only; video and older runs omitted."]
+        let manifest: [String: Any] = ["format": 1, "recentRunLimit": policy.maxRuns, "includedRuns": folders.count, "payloadLimitBytes": policy.exportBytes,
+            "copiedFiles": copied, "omittedFiles": omitted, "videoIncluded": false, "note": "Bounded retained run history; text records precede images. Video and files exceeding the payload budget are omitted."]
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
         if data.count <= policy.exportBytes { try data.write(to: stage.appendingPathComponent("manifest.json")) }
         return stage

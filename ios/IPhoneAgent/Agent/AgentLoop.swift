@@ -495,7 +495,7 @@ extension Pointer: Gestures {}
         sendCorrections = 0
         quietSinceSend = 0
         pendingInput = inputToInspect
-        if let inputToInspect { unsent = Self.typedKey(inputToInspect) }
+        if let inputToInspect { unsent = inputToInspect }
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
         let applied = lessons?.relevant(to: task) ?? []
@@ -739,14 +739,16 @@ extension Pointer: Gestures {}
                     }
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
-                if name == "type" { noKeyboard = 0; unsent = Self.typedKey(act["text"]?.str ?? ""); quietSinceSend = 0 }
+                if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0 }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
-                if name == "tap", missed || aimNext { act["precise"] = .bool(true) } // record the aim mode actually used
+                if name == "tap", missed || aimNext || (unsent != nil && Self.sends(act)) {
+                    act["precise"] = .bool(true) // a pending message's first send also requires a verified landing
+                }
                 if name == "path", act["smooth"] == nil, Self.isGentleBend(points(act), aspect: screen?.aspect ?? 9 / 19.5) {
                     act["smooth"] = .bool(true)  // recorded, so the review and the next look know it was a curve
                 }
@@ -766,7 +768,7 @@ extension Pointer: Gestures {}
                     pendingInput = nil
                 }
                 if let text = unsent, Self.sends(act) {
-                    sentTexts.insert(text); unsent = nil; pendingInput = nil; quietSinceSend = 0
+                    sentTexts.insert(Self.typedKey(text)); unsent = nil; pendingInput = nil; quietSinceSend = 0
                     justSent = text
                 }
                 lastActed = now()
@@ -789,14 +791,27 @@ extension Pointer: Gestures {}
                 // The rest of a type/send/navigation batch was planned before the send. Drop it and verify afresh.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
-                if let text = justSent, sendCorrections < 2, let before = seen, let after = screen?.frame,
-                   let draft = CandidatePicker.mistypedDraft(text, before: before, after: after) {
-                    sendCorrections += 1
-                    sentTexts.remove(text); unsent = text; pendingInput = text; quietSinceSend = 0
-                    record(after, ["action": .str("send missed"), "reason": .str(
-                        "The send tap added a letter to the SAME input field: \(draft). No new matching message is visible. "
-                        + "The message was not sent. Correct only the visible extra characters, then send once and verify. "
-                        + "Do not retype or replace text that is already correct.")])
+                if name == "tap", let text = justSent, sendCorrections < 2, let before = seen, let after = screen?.frame {
+                    var recovery: String?
+                    if let draft = CandidatePicker.mistypedDraft(text, before: before, after: after) {
+                        recovery = "The send tap added a letter to the SAME input field: \(draft). Correct only the visible extra characters."
+                    } else if CandidatePicker.unchangedDraft(text, before: before, after: after) {
+                        // A second frame must still show that same complete draft. A transient/unknown result
+                        // or a new matching bubble keeps the existing send protection.
+                        let confirmation = now()
+                        await screen?.afterAction(since: confirmation)
+                        try await screen?.requireFrame(after: confirmation)
+                        if let checked = screen?.frame, CandidatePicker.unchangedDraft(text, before: before, after: checked) {
+                            recovery = "The SAME input field still contains the complete correct draft in two post-action observations. Keep it unchanged and correct the send control's landing."
+                        }
+                    }
+                    if let recovery {
+                        sendCorrections += 1
+                        sentTexts.remove(Self.typedKey(text)); unsent = text; pendingInput = text; quietSinceSend = 0
+                        aimNext = true
+                        record(screen?.frame, ["action": .str("send missed"), "reason": .str(recovery
+                            + " No new matching message is visible. Send once with visual aim, then verify. Do not retype or replace correct text.")])
+                    }
                 }
                 return false
             }
@@ -989,6 +1004,7 @@ extension Pointer: Gestures {}
     /// True when the actor picks the same action as its last limit-1 moves and the last one did nothing.
     /// Repeating a move that still changes the screen (e.g. scrolling down a long list) is progress, not a loop.
     func repeating(_ act: JObject, limit: Int = 3) -> Bool {
+        if recoveringSend(act) { return false }
         if act["action"] == .str("tap"), act["precise"] == .bool(true),
            lastObservedAction?["precise"] != .bool(true) {
             return false // this bounded delivery-mode retry must execute before the generic loop guard
@@ -998,6 +1014,10 @@ extension Pointer: Gestures {}
         }.suffix(limit - 1)
         return moves.count == limit - 1 && moves.allSatisfy { Actions.sameTarget($0, act) }
             && moves.last?["changed"] != .bool(true)
+    }
+
+    private func recoveringSend(_ act: JObject) -> Bool {
+        aimNext && unsent != nil && (1...2).contains(sendCorrections) && act["action"] == .str("tap") && Self.sends(act)
     }
 
     func replan(stuck: Bool = false) async throws {
@@ -1063,7 +1083,7 @@ extension Pointer: Gestures {}
                                       "reason": .str("Home changed nothing after the keyboard fallback; the Home route could not be verified"),
                                       "think_s": .num(seconds)], shot: frame)]
             }
-            if missed, let last = lastObservedAction, Actions.sameTarget(acts[0], last) {
+            if missed, let last = lastObservedAction, Actions.sameTarget(acts[0], last), !recoveringSend(acts[0]) {
                 if acts[0]["action"] == .str("tap") {
                     if last["precise"] == .bool(true) {
                         let reason = "tap target unchanged after a precision retry; inspect another route, keep completed work"
@@ -1091,7 +1111,7 @@ extension Pointer: Gestures {}
         switch a["action"]?.str {
         case "tap":
             lastTap = CGPoint(x: p("x"), y: p("y"))
-            try await phone.tap(p("x"), p("y"), aim: a["precise"]?.bool ?? false || missed || aimNext)
+            try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
         case "path":

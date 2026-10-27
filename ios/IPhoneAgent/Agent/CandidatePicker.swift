@@ -112,6 +112,35 @@ enum CandidatePicker {
         return row.map(\.text).joined()
     }
 
+    /// Positive evidence of an unsent draft, including wrapped text. A missing field is uncertainty.
+    /// Require the same lowest text field above a visible keyboard and no newly matching message elsewhere.
+    static func unchangedDraft(_ text: String, before: Data, after: Data) -> Bool {
+        let oldRows = rows(in: before, top: 0.3, bottom: 1)
+        let newRows = rows(in: after, top: 0.3, bottom: 1)
+        guard keyboardUp(rows: oldRows), keyboardUp(rows: newRows) else { return false }
+        let old = aligned(aboveKeyboard(oldRows)), current = aligned(aboveKeyboard(newRows))
+        guard let last = old.last, let lastBox = last.first?.box, lastBox.midY >= 0.35 else { return false }
+        let nine: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"]
+        guard let keys = aligned(oldRows).first(where: { letterKeys($0) || $0.filter { nine.contains($0.text) }.count >= 2 }),
+              let keyboardTop = keys.map(\.box.minY).min(),
+              keyboardTop - lastBox.maxY < 0.2 else { return false }
+        guard let start = old.indices.reversed().first(where: { index in
+            shows(text, lines: [old[index...].flatMap { $0.map(\.text) }.joined()]) == 1
+        }) else { return false }
+        let field = Array(old[start...])
+        let box = field.flatMap { $0.map(\.box) }.reduce(CGRect.null) { $0.union($1) }
+        func inField(_ row: [Piece]) -> Bool {
+            guard let first = row.first else { return false }
+            return first.box.midY >= box.minY - 0.015 && first.box.midY <= box.maxY + 0.015
+                && abs(first.box.minX - box.minX) < 0.05
+        }
+        let draft = current.filter(inField).flatMap { $0.map(\.text) }.joined()
+        guard shows(text, lines: [draft]) == 1 else { return false }
+        let previousBubbles = shows(text, lines: old.filter { !inField($0) }.map { $0.map(\.text).joined() })
+        let currentBubbles = shows(text, lines: current.filter { !inField($0) }.map { $0.map(\.text).joined() })
+        return currentBubbles <= previousBubbles
+    }
+
     /// Exclude the keyboard and its suggestion strip. A disappearing suggestion must not cancel out a new copy
     /// in the field (logs34), nor can a suggestion confirm text that never reached the field.
     private static func aboveKeyboard(_ rows: [[Piece]]) -> [[Piece]] {

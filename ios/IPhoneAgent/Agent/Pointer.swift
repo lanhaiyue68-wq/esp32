@@ -169,7 +169,7 @@ import Foundation
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim && (screen != nil || finder != nil) { try await self.aim(x, y) }
+        if aim { try await self.aim(x, y) }
     }
 
     /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
@@ -179,7 +179,7 @@ import Foundation
     private func aim(_ x: Double, _ y: Double) async throws {
         guard let span, var found = try await find(x, y) else {
             log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
-            return
+            throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
         }
         let miss = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
         if miss <= Self.maxMiss && !pinned(found, x, y) {  // learn from normal drift only, never a stray reading
@@ -197,7 +197,10 @@ import Foundation
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
                 try await device.send("move \(ux) \(uy)")
                 pos = (ux, uy)
-                guard let p = try await find(x, y) else { break }
+                guard let p = try await find(x, y) else {
+                    pos = nil
+                    throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
+                }
                 if let g = measured(ux, 0, Double(p.x), x, gain.w) { gain.w = g }
                 if let g = measured(uy, 0, Double(p.y), y, gain.h) { gain.h = g }
                 found = p
@@ -206,12 +209,22 @@ import Foundation
             let mx = Int(((x - fx) * gain.w).rounded(.toNearestOrEven)), my = Int(((y - fy) * gain.h).rounded(.toNearestOrEven))
             try await device.send("move \(mx) \(my)")  // fix this miss right away
             if let p = pos { pos = (p.0 + mx, p.1 + my) }
-            guard let p = try await find(x, y) else { break }
+            guard let p = try await find(x, y) else {
+                pos = nil
+                throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
+            }
             if abs(mx) >= 20, let g = measured(mx, fx, Double(p.x), x, gain.w) { gain.w = g }
             if abs(my) >= 20, let g = measured(my, fy, Double(p.y), y, gain.h) { gain.h = g }
             found = p
         }
         if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
+        let remaining = max(abs(Double(found.x) - x), abs(Double(found.y) - y))
+        guard remaining <= Self.aimTolerance else {
+            pos = nil
+            log(String(format: "aim (%.3f, %.3f): still at (%.3f, %.3f); click withheld", x, y, found.x, found.y))
+            throw DeviceError(message: "Pointer is still off target after correction; no click was sent. Keep the current draft and inspect another route.")
+        }
+        log(String(format: "aim (%.3f, %.3f): verified at (%.3f, %.3f)", x, y, found.x, found.y))
     }
 
     private func find(_ x: Double, _ y: Double) async throws -> CGPoint? {
@@ -251,21 +264,24 @@ import Foundation
         guard let screen, let span else { return nil }
         let nudge = x < 0.9 ? Self.nudge : -Self.nudge  // stay clear of the screen edge
         await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)  // pointer at rest
-        let before = screen.frame, sent = now()
         try await device.send("move \(nudge) 0")
-        var after = await screen.fresh(since: sent, timeout: 1.2)
+        // A frame captured while the BLE command was in flight can still precede the actual move.
+        var after = await screen.fresh(since: now(), timeout: 1.2)
         if after != nil {
             await screen.settled(quiet: 0.1, least: 0.05, most: 0.4)
             after = screen.frame
         }
         try await device.send("move \(-nudge) 0")
+        let restored = await screen.fresh(since: now(), timeout: 1.2)
         let shift = Double(nudge) / Double(span.w)
-        guard let before, let after else { return nil }
-        if let p = Vision.pointer(before, after, near: CGPoint(x: x, y: y), shift: shift)
-            ?? Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)) {
+        guard let restored, let after else { return nil }
+        // The inverse move need not return to exactly the old point. Locate the pointer where it NOW is,
+        // rather than clicking on the assumption that undoing relative mouse units restored it.
+        if let p = Vision.pointer(restored, after, near: CGPoint(x: x, y: y), shift: shift)
+            ?? Vision.pointer(restored, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)) {
             return p
         }
-        return model ? await locate?(after) : nil
+        return model ? await locate?(restored) : nil
     }
 
     /// Calibration check without tapping: move to a known point and measure the miss (fraction of the screen).
