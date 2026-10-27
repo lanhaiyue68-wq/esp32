@@ -371,7 +371,7 @@ import Foundation
             try await device.send("release")
             (pos, link) = (nil, device.links)
         }
-        if pos == nil || (rehome && moves >= Self.rehomeEvery) {
+        if pos == nil || (rehome && (maps != nil || moves >= Self.rehomeEvery)) {
             if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
             (pos, moves) = ((0, 0), 0)
         }

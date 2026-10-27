@@ -83,6 +83,14 @@ import XCTest
         XCTAssertTrue(moves.allSatisfy { $0[0] == 0 || $0[1] == 0 })
     }
 
+    func testNewGestureStartsUseTheSameHomeAsTheProbe() async throws {
+        let (pointer, device, _) = calibration()
+        try await pointer.point(0.7, 0.7)
+        try await pointer.goBack()
+        XCTAssertEqual(device.sent.filter { $0 == "home" }.count, 2,
+                       "the measured mapping is from home; a back gesture cannot start with an uncalibrated relative move")
+    }
+
     func testReturningFromChatDoesNotTapBesideScreenSharingIndicator() async {
         let state = WatchListReturn(); state.pending = "客户群"
         let phone = FakeGestures(), screen = Logs39Screen()
