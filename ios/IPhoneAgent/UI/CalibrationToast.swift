@@ -34,7 +34,9 @@ struct CalibrationBoard: View {
 
     var body: some View {
         ZStack {
-            ProbeGrid(flashes: probe.flashes)
+            // The checks find the pointer by pixel diff: lines, labels and the earlier landing dots under it hid
+            // it (logs43: the first check sits on a probe dot and the 50% line), so they see plain white.
+            ProbeGrid(flashes: calibrator.phase == .verifying ? [] : probe.flashes, plain: calibrator.phase == .verifying)
             VStack {
                 HStack {
                     Spacer()
@@ -117,15 +119,16 @@ private extension View {
 
 /// White, lines every 10% (darker every 50%), labels 100-900 on the top and left edges, a coloured square
 /// in each corner (red, green, blue, orange from top-left, clockwise from the top) to register a frame, and a
-/// dot where each probe tap landed.
+/// dot where each probe tap landed. plain: white with the corner squares only.
 struct ProbeGrid: View {
     let flashes: [CGPoint]
+    var plain = false
     static let corners: [Color] = [.red, .green, .orange, .blue]  // TL, TR, BR, BL
 
     var body: some View {
         Canvas { ctx, size in
             ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
-            for i in 1..<10 {
+            for i in 1..<10 where !plain {
                 let x = size.width * Double(i) / 10, y = size.height * Double(i) / 10
                 var line = Path()
                 line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))

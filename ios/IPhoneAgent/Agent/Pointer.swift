@@ -224,17 +224,35 @@ import Foundation
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim || requiresFeedback { try await self.aim(x, y, edgeStart: edgeStart) }
+        if aim || requiresFeedback { try await self.aim(x, y, edgeStart: edgeStart, required: aim) }
     }
 
     /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
     /// Each correction measures the real scale (mouse units per screen) from how far it moved the pointer, so a stale
     /// span is fixed within a tap instead of overshooting once and clicking there. A pointer stopped by the border
     /// says nothing about the scale: home, move half way, and measure from the corner.
-    private func aim(_ x: Double, _ y: Double, edgeStart: Bool = false) async throws {
-        guard let span, var found = try await find(x, y) else {
+    /// required: a precision tap (send button) never clicks unseen. Otherwise feedback only improves the map's
+    /// estimate: icons, wallpaper and photos hide the translucent pointer from the pixel diff (logs43: every
+    /// home-screen tap was withheld, so every run failed), and an unseen pointer is not a wrong one.
+    private func aim(_ x: Double, _ y: Double, edgeStart: Bool = false, required: Bool = false) async throws {
+        guard let span else { throw DeviceError(message: "pointer not calibrated") }
+        guard var found = try await find(x, y) else {
+            guard required else {
+                log(String(format: "aim (%.3f, %.3f): pointer not found; clicking at the calibrated estimate", x, y))
+                return
+            }
             log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
             throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
+        }
+        /// Lost while correcting: the corrections moved it somewhere unseen, so start over from the corner.
+        func lost() async throws {
+            pos = nil
+            guard required else {
+                log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
+                try await moveTo(dx(x), dy(y))
+                return
+            }
+            throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
         }
         // Only a system gesture may start from the visible cursor's border inset.
         // The other axis, ordinary taps and all calibration points stay exact.
@@ -259,10 +277,7 @@ import Foundation
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
                 if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
                 pos = (ux, uy)
-                guard let p = try await find(x, y) else {
-                    pos = nil
-                    throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
-                }
+                guard let p = try await find(x, y) else { return try await lost() }
                 if let g = measured(ux, 0, Double(p.x), x, gain.w) { gain.w = g }
                 if let g = measured(uy, 0, Double(p.y), y, gain.h) { gain.h = g }
                 found = p
@@ -271,10 +286,7 @@ import Foundation
             let mx = Int((error(fx, x) * gain.w).rounded(.toNearestOrEven)), my = Int((error(fy, y) * gain.h).rounded(.toNearestOrEven))
             if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
             if let p = pos { pos = (p.0 + mx, p.1 + my) }
-            guard let p = try await find(x, y) else {
-                pos = nil
-                throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
-            }
+            guard let p = try await find(x, y) else { return try await lost() }
             if abs(mx) >= 20, let g = measured(mx, fx, Double(p.x), x, gain.w) { gain.w = g }
             if abs(my) >= 20, let g = measured(my, fy, Double(p.y), y, gain.h) { gain.h = g }
             found = p

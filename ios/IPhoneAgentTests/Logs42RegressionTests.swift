@@ -63,22 +63,49 @@ import XCTest
         XCTAssertFalse(phone.sent.contains("curve off"))
     }
 
-    func testOrdinaryTapWithMissingFeedbackNeverClicks() async throws {
+    // logs43: the pixel diff never saw the pointer over the home screen's icons and wallpaper. Withholding every
+    // such tap failed each run on its first step; an unseen ordinary tap clicks at the calibrated estimate.
+    func testOrdinaryTapWithoutVisiblePointerClicksAtTheMapEstimate() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
         p.finder = { _, _ in nil }
-        do { try await p.tap(0.5, 0.62); XCTFail("unobserved curved endpoint must not be clicked") }
-        catch is DeviceError { }
-        XCTAssertTrue(phone.clicks.isEmpty)
+        try await p.tap(0.85, 0.59)
+        let hit = try XCTUnwrap(phone.clicks.first)
+        XCTAssertEqual(phone.clicks.count, 1)
+        XCTAssertEqual(hit.x, 0.85, accuracy: 0.06, "the map's estimate, including this fake's curve scatter")
+        XCTAssertEqual(hit.y, 0.59, accuracy: 0.01)
     }
 
-    func testGestureCannotPressWithoutEndpointFeedback() async throws {
+    func testGestureWithoutVisiblePointerStillPressesAtTheMapEstimate() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
         p.finder = { _, _ in nil }
-        do { try await p.swipe(0.5, 0.62, 0.5, 0.3); XCTFail("unobserved start must not be pressed") }
+        try await p.swipe(0.5, 0.62, 0.5, 0.3)
+        XCTAssertEqual(phone.presses.count, 1)
+    }
+
+    func testPointerLostDuringCorrectionRestartsFromTheCornerBeforeClicking() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        var looks = 0
+        // Seen once off target (this fake's curve scatter), then never again after the correction.
+        p.finder = { _, _ in looks += 1; return looks == 1 ? phone.at : nil }
+        try await p.tap(0.5, 0.62)
+        XCTAssertEqual(looks, 2)
+        XCTAssertEqual(phone.clicks.count, 1)
+        let lastHome = try XCTUnwrap(phone.sent.lastIndex(of: "home"))
+        let correction = try XCTUnwrap(phone.sent.firstIndex { $0.hasPrefix("move") && $0 != "move 150 0" && $0 != "move 0 403" })
+        XCTAssertGreaterThan(lastHome, correction, "the unseen corrected position is abandoned for a fresh move from the corner")
+        XCTAssertEqual(try XCTUnwrap(phone.clicks.first).y, 0.62, accuracy: 0.01)
+    }
+
+    func testPrecisionTapStillNeverClicksUnseenWithFeedbackCalibration() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        p.finder = { _, _ in nil }
+        do { try await p.tap(0.863, 0.887, aim: true); XCTFail("a send-button tap must stay verified") }
         catch is DeviceError { }
-        XCTAssertFalse(phone.sent.contains("press"))
+        XCTAssertTrue(phone.clicks.isEmpty)
     }
 
     func testMeasuredFeedbackQualityRetainsRawScatterAndSurvivesRestart() throws {
