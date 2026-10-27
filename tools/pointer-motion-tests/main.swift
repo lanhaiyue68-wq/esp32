@@ -103,3 +103,29 @@ final class PointerMotionTests: XCTestCase {
         XCTAssertFalse(board.sent.contains("curve off"))
     }
 }
+
+final class ProbeMapRegressionTests: XCTestCase {
+    func testLogs41LowTargetUsesTheLeadingEdgeOfTheMeasuredPlateau() throws {
+        // Real logs41: 46 and 56 units both landed at .109; 75 landed at .149.
+        // A .09 target extrapolates from (46,.109) towards (75,.149): 32.225 units.
+        // Averaging the plateau to 51 units, or anchoring it to (0,0), repeats the miss.
+        let map = try XCTUnwrap(ProbeMap([(46, 0.109), (56, 0.109), (75, 0.149)]))
+        XCTAssertEqual(map.units(for: 0.09), 32)
+    }
+
+    func testFlatMeasuredLandingsDoNotInventFittingError() throws {
+        let map = try XCTUnwrap(ProbeMap([(46, 0.109), (56, 0.109), (75, 0.149)]))
+        XCTAssertEqual(map.landed(at: 46), 0.109, accuracy: 0.00001)
+        XCTAssertEqual(map.landed(at: 56), 0.109, accuracy: 0.00001)
+        XCTAssertEqual(map.scatter, 0, accuracy: 0.00001)
+    }
+
+    func testInconsistentRepeatedCommandsStillExposeTheirActualScatter() throws {
+        let map = try XCTUnwrap(ProbeMap([(100, 0.30), (100, 0.36), (200, 0.65)]))
+        XCTAssertGreaterThan(map.scatter, 0.029, "a better inverse must not hide random landing error")
+    }
+
+    func testAFlatResponseWithoutMeasuredSpanCannotCalibrate() {
+        XCTAssertNil(ProbeMap([(46, 0.109), (56, 0.109), (75, 0.109)]))
+    }
+}

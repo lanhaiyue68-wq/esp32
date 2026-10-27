@@ -13,7 +13,9 @@ target = Path(sys.argv[1]).resolve()
 (target / 'Sources').mkdir(parents=True, exist_ok=True)
 (target / 'Tests').mkdir(exist_ok=True)
 source = (repo / 'ios/IPhoneAgent/Agent/ProbeMap.swift').read_text(encoding='utf-8')
-motion = source[source.index('@MainActor enum ProbeMotion'):]
+motion = source[source.index('struct ProbeMap'):]
+fit_source = (repo / 'ios/IPhoneAgent/Agent/ProbeFit.swift').read_text(encoding='utf-8')
+fit = fit_source[fit_source.index('enum ProbeFit'):fit_source.index("/// This device's screen")]
 shim = '''import Foundation
 @MainActor protocol HIDDevice: AnyObject {
     @discardableResult func send(_ command: String) async throws -> String
@@ -23,6 +25,6 @@ struct DeviceError: LocalizedError {
     var errorDescription: String? { message }
 }
 '''
-(target / 'Sources/Motion.swift').write_text(shim + motion, encoding='utf-8')
+(target / 'Sources/Motion.swift').write_text(shim + fit + motion, encoding='utf-8')
 shutil.copyfile(Path(__file__).with_name('Package.swift'), target / 'Package.swift')
 shutil.copyfile(Path(__file__).with_name('main.swift'), target / 'Tests/PointerMotionTests.swift')
