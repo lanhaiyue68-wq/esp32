@@ -10,4 +10,10 @@ Calibration and runtime both use Bezier movement. Version3 marks older mappings 
 
 Skill routing: systematic-debugging and test-driven-development, with Spec Kit triage. These are two bounded defects in the existing motion preference and inverse map; no new subsystem or workflow rewrite was introduced. Raw logs remain local outside Git.
 
-RED evidence: run40450154361 reproduced five failing Bezier-contract tests (11 assertions); run40450951228 also reproduced the two logs41 plateau tests (four assertions). Both ran unchanged build79 production code. The permanent Foundation harness extracts the real production fit/map/motion code and tests 12 contracts. Final Release, simulator and package validation are pending.
+RED evidence: run40450154361 reproduced five failing Bezier-contract tests (11 assertions); run40450951228 also reproduced the two logs41 plateau tests (four assertions). Both ran unchanged build79 production code. The permanent Foundation harness extracts the real production fit/map/motion code and tests 12 contracts.
+
+Final CI run `40451309403`, attempt1, passed the unsigned arm64 Release build, all 423 simulator tests, 12 Bezier/map policy tests and eight direct-capture policy tests. No tests were skipped. Source: `6f213bd75fafb12c1e0510cdef6374af7aa62593`.
+
+Delivered: `E:/桌面/Lan-Agent-build80-unsigned.ipa`, 5,269,123 bytes, SHA256 `c2795d45fbb81e1f6df82729e0340fc586573c600a36d886e4a772d72ddd1b76`. ZIP integrity, arm64, ScreenCaptureKit linkage and matching build80 in the app and embedded extension were verified. Superseded desktop build79, the duplicate downloaded IPA and old cloud package were removed after verifying the new desktop copy. Re-sign/install and remeasure calibration once; physical-phone landing precision has not been verified here.
+
+Key files: `ios/IPhoneAgent/Agent/ProbeMap.swift` (Bezier preference recovery and inverse map), `Agent/Pointer.swift` (saved motion-version validation), `App/TouchCalibration.swift` (accurate mode label), `tools/pointer-motion-tests` (production-source regression harness), and the corresponding iOS regression fixtures.
