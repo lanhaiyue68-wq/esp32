@@ -1,7 +1,6 @@
 # Unsigned IPA on a GitHub macOS runner, for a team without a Mac: the same Release build the Mac made for
 # build 14 (default bundle ID, no signing). Sign and install from Windows (AllInSign or a sideloading tool),
-# entering the bundle ID used on the phone there. The IPA is uploaded before the unit tests run, so a test
-# failure still leaves something to install, and the run shows what failed.
+# entering the bundle ID used on the phone there. Publish an IPA only after device build and simulator tests pass.
 name: Unsigned IPA
 
 on:
@@ -48,13 +47,6 @@ jobs:
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
           (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
           shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: IPhoneAgent-unsigned-ipa
-          path: |
-            ios/IPhoneAgent-build*-unsigned.ipa
-            ios/ipa.sha256
-          retention-days: 30
       - name: Unit tests (simulator, unsigned)
         run: |
           set -o pipefail
@@ -62,9 +54,25 @@ jobs:
           echo "simulator: $sim"
           status=0
           xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
-            -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build-sim \
-            CODE_SIGNING_ALLOWED=NO > test.log 2>&1 || status=$?
+            -destination "platform=iOS Simulator,name=$sim" -destination-timeout 90 -derivedDataPath build-sim \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 90 -maximum-test-execution-time-allowance 120 \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log || status=$?
           tail -40 test.log
           echo "---- failures (assertion lines kept even when the log is long)"
           grep -E "error: |Test Case .* failed|Failing tests:|^\s+[A-Za-z0-9]+Tests\.test" test.log | head -80 || true
           exit $status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IPhoneAgent-unsigned-ipa
+          path: |
+            ios/IPhoneAgent-build*-unsigned.ipa
+            ios/ipa.sha256
+          retention-days: 7
+      - name: Preserve failed test evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-test-log
+          path: ios/test.log
+          if-no-files-found: ignore
+          retention-days: 1
