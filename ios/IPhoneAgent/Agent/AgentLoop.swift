@@ -146,6 +146,8 @@ extension Pointer: Gestures {}
     private var pendingInput: String?
     /// Text already entered by a quick send, handed over for visual inspection without retyping.
     var inputToInspect: String?
+    /// A destination-specific receipt, independent of the actor's next navigation/action guess.
+    var sendReceipt: ((String) async -> Bool)?
     /// How often each text showed on screen when this run first typed it. Shown more often later, it was sent or is
     /// still in the box: typing it again is refused (60 on the PC harness: the model sent with WeChat's green 发送
     /// next to the box, which the tap check above missed, typed the text again, and left it in the box).

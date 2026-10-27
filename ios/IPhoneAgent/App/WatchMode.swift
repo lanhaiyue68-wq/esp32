@@ -181,6 +181,10 @@ enum WatchSettings {
     /// Before typing in a send run. Refused when the chat on screen is not the destination (logs26: the report for
     /// 蓝海乐 went into 测试群), or when the text already shows more often than when this run first typed it (logs26:
     /// sent with 发送, then typed and sent again with Return).
+    static func canStartTask(replySent: Bool, sources: [ReadMessage], rules: Rules) -> Bool {
+        replySent
+    }
+
     static func sendRefusal(chat: String, inChat: Bool, shown: Int, baseline: inout Int?) -> String? {
         guard inChat else {
             return "This screen is not the chat “\(chat)”. Go back to the chat list and open “\(chat)” first; never type this message in another chat."
@@ -704,6 +708,10 @@ enum WatchReport {
 
     /// True when an own message with these words comes after `after` (the message answered) on screen: an identical
     /// earlier reply higher up does not count (logs(19)). Without `after` on screen, any own message with them.
+    static func confirmedReply(_ text: String, after: Line?, in lines: [Line]) -> Bool {
+        replied(text, after: after, in: lines)
+    }
+
     static func replied(_ text: String, after: Line?, in lines: [Line]) -> Bool {
         let start = after.flatMap { a in lines.lastIndex { !$0.mine && sameWords($0.text, a.text) } }.map { $0 + 1 } ?? 0
         return lines[min(start, lines.count)...].contains { $0.mine && sameWords($0.text, text) }
