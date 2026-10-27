@@ -71,6 +71,19 @@ final class VisionTests: XCTestCase {
         XCTAssertNil(Vision.pointer(frame, frame, near: CGPoint(x: 0.5, y: 0.8), shift: 12 / W))
     }
 
+    func testPointerUsesObservedNudgeDistanceInsteadOfTheUncertainMouseScale() throws {
+        let found = try XCTUnwrap(Vision.pointer(screen(pointer: (262, 856)), screen(pointer: (280, 856)),
+                                                 near: p(262, 856), shift: 12 / W))
+        XCTAssertEqual(found.x * W, 262.5, accuracy: 1.2)
+        XCTAssertEqual(found.y * H, 856.5, accuracy: 1.2)
+    }
+
+    func testReverseNudgeUsesTheObservedDistanceToo() throws {
+        let found = try XCTUnwrap(Vision.pointer(screen(pointer: (262, 856)), screen(pointer: (244, 856)),
+                                                 near: p(262, 856), shift: -12 / W))
+        XCTAssertEqual(found.x * W, 262.5, accuracy: 1.2)
+    }
+
     func testSmallCheckmarkCountsAsAChange() {
         XCTAssertTrue(Vision.changed(screen(pointer: (100, 500)), screen(pointer: (100, 500), checked: true)))
     }

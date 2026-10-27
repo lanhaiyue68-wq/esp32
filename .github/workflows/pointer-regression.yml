@@ -1,0 +1,25 @@
+name: Pointer regression evidence
+on: workflow_dispatch
+jobs:
+  regression:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Targeted pointer regressions
+        working-directory: ios
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
+          xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent \
+            -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build-red \
+            -only-testing:IPhoneAgentTests/Logs42RegressionTests -only-testing:IPhoneAgentTests/VisionTests \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee test-red.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pointer-red-evidence
+          path: ios/test-red.log
+          retention-days: 1
