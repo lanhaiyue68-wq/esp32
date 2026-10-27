@@ -1,0 +1,13 @@
+name: Pointer motion regression
+on:
+  workflow_dispatch:
+jobs:
+  regression:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run production motion policy against firmware mode contract
+        run: |
+          python3 tools/pointer-motion-tests/prepare.py "$RUNNER_TEMP/pointer-motion"
+          swift test --package-path "$RUNNER_TEMP/pointer-motion"
