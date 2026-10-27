@@ -75,7 +75,7 @@ extension AutoCalibrator {
         }
         guard pointer.applyProbe(x: lx, y: ly, samples: samples) else { return .failed("校准落点无法建立有效映射，未保存参数。") }
         guard pointer.probeScatter <= Self.maxCheckError else {
-            return .failed(String(format: "直线移动采样偏差 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
+            return .failed(String(format: "曲线移动采样偏差 %.1f%%，超过 1.5%%，未保存参数。", pointer.probeScatter * 100))
         }
 
         phase = .verifying

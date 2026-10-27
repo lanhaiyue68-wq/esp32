@@ -66,8 +66,8 @@ import Foundation
             span = Span(w: saved.w, h: saved.h)
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             maps = saved.maps
-            // Build78 could measure random firmware curves; those parameters cannot
-            // be reused after selecting straight motion.
+            // Build79 measured with Bezier disabled; those parameters must not be
+            // reported as validated after restoring the user's curve setting.
             if saved.motionVersion != ProbeMotion.version { stale = true }
             for axis in ["x", "y"] {
                 seen[axis] = (saved.seen?[axis] ?? []).filter { $0.count == 2 }.map { ($0[0], $0[1]) }.suffix(12)

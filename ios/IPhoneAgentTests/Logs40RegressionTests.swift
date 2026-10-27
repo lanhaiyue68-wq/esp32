@@ -2,16 +2,16 @@ import XCTest
 @testable import IPhoneAgent
 
 @MainActor final class Logs40RegressionTests: XCTestCase {
-    func testBuild78ParametersNeedRemeasurementAfterChangingTheFirmwareMotionMode() throws {
+    func testBuild79StraightParametersNeedRemeasurementWhenRestoringBezier() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         defer { try? FileManager.default.removeItem(at: file) }
-        try Data(#"{"w":300,"h":650,"quality":0.01,"stale":false,"motionVersion":1}"#.utf8).write(to: file)
+        try Data(#"{"w":300,"h":650,"quality":0.01,"stale":false,"motionVersion":2}"#.utf8).write(to: file)
         let pointer = Pointer(device: FakeDevice(), calibrationFile: file)
         XCTAssertTrue(pointer.stale)
     }
 
     func testReducedSamplingStillCoversEachFreshValidationLocation() throws {
-        // A stable, nonlinear straight-report response. Build the candidate using
+        // A stable nonlinear response (not a simulation of random iOS motion). Build the candidate using
         // the real probe plan, then independently check the requested positions.
         func x(_ units: Double) -> Double { units / 300 + 0.03 * pow(units / 300, 2) }
         func y(_ units: Double) -> Double { units / 650 + 0.02 * pow(units / 650, 2) }

@@ -17,7 +17,7 @@ jobs:
         working-directory: ios
     steps:
       - uses: actions/checkout@v5
-      - name: Straight pointer motion policy
+      - name: Bezier motion and measured pointer map policy
         run: |
           python3 ../tools/pointer-motion-tests/prepare.py "$RUNNER_TEMP/pointer-motion"
           swift test --package-path "$RUNNER_TEMP/pointer-motion"

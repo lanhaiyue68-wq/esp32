@@ -1,7 +1,7 @@
 import Foundation
 
-/// Measured mouse units from home -> screen fraction. The origin is a real home,
-/// not the intercept extrapolated from interior calibration points.
+/// Measured mouse units from home -> screen fraction. Flat responses retain both
+/// ends of their measured unit range; the physical pointer centre can be inset at home.
 struct ProbeMap: Codable {
     struct Knot: Codable { var units: Double; var fraction: Double }
     var knots: [Knot]
@@ -24,8 +24,11 @@ struct ProbeMap: Codable {
                 pools[pools.count - 1] += last
             }
         }
-        knots = [Knot(units: 0, fraction: 0)] + pools.map {
-            Knot(units: $0.map(\.units).reduce(0, +) / Double($0.count), fraction: mean($0))
+        guard pools.count >= 2 else { return nil }  // a flat response has no measured gain
+        knots = [Knot(units: 0, fraction: 0)] + pools.flatMap { pool in
+            // A plateau is an interval, not one averaged unit value. Collapsing it
+            // creates false residuals and repeatedly selects a unit value inside it.
+            pool.map { Knot(units: $0.units, fraction: mean(pool)) }
         }
         guard knots.count >= 3 else { return nil }
         scatter = 0
@@ -33,46 +36,60 @@ struct ProbeMap: Codable {
     }
 
     func units(for fraction: Double) -> Int {
-        Int(interpolate(min(max(fraction, 0), 1), inverse: true).rounded())
+        let target = min(max(fraction, 0), 1)
+        guard target > 0 else { return 0 }
+        let measured = Array(knots.dropFirst())
+        let a: Knot, b: Knot
+        if target < measured[0].fraction {
+            // Below the first real landing, use the measured low-end gain rather
+            // than inventing a slope from the logical (0,0) corner to the pointer inset.
+            a = measured[0]
+            b = measured.first { $0.fraction > a.fraction }!
+        } else if let hi = measured.firstIndex(where: { $0.fraction >= target }) {
+            if hi == 0 { return Int(measured[0].units.rounded()) }
+            a = measured[hi - 1]
+            b = measured[hi]
+        } else {
+            b = measured.last!
+            a = measured.last { $0.fraction < b.fraction }!
+        }
+        let units = a.units + (target - a.fraction) * (b.units - a.units) / (b.fraction - a.fraction)
+        return Int(min(max(units, 0), 100_000).rounded())
     }
 
-    func landed(at units: Double) -> Double { interpolate(units, inverse: false) }
-
-    private func interpolate(_ t: Double, inverse: Bool) -> Double {
-        func x(_ k: Knot) -> Double { inverse ? k.fraction : k.units }
-        func y(_ k: Knot) -> Double { inverse ? k.units : k.fraction }
-        let hi = knots.indices.dropFirst().first { x(knots[$0]) >= t } ?? (knots.count - 1)
+    func landed(at units: Double) -> Double {
+        let hi = knots.indices.dropFirst().first { knots[$0].units >= units } ?? (knots.count - 1)
         let a = knots[hi - 1], b = knots[hi]
-        return y(a) + (t - x(a)) * (y(b) - y(a)) / (x(b) - x(a))
+        return a.fraction + (units - a.units) * (b.fraction - a.fraction) / (b.units - a.units)
     }
 }
 
-/// Use the same settled straight reports in calibration and runtime. v34's `move`
-/// otherwise defaults to random Bezier paths, even for single-axis commands.
+/// Keep the user's Bezier motion enabled in calibration and runtime. Build79
+/// incorrectly persisted curve=off; recover that state before measured positioning.
 @MainActor enum ProbeMotion {
-    static let version = 2
+    static let version = 3
 
     static func home(_ device: HIDDevice) async throws {
         try Task.checkCancellation()
-        try await confirmStraightMotion(device)
+        try await confirmBezierMotion(device)
         try await device.send("home")
         try await Task.sleep(nanoseconds: 150_000_000)
     }
 
-    private static func confirmStraightMotion(_ device: HIDDevice) async throws {
+    private static func confirmBezierMotion(_ device: HIDDevice) async throws {
         let mode: String
         do { mode = try await device.send("curve").trimmingCharacters(in: .whitespacesAndNewlines) }
         catch let error as DeviceError where error.message.lowercased().contains("unknown command") {
             // Firmware predating curve support always emits straight steps.
             return
         }
-        if mode == "off" { return }  // query only: do not rewrite board NVS on every gesture
-        guard mode == "on" else {
-            throw DeviceError(message: "无法确认开发板的直线移动模式，未执行定位。请检查连接后重试。")
+        if mode == "on" { return }  // query only: do not rewrite board NVS on every gesture
+        guard mode == "off" else {
+            throw DeviceError(message: "无法确认开发板的贝塞尔曲线模式，未执行定位。请检查连接后重试。")
         }
-        let changed = try await device.send("curve off").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard changed == "off" else {
-            throw DeviceError(message: "开发板未确认关闭随机曲线移动，未执行定位。请检查连接后重试。")
+        let changed = try await device.send("curve on").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard changed == "on" else {
+            throw DeviceError(message: "开发板未确认恢复贝塞尔曲线移动，未执行定位。请检查连接后重试。")
         }
     }
 

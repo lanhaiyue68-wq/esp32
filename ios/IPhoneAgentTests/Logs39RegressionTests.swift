@@ -114,10 +114,10 @@ import XCTest
         XCTAssertNil(ProbeMap([(100, 0.5)]))
     }
 
-    func testInterpolationUsesMeasuredNonlinearShapeAndHome() throws {
+    func testInterpolationUsesMeasuredNonlinearShapeAndLowEndGain() throws {
         let map = try XCTUnwrap(ProbeMap([(40, 0.09), (100, 0.24), (300, 0.8)]))
         XCTAssertEqual(map.units(for: 0), 0)
-        XCTAssertEqual(map.units(for: 0.045), 20)
+        XCTAssertEqual(map.units(for: 0.045), 22)
         XCTAssertEqual(map.units(for: 0.165), 70)
         XCTAssertEqual(map.landed(at: 40), 0.09, accuracy: 0.0001)
     }
@@ -131,7 +131,7 @@ import XCTest
     var clicks = 0
     func send(_ command: String) async throws -> String {
         let p = command.split(separator: " ")
-        if command == "curve" { return "off" }
+        if command == "curve" { return "on" }
         if p.first == "home" { at = .zero }
         if p.first == "click" { clicks += 1 }
         if p.first == "move" {

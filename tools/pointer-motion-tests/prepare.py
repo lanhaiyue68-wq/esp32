@@ -1,8 +1,8 @@
-"""Build a Foundation-only harness around the unchanged production motion enum.
+"""Build a Foundation-only harness around the production fit, map and motion code.
 
 The protocol/error shim stands in for the Bluetooth transport, which needs iOS.
-The actual command selection, ordering, waits and failure handling come verbatim
-from ProbeMap.swift; this is not a second implementation of the motion policy.
+The actual command selection, ordering, waits, interpolation and failure handling
+come verbatim from production; this is not a second implementation of the policy.
 """
 from pathlib import Path
 import shutil
