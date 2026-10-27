@@ -34,6 +34,42 @@ import XCTest
         XCTAssertEqual(agent.sent, ["hello"])
     }
 
+    func testANewBubbleKeepsSendProtectionEvenIfTheDraftRemainsVisible() async throws {
+        let screen = FakeScreen()
+        screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
+        let phone = Logs37Gestures()
+        phone.onType = { screen.frame = InputFieldVerificationTests.screen(input: $0, candidate: "我") }
+        phone.onTap = { _ in
+            let draft = InputFieldVerificationTests.screen(input: "hello", candidate: "我")
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            screen.frame = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { _ in
+                UIImage(data: draft)!.draw(in: CGRect(x: 0, y: 0, width: 720, height: 1560))
+                ("hello" as NSString).draw(at: CGPoint(x: 450, y: 550),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white])
+            }.jpegData(compressionQuality: 0.9)!
+        }
+        let actor = FakeModel { n in n == 1 ? "DO: type hello" : "DO: tap 908 543" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.endAfterSend = 5
+        _ = try await agent.step(); _ = try await agent.step(); _ = try await agent.step()
+        XCTAssertEqual(phone.aims.count, 1, "a new matching bubble must prevent a second send")
+        XCTAssertEqual(agent.sent, ["hello"])
+    }
+
+    func testUnreadablePostSendFrameDoesNotAuthorizeAnotherSend() async throws {
+        let screen = FakeScreen()
+        screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
+        let phone = Logs37Gestures()
+        phone.onType = { screen.frame = InputFieldVerificationTests.screen(input: $0, candidate: "我") }
+        phone.onTap = { _ in screen.frame = Data([0]) }
+        let actor = FakeModel { n in n == 1 ? "DO: type hello" : "DO: tap 908 543" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.endAfterSend = 5
+        _ = try await agent.step(); _ = try await agent.step(); _ = try await agent.step()
+        XCTAssertEqual(phone.aims.count, 1)
+        XCTAssertEqual(agent.sent, ["hello"])
+    }
+
     func testAnUnlocatablePointerCannotClickDuringAPrecisionTap() async throws {
         let phone = SimPhone(w: 281, h: 626)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -44,6 +80,20 @@ import XCTest
         do { try await pointer.tap(0.863, 0.887, aim: true); XCTFail("an unverified pointer must not click") }
         catch is DeviceError {}
         XCTAssertTrue(phone.clicks.isEmpty)
+    }
+
+    func testRealPixelAimVerifiesThePositionAfterTheProbeReturns() async throws {
+        let device = Logs37PixelDevice()
+        let screen = Logs37PixelScreen(phone: device.phone)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let pointer = Pointer(device: device, calibrationFile: file, screen: screen)
+        pointer.finishCalibration(x: 200.0 / 281, y: 200.0 / 626)
+        // Real pixel detection, no finder shortcut: a probe's inverse move can return to a different point.
+        try await pointer.tap(0.863, 0.887, aim: true)
+        let hit = try XCTUnwrap(device.phone.clicks.last)
+        XCTAssertEqual(hit.x, 0.863, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(hit.y, 0.887, accuracy: Pointer.aimTolerance)
     }
 
     func testAStillMisalignedPointerCannotClickAfterItsCorrectionBudget() async throws {
@@ -69,6 +119,39 @@ import XCTest
         do { try await pointer.tap(0.863, 0.887, aim: true); XCTFail("losing the pointer leaves the tap unverified") }
         catch is DeviceError {}
         XCTAssertTrue(phone.clicks.isEmpty)
+    }
+}
+
+@MainActor private final class Logs37PixelDevice: HIDDevice {
+    let phone = SimPhone(w: 281, h: 626)
+    var links: Int { phone.links }
+    var connected: Bool { phone.connected }
+    private var shifted = false
+    func send(_ command: String) async throws -> String {
+        let result = try await phone.send(command)
+        if command == "move -12 0", !shifted {
+            shifted = true
+            phone.at.x += 0.02
+        }
+        return result
+    }
+    func waitConnected(_ timeout: TimeInterval) async -> Bool { true }
+}
+
+@MainActor private final class Logs37PixelScreen: ScreenSource {
+    let phone: SimPhone
+    init(phone: SimPhone) { self.phone = phone }
+    var live = true
+    var updated: Double { now() }
+    var capturedAt: Double { now() }
+    var aspect = 592.0 / 1280
+    var frame: Data? {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 592, height: 1280), format: format).image { ctx in
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 592, height: 1280))
+            UIColor.gray.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: phone.at.x * 592 - 18, y: phone.at.y * 1280 - 18, width: 36, height: 36))
+        }.jpegData(compressionQuality: 0.95)
     }
 }
 
