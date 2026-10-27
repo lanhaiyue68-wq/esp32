@@ -154,6 +154,7 @@ import Foundation
         provisional = true
         let mx = ProbeMap(samples.map { ($0.ux, $0.fx) }), my = ProbeMap(samples.map { ($0.uy, $0.fy) })
         guard let mx, let my, x.a.isFinite, y.a.isFinite, x.a > 0, y.a > 0 else { discardProbe(); return false }
+        guard (1...100_000).contains(1 / x.a), (1...100_000).contains(1 / y.a) else { discardProbe(); return false }
         maps = ["x": mx, "y": my]
         let s = Span(w: Int((1 / x.a).rounded()), h: Int((1 / y.a).rounded()))
         span = s

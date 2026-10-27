@@ -93,6 +93,26 @@ import XCTest
         XCTAssertFalse(phone.calls.contains("tap"))
         XCTAssertEqual(phone.calls.count, 1)
     }
+
+    func testOldDiagonalCalibrationRequiresRemeasurement() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try Data(#"{"w":290,"h":659,"quality":0.012,"stale":false}"#.utf8).write(to: file)
+        let pointer = Pointer(device: FakeDevice(), calibrationFile: file)
+        XCTAssertTrue(pointer.stale, "a good centre tap from build77 cannot validate the new motion path")
+    }
+
+    func testInvalidAndClippedMeasurementsCannotMakeACurve() {
+        XCTAssertNil(ProbeMap([(Double.nan, 0.5), (Double.infinity, 0.4), (350, 0.998)]))
+        XCTAssertNil(ProbeMap([(100, 0.5)]))
+    }
+
+    func testInterpolationUsesMeasuredNonlinearShapeAndHome() throws {
+        let map = try XCTUnwrap(ProbeMap([(40, 0.09), (100, 0.24), (300, 0.8)]))
+        XCTAssertEqual(map.units(for: 0), 0)
+        XCTAssertEqual(map.units(for: 0.045), 20)
+        XCTAssertEqual(map.units(for: 0.165), 70)
+        XCTAssertEqual(map.landed(at: 40), 0.09, accuracy: 0.0001)
+    }
 }
 
 /// A counterexample to independent linear diagonal movement, not a claim to emulate iOS acceleration exactly.

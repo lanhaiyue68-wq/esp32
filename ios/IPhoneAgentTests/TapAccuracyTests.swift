@@ -148,7 +148,9 @@ import UIKit
         pointer.applyProbe(x: .init(a: 0.00341, b: 0.038, rms: 0.005), y: .init(a: 0.00157, b: 0.021, rms: 0.01), samples: samples)
         let aimed = pointer.fix(0.5, "x")
         let units = (aimed * Double(pointer.span!.w)).rounded()
-        XCTAssertEqual(0.00341 * units + 0.038, 0.5, accuracy: 0.008, "logs27 landed 0.540 for 0.5")
+        let measuredLanding = 0.273 + (units - 69) / (138 - 69) * (0.517 - 0.273)
+        XCTAssertEqual(measuredLanding, 0.5, accuracy: 0.008, "use the actual neighbouring landings, not the obsolete global line")
+        XCTAssertLessThan(pointer.fix(0.99, "x") * Double(pointer.span!.w), 300, "a clipped 350-unit sample must not become a mapping knot")
     }
 }
 

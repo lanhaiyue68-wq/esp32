@@ -3,8 +3,8 @@ import UIKit
 
 /// Calibrates the pointer like a 3D printer's auto bed levelling, on the calibration board: a white
 /// full-screen grid (CalibrationBoard) over the app. The board homes the pointer, clicks at known mouse
-/// distances and the app catches the taps (TouchProbe), then fits mouse units → screen per axis. When no tap
-/// arrives it falls back to finding the pointer in the mirrored video (pixel diff, then the vision model).
+/// distances and catches the taps (TouchProbe), then validates a measured per-axis mapping.
+/// Missing or inconsistent clicks leave calibration unsuccessful; video guesses cannot bypass the checks.
 /// If both fail the board offers Try Again and "Tap the pointer yourself" (manual needs the grid behind it).
 /// It never starts by itself: when calibration is needed and the mouse and mirroring are up, the Agent page
 /// shows a Calibrate button; a run calibrates first if needed; Settings › Calibration starts it too.

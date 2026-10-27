@@ -8,7 +8,7 @@ struct ProbeMap: Codable {
     var scatter: Double
 
     init?(_ samples: [(Double, Double)]) {
-        let valid = samples.filter { $0.0.isFinite && $0.0 > 0 && $0.1.isFinite && ProbeFit.usable($0.1) }
+        let valid = samples.filter { $0.0.isFinite && $0.0 > 0 && $0.0 <= 100_000 && $0.1.isFinite && ProbeFit.usable($0.1) }
         let groups = Dictionary(grouping: valid, by: { Int($0.0.rounded()) })
         guard groups.count >= 2 else { return nil }
         let points = groups.keys.sorted().map { u in
