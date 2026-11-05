@@ -264,7 +264,8 @@ import Foundation
     "done" is not proof. Do not invent screens or buttons that are not in the steps. Lessons are about the apps \
     and screens on the phone, never about this agent's own mechanics ("stale plan", replanning, step limits, \
     timeouts): those are not the user's apps and a lesson about them misleads. If there was no deviation, \
-    you may keep one lesson about the route through the apps that worked. Write in the language of the task, at \
+    you may keep one lesson about the route through the apps that worked. Name controls by what they show, never by \
+    screen coordinates: the spot moves between visits. Write in the language of the task, at \
     most 3 lessons, one line each, starting with "LESSON:"; reply NONE if nothing reliable can be learned.
     """
 
@@ -294,9 +295,17 @@ import Foundation
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard line.uppercased().hasPrefix("LESSON:") else { return nil }
             let text = line.dropFirst(7).trimmingCharacters(in: .whitespaces)
-            return text.isEmpty ? nil : text
+            // "do not tap 蓝海乐 at (265,147)": a remembered spot is wrong once the list moves (logs43).
+            let spot = text.range(of: #"\d{2,4}\s*[,，]\s*\d{2,4}"#, options: .regularExpression) != nil
+            return text.isEmpty || spot ? nil : text
         }
         return Array(lessons.prefix(3))
+    }
+
+    /// Forget every self-learned lesson; the user's own corrections and hints stay.
+    func dropSelfLearned() {
+        lessons.removeAll { $0.auto == true }
+        save()
     }
 
     /// After a run: keep what the model learned from its own steps (replacing an earlier review of the same run).
@@ -329,9 +338,12 @@ import Foundation
         let words = Self.tokens(task)
         let scored = pool.compactMap { l -> (Lesson, Int)? in
             if l.general { return (l, 1000) }
-            let shared = words.intersection(Self.tokens(l.task)).count
-            let need = Swift.max(2, Swift.min(words.count, Self.tokens(l.task).count) / 3)
-            return shared >= need ? (l, shared) : nil
+            let theirs = Self.tokens(l.task), shared = words.intersection(theirs).count
+            let need = Swift.max(2, Swift.min(words.count, theirs.count) / 3)
+            // A short task sharing "打开"/"完成" with the long watch prompt is not similar (logs43: a lesson about
+            // "中间三个按钮" reached every WeChat check): the overlap must also be a fair part of both tasks.
+            let overlap = Double(shared) / Double(Swift.max(1, words.union(theirs).count))
+            return shared >= need && overlap >= 0.2 ? (l, shared) : nil
         }
         var seen = Set<String>(), out: [Lesson] = []
         for (l, _) in scored.sorted(by: { $0.1 != $1.1 ? $0.1 > $1.1 : Self.fresher($0.0, $1.0) })

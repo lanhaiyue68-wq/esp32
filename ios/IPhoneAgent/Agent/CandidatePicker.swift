@@ -46,6 +46,21 @@ enum CandidatePicker {
 
     /// True when the on-screen keyboard is up: its key labels in the lower part of the screen. Back from Lan Agent the
     /// box often still has the keyboard, and a tap where the box sits without it hit the space bar (logs(17)).
+    /// The text label a tap at `point` (0-1) was meant for, for a learned route: a piece under the point, else the
+    /// nearest one around it (an app's name sits under its icon). Short names are preferred over message previews and
+    /// times, which change from one visit to the next.
+    static func label(_ jpeg: Data, _ point: CGPoint) -> (text: String, centre: CGPoint)? {
+        func cost(_ p: Piece) -> Double {
+            let inside = p.box.insetBy(dx: -0.01, dy: -0.01).contains(point) ? 0 : hypot(p.box.midX - point.x, p.box.midY - point.y)
+            return inside + (p.text.count > 8 ? 0.05 : 0) + (p.text.contains(where: \.isNumber) ? 0.05 : 0)
+        }
+        let near = rows(in: jpeg, top: 0, bottom: 1).flatMap { $0 }.filter { p in
+            !p.text.trimmingCharacters(in: .whitespaces).isEmpty && p.text.count <= 20
+                && abs(p.box.midX - point.x) <= 0.1 && abs(p.box.midY - point.y) <= 0.08
+        }
+        return near.min { cost($0) < cost($1) }.map { ($0.text, CGPoint(x: $0.box.midX, y: $0.box.midY)) }
+    }
+
     static func keyboardUp(in jpeg: Data) -> Bool {
         Vision.letterKeyboard(jpeg) || keyboardUp(rows: rows(in: jpeg, top: 0.6, bottom: 1))
     }

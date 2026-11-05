@@ -55,6 +55,8 @@ extension Pointer: Gestures {}
     var experience: ExperienceStore?
     /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
     var lessons: LessonBook?
+    var routes: RouteBook?
+    private var replayedRoute: String?  // the learned route this run started with
     private var learnedThrough = -1
     private var lessonRun = UUID().uuidString
     /// Plans dropped in a row because the screen moved while the model answered. A plan goes ahead when the
@@ -508,7 +510,11 @@ extension Pointer: Gestures {}
             trace?.write(kind: "lessons", ["lessons": .arr(applied.map { .str($0.text) }), "rules_md": .bool(!Prompts.userRules.isEmpty)])
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
+        replayedRoute = nil
         do {
+            do { try await replay() }
+            catch let e where e is CancellationError || Task.isCancelled { throw e }
+            catch { DebugLog.write("route: replay stopped by \(error.localizedDescription); the model takes over") }
             if !presetPlan.isEmpty || directStart {
                 plan = presetPlan.isEmpty ? """
                 Work from the CURRENT screen and the original Goal; keep completed work.
@@ -612,6 +618,56 @@ extension Pointer: Gestures {}
 
     private func finish() {
         if let metrics { trace?.writeMetrics(metrics.snapshot()) }
+        if let routes, steps.last?["action"]?.str == "done" {
+            let run = (task: self.task, steps: self.steps, shots: self.shots, aspect: screen?.aspect ?? 0, used: replayedRoute)
+            Task { await routes.learn(task: run.task, steps: run.steps, shots: run.shots, aspect: run.aspect, replayed: run.used) }
+        }
+    }
+
+    /// Walk a learned route (RouteBook) without the model while each screen is the one it was learned on, tapping
+    /// each step's label where it is now. The first screen that differs, a missing label or a step that changes
+    /// nothing hands the run to the model from there; the replayed steps are in its recent actions.
+    func replay() async throws {
+        guard let routes, phone != nil, let first = screen?.frame, let scene = Vision.experienceScene(first),
+              let route = routes.match(task: task, scene: scene, aspect: screen?.aspect ?? 0) else { return }
+        replayedRoute = route.id
+        var walked = 0, stop = ""
+        walk: for step in route.steps {
+            try Task.checkCancellation()
+            try await gate?()
+            guard let shown = screen?.frame, let now = Vision.experienceScene(shown),
+                  RouteBook.sceneDistance(now, step.scene) <= 1 else { stop = "the screen differs"; break }
+            var act: JObject = ["action": .str(step.action), "source": .str("route")]
+            switch step.action {
+            case "tap":
+                var x = Double(step.values[0]), y = Double(step.values[1])
+                if let anchor = step.anchor {
+                    let was = CGPoint(x: (x - Double(step.offsetX ?? 0)) / 1000, y: (y - Double(step.offsetY ?? 0)) / 1000)
+                    guard let spot = RouteBook.find(anchor, near: was, in: shown) else { stop = "“\(anchor)” is not on screen"; break walk }
+                    x = min(1000, max(0, spot.x * 1000 + Double(step.offsetX ?? 0)))
+                    y = min(1000, max(0, spot.y * 1000 + Double(step.offsetY ?? 0)))
+                }
+                act["x"] = .num(x.rounded())
+                act["y"] = .num(y.rounded())
+            case "swipe":
+                for (k, v) in zip(["x1", "y1", "x2", "y2"], step.values) { act[k] = .num(Double(v)) }
+            default: break
+            }
+            onDoing?(.acting(act))
+            let started = now()
+            try await perform(act)
+            lastActed = now()
+            act["act_s"] = .num(((lastActed - started) * 100).rounded() / 100)
+            record(shown, act)
+            _ = try await settle()
+            let changed = Vision.changed(shown, screen?.frame, ignore: pointerPath(act))
+            steps[steps.count - 1]["changed"] = .bool(changed)
+            guard changed else { stop = "a step changed nothing"; break }
+            walked += 1
+        }
+        if walked < route.steps.count { routes.missed(route.id) }
+        DebugLog.write("route: replayed \(walked)/\(route.steps.count) learned steps without the model"
+                       + (stop.isEmpty ? "" : "; stopped: \(stop)"))
     }
 
     /// One see-think-act round (one or more actions). Returns true when the task is over.

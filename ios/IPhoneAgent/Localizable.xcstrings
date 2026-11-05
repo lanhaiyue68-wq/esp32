@@ -45,6 +45,17 @@
         }
       }
     },
+    "Learned routes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学会的操作路径"
+          }
+        }
+      }
+    },
     "Measured feedback" : {
       "extractionState" : "manual",
       "localizations" : {

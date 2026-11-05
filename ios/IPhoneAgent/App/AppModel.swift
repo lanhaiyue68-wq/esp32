@@ -127,7 +127,16 @@ import UIKit
             agent.experience = memory
             let lessons = LessonBook(file: support.appendingPathComponent("lessons-v1.json"))
             lessons.enabled = memory.enabled  // one switch: Settings › Privacy › Learn from operation feedback
+            // Self-learned lessons up to build84 matched unrelated tasks and piled up "don't" rules with coordinates
+            // (logs43–46); drop them once. The user's own corrections stay.
+            if !UserDefaults.standard.bool(forKey: "selfLessonsReset85") {
+                lessons.dropSelfLearned()
+                UserDefaults.standard.set(true, forKey: "selfLessonsReset85")
+            }
             agent.lessons = lessons
+            let routes = RouteBook(file: support.appendingPathComponent("routes-v1.json"))
+            routes.enabled = memory.enabled
+            agent.routes = routes
         }
         agent.metrics = metrics
         feed.device = board.commands
