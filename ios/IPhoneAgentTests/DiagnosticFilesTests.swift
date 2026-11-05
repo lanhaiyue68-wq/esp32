@@ -23,15 +23,20 @@ final class DiagnosticFilesTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: folder.path)
         return folder
     }
+    /// A run's folder name is its start time and the age limit reads it: names fixed in October expired in November.
+    private func recent(_ hoursAgo: Int) -> String {
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date().addingTimeInterval(-Double(hoursAgo) * 3600))
+    }
     func testOldestCompletedRunsAreRemovedAtCountLimit() throws {
         storage.policy.maxRuns = 2
-        let old = try run("20261020-000000"); _ = try run("20261021-000000"); _ = try run("20261022-000000")
+        let old = try run(recent(3)); _ = try run(recent(2)); _ = try run(recent(1))
         let usage = try storage.maintain()
         XCTAssertEqual(usage.runs, 2); XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
     }
     func testByteBudgetRemovesOldestUntilItFits() throws {
         storage.policy.maxBytes = 25
-        _ = try run("20261020-000000", bytes: 20); _ = try run("20261021-000000", bytes: 20)
+        _ = try run(recent(2), bytes: 20); _ = try run(recent(1), bytes: 20)
         XCTAssertLessThanOrEqual(try storage.maintain().bytes, 25)
         XCTAssertEqual(storage.usage().runs, 1)
     }

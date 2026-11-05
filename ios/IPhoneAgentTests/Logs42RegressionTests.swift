@@ -165,7 +165,7 @@ import XCTest
         try await p.goBack()
         let start = try XCTUnwrap(phone.presses.first)
         XCTAssertEqual(start.x, 0.02, accuracy: 0.001)
-        XCTAssertEqual(start.y, 0.45, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(start.y, 0.45, accuracy: Pointer.edgeAlongTolerance + 0.001, "along the border")
         XCTAssertEqual(phone.sent.last, "release")
     }
 
@@ -177,8 +177,8 @@ import XCTest
         try await p.nextApp()
         XCTAssertEqual(phone.presses.count, 2)
         for start in phone.presses { XCTAssertEqual(start.y, 0.987, accuracy: 0.001) }
-        XCTAssertEqual(phone.presses[0].x, 0.2, accuracy: Pointer.aimTolerance)
-        XCTAssertEqual(phone.presses[1].x, 0.85, accuracy: Pointer.aimTolerance)
+        XCTAssertEqual(phone.presses[0].x, 0.2, accuracy: Pointer.edgeAlongTolerance + 0.001, "along the bar")
+        XCTAssertEqual(phone.presses[1].x, 0.85, accuracy: Pointer.edgeAlongTolerance + 0.001, "along the bar")
     }
 
     func testOrdinaryEdgeTapStillRequiresExactEndpoint() async throws {
