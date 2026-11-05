@@ -274,9 +274,12 @@ enum WatchSettings {
         return "这次任务未能确认完成，请先查看目标应用里的结果。"
     }
 
-    /// A task with more than one thing to do in order (再/然后…): no early end after its first send.
+    /// A task with more than one thing to do in order (再/然后…): no early end after its first send. Bringing
+    /// something back is such a part: logs46 "去 claude 说一句你好，并把 claude 回复的内容发给我" was held after "你好"
+    /// to verifying that send and failed with Claude's reply on screen.
     static func severalParts(_ task: String) -> Bool {
-        ["再", "然后", "接着", "之后", "并且", "同时", "顺便", "另外"].contains { task.contains($0) }
+        ["再", "然后", "接着", "之后", "并且", "同时", "顺便", "另外", "并把", "并将",
+         "发给我", "发我", "告诉我", "回复我", "回给我", "转给我", "给我看", "截图"].contains { task.contains($0) }
     }
 
     /// A reply the board can type: what a pinyin keyboard has keys for. "～" or an emoji made every type fail
@@ -433,6 +436,7 @@ enum WatchSettings {
             微信里的做法（电脑上实测过）：群主是群聊右上角“…”打开的聊天信息里成员头像的第一个，名字被截断就点开他的头像看全名；            微信不在成员旁标“群主”二字。要@某人：在群的输入框输入“@”，弹出“选择提醒的人”后点顶部搜索，输入他名字的拼音（例如 xiabidao）            再按回车，点和全名完全一样的那一项（常有相似的名字），输入框里出现“@全名”后再输入其余内容。            要发的话必须一字不差（包括“吗”、标点）；发送前看清输入框里的内容和会话标题，都对了才发，只发一次。            主人只说“发个消息”却没写内容时，不要把这句指令原文当内容发出去，发一句“你好”，并在答案里写明发了什么。
             做到后直接完成，答案只写一行 JSON {"send":"实际做了什么或查到了什么，简短中文"}。
             不要自行回微信回报，程序会返回原会话发送结果。没有亲眼确认就不要说已完成，做不到就失败并写明原因。
+            主人要你把对方或 App 的回复、查到的结果发给他时：在那个 App 里等它完整出现，读清楚后直接完成，把内容原文写进答案 {"send":"…"}，程序会把答案发回微信；不要切回微信，也不要在别的 App 的输入框里输入或粘贴它。
             """
         }
         return """

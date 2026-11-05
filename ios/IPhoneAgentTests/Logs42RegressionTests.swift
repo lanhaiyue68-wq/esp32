@@ -111,6 +111,25 @@ import XCTest
         XCTAssertEqual(hit.y, 0.50, accuracy: Pointer.aimTolerance)
     }
 
+    // logs46: the pointer stayed at x 0.210 for the home-bar spot 0.200, the app switch was withheld and the
+    // paste hop lost its way. Along the bar a swipe may start a little off; across it stays exact.
+    func testAppSwitchStartsWithinItsAlongTheBarTolerance() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        p.finder = { _, _ in CGPoint(x: 0.210, y: 0.994) }
+        try await p.previousApp()
+        XCTAssertEqual(phone.presses.count, 1)
+    }
+
+    func testAppSwitchFarAlongTheBarIsStillWithheld() async throws {
+        let phone = Logs42Phone(), (p, file) = try candidate(phone)
+        defer { try? FileManager.default.removeItem(at: file) }
+        p.finder = { _, _ in CGPoint(x: 0.240, y: 0.994) }
+        do { try await p.previousApp(); XCTFail("4% along the bar is off target") }
+        catch is DeviceError { }
+        XCTAssertTrue(phone.presses.isEmpty)
+    }
+
     func testPrecisionTapStillNeverClicksUnseenWithFeedbackCalibration() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }

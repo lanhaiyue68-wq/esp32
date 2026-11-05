@@ -17,6 +17,7 @@ import Foundation
     static let aimPasses = 3                // closed loop: look, correct, look again, at most this many corrections
     static let edge = 0.05                  // screen fraction; a pointer this close to the border, past its target, was stopped by it
     private static let gestureEdgeInset = 0.025 // visible pointer centre can remain inside the border during a system edge gesture
+    static let edgeAlongTolerance = 0.03    // screen fraction; how far along the border a system swipe may start from its spot
 
     struct Span: Codable, Equatable { var w: Int, h: Int }
     private struct Saved: Codable {
@@ -261,6 +262,13 @@ import Foundation
                 || (0.99...1).contains(target) && (1 - Self.gestureEdgeInset...1).contains(found)) { return 0 }
             return target - found
         }
+        // A system swipe can start anywhere near its spot along the border: 1% along the home bar is no miss
+        // (logs46: the pointer at 0.210 for 0.200 withheld the app switch and the paste hop lost its way).
+        let tolerance = (x: edgeStart && (y <= 0.01 || y >= 0.99) ? Self.edgeAlongTolerance : Self.aimTolerance,
+                         y: edgeStart && (x <= 0.01 || x >= 0.99) ? Self.edgeAlongTolerance : Self.aimTolerance)
+        func onTarget(_ p: CGPoint) -> Bool {
+            abs(error(Double(p.x), x)) <= tolerance.x && abs(error(Double(p.y), y)) <= tolerance.y
+        }
         let miss = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
         if !edgeStart && maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
             remember("x", (fix(x, "x"), Double(found.x)))
@@ -271,7 +279,7 @@ import Foundation
         var gain = (w: Double(span.w), h: Double(span.h))
         for _ in 0..<Self.aimPasses {
             let fx = Double(found.x), fy = Double(found.y)
-            if abs(error(fx, x)) <= Self.aimTolerance && abs(error(fy, y)) <= Self.aimTolerance { break }
+            if onTarget(found) { break }
             if pinned(found, x, y) {
                 if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
@@ -292,8 +300,7 @@ import Foundation
             found = p
         }
         if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
-        let remaining = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
-        guard remaining <= Self.aimTolerance else {
+        guard onTarget(found) else {
             pos = nil
             log(String(format: "aim (%.3f, %.3f): still at (%.3f, %.3f); click withheld", x, y, found.x, found.y))
             throw DeviceError(message: "Pointer is still off target after correction; no click was sent. Keep the current draft and inspect another route.")

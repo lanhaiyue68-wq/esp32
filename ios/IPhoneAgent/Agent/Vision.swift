@@ -63,6 +63,60 @@ enum Vision {
         return Gray(w: w, h: h, px: px)
     }
 
+    /// A letter keyboard by its layout, light or dark: a row of ten even keys with a row of nine one key pitch below.
+    /// Text recognition did not read the dark keyboard's single letters at night (logs46), so typing was refused
+    /// with the keyboard up. Keys are brighter than the tray in both appearances.
+    static func letterKeyboard(_ jpeg: Data) -> Bool {
+        guard let img = image(jpeg), img.width > 0, img.height > img.width else { return false }
+        let w = 296, h = Int((Double(w) * Double(img.height) / Double(img.width)).rounded())
+        let g = gray(img, w, h)
+        var tens: [Int] = [], nines: [Int] = []
+        for y in Int(0.5 * Double(h))..<Int(0.97 * Double(h)) {
+            let keys = brightRuns(g.px[(y * w)..<((y + 1) * w)], w)
+            if evenKeys(keys, w, 10) { tens.append(y) }
+            if evenKeys(keys, w, 9) { nines.append(y) }
+        }
+        // A key row is a band of matching scan lines, not a stray one.
+        func bands(_ ys: [Int]) -> [Double] {
+            var out: [(Int, Int)] = []
+            for y in ys {
+                if let last = out.last, y - last.1 <= 2 { out[out.count - 1].1 = y } else { out.append((y, y)) }
+            }
+            return out.filter { Double($0.1 - $0.0 + 1) >= 0.008 * Double(h) }.map { Double($0.0 + $0.1) / 2 }
+        }
+        let nineRows = bands(nines)
+        return bands(tens).contains { top in nineRows.contains { (0.04...0.11).contains(($0 - top) / Double(h)) } }
+    }
+
+    /// The runs brighter than the middle of the line's 10th and 90th percentiles; none when the line is flat.
+    private static func brightRuns(_ line: ArraySlice<UInt8>, _ w: Int) -> [(Int, Int)] {
+        let sorted = line.sorted()
+        let lo = Int(sorted[w / 10]), hi = Int(sorted[w * 9 / 10])
+        guard hi - lo >= 15 else { return [] }
+        let middle = (lo + hi) / 2
+        var runs: [(Int, Int)] = [], start: Int?
+        for (x, v) in line.enumerated() {
+            if Int(v) > middle { if start == nil { start = x } } else if let s = start { runs.append((s, x)); start = nil }
+        }
+        if let s = start { runs.append((s, w)) }
+        return runs
+    }
+
+    /// Exactly n key-sized runs of even width and pitch across most of the line, and nothing wider.
+    private static func evenKeys(_ runs: [(Int, Int)], _ w: Int, _ n: Int) -> Bool {
+        let small = 0.05 * Double(w), large = 0.12 * Double(w)
+        guard !runs.contains(where: { Double($0.1 - $0.0) > large }) else { return false }
+        let keys = runs.filter { Double($0.1 - $0.0) >= small }
+        guard keys.count == n else { return false }
+        func spread(_ v: [Double]) -> Double {
+            let mean = v.reduce(0, +) / Double(v.count)
+            return sqrt(v.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(v.count)) / mean
+        }
+        let widths = keys.map { Double($0.1 - $0.0) }, centres = keys.map { Double($0.0 + $0.1) / 2 }
+        let pitch = zip(centres.dropFirst(), centres).map { $0 - $1 }
+        return spread(widths) < 0.15 && spread(pitch) < 0.12 && centres.last! - centres.first! > 0.6 * Double(w)
+    }
+
     /// True when the screen content changed, including small things such as a checkmark.
     ///
     /// `ignore` lists screen points (fractions) where the pointer was or went: those spots are masked, so pointer

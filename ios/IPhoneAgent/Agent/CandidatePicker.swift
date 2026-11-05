@@ -46,7 +46,9 @@ enum CandidatePicker {
 
     /// True when the on-screen keyboard is up: its key labels in the lower part of the screen. Back from Lan Agent the
     /// box often still has the keyboard, and a tap where the box sits without it hit the space bar (logs(17)).
-    static func keyboardUp(in jpeg: Data) -> Bool { keyboardUp(rows: rows(in: jpeg, top: 0.6, bottom: 1)) }
+    static func keyboardUp(in jpeg: Data) -> Bool {
+        Vision.letterKeyboard(jpeg) || keyboardUp(rows: rows(in: jpeg, top: 0.6, bottom: 1))
+    }
 
     static func keyboardUp(rows: [[Piece]]) -> Bool {
         if rows.flatMap({ $0 }).filter({ keyboardWords.contains($0.text) }).count >= 2 { return true }

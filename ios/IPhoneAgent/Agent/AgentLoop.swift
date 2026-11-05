@@ -382,7 +382,9 @@ extension Pointer: Gestures {}
     static let sendVerificationReason = "This run already issued the send command for the requested message. "
         + "Do not send it again, type anything, or navigate away. Inspect the CURRENT requested chat and confirm that "
         + "the newly sent message matches the original Goal; an older matching bubble is not confirmation. "
-        + "Only wait, done after verification, or fail if the result cannot be verified."
+        + "Only wait, done after verification, or fail if the result cannot be verified. If the Goal also asks for "
+        + "something to be brought back (a reply, a result), read it on screen and put it in the done answer: the "
+        + "program delivers the answer, so never go back to WeChat yourself."
 
     /// The text as typed, for telling a repeat: quotes and spaces the model adds around it do not count.
     /// A run's outcome from what it sent, in the {"send": …} form WatchReport.sendAnswer reads.
