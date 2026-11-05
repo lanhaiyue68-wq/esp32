@@ -57,11 +57,14 @@ enum CandidatePicker {
             let changing: Double = p.text.contains(where: \.isNumber) ? 0.05 : 0
             return distance + long + changing
         }
-        let near = rows(in: jpeg, top: 0, bottom: 1).flatMap { $0 }.filter { p in
-            !p.text.trimmingCharacters(in: .whitespaces).isEmpty && p.text.count <= 20
-                && abs(p.box.midX - point.x) <= 0.1 && abs(p.box.midY - point.y) <= 0.08
+        func around(_ p: Piece) -> Bool {
+            let named = !p.text.trimmingCharacters(in: .whitespaces).isEmpty && p.text.count <= 20
+            let dx: Double = abs(Double(p.box.midX - point.x)), dy: Double = abs(Double(p.box.midY - point.y))
+            return named && dx <= 0.1 && dy <= 0.08
         }
-        return near.min { cost($0) < cost($1) }.map { ($0.text, CGPoint(x: $0.box.midX, y: $0.box.midY)) }
+        let pieces: [Piece] = rows(in: jpeg, top: 0, bottom: 1).flatMap { $0 }
+        guard let best = pieces.filter(around).min(by: { cost($0) < cost($1) }) else { return nil }
+        return (best.text, CGPoint(x: best.box.midX, y: best.box.midY))
     }
 
     static func keyboardUp(in jpeg: Data) -> Bool {
