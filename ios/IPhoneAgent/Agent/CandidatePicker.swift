@@ -51,8 +51,11 @@ enum CandidatePicker {
     /// times, which change from one visit to the next.
     static func label(_ jpeg: Data, _ point: CGPoint) -> (text: String, centre: CGPoint)? {
         func cost(_ p: Piece) -> Double {
-            let inside = p.box.insetBy(dx: -0.01, dy: -0.01).contains(point) ? 0 : hypot(p.box.midX - point.x, p.box.midY - point.y)
-            return inside + (p.text.count > 8 ? 0.05 : 0) + (p.text.contains(where: \.isNumber) ? 0.05 : 0)
+            let under = p.box.insetBy(dx: -0.01, dy: -0.01).contains(point)
+            let distance: Double = under ? 0 : Double(hypot(p.box.midX - point.x, p.box.midY - point.y))
+            let long: Double = p.text.count > 8 ? 0.05 : 0
+            let changing: Double = p.text.contains(where: \.isNumber) ? 0.05 : 0
+            return distance + long + changing
         }
         let near = rows(in: jpeg, top: 0, bottom: 1).flatMap { $0 }.filter { p in
             !p.text.trimmingCharacters(in: .whitespaces).isEmpty && p.text.count <= 20

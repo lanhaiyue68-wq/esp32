@@ -635,8 +635,8 @@ extension Pointer: Gestures {}
         walk: for step in route.steps {
             try Task.checkCancellation()
             try await gate?()
-            guard let shown = screen?.frame, let now = Vision.experienceScene(shown),
-                  RouteBook.sceneDistance(now, step.scene) <= 1 else { stop = "the screen differs"; break }
+            guard let shown = screen?.frame, let here = Vision.experienceScene(shown),
+                  RouteBook.sceneDistance(here, step.scene) <= 1 else { stop = "the screen differs"; break }
             var act: JObject = ["action": .str(step.action), "source": .str("route")]
             switch step.action {
             case "tap":
