@@ -178,6 +178,11 @@ enum WatchSettings {
         }.joined(separator: #"\s*"#)
     }
 
+    /// The reply before an owner's phone task. Short enough to type as pinyin (Pasteboard.prefersExact: over 6 Chinese
+    /// characters are pasted): "收到，我去处理。" always went through the paste hop, 25–40 s and twice a 65 s failure
+    /// (logs 11-06); "收到" is typed in place in a few seconds, like "你好".
+    static let taskAcknowledgement = "收到"
+
     /// An acknowledgement is a courtesy, not permission to execute an independently authenticated request.
     static func canStartTask(replySent: Bool, sources: [ReadMessage], rules: Rules) -> Bool {
         replySent || phoneRequest(sources, rules) != nil
@@ -1122,7 +1127,7 @@ extension AppModel {
                 DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
                 let decided: (reply: String, task: String)
                 if let request {
-                    decided = ("收到，我去处理。", request)
+                    decided = (WatchSettings.taskAcknowledgement, request)
                 } else if original != nil {
                     decided = (WatchSettings.missingRetryTaskReply, "")
                 } else if let answer = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
@@ -1140,7 +1145,7 @@ extension AppModel {
                     phoneMessages = sources
                     task = request
                     watchLastTask[chat] = request
-                    if reply == nil { reply = "收到，我去处理。" }
+                    if reply == nil { reply = WatchSettings.taskAcknowledgement }
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
                 reply = await compose(WatchSettings.interjectPrompt(chat: chat, recent: screen.lines, r: rules)).flatMap(WatchSettings.typeable)

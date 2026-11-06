@@ -121,7 +121,10 @@ enum Vision {
     ///
     /// `ignore` lists screen points (fractions) where the pointer was or went: those spots are masked, so pointer
     /// moves never count. The status bar (clock) is ignored too.
-    static func changed(_ before: Data?, _ after: Data?, ignore: [CGPoint] = [], threshold: Double = 1.0) -> Bool {
+    /// caret: a change that is only one thin upright stroke (a blinking text cursor) is no change. Off for the result of
+    /// an action: a tap that only placed the cursor did something.
+    static func changed(_ before: Data?, _ after: Data?, ignore: [CGPoint] = [], threshold: Double = 1.0,
+                        caret: Bool = false) -> Bool {
         guard let before, let after, let a = image(before), let b = image(after) else { return true }
         if a.width != b.width || a.height != b.height { return true }
         let sa = gray(a, 32, 64), sb = gray(b, 32, 64)
@@ -131,13 +134,17 @@ enum Vision {
         let fa = gray(a, w, h), fb = gray(b, w, h)
         let masks = ignore.map { (Double($0.x) * Double(w), Double($0.y) * Double(h)) }
         let r2 = pow(0.05 * Double(w), 2)
-        var hits = 0
+        var hits = 0, minX = w, maxX = -1, minY = h, maxY = -1
         for i in 0..<(w * h) where abs(Int(fa.px[i]) - Int(fb.px[i])) > 25 {
             let x = Double(i % w), y = Double(i / w)
             if y > topMask * Double(h) && masks.allSatisfy({ pow(x - $0.0, 2) + pow(y - $0.1, 2) > r2 }) {
                 hits += 1
+                (minX, maxX, minY, maxY) = (min(minX, i % w), max(maxX, i % w), min(minY, i / w), max(maxY, i / w))
             }
         }
+        // logs 11-06: the cursor blinking in a focused box dropped 11 plans as "the screen changed while the model
+        // was responding", each one more model call.
+        if caret, hits >= 6, Double(maxX - minX) <= 0.012 * Double(w), Double(maxY - minY) <= 0.05 * Double(h) { return false }
         return hits >= 6
     }
 

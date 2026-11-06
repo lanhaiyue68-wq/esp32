@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Network
 import UIKit
 
@@ -10,6 +11,9 @@ import UIKit
     var capturedAt: Double { get }
     var freshnessProofAt: Double { get }
     var aspect: Double { get }
+    /// When the screen last visibly changed; `updated` unless the source tells them apart (VideoFeed: a blinking
+    /// text cursor or the status bar alone is no change).
+    var changedAt: Double { get }
     /// After a gesture that ended at `since`: wait until the screen shows its result (and fetch it, in snap mode).
     func afterAction(since: Double) async
     func requireFrame(after: Double?) async throws
@@ -78,6 +82,7 @@ enum CaptureSource: String, CaseIterable {
 
 extension ScreenSource {
     var freshnessProofAt: Double { capturedAt > 0 ? capturedAt : updated }
+    var changedAt: Double { updated }
     func afterAction(since: Double) async { await settled() }
     func requireFrame(after: Double? = nil) async throws {
         try Task.checkCancellation()
@@ -89,7 +94,7 @@ extension ScreenSource {
     func settled(quiet: Double = 0.5, least: Double = 0.3, most: Double = 4) async {
         let started = now()
         try? await Task.sleep(nanoseconds: UInt64(least * 1e9))
-        while now() - updated < quiet + lag && now() - started < most {
+        while now() - changedAt < quiet + lag && now() - started < most {
             if Task.isCancelled { return }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
@@ -132,6 +137,9 @@ extension ScreenSource {
     @Published private(set) var size = CGSize.zero
     @Published private(set) var note = ""  // last decoder problem, shown in Diagnostics
     private(set) var updated = 0.0
+    /// The last frame that visibly changed (VideoFeed.visiblyChanged): settling waits on this, not on new bytes.
+    private(set) var changedAt = 0.0
+    private var lastLook: [UInt8]?
     /// When the board received the shown frame, in local time (≈; see `boardClock`).
     private(set) var capturedAt = 0.0
     /// When the board last forwarded a live (not snapshot) unit: the stream is flowing on its link.
@@ -228,7 +236,14 @@ extension ScreenSource {
         case .frame(let id, let seq, let jpeg, let width, let height, let timestamp, let ms):
             guard !jpeg.isEmpty, width > 0, height > width,
                   directState.complete(id, sequence: seq, capturedAt: timestamp, at: now()) else { return }
-            if frame != jpeg { frame = jpeg; updated = now() }
+            if frame != jpeg {
+                frame = jpeg; updated = now()
+                // A direct capture publishes every changed pixel: a blinking text cursor alone kept the screen
+                // "moving", so every action waited the full 2 s and every start 4 s (logs 11-06: 18 of 44 steps).
+                let look = Self.look(jpeg)
+                if look == nil || lastLook == nil || Self.visiblyChanged(lastLook!, look!) { changedAt = updated }
+                lastLook = look
+            }
             capturedAt = timestamp
             size = CGSize(width: width, height: height)
             broken = false; note = ""; nativeStatus = "整屏取屏中"
@@ -248,7 +263,7 @@ extension ScreenSource {
     }
 
     private func resetPixels() {
-        frame = nil; size = .zero; updated = 0; capturedAt = 0; broken = false
+        frame = nil; size = .zero; updated = 0; capturedAt = 0; broken = false; changedAt = 0; lastLook = nil
     }
 
     private func requireDirectFrame(after: Double? = nil, wait: Double = 4) async throws {
@@ -399,6 +414,7 @@ extension ScreenSource {
         guard !isNative else { return }
         assembler.reset(); clockOffset = nil; statusAt = 0; latestBoardMs = nil
         decodedBoardMs = 0; frame = nil; updated = 0; capturedAt = 0; broken = false; liveUnitAt = -.infinity
+        changedAt = 0; lastLook = nil
         fed.removeAll(); fedOrder.removeAll(); tcp.fed(0)
         generation += 1
         let g = generation
@@ -429,6 +445,7 @@ extension ScreenSource {
         frame = f.jpeg
         decodedBoardMs = Int(f.unit.boardMs)
         updated = now()
+        changedAt = updated  // mirrored frames come only on change
         capturedAt = clockOffset.map { Double(f.unit.boardMs) / 1000 + $0 } ?? updated
         broken = false
         if size.width != CGFloat(f.width) || size.height != CGFloat(f.height) {
@@ -687,5 +704,26 @@ final class VideoTCP: @unchecked Sendable {
                 if done { self.drop(c) } else { self.read(c) }
             }
         }
+    }
+}
+
+extension VideoFeed {
+    /// A 24×48 gray look of a frame, decoded small (ImageIO thumbnail), for telling visible changes from noise.
+    static func look(_ jpeg: Data) -> [UInt8]? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 128,
+              ] as CFDictionary) else { return nil }
+        return Vision.gray(small, 24, 48).px
+    }
+
+    /// Whether two looks differ below the status bar by more than a blinking text cursor can: a cursor covers about a
+    /// twentieth of one cell (a change of ~5–7 levels); a typed character, a new bubble, a sheet or a scroll moves
+    /// at least one cell by more than 16.
+    static func visiblyChanged(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        guard a.count == b.count, a.count == 24 * 48 else { return true }
+        for i in (3 * 24)..<a.count where abs(Int(a[i]) - Int(b[i])) > 16 { return true }
+        return false
     }
 }

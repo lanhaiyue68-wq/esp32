@@ -804,7 +804,7 @@ extension Pointer: Gestures {}
                 try await screen?.requireFrame(after: nil)
                 // Home and wait do not use coordinates or the current focus. Animation cannot make their target stale.
                 if i == 0, !["home", "wait"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
-                   Vision.changed(seen, screen?.frame, ignore: spots) {
+                   Vision.changed(seen, screen?.frame, ignore: spots, caret: true) {
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
                     // still (a live clock icon, a video, an animated background): when the model, looking again at a
