@@ -91,14 +91,14 @@ import XCTest
                        "the measured mapping is from home; a back gesture cannot start with an uncalibrated relative move")
     }
 
-    func testReturningFromChatDoesNotTapBesideScreenSharingIndicator() async {
+    func testReturningFromChatTapsTheChevronAtTheTitleNotTheStatusBar() async {
         let state = WatchListReturn(); state.pending = "客户群"
         let phone = FakeGestures(), screen = Logs39Screen()
         let ok = await state.resume(phone: phone, screen: screen, canAct: { true },
             inspect: { frame, _ in frame == Data([1]) ? .chat(CGPoint(x: 0.06, y: 0.09)) : .list },
             fallback: { false })
         XCTAssertTrue(ok)
-        XCTAssertFalse(phone.calls.contains("tap"))
+        XCTAssertEqual(phone.calls, ["tap"], "the chevron at the verified title height (y 0.09), below the screen-sharing pill")
         XCTAssertEqual(phone.calls.count, 1)
     }
 

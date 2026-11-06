@@ -37,13 +37,13 @@ import XCTest
 }
 
 @MainActor final class Logs42RegressionTests: XCTestCase {
-    private func candidate(_ phone: Logs42Phone, scatter: Double = 0) throws -> (Pointer, URL) {
+    private func candidate(_ phone: Logs42Phone, scatter: Double = 0, stale: Bool = false) throws -> (Pointer, URL) {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let mapX: [String: Any] = ["scatter": scatter, "knots": [
             ["units": 0, "fraction": 0], ["units": 75, "fraction": 0.25], ["units": 225, "fraction": 0.75]]]
         let mapY: [String: Any] = ["scatter": scatter, "knots": [
             ["units": 0, "fraction": 0], ["units": 163, "fraction": 163.0 / 650], ["units": 488, "fraction": 488.0 / 650]]]
-        let saved: [String: Any] = ["w": 300, "h": 650, "quality": 0.01, "stale": false,
+        let saved: [String: Any] = ["w": 300, "h": 650, "quality": 0.01, "stale": stale,
             "motionVersion": ProbeMotion.version, "requiresFeedback": true, "maps": ["x": mapX, "y": mapY]]
         try JSONSerialization.data(withJSONObject: saved).write(to: file)
         let p = Pointer(device: phone, calibrationFile: file)
@@ -129,13 +129,20 @@ import XCTest
         XCTAssertTrue(phone.presses.isEmpty)
     }
 
-    func testPrecisionTapStillNeverClicksUnseenWithFeedbackCalibration() async throws {
+    // logs 11-06 (build87): Claude's 发送 was withheld 17 times in a row with the pointer unseen, and the run failed.
+    func testUnseenPrecisionTapClicksAtTheEstimateOnlyWhileTheCalibrationIsTrusted() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
         p.finder = { _, _ in nil }
-        do { try await p.tap(0.863, 0.887, aim: true); XCTFail("a send-button tap must stay verified") }
+        try await p.tap(0.863, 0.887, aim: true)
+        XCTAssertEqual(phone.clicks.count, 1, "trusted calibration: the unseen send clicks at the map estimate")
+
+        let stalePhone = Logs42Phone(), (q, staleFile) = try candidate(stalePhone, stale: true)
+        defer { try? FileManager.default.removeItem(at: staleFile) }
+        q.finder = { _, _ in nil }
+        do { try await q.tap(0.863, 0.887, aim: true); XCTFail("a stale calibration never clicks unseen") }
         catch is DeviceError { }
-        XCTAssertTrue(phone.clicks.isEmpty)
+        XCTAssertTrue(stalePhone.clicks.isEmpty)
     }
 
     func testMeasuredFeedbackQualityRetainsRawScatterAndSurvivesRestart() throws {

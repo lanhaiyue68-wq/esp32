@@ -45,6 +45,32 @@ import XCTest
         XCTAssertEqual(phone.aims.count, 1)
     }
 
+    // logs 11-06: "the 主人蓝海乐 row is visible", the tap opened 小柳 and then another group.
+    func testAListTapOpensTheTargetChatsRowAsReadOnThePhone() async throws {
+        let (agent, phone) = listAgent(tap: "DO: tap 450 580")
+        _ = try await agent.step()
+        XCTAssertEqual(try XCTUnwrap(phone.points.first).y, 0.225, accuracy: 0.002)
+    }
+
+    func testATapOutsideTheListBodyIsNotMoved() async throws {
+        let (agent, phone) = listAgent(tap: "DO: tap 450 95")  // the search bar
+        _ = try await agent.step()
+        XCTAssertEqual(try XCTUnwrap(phone.points.first).y, 0.095, accuracy: 0.002)
+    }
+
+    private func listAgent(tap: String) -> (AgentLoop, Logs37Gestures) {
+        let screen = FakeScreen()
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        screen.frame = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
+            UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 720, height: 1560))
+        }.jpegData(compressionQuality: 0.9)!
+        let phone = Logs37Gestures()
+        let actor = FakeModel { _ in tap }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.rowTarget = { _ in CGPoint(x: 0.5, y: 0.225) }
+        return (agent, phone)
+    }
+
     func testCorrectDraftSurvivingAMissedSendCanRetryWithoutRetyping() async throws {
         let screen = FakeScreen()
         screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
@@ -188,13 +214,14 @@ import XCTest
 @MainActor private final class Logs37Gestures: Gestures {
     let device: HIDDevice = FakeDevice()
     var aims: [Bool] = []
+    var points: [CGPoint] = []
     var types: [String] = []
     var keys: [String] = []
     var onType: ((String) -> Void)?
     var onTap: ((Int) -> Void)?
     func type(_ text: String) async throws { types.append(text); onType?(text) }
     func key(_ combo: String) async throws { keys.append(combo) }
-    func tap(_ x: Double, _ y: Double, aim: Bool) async throws { aims.append(aim); onTap?(aims.count) }
+    func tap(_ x: Double, _ y: Double, aim: Bool) async throws { aims.append(aim); points.append(CGPoint(x: x, y: y)); onTap?(aims.count) }
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool) async throws {}
     func drag(_ points: [CGPoint], hold: Bool) async throws {}
     func goHome() async throws {}

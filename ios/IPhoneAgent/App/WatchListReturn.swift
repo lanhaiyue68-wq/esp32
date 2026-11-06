@@ -62,12 +62,14 @@ import Foundation
         do {
             let current = try await look()
             if current == .list { pending = nil; return true }
-            // A middle-edge back gesture avoids the screen-sharing indicator above the back chevron.
+            // The back chevron first, at the verified title's height (well below the screen-sharing pill in the status
+            // bar): logs 11-06 (build87) had 13 of 13 edge back swipes leave the chat open, each followed by a model
+            // run that tapped this chevron, 7 of 7 back on the list. The swipe stays as the second try.
             // Wait for a fresh verified list before reading the next chat.
             var view = current
-            for _ in 0..<2 {
-                guard case .chat = view, allowed() else { break }
-                try await phone.goBack()
+            for attempt in 0..<2 {
+                guard case .chat(let chevron) = view, allowed() else { break }
+                if attempt == 0 { try await phone.tap(chevron.x, chevron.y, aim: false) } else { try await phone.goBack() }
                 let ended = now()
                 await screen.afterAction(since: ended)
                 view = try await look(after: ended)

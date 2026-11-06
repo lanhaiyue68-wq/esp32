@@ -81,6 +81,8 @@ import Foundation
     }
 
     var calibrated: Bool { span != nil }
+    /// Calibrated, not marked stale, and last measured within the calibration tolerance.
+    var trusted: Bool { calibrated && !stale && (quality ?? 1) <= Self.calibrationTolerance }
 
     private func remember(_ axis: String, _ sample: (Double, Double)) {
         seen[axis] = Array((seen[axis, default: []] + [sample]).suffix(12))  // deque(maxlen=12)
@@ -236,23 +238,27 @@ import Foundation
     /// Each correction measures the real scale (mouse units per screen) from how far it moved the pointer, so a stale
     /// span is fixed within a tap instead of overshooting once and clicking there. A pointer stopped by the border
     /// says nothing about the scale: home, move half way, and measure from the corner.
-    /// required: a precision tap (send button) never clicks unseen. Otherwise feedback only improves the map's
-    /// estimate: icons, wallpaper and photos hide the translucent pointer from the pixel diff (logs43: every
-    /// home-screen tap was withheld, so every run failed), and an unseen pointer is not a wrong one.
+    /// required: a precision tap (send button) corrects a seen pointer and never clicks while it is seen off target.
+    /// Unseen, it clicks at the map's estimate only while the calibration is trusted (not stale, measured within
+    /// tolerance): on dark screens the pixel diff rarely sees the pointer, and Claude's 发送 was withheld 17 times in
+    /// a row until the run failed (logs 11-06, build87), while every unseen tap at the estimate landed. Otherwise
+    /// feedback only improves the map's estimate: icons, wallpaper and photos hide the translucent pointer from the
+    /// pixel diff (logs43: every home-screen tap was withheld, so every run failed).
     private func aim(_ x: Double, _ y: Double, edgeStart: Bool = false, required: Bool = false) async throws {
         guard let span else { throw DeviceError(message: "pointer not calibrated") }
+        let unseenClicks = !required || trusted
         guard var found = try await find(x, y) else {
-            guard required else {
-                log(String(format: "aim (%.3f, %.3f): pointer not found; clicking at the calibrated estimate", x, y))
-                return
+            guard unseenClicks else {
+                log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
+                throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
             }
-            log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
-            throw DeviceError(message: "Pointer position could not be verified; no click was sent. Keep the current draft and inspect again.")
+            log(String(format: "aim (%.3f, %.3f): pointer not found; clicking at the calibrated estimate", x, y))
+            return
         }
         /// Lost while correcting: the corrections moved it somewhere unseen, so start over from the corner.
         func lost() async throws {
             pos = nil
-            guard required else {
+            guard !unseenClicks else {
                 log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
                 try await moveTo(dx(x), dy(y))
                 return

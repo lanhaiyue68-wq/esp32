@@ -1069,8 +1069,9 @@ extension AppModel {
         } else {
             // Stop on the destination before the actor can return to the list and consume its unread badge.
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
+            // Which chat to open depends on the red badges now, never on the last check: no learned route.
             guard let opened = await watchRun(WatchSettings.openTask(rules), plan: WatchSettings.openPlan(rules),
-                                             navigation: rules.single ? nil : rules) else { return (false, false) }
+                                             navigation: rules.single ? nil : rules, learnedRoutes: false) else { return (false, false) }
             guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) })
             else { return (true, false) }  // nothing unread
             guard let look = await readChat(open) else { return (false, false) }
@@ -1230,7 +1231,7 @@ extension AppModel {
         let outcome = await watchListReturn.attempt(phone: pointer, screen: feed,
             canAct: { self.watching && UIApplication.shared.applicationState != .active },
             fallback: { await self.watchRun(WatchSettings.returnTask, plan: WatchSettings.returnPlan,
-                                           stepLimit: 4, returning: true) != nil })
+                                           stepLimit: 4, returning: true, learnedRoutes: false) != nil })
         if outcome == .deferred { DebugLog.write("watch: return paused; not a failed attempt") }
         else { DebugLog.write("watch: return to list \(outcome == .arrived ? "verified" : "pending; navigation retry only")") }
         return outcome
@@ -1529,7 +1530,8 @@ extension AppModel {
     private func watchRun(_ task: String, reference: String = "", plan: String = "", stepLimit: Int? = 15,
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
                           directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil,
-                          inspectInput: String? = nil, replyAfter: WatchReport.Line? = nil) async -> String? {
+                          inspectInput: String? = nil, replyAfter: WatchReport.Line? = nil,
+                          learnedRoutes: Bool = true) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
@@ -1566,10 +1568,14 @@ extension AppModel {
                 return self.watching && !Task.isCancelled && confirmed
             }
         } else { agent.sendReceipt = nil }
-        defer { agent.inputToInspect = nil; agent.sendReceipt = nil }
+        // A run that sends into `chat`: a tap on the list opens that chat's row as read here, not the model's guess.
+        if let chat {
+            agent.rowTarget = { (frame: Data) -> CGPoint? in WatchChatOpen.row(of: chat, in: frame) }
+        } else { agent.rowTarget = nil }
+        defer { agent.inputToInspect = nil; agent.sendReceipt = nil; agent.rowTarget = nil }
         await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
-                  directStart: directStart, keyboardGuard: true)
+                  directStart: directStart, keyboardGuard: true, learnedRoutes: learnedRoutes)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: 100_000_000)

@@ -56,6 +56,9 @@ extension Pointer: Gestures {}
     /// The user's corrections from earlier runs, as sentences for the planner and the actor (LessonBook).
     var lessons: LessonBook?
     var routes: RouteBook?
+    /// Off for a run whose route depends on what is on screen: WeChat watch's unread check learned "tap 主人蓝海乐"
+    /// and replayed it at every check, unread or not, so it kept opening and leaving that chat (logs 11-06, build87).
+    var learnedRoutes = true
     private var replayedRoute: String?  // the learned route this run started with
     private var learnedThrough = -1
     private var lessonRun = UUID().uuidString
@@ -120,6 +123,8 @@ extension Pointer: Gestures {}
     var pasteHop: ((String) async -> PasteHopResult)?
     private var pasteHopOff = false  // a hop got lost once in this run: the rest of it types
     private var lastTap: CGPoint?    // the last tap (0-1), the input box when a type follows
+    /// WeChat watch send: the target chat's row (0-1) when this frame is the chat list showing it once; nil otherwise.
+    var rowTarget: ((Data) -> CGPoint?)?
     /// WeChat watch send: a reply pasted and seen in the box is sent with Return at once (no look to find 发送).
     var returnSends = false
     /// Where this run typed: the input box (0-1), for WeChat watch to send the next reply without a run.
@@ -625,7 +630,7 @@ extension Pointer: Gestures {}
 
     private func finish() {
         if let metrics { trace?.writeMetrics(metrics.snapshot()) }
-        if let routes, steps.last?["action"]?.str == "done" {
+        if let routes, learnedRoutes, steps.last?["action"]?.str == "done" {
             let run = (task: self.task, steps: self.steps, shots: self.shots, aspect: screen?.aspect ?? 0, used: replayedRoute)
             Task { await routes.learn(task: run.task, steps: run.steps, shots: run.shots, aspect: run.aspect, replayed: run.used) }
         }
@@ -635,7 +640,7 @@ extension Pointer: Gestures {}
     /// each step's label where it is now. The first screen that differs, a missing label or a step that changes
     /// nothing hands the run to the model from there; the replayed steps are in its recent actions.
     func replay() async throws {
-        guard let routes, phone != nil, let first = screen?.frame, let scene = Vision.experienceScene(first),
+        guard let routes, learnedRoutes, phone != nil, let first = screen?.frame, let scene = Vision.experienceScene(first),
               let route = routes.match(task: task, scene: scene, aspect: screen?.aspect ?? 0) else { return }
         replayedRoute = route.id
         var walked = 0, stop = ""
@@ -699,6 +704,14 @@ extension Pointer: Gestures {}
                 act["action"] = .str("key")
                 act["combo"] = .str("enter")
                 for k in ["x", "y", "precise"] { act[k] = nil }
+            }
+            if act["action"]?.str == "tap", let rowTarget, let shown = screen?.frame, let row = rowTarget(shown),
+               let y = act["y"]?.double, (140...880).contains(y), abs(y / 1000 - row.y) > 0.025 {
+                // A tap into the chat list body while this run's chat is listed once, read on this phone: its row.
+                // logs 11-06: "the 主人蓝海乐 row is visible", tapped 小柳 and then another group, back twice.
+                DebugLog.write(String(format: "tap on the chat list moved to the target chat's row (y %.3f → %.3f)", y / 1000, row.y))
+                act["x"] = .int(Int((row.x * 1000).rounded()))
+                act["y"] = .int(Int((row.y * 1000).rounded()))
             }
             let name = act["action"]?.str ?? ""
             var justSent: String?
