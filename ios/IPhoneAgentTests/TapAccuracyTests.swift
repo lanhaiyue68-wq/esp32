@@ -109,7 +109,8 @@ import UIKit
         XCTAssertEqual(agent.steps.last?["action"], .str("done"))
         XCTAssertLessThan(agent.steps.count, 10)
         XCTAssertEqual(phone.typed, 1)
-        XCTAssertEqual(phone.aims.count, 1, "only the original send tap was dispatched")
+        XCTAssertEqual(phone.returns, 1, "the tap on the keyboard's 发送 key is pressed as Return (logs 11-06)")
+        XCTAssertTrue(phone.aims.isEmpty, "only the original send was dispatched")
         let answer = agent.steps.last?["answer"]?.str ?? ""
         XCTAssertEqual(WatchReport.sendAnswer(answer), "已发出“这不是简简单单吗”")
         XCTAssertTrue(WatchSettings.severalParts("先去测试群发你好，然后告诉我"))
@@ -132,7 +133,8 @@ import UIKit
         await fulfillment(of: [ended], timeout: 15)
         agent.stop()
         XCTAssertEqual(phone.typed, 1)
-        XCTAssertEqual(phone.aims.count, 1, "the attempted verification taps never reach the phone")
+        XCTAssertEqual(phone.returns, 1, "sent once, as Return")
+        XCTAssertTrue(phone.aims.isEmpty, "the attempted verification taps never reach the phone")
         XCTAssertEqual(agent.steps.last?["action"], .str("fail"))
         XCTAssertTrue(agent.steps.last?["reason"]?.str?.contains("could not verify") == true)
         XCTAssertFalse(agent.steps.contains { $0["action"] == .str("done") })
@@ -156,14 +158,14 @@ import UIKit
 
 @MainActor private final class AimGestures: Gestures {
     let device: HIDDevice = FakeDevice()
-    var aims: [Bool] = [], typed = 0
+    var aims: [Bool] = [], typed = 0, returns = 0
     var onTap: (() -> Void)?
     var onType: (() -> Void)?
     func tap(_ x: Double, _ y: Double, aim: Bool) async throws { aims.append(aim); onTap?() }
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool) async throws {}
     func drag(_ points: [CGPoint], hold: Bool) async throws {}
     func type(_ text: String) async throws { typed += 1; onType?() }
-    func key(_ combo: String) async throws {}
+    func key(_ combo: String) async throws { if combo == "enter" { returns += 1 } }
     func goHome() async throws {}
     func goBack() async throws {}
     func reset() async throws {}
