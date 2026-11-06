@@ -45,6 +45,17 @@
         }
       }
     },
+    "Learned buttons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学会的按钮"
+          }
+        }
+      }
+    },
     "Learned routes" : {
       "extractionState" : "manual",
       "localizations" : {

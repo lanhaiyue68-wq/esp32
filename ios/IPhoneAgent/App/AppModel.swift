@@ -137,6 +137,9 @@ import UIKit
             let routes = RouteBook(file: support.appendingPathComponent("routes-v1.json"))
             routes.enabled = memory.enabled
             agent.routes = routes
+            let controls = ControlBook(file: support.appendingPathComponent("controls-v1.json"))
+            controls.enabled = memory.enabled
+            agent.controls = controls
         }
         agent.metrics = metrics
         feed.device = board.commands

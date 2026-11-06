@@ -59,6 +59,11 @@ extension Pointer: Gestures {}
     /// Off for a run whose route depends on what is on screen: WeChat watch's unread check learned "tap 主人蓝海乐"
     /// and replayed it at every check, unread or not, so it kept opening and leaving that chat (logs 11-06, build87).
     var learnedRoutes = true
+    /// Learned buttons (send, back), found again by their look; see ControlBook.
+    var controls: ControlBook?
+    private var sendTap: (point: CGPoint, frame: Data)?  // this run's send tap and the screen it was made on
+    private var backMissed = false                        // the last back swipe changed nothing
+    private var actFrame: Data?                           // the screen just before the latest action
     private var replayedRoute: String?  // the learned route this run started with
     private var learnedThrough = -1
     private var lessonRun = UUID().uuidString
@@ -523,6 +528,7 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         replayedRoute = nil
+        (sendTap, backMissed, actFrame) = (nil, false, nil)
         do {
             do { try await replay() }
             catch let e where e is CancellationError || Task.isCancelled { throw e }
@@ -634,6 +640,11 @@ extension Pointer: Gestures {}
             let run = (task: self.task, steps: self.steps, shots: self.shots, aspect: screen?.aspect ?? 0, used: replayedRoute)
             Task { await routes.learn(task: run.task, steps: run.steps, shots: run.shots, aspect: run.aspect, replayed: run.used) }
         }
+        // A run that sent by tapping and ended done: that spot is this screen's send button, by its look.
+        if let controls, steps.last?["action"]?.str == "done", !sentTexts.isEmpty, let tap = sendTap {
+            controls.learn("send", at: tap.point, on: tap.frame)
+        }
+        sendTap = nil
     }
 
     /// Walk a learned route (RouteBook) without the model while each screen is the one it was learned on, tapping
@@ -712,6 +723,26 @@ extension Pointer: Gestures {}
                 DebugLog.write(String(format: "tap on the chat list moved to the target chat's row (y %.3f → %.3f)", y / 1000, row.y))
                 act["x"] = .int(Int((row.x * 1000).rounded()))
                 act["y"] = .int(Int((row.y * 1000).rounded()))
+            }
+            if let controls, let shown = screen?.frame {
+                func use(_ hit: ControlBook.Hit, _ role: String) {
+                    act["action"] = .str("tap")
+                    act["x"] = .int(Int((Double(hit.point.x) * 1000).rounded()))
+                    act["y"] = .int(Int((Double(hit.point.y) * 1000).rounded()))
+                    act["learned"] = .str(role)
+                    act["control"] = .str(hit.id)
+                }
+                if act["action"]?.str == "back", let hit = controls.find("back", in: shown) {
+                    // Here the back swipe did nothing before and this button worked: tap it, no swipe first.
+                    DebugLog.write(String(format: "back: tapping the learned back button at (%.3f, %.3f)", hit.point.x, hit.point.y))
+                    use(hit, "back")
+                } else if act["action"]?.str == "tap", unsent != nil, let x = act["x"]?.double, let y = act["y"]?.double,
+                          let hit = controls.find("send", in: shown),
+                          Self.sends(act) || hypot(x / 1000 - Double(hit.point.x), y / 1000 - Double(hit.point.y)) <= 0.12 {
+                    // The send button found by how it looked when a send went out, not the model's guess of it.
+                    DebugLog.write(String(format: "send: the learned send button at (%.3f, %.3f), score %.2f", hit.point.x, hit.point.y, hit.score))
+                    use(hit, "send")
+                }
             }
             let name = act["action"]?.str ?? ""
             var justSent: String?
@@ -842,6 +873,7 @@ extension Pointer: Gestures {}
                     act["smooth"] = .bool(true)  // recorded, so the review and the next look know it was a curve
                 }
                 momentum = name == "swipe"
+                actFrame = screen?.frame
                 do { try await perform(act) }
                 catch let input as InputNeedsVerification {
                     if input.fieldMayBeComplete { pendingInput = input.expected }
@@ -856,7 +888,10 @@ extension Pointer: Gestures {}
                 if name == "key", ["cmd+a", "backspace", "delete"].contains(act["combo"]?.str?.lowercased() ?? "") {
                     pendingInput = nil
                 }
-                if let text = unsent, Self.sends(act) {
+                if let text = unsent, Self.sends(act) || act["learned"] == .str("send") {
+                    if name == "tap", let x = act["x"]?.double, let y = act["y"]?.double, let before = actFrame {
+                        sendTap = (CGPoint(x: x / 1000, y: y / 1000), before)  // learned at the end if the run is done
+                    }
                     sentTexts.insert(Self.typedKey(text)); unsent = nil; pendingInput = nil; quietSinceSend = 0
                     justSent = text
                 }
@@ -950,8 +985,30 @@ extension Pointer: Gestures {}
     /// A tap that changed nothing on screen counts as dead, like one before a stroke that left no line: the same spot
     /// twice is refused, so the agent tries another control instead of the same one again and again.
     private func noteDeadTap() {
+        noteLearnedControls()
         guard let last = steps.last, last["action"]?.str == "tap", last["changed"] == .bool(false) else { return }
         deadTaps.append(last)
+    }
+
+    /// Learned buttons from what this action did: a learned spot that changed nothing is counted against it; the
+    /// first top-of-screen tap that worked right after a back swipe did nothing is learned as this screen's back.
+    private func noteLearnedControls() {
+        guard let controls, let last = steps.last, let changed = last["changed"]?.bool else { return }
+        if let id = last["control"]?.str {
+            if !changed { controls.failed(id) } else if last["learned"] == .str("back") { controls.worked(id) }
+        }
+        switch last["action"]?.str {
+        case "back":
+            backMissed = !changed
+        case "tap":
+            if backMissed, changed, last["learned"] == nil, let x = last["x"]?.double, let y = last["y"]?.double,
+               y <= 150, let before = actFrame {
+                controls.learn("back", at: CGPoint(x: x / 1000, y: y / 1000), on: before)
+            }
+            backMissed = false
+        default:
+            break
+        }
     }
 
     /// Text in without a model look per phrase. A paste when iOS lets this app fill the pasteboard and the text then
@@ -1158,6 +1215,16 @@ extension Pointer: Gestures {}
         }
         var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(recentActions)\n\nNext action?"
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
+        if let controls, let shown = screen?.frame {
+            if unsent != nil, let hit = controls.find("send", in: shown) {
+                prompt += "\n\nLearned on this phone: this screen's send button is at x \(Int(Double(hit.point.x) * 1000)), "
+                    + "y \(Int(Double(hit.point.y) * 1000)); a message went out from there before. Tap it there once the text is complete."
+            }
+            if let hit = controls.find("back", in: shown) {
+                prompt += "\n\nLearned on this phone: on this screen the back swipe does nothing; to go back, tap the back "
+                    + "button at x \(Int(Double(hit.point.x) * 1000)), y \(Int(Double(hit.point.y) * 1000))."
+            }
+        }
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
