@@ -144,8 +144,31 @@ enum Vision {
         }
         // logs 11-06: the cursor blinking in a focused box dropped 11 plans as "the screen changed while the model
         // was responding", each one more model call.
-        if caret, hits >= 6, Double(maxX - minX) <= 0.012 * Double(w), Double(maxY - minY) <= 0.05 * Double(h) { return false }
+        if caret, hits >= 6 {
+            if Double(maxX - minX) <= 0.012 * Double(w), Double(maxY - minY) <= 0.05 * Double(h) { return false }
+            // The device's JPEG spreads a thin cursor wider than the strip above: the coarse look decides then.
+            if let la = look(before), let lb = look(after), !visiblyChanged(la, lb) { return false }
+        }
         return hits >= 6
+    }
+
+    /// A 24×48 gray look of a frame, decoded small (ImageIO thumbnail), for telling visible changes from noise.
+    static func look(_ jpeg: Data) -> [UInt8]? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 128,
+              ] as CFDictionary) else { return nil }
+        return gray(small, 24, 48).px
+    }
+
+    /// Whether two looks differ below the status bar by more than a blinking text cursor can: a cursor covers about a
+    /// twentieth of one cell (a change of ~5–7 levels); a typed character, a new bubble, a sheet or a scroll moves
+    /// at least one cell by more than 16.
+    static func visiblyChanged(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        guard a.count == b.count, a.count == 24 * 48 else { return true }
+        for i in (3 * 24)..<a.count where abs(Int(a[i]) - Int(b[i])) > 16 { return true }
+        return false
     }
 
     /// True when the screen changed near `points` (fractions): where an action would land. Changes elsewhere (a

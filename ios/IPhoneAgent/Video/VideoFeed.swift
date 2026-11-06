@@ -708,22 +708,7 @@ final class VideoTCP: @unchecked Sendable {
 }
 
 extension VideoFeed {
-    /// A 24×48 gray look of a frame, decoded small (ImageIO thumbnail), for telling visible changes from noise.
-    static func look(_ jpeg: Data) -> [UInt8]? {
-        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
-              let small = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 128,
-              ] as CFDictionary) else { return nil }
-        return Vision.gray(small, 24, 48).px
-    }
-
-    /// Whether two looks differ below the status bar by more than a blinking text cursor can: a cursor covers about a
-    /// twentieth of one cell (a change of ~5–7 levels); a typed character, a new bubble, a sheet or a scroll moves
-    /// at least one cell by more than 16.
-    static func visiblyChanged(_ a: [UInt8], _ b: [UInt8]) -> Bool {
-        guard a.count == b.count, a.count == 24 * 48 else { return true }
-        for i in (3 * 24)..<a.count where abs(Int(a[i]) - Int(b[i])) > 16 { return true }
-        return false
-    }
+    /// A 24×48 gray look of a frame (Vision.look), for telling visible changes from noise.
+    static func look(_ jpeg: Data) -> [UInt8]? { Vision.look(jpeg) }
+    static func visiblyChanged(_ a: [UInt8], _ b: [UInt8]) -> Bool { Vision.visiblyChanged(a, b) }
 }
