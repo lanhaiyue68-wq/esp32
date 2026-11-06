@@ -51,10 +51,10 @@ import XCTest
         return (p, file)
     }
 
-    func testOrdinaryTapsCorrectChangingCurveLandingsBeforeClicking() async throws {
+    func testPreciseTapsCorrectChangingCurveLandingsBeforeClicking() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
-        for _ in 0..<2 { try await p.tap(0.5, 0.62) }
+        for _ in 0..<2 { try await p.tap(0.5, 0.62, aim: true) }
         XCTAssertEqual(phone.clicks.count, 2)
         for hit in phone.clicks {
             XCTAssertEqual(hit.x, 0.5, accuracy: Pointer.aimTolerance)
@@ -84,18 +84,17 @@ import XCTest
         XCTAssertEqual(phone.presses.count, 1)
     }
 
-    func testPointerLostDuringCorrectionRestartsFromTheCornerBeforeClicking() async throws {
+    // logs 11-06: on dark WeChat screens the search found the pointer 6 times in 31; each tap wiggled it ~5 times over
+    // 4-6 s, often walked it after a misread, then clicked at the map estimate anyway, and every one of those landed.
+    func testOrdinaryTapClicksAtTheMapWithoutLookingForThePointer() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
         var looks = 0
-        // Seen once off target (this fake's curve scatter), then never again after the correction.
-        p.finder = { _, _ in looks += 1; return looks == 1 ? phone.at : nil }
+        p.finder = { _, _ in looks += 1; return phone.at }
         try await p.tap(0.5, 0.62)
-        XCTAssertEqual(looks, 2)
+        XCTAssertEqual(looks, 0, "no pixel search before an ordinary tap")
+        XCTAssertFalse(phone.sent.contains("move \(Pointer.nudge) 0"), "no wiggle")
         XCTAssertEqual(phone.clicks.count, 1)
-        let lastHome = try XCTUnwrap(phone.sent.lastIndex(of: "home"))
-        let correction = try XCTUnwrap(phone.sent.firstIndex { $0.hasPrefix("move") && $0 != "move 150 0" && $0 != "move 0 403" })
-        XCTAssertGreaterThan(lastHome, correction, "the unseen corrected position is abandoned for a fresh move from the corner")
         XCTAssertEqual(try XCTUnwrap(phone.clicks.first).y, 0.62, accuracy: 0.01)
     }
 
@@ -181,11 +180,11 @@ import XCTest
         XCTAssertEqual(phone.presses[1].x, 0.85, accuracy: Pointer.edgeAlongTolerance + 0.001, "along the bar")
     }
 
-    func testOrdinaryEdgeTapStillRequiresExactEndpoint() async throws {
+    func testPreciseEdgeTapStillRequiresExactEndpoint() async throws {
         let phone = Logs42Phone(), (p, file) = try candidate(phone)
         defer { try? FileManager.default.removeItem(at: file) }
         phone.minimum.x = 0.02
-        do { try await p.tap(0.005, 0.45); XCTFail("a border gesture allowance must never relax ordinary taps") }
+        do { try await p.tap(0.005, 0.45, aim: true); XCTFail("a border gesture allowance must never relax aimed taps") }
         catch is DeviceError { }
         XCTAssertTrue(phone.clicks.isEmpty)
     }

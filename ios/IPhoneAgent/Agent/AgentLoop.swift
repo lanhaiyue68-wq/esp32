@@ -400,6 +400,13 @@ extension Pointer: Gestures {}
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
     }
 
+    /// A tap on the keyboard's bottom-right key, while a keyboard is up (0-1000): 发送 / 换行 below the backspace key
+    /// (0.80–0.83) and above the globe and microphone (0.93–).
+    static func onReturnKey(_ act: JObject) -> Bool {
+        guard act["action"]?.str == "tap", let x = act["x"]?.double, let y = act["y"]?.double else { return false }
+        return x >= 760 && (845...925).contains(y)
+    }
+
     /// Return, or a tap where 发送 sits (next to the box, or the keyboard's bottom-right key).
     static func sends(_ act: JObject) -> Bool {
         switch act["action"]?.str {
@@ -684,6 +691,15 @@ extension Pointer: Gestures {}
         defer { metrics?.step(timing) }
         for (i, planned) in acts.enumerated() {
             var act = planned.act
+            if Self.onReturnKey(act), let shown = screen?.frame, CandidatePicker.keyboardUp(in: shown) {
+                // The keyboard's bottom-right key (发送 / 换行 / 前往) is Return, which the board's keyboard presses
+                // without the pointer. As a tap it waited for a seen pointer, which the dark keyboard hides: every
+                // send was withheld until "3 errors in a row" (logs 11-06: 76 s, 16 model calls, nothing sent).
+                DebugLog.write("tap on the keyboard's Return key: pressing Return instead")
+                act["action"] = .str("key")
+                act["combo"] = .str("enter")
+                for k in ["x", "y", "precise"] { act[k] = nil }
+            }
             let name = act["action"]?.str ?? ""
             var justSent: String?
             if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil, !["wait", "done", "fail"].contains(name) {

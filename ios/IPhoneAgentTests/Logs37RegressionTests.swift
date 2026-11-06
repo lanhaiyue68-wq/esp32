@@ -15,6 +15,36 @@ import XCTest
         XCTAssertEqual(phone.aims, [true], "logs37: an acknowledged move overshot into the bottom-right corner")
     }
 
+    // logs 11-06: the dark keyboard hid the pointer, so every tap on its 发送 key was withheld; nothing was ever sent.
+    func testATapOnTheKeyboardsReturnKeyPressesReturnWithoutThePointer() async throws {
+        let screen = FakeScreen()
+        screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
+        let phone = Logs37Gestures()
+        phone.onType = { screen.frame = InputFieldVerificationTests.screen(input: $0, candidate: "我") }
+        let actor = FakeModel { n in n == 1 ? "DO: type hello" : "DO: tap 863 886" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        agent.endAfterSend = 5
+        _ = try await agent.step(); _ = try await agent.step()
+        XCTAssertEqual(phone.keys, ["enter"])
+        XCTAssertTrue(phone.aims.isEmpty, "the key is pressed, not tapped")
+    }
+
+    func testTheSameSpotWithoutAKeyboardIsStillATap() async throws {
+        let screen = FakeScreen()
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        screen.frame = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
+            UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 720, height: 1560))
+            ("PHOTOS" as NSString).draw(at: CGPoint(x: 80, y: 170),
+                withAttributes: [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white])
+        }.jpegData(compressionQuality: 0.9)!
+        let phone = Logs37Gestures()
+        let actor = FakeModel { _ in "DO: tap 863 886" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil)
+        _ = try await agent.step()
+        XCTAssertTrue(phone.keys.isEmpty)
+        XCTAssertEqual(phone.aims.count, 1)
+    }
+
     func testCorrectDraftSurvivingAMissedSendCanRetryWithoutRetyping() async throws {
         let screen = FakeScreen()
         screen.frame = InputFieldVerificationTests.screen(input: "", candidate: "我")
@@ -159,10 +189,11 @@ import XCTest
     let device: HIDDevice = FakeDevice()
     var aims: [Bool] = []
     var types: [String] = []
+    var keys: [String] = []
     var onType: ((String) -> Void)?
     var onTap: ((Int) -> Void)?
     func type(_ text: String) async throws { types.append(text); onType?(text) }
-    func key(_ combo: String) async throws {}
+    func key(_ combo: String) async throws { keys.append(combo) }
     func tap(_ x: Double, _ y: Double, aim: Bool) async throws { aims.append(aim); onTap?(aims.count) }
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool) async throws {}
     func drag(_ points: [CGPoint], hold: Bool) async throws {}

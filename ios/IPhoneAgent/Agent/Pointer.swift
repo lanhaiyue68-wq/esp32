@@ -225,7 +225,11 @@ import Foundation
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         try await moveTo(dx(x), dy(y), rehome: rehome)
-        if aim || requiresFeedback { try await self.aim(x, y, edgeStart: edgeStart, required: aim) }
+        // Ordinary taps click at the calibrated map without looking for the pointer. On the dark WeChat screens the
+        // pixel search found it 6 times in 31 (logs 11-06): every tap wiggled it ~5 times over 4–6 s, often walked it
+        // after a misread and lost it, then clicked at this estimate anyway, and all of those taps landed. A tap that
+        // changes nothing is aimed next time (missed); precise taps and system edge gestures still look first.
+        if aim || (requiresFeedback && edgeStart) { try await self.aim(x, y, edgeStart: edgeStart, required: aim) }
     }
 
     /// Closed loop: find the real pointer on screen, fix a miss, look again, and learn the error for later moves.
@@ -441,8 +445,7 @@ import Foundation
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
 
-    /// Every tap starts from the corner. Calibrations measured with endpoint
-    /// feedback always verify again before clicking, even when callers omit aim.
+    /// Every tap starts from the corner. aim: find the pointer and correct it first, and never click unseen.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
         pos = nil
@@ -704,7 +707,7 @@ import Foundation
         // From the very bottom edge: coming down from the top after a re-home, the pointer stopped a little above the
         // home bar and the swipe only slid inside WeChat (logs(15)). An extra move down pins it against the edge.
         drawChain = false
-        try await point(0.2, 1, edgeStart: true)
+        try await point(0.2, 1)  // looked for once, below, after the move that pins it to the edge
         try await device.send("move 0 80")
         if requiresFeedback { try await aim(0.2, 1, edgeStart: true) }
         try await device.send("press")
@@ -717,7 +720,7 @@ import Foundation
     func nextApp() async throws {
         drawChain = false
         defer { pos = nil }
-        try await point(0.85, 1, edgeStart: true)
+        try await point(0.85, 1)
         try await device.send("move 0 80")
         if requiresFeedback { try await aim(0.85, 1, edgeStart: true) }
         try await device.send("press")
