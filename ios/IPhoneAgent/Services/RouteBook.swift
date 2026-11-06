@@ -61,6 +61,24 @@ import Foundation
         }
     }
 
+    /// The route for this task and the step to join it at: its start on this screen, or a later step taken on this
+    /// screen when this run began further along (logs 11-06: "go to Claude" was learned from inside WeChat, the next
+    /// one started on the Home Screen, so it never replayed and the model worked the way out again).
+    func entry(task: String, scene: [UInt8], aspect: Double) -> (route: Route, from: Int)? {
+        guard enabled else { return nil }
+        if let route = match(task: task, scene: scene, aspect: aspect) { return (route, 0) }
+        let wanted = task.lowercased()
+        for route in routes where abs(route.aspect - aspect) <= 0.03 && Self.similar(route.task, task) {
+            let named = route.task.lowercased()
+            guard route.steps.compactMap(\.anchor).allSatisfy({ !named.contains($0.lowercased()) || wanted.contains($0.lowercased()) })
+            else { continue }
+            if let k = route.steps.indices.dropFirst().first(where: { Self.sceneDistance(route.steps[$0].scene, scene) <= 1 }) {
+                return (route, k)
+            }
+        }
+        return nil
+    }
+
     /// A finished run: keep its route, and credit the route it replayed.
     func learn(task: String, steps: [JObject], shots: [Int: Data], aspect: Double, replayed: String?) async {
         guard enabled, steps.last?["action"]?.str == "done" else { return }
@@ -112,6 +130,9 @@ import Foundation
             if name == "tap", let found = label(shot, CGPoint(x: Double(values[0]) / 1000, y: Double(values[1]) / 1000)) {
                 let text = found.text.lowercased()
                 if unsafeLabels.contains(where: { text.contains($0) }) { break }
+                // A time or a count changes by the next run ("20:20" stopped every replay of a route, logs 11-06).
+                let bare = text.filter { !$0.isWhitespace }
+                if !bare.isEmpty, bare.allSatisfy({ $0.isNumber || ":.-/+".contains($0) }) { break }
                 step.anchor = found.text
                 step.offsetX = values[0] - Int((found.centre.x * 1000).rounded())
                 step.offsetY = values[1] - Int((found.centre.y * 1000).rounded())

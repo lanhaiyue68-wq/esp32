@@ -19,6 +19,22 @@ extension AppModel {
         pasteHopping = true
         defer { pasteHopping = false }
         var returnedAt = now()
+        // A watched WeChat chat (its title read on this phone) is reopened by WeChat's URL scheme, which brings back the
+        // same chat. Reversed swipes depend on the app order: with Claude used last they stopped in Claude, the check
+        // refused, and the reply fell to a 65 s model run that failed the same way (logs 11-06, build89).
+        var reopen: (() async throws -> Void)?
+        if WatchReport.navigationChat(in: source, targets: WatchSettings.rules.targets) != nil {
+            reopen = {
+                guard let url = URL(string: "weixin://"), await UIApplication.shared.open(url) else {
+                    throw DeviceError(message: "WeChat did not open")
+                }
+                returnedAt = now()
+                guard await self.waitForState(.background, within: 3) else {
+                    throw DeviceError(message: "paste hop did not leave Lan Agent")
+                }
+                try await Task.sleep(nanoseconds: 600_000_000)  // WeChat redraws
+            }
+        }
         let result = await PasteRoundTrip.perform(text, isActive: {
             UIApplication.shared.applicationState == .active
         }, previousApp: {
@@ -59,8 +75,9 @@ extension AppModel {
                 if matched { return true }
             }
             return false
-        })
-        DebugLog.write("paste hop: \(result), original target \(result == .lost ? "unverified" : "verified")")
+        }, reopenSource: reopen)
+        DebugLog.write("paste hop: \(result), original target \(result == .lost ? "unverified" : "verified")"
+                       + (reopen == nil ? "" : " (WeChat reopened by its URL)"))
         return result
     }
 

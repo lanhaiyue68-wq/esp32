@@ -1180,6 +1180,7 @@ extension AppModel {
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
                                       stepLimit: phone ? agent.maxSteps : 25, fastText: true, directStart: phone)
             agent.endAfterSend = nil
+            afterPhoneTask = phone
             if phone, let source = phoneMessages.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
@@ -1480,7 +1481,10 @@ extension AppModel {
     /// back from another WeChat chat; or WeChat again through Lan Agent. Every step is checked on a fresh frame and
     /// anything unclear stops here (the agent's run takes over as before).
     private func walkToChat(_ chat: String, look: () async -> Data?) async -> Bool {
-        var hopped = false, blindBacks = 0
+        // Right after a phone task an unknown screen is most likely another app: WeChat's back chevron spot is Claude's
+        // menu there, tapped twice for nothing before the hop (logs 11-06, 9 s). Known WeChat chats still go back.
+        var hopped = false, blindBacks = afterPhoneTask ? 2 : 0
+        afterPhoneTask = false
         for _ in 0..<7 {
             // Lan Agent in front: a tap would land on this app
             guard watching, !Task.isCancelled, UIApplication.shared.applicationState != .active,

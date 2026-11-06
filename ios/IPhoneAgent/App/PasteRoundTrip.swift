@@ -5,7 +5,8 @@ import Foundation
     static func perform(_ text: String, isActive: () -> Bool,
                         previousApp: () async throws -> Void, nextApp: () async throws -> Void,
                         waitForAgent: () async -> Bool, put: (String) -> Bool,
-                        verifySource: () async -> Bool) async -> PasteHopResult {
+                        verifySource: () async -> Bool,
+                        reopenSource: (() async throws -> Void)? = nil) async -> PasteHopResult {
         guard !Task.isCancelled, !isActive() else { return .lost }
         do {
             var hops = 0
@@ -20,11 +21,17 @@ import Foundation
                 return .lost
             }
             let filled = put(text)
-            // Undo every switch, including switches through an unrelated app. Filling the clipboard alone is
-            // insufficient: Cmd+V is allowed only when a fresh frame confirms the original destination.
-            for _ in 0..<hops {
+            // Undo every switch, including switches through an unrelated app, or open the source app directly when it
+            // can be (WeChat): reversed swipes stopped in Claude when it sat between them (logs 11-06). Filling the
+            // clipboard alone is insufficient: Cmd+V is allowed only when a fresh frame confirms the original destination.
+            if let reopenSource {
                 try Task.checkCancellation()
-                try await nextApp()
+                try await reopenSource()
+            } else {
+                for _ in 0..<hops {
+                    try Task.checkCancellation()
+                    try await nextApp()
+                }
             }
             guard !Task.isCancelled, !isActive(), await verifySource() else { return .lost }
             return filled ? .filled : .refused

@@ -652,10 +652,12 @@ extension Pointer: Gestures {}
     /// nothing hands the run to the model from there; the replayed steps are in its recent actions.
     func replay() async throws {
         guard let routes, learnedRoutes, phone != nil, let first = screen?.frame, let scene = Vision.experienceScene(first),
-              let route = routes.match(task: task, scene: scene, aspect: screen?.aspect ?? 0) else { return }
+              let entry = routes.entry(task: task, scene: scene, aspect: screen?.aspect ?? 0) else { return }
+        let route = entry.route, from = entry.from
         replayedRoute = route.id
+        if from > 0 { DebugLog.write("route: joined at step \(from + 1) of \(route.steps.count), the screen this run starts on") }
         var walked = 0, stop = ""
-        walk: for step in route.steps {
+        walk: for step in route.steps[from...] {
             try Task.checkCancellation()
             try await gate?()
             guard let shown = screen?.frame, let here = Vision.experienceScene(shown),
@@ -688,8 +690,8 @@ extension Pointer: Gestures {}
             guard changed else { stop = "a step changed nothing"; break }
             walked += 1
         }
-        if walked < route.steps.count { routes.missed(route.id) }
-        DebugLog.write("route: replayed \(walked)/\(route.steps.count) learned steps without the model"
+        if walked < route.steps.count - from { routes.missed(route.id) }
+        DebugLog.write("route: replayed \(walked)/\(route.steps.count - from) learned steps without the model"
                        + (stop.isEmpty ? "" : "; stopped: \(stop)"))
     }
 

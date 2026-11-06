@@ -37,6 +37,16 @@ import XCTest
         XCTAssertNil(phone.clipboard)
     }
 
+    // logs 11-06 (build89): Claude sat between WeChat and Lan Agent; the reversed swipes stopped in Claude.
+    func testReopeningTheSourceAppReturnsThereWhateverTheAppOrder() async {
+        let phone = PasteApps(["Lan Agent", "Claude", "WeChat"], at: 2)
+        phone.restoreWrongApp = true  // reversing the swipes would not reach WeChat
+        let result = await phone.paste("收到，我去处理。", reopen: true)
+        XCTAssertEqual(result, .filled)
+        XCTAssertEqual(phone.current, "WeChat")
+        XCTAssertEqual(phone.visited, ["Claude", "Lan Agent", "WeChat"], "one direct return, no reverse swipes")
+    }
+
     func testFailureToFindLanAgentNeverWritesTheClipboard() async {
         let phone = PasteApps(["WeChat", "Claude"], at: 1)
         let result = await phone.paste("你好")
@@ -128,8 +138,12 @@ import XCTest
 
     init(_ apps: [String], at index: Int) { self.apps = apps; self.index = index }
 
-    func paste(_ text: String) async -> PasteHopResult {
+    func paste(_ text: String, reopen: Bool = false) async -> PasteHopResult {
         let source = current
+        let reopenSource: (() async throws -> Void)? = reopen ? {
+            self.index = self.apps.firstIndex(of: source) ?? self.index
+            self.visited.append(self.current)
+        } : nil
         return await PasteRoundTrip.perform(text, isActive: { self.current == "Lan Agent" }, previousApp: {
             self.index = max(0, self.index - 1); self.visited.append(self.current)
         }, nextApp: {
@@ -139,6 +153,6 @@ import XCTest
             guard self.current == "Lan Agent", self.allowClipboard else { return false }
             self.clipboard = text
             return true
-        }, verifySource: { self.current == source && self.current != "Lan Agent" })
+        }, verifySource: { self.current == source && self.current != "Lan Agent" }, reopenSource: reopenSource)
     }
 }

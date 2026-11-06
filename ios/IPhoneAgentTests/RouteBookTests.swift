@@ -102,6 +102,45 @@ import XCTest
         XCTAssertEqual(phone.taps.count, 1, "the second step was learned on another screen")
         XCTAssertEqual(agent.steps.filter { $0["source"] == .str("route") }.count, 1)
     }
+
+    // logs 11-06: "go to Claude" was learned starting inside WeChat; the next same task began on the Home Screen.
+    func testARunStartingFurtherAlongJoinsTheRouteAtThatStep() throws {
+        let book = RouteBook(file: nil)
+        let chatScene = try XCTUnwrap(Vision.experienceScene(chat)), homeScene = try XCTUnwrap(Vision.experienceScene(home))
+        let task = "你现在去 claude 给他发一句你好"
+        book.store(task: task, aspect: 0.46, steps: [
+            .init(action: "home", values: [], scene: chatScene),
+            .init(action: "tap", values: [386, 708], scene: homeScene, anchor: "Claude", offsetX: 0, offsetY: -40)])
+        XCTAssertEqual(book.entry(task: task, scene: homeScene, aspect: 0.46)?.from, 1)
+        XCTAssertEqual(book.entry(task: task, scene: chatScene, aspect: 0.46)?.from, 0)
+        XCTAssertNil(book.entry(task: "你现在去 chatgpt 给他发一句你好", scene: homeScene, aspect: 0.46), "never into another app")
+    }
+
+    func testAJoinedReplayWalksOnlyTheRestOfTheRoute() async throws {
+        let screen = RouteScreen(frames: [list, chat])  // already past the first step (it was taken on home)
+        let phone = RoutePhone(screen: screen)
+        let model = FakeModel { _ in "DO: done 已打开" }
+        let agent = AgentLoop(phone: phone, screen: screen, actor: model, planner: model, trace: nil)
+        let book = RouteBook(file: nil)
+        book.store(task: "打开微信看蓝海乐", aspect: 0.46, steps: [
+            .init(action: "tap", values: [850, 590], scene: try XCTUnwrap(Vision.experienceScene(home))),
+            .init(action: "tap", values: [500, 400], scene: try XCTUnwrap(Vision.experienceScene(list)))])
+        agent.routes = book
+        agent.directStart = true
+        try agent.start("打开微信看蓝海乐")
+        for _ in 0..<200 where agent.running { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertEqual(phone.taps.count, 1)
+        XCTAssertEqual(Double(try XCTUnwrap(phone.taps.first).y), 0.4, accuracy: 0.001, "the step learned on this screen")
+        XCTAssertEqual(book.routes.first?.misses, 0, "joining part way is not a miss")
+    }
+
+    func testATimeOrACountIsNeverAnAnchor() throws {
+        let steps: [JObject] = [tap(850, 590), tap(500, 300), ["action": .str("done")]]
+        let route = try XCTUnwrap(RouteBook.route(steps: steps, shots: [0: home, 1: list]) { _, p in
+            p.y == 0.3 ? ("20:20", p) : ("微信", p)
+        })
+        XCTAssertEqual(route.map(\.anchor), ["微信"], "the route ends before a tap on a time, which changes by the next run")
+    }
 }
 
 @MainActor private final class RouteScreen: ScreenSource {
