@@ -13,7 +13,7 @@ struct AboutView: View {
         List {
             Section {
                 VStack(spacing: Space.m) {
-                    Image("Logo").resizable().scaledToFit().frame(width: 96, height: 96)
+                    Image("LaunchLogo").resizable().scaledToFit().frame(width: 96, height: 96)
                         .accessibilityHidden(true)
                     Text(verbatim: "Lan Agent").font(.title2.bold())
                     Text("Version \(version)").font(.subheadline).foregroundStyle(.secondary)

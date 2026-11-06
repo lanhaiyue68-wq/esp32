@@ -11,6 +11,11 @@ settings:
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1"
+  configs:
+    # The CI packages `xcodebuild build`, which never strips: build85 shipped 79k symbols, 62% of the 9.6 MB binary.
+    Release:
+      DEPLOYMENT_POSTPROCESSING: "YES"
+      STRIP_INSTALLED_PRODUCT: "YES"
 targets:
   IPhoneAgent:
     type: application
@@ -62,6 +67,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(IA_BUNDLE_ID)
         PRODUCT_NAME: IPhoneAgent
+        TARGETED_DEVICE_FAMILY: "1"  # the target preset says iPhone + iPad; this is an iPhone tool
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -89,6 +95,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(IA_BUNDLE_ID).activity
         CODE_SIGN_ENTITLEMENTS: $(IA_WIDGET_ENTITLEMENTS)
         PRODUCT_NAME: AgentActivity
+        TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES

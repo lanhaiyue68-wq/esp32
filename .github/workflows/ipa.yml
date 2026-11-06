@@ -48,6 +48,10 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print UIBackgroundModes' "$app/Info.plist"
           # A guarded source file must not silently disappear under an older SDK.
           otool -L "$app/IPhoneAgent" | grep ScreenCaptureKit
+          # Release must ship stripped binaries (build85: 79k symbols, 62% of the app binary).
+          ls -l "$app/IPhoneAgent" "$app/PlugIns/AgentActivity.appex/AgentActivity" "$app/Assets.car"
+          syms=$(nm "$app/IPhoneAgent" | wc -l); echo "app symbols: $syms"
+          test "$syms" -lt 20000
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
           (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
           shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256

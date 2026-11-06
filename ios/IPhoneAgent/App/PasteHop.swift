@@ -26,22 +26,39 @@ extension AppModel {
         }, nextApp: {
             try await self.pointer.nextApp()
             returnedAt = now()
-            guard await self.waitForState(.background, within: 3) else {
-                throw DeviceError(message: "paste hop did not leave Lan Agent")
+            if !(await self.waitForState(.background, within: 3)) {
+                // After a few seconds in the app reached, iOS moves it to the front of the app order: the original app
+                // is then behind Lan Agent and the reverse swipe does nothing (logs 11-06: 8 s in Lan Agent, stuck).
+                // The forward swipe reaches it; the source check below still decides whether it is the right screen.
+                DebugLog.write("paste hop: reverse swipe stayed in Lan Agent; swiping the other way")
+                try await self.pointer.previousApp()
+                returnedAt = now()
+                guard await self.waitForState(.background, within: 3) else {
+                    throw DeviceError(message: "paste hop did not leave Lan Agent")
+                }
             }
             try await Task.sleep(nanoseconds: 600_000_000)
         }, waitForAgent: {
             await self.waitForState(.active, within: 2.5)
         }, put: { Pasteboard.put($0) }, verifySource: {
-            await self.feed.afterAction(since: returnedAt)
-            do { try await self.feed.requireFrame(after: returnedAt) } catch {
-                DebugLog.write("paste hop: return frame freshness unverified")
-                return false
+            // WeChat's banners for other chats cover the title for a few seconds (logs 11-06: 2 of 4 hops refused the
+            // right chat). Look again 2 and 4 s later; every look is a fresh frame held to the same strict match.
+            for attempt in 0..<3 {
+                if attempt > 0 { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+                let since = attempt == 0 ? returnedAt : now()
+                await self.feed.afterAction(since: since)
+                do { try await self.feed.requireFrame(after: since) } catch {
+                    DebugLog.write("paste hop: return frame freshness unverified")
+                    return false
+                }
+                guard !Task.isCancelled, UIApplication.shared.applicationState == .background,
+                      let returned = self.feed.frame else { return false }
+                let matched = PasteRoundTrip.matchesSource(source, returned)
+                self.agent.trace?.write(returned, kind: "paste target",
+                                        ["stage": .str("return"), "matched": .bool(matched), "look": .int(attempt + 1)])
+                if matched { return true }
             }
-            guard UIApplication.shared.applicationState == .background, let returned = self.feed.frame else { return false }
-            let matched = PasteRoundTrip.matchesSource(source, returned)
-            self.agent.trace?.write(returned, kind: "paste target", ["stage": .str("return"), "matched": .bool(matched)])
-            return matched
+            return false
         })
         DebugLog.write("paste hop: \(result), original target \(result == .lost ? "unverified" : "verified")")
         return result

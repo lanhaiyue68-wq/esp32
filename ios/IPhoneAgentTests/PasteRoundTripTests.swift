@@ -71,13 +71,37 @@ import XCTest
         XCTAssertTrue(PasteRoundTrip.matchesSource(conversation(input: "nihao"), conversation(input: "")))
     }
 
-    private func conversation(input: String) -> Data {
+    // logs 11-06: the back button's unread count went 321 → 322 while Lan Agent filled the clipboard.
+    func testANewUnreadCountOnTheBackButtonStillVerifiesTheSameConversation() {
+        XCTAssertTrue(PasteRoundTrip.matchesSource(conversation(input: "", badge: "321"),
+                                                   conversation(input: "", badge: "322")))
+    }
+
+    // logs 11-06: a WeChat banner for another group covered the title. That frame cannot verify; the hop looks again.
+    func testAFrameWithABannerOverTheTitleIsNotTakenAsTheTarget() {
+        XCTAssertFalse(PasteRoundTrip.matchesSource(conversation(input: ""), conversation(input: "", banner: true)))
+    }
+
+    func testAnotherConversationWithTheSameMessageIsStillRefused() {
+        XCTAssertFalse(PasteRoundTrip.matchesSource(conversation(input: ""),
+                                                    conversation(input: "", title: "SOMEONE ELSE")))
+    }
+
+    private func conversation(input: String, title: String = "WECHAT OWNER", badge: String? = nil,
+                              banner: Bool = false) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let white: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white]
         return UIGraphicsImageRenderer(size: CGSize(width: 720, height: 1560), format: format).image { ctx in
             UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 720, height: 1560))
-            for (text, y) in [("WECHAT OWNER", 170.0), ("HELLO THERE", 350.0), (input, 825.0)] {
-                (text as NSString).draw(at: CGPoint(x: 80, y: y),
-                    withAttributes: [.font: UIFont.systemFont(ofSize: 40), .foregroundColor: UIColor.white])
+            if let badge { (badge as NSString).draw(at: CGPoint(x: 20, y: 170), withAttributes: white) }
+            for (text, y) in [(title, 170.0), ("HELLO THERE", 350.0), (input, 825.0)] {
+                (text as NSString).draw(at: CGPoint(x: badge == nil ? 80 : 300, y: y), withAttributes: white)
+            }
+            if banner {
+                UIColor(white: 0.85, alpha: 1).setFill()
+                UIBezierPath(roundedRect: CGRect(x: 16, y: 24, width: 688, height: 200), cornerRadius: 36).fill()
+                ("OTHER GROUP NEW PHOTO" as NSString).draw(at: CGPoint(x: 60, y: 100),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 36), .foregroundColor: UIColor.black])
             }
         }.jpegData(compressionQuality: 0.9)!
     }

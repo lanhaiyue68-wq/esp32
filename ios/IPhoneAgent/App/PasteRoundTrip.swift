@@ -38,9 +38,14 @@ import Foundation
               a.width == b.width, a.height == b.height else { return false }
         // Ignore the status bar, input field and keyboard. Match readable content as well as layout: two dark chat apps can
         // otherwise have almost identical coarse images. Unreadable screens cannot authorize a paste.
+        // Pieces that are only a number are not compared: the back button's unread count changes by itself during the
+        // few seconds away (logs 11-06: 321 → 322 refused the right chat). A banner over the title still refuses this
+        // frame; the caller looks again once it has gone.
         func words(_ data: Data) -> String {
-            CandidatePicker.bare(CandidatePicker.rows(in: data, top: 0.06, bottom: 0.48)
-                .flatMap { $0 }.map(\.text).joined()).lowercased()
+            CandidatePicker.rows(in: data, top: 0.06, bottom: 0.48).flatMap { $0 }
+                .map { CandidatePicker.bare($0.text) }
+                .filter { !$0.allSatisfy(\.isNumber) }  // unread counts (and pieces with no letters)
+                .joined().lowercased()
         }
         let source = words(before)
         guard source.count >= 2, source == words(after) else {
