@@ -14,7 +14,7 @@ import XCTest
 
     func testEveryTapStartsFromTheCorner() async throws {
         let (p, device) = pointer()
-        for _ in 0..<3 { try await p.tap(0.5, 0.5) }
+        for x in [0.3, 0.5, 0.7] { try await p.tap(x, 0.5) }  // build96: the same spot again clicks in place
         let homes = device.sent.enumerated().filter { $0.element == "home" }.map(\.offset)
         let clicks = device.sent.enumerated().filter { $0.element == "click" }.map(\.offset)
         XCTAssertEqual(homes.count, 3)

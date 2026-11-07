@@ -38,6 +38,7 @@ import Foundation
     @Published private(set) var span: Span?  // mouse units needed to cross the full screen width / height
     private var pos: (Int, Int)?  // pointer position in mouse units; nil = unknown
     private var moves = 0
+    private var lastClick: LastClick?  // the last tap's spot, for clicking again in place
     private var strokeCommand: Bool?  // does the firmware take `stroke` (v16+)? nil until the first drawing tries it
     // A run of drawing strokes (circle/path) re-homes to the corner only at its start, then continues from the tracked
     // position: no trip to the top-left between every stroke. Any tap or other gesture ends the run (clears drawChain),
@@ -93,6 +94,7 @@ import Foundation
     /// `progress` gets 0 (homing), then 1, 2 (each probe).
     func startCalibration(progress: ((Int) -> Void)? = nil) async throws -> Bool {
         pos = nil
+        lastClick = nil
         progress?(0)
         try await device.send("home")
         var found: [(Int, Double, Double)] = []
@@ -150,6 +152,7 @@ import Foundation
     /// x, y: where the pointer ended up after startCalibration() (one point, picked by the user).
     func finishCalibration(x: Double, y: Double) {
         maps = nil
+        lastClick = nil
         requiresFeedback = false
         (quality, aspect, stale) = (nil, screenAspect(), false)
         span = Span(w: Int((Double(Self.calibrationMove) / x).rounded(.toNearestOrEven)), h: Int((Double(Self.calibrationMove) / y).rounded(.toNearestOrEven)))
@@ -160,6 +163,7 @@ import Foundation
     /// Touch-probe result: per-axis lines landed = a * units + b fitted from taps the app caught itself.
     /// The span is 1/a; every probe becomes a landing sample, so `fix` also corrects the offset b.
     @discardableResult func applyProbe(x: ProbeFit.Line, y: ProbeFit.Line, samples: [(ux: Double, uy: Double, fx: Double, fy: Double)], feedback: Bool = false) -> Bool {
+        lastClick = nil  // calibration moved the pointer behind the tracked position
         if !provisional { backup = snapshot() }
         provisional = true
         let mx = ProbeMap(samples.map { ($0.ux, $0.fx) }), my = ProbeMap(samples.map { ($0.uy, $0.fy) })
@@ -199,6 +203,7 @@ import Foundation
 
     /// Failed/missing checks restore the previous parameters and mark them due for remeasurement.
     func discardProbe() {
+        lastClick = nil
         if provisional {
             span = backup.map { Span(w: $0.w, h: $0.h) }
             maps = backup?.maps
@@ -433,6 +438,7 @@ import Foundation
     /// Let go of the button and re-home the pointer, whatever state a gesture left.
     func reset() async throws {
         pos = nil
+        lastClick = nil
         drawChain = false
         unitsSinceDrawHome = 0
         try await device.send("release")
@@ -451,13 +457,36 @@ import Foundation
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
 
-    /// Every tap starts from the corner. aim: find the pointer and correct it first, and never click unseen.
+    /// A tap starts from the corner, except a tap again on the spot just clicked: the pointer still rests where that
+    /// click landed, so it clicks again without moving (logs(9) 11-08: five globe-key taps each went back to the
+    /// corner first, ~3 s apiece). aim: find the pointer and correct it first, and never click unseen; an aimed tap
+    /// always moves, since it follows a tap that changed nothing.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
+        if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
+            log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
+            try await device.send("click")
+            lastClick?.time = Date().timeIntervalSince1970
+            try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+            return
+        }
+        lastClick = nil
         pos = nil
         try await point(x, y, aim: aim)
         try await device.send("click")
+        if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
+    struct LastClick: Equatable { var x: Double, y: Double, ux: Int, uy: Int, link: Int, time: Double }
+    static let sameSpot = 0.004       // screen fraction: model coordinates on a 0-1000 grid repeat exactly
+    static let clickAgainWindow = 60.0  // seconds; after longer the user may have touched or moved things
+
+    /// Click again in place only when nothing has moved the pointer since the last click (its tracked position is
+    /// unchanged and the board link is the same) and the target is that same spot.
+    static func clickAgain(_ last: LastClick, _ x: Double, _ y: Double, units: (Int, Int), link: Int, at now: Double) -> Bool {
+        abs(last.x - x) <= sameSpot && abs(last.y - y) <= sameSpot && units == (last.ux, last.uy)
+            && link == last.link && now - last.time >= 0 && now - last.time <= clickAgainWindow
     }
 
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool = true) async throws {

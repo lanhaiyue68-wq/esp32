@@ -40,6 +40,32 @@ enum CandidatePicker {
         return CGPoint(x: hit.box.midX, y: hit.box.midY)
     }
 
+    /// Rows of the keyboard menu a pointer click on the globe key opens; any one shows the menu is up.
+    /// Menu-only labels: not keyboard keys (拼音 is one), so a chat line next to the keyboard never counts.
+    static let keyboardMenuWords = ["englishus", "englishuk", "表情符号", "表情符號", "emoji", "键盘设置", "鍵盤設定",
+                                    "鍵盤設置", "键盘设定", "keyboardsettings"]
+
+    /// The keyboard menu is open: one of its menu-only rows shows.
+    static func keyboardMenuOpen(rows: [[Piece]]) -> Bool {
+        rows.contains { row in keyboardMenuWords.contains { bare(row.map(\.text).joined()).lowercased().hasPrefix($0) } }
+    }
+
+    /// Where "Lan Agent" is in the open keyboard menu, 0-1 screen coordinates. The row must read exactly "Lan Agent"
+    /// (a chat bubble mentioning it has more text) and sit in one left-aligned column with another menu row.
+    static func keyboardMenuEntry(rows: [[Piece]]) -> CGPoint? {
+        func plain(_ s: String) -> String { bare(s).lowercased() }
+        func line(_ row: [Piece]) -> String { plain(row.map(\.text).joined()) }
+        func left(_ row: [Piece]) -> Double { Double(row.map(\.box.minX).min() ?? 1) }
+        let markers = rows.filter { row in keyboardMenuWords.contains { line(row).hasPrefix($0) } }.map(left)
+        guard !markers.isEmpty else { return nil }
+        for row in rows where !row.isEmpty && line(row) == "lanagent" {
+            let box = row.dropFirst().reduce(row[0].box) { $0.union($1.box) }
+            guard box.midX < 0.7, markers.contains(where: { abs($0 - Double(box.minX)) < 0.08 }) else { continue }
+            return CGPoint(x: box.midX, y: box.midY)
+        }
+        return nil
+    }
+
     /// Key labels of the iPhone keyboards (9-key and full pinyin, English).
     static let keyboardWords: Set<String> = ["ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ", "空格", "space",
                                              "return", "确认", "发送", "分隔", "选拼音", "选定", "换行", "123", "拼"]

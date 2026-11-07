@@ -8,29 +8,57 @@ extension AppModel {
     /// The globe key under every keyboard on this iPhone, bottom left (logs 11-06/11-08 screenshots: 72,1218 of 592x1280).
     static let globeKey = CGPoint(x: 0.122, y: 0.952)
 
-    /// Lan Agent's keyboard on screen for the focused field: the globe key cycles keyboards until it reports in, at
-    /// most `taps` times. Only while a system keyboard shows: without one, the globe's spot is the app's own control
-    /// (WeChat's voice button), so nothing is tapped and the caller focuses the field first.
-    func showLanAgentKeyboard(taps: Int = 5) async -> Bool {
+    /// Lan Agent's keyboard on screen for the focused field. A pointer click on the globe key does not switch
+    /// keyboards: it opens the keyboard menu (logs(9) 11-08 frame: 鍵盤設定…, 简体拼音, English (US), 表情符號, 繁體拼音,
+    /// Lan Agent), so five globe taps only opened and closed that menu. Click the globe once, then "Lan Agent" in the
+    /// menu; a menu already open is used as it is. Only while a system keyboard shows: without one, the globe's spot
+    /// is the app's own control (WeChat's voice button), so nothing is tapped and the caller focuses the field first.
+    func showLanAgentKeyboard(tries: Int = 3) async -> Bool {
         if keyboardBridge.onScreen() { return true }
-        for attempt in 1...taps {
-            guard let frame = await freshFrame(), CandidatePicker.keyboardUp(in: frame) else {
+        for attempt in 1...tries {
+            guard let frame = await freshFrame() else { return keyboardBridge.onScreen() }
+            let rows = CandidatePicker.rows(in: frame, top: 0.3, bottom: 1)
+            if CandidatePicker.keyboardMenuOpen(rows: rows) { return await useKeyboardMenu(rows, attempt) }
+            guard CandidatePicker.keyboardUp(in: frame) else {
                 if keyboardBridge.onScreen() { return true }
                 DebugLog.write("keyboard: no keyboard on screen to switch from")
                 return false
             }
             do { try await pointer.tap(Self.globeKey.x, Self.globeKey.y) } catch { return false }
-            let deadline = now() + 1.4
-            while now() < deadline {
-                if keyboardBridge.onScreen() {
-                    DebugLog.write("keyboard: Lan Agent's keyboard on screen after \(attempt) globe tap(s)")
-                    return true
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000)
+            if await lanAgentKeyboardUp(within: 0.6) {
+                DebugLog.write("keyboard: Lan Agent's keyboard on screen after the globe key (try \(attempt))")
+                return true
             }
+            guard let after = await freshFrame() else { continue }
+            let menu = CandidatePicker.rows(in: after, top: 0.3, bottom: 1)
+            if CandidatePicker.keyboardMenuOpen(rows: menu) { return await useKeyboardMenu(menu, attempt) }
+            DebugLog.write("keyboard: the globe key switched to another keyboard (try \(attempt))")  // next try: in place
         }
-        DebugLog.write("keyboard: Lan Agent's keyboard did not come up after \(taps) globe taps (is it added in Settings › Keyboards?)")
+        DebugLog.write("keyboard: Lan Agent's keyboard did not come up after \(tries) tries (is it added in Settings › Keyboards?)")
         return false
+    }
+
+    /// The keyboard menu is open: click "Lan Agent" in it. Without that row (not added, or not read), close the menu
+    /// with the globe key once and let the caller fall back, never toggling it open and shut.
+    private func useKeyboardMenu(_ rows: [[CandidatePicker.Piece]], _ attempt: Int) async -> Bool {
+        guard let entry = CandidatePicker.keyboardMenuEntry(rows: rows) else {
+            DebugLog.write("keyboard: the keyboard menu has no Lan Agent row (try \(attempt)); closing it")
+            try? await pointer.tap(Self.globeKey.x, Self.globeKey.y)
+            return false
+        }
+        do { try await pointer.tap(entry.x, entry.y) } catch { return false }
+        let up = await lanAgentKeyboardUp(within: 1.5)
+        DebugLog.write("keyboard: picked Lan Agent in the keyboard menu (try \(attempt)): \(up ? "on screen" : "not reported")")
+        return up
+    }
+
+    private func lanAgentKeyboardUp(within seconds: Double) async -> Bool {
+        let deadline = now() + seconds
+        while now() < deadline {
+            if keyboardBridge.onScreen() { return true }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return keyboardBridge.onScreen()
     }
 
     /// `text` into the focused field by Lan Agent's keyboard; false when the keyboard could not be shown or did not
