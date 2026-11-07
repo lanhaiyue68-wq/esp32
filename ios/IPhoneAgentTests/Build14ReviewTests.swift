@@ -57,8 +57,10 @@ import XCTest
         // Only a corner keeps changing, far from where the model taps (two spots, so never "the same spot again").
         let frames = [frame(square: nil), frame(square: (400, 150, 40))]
         let (agent, phone) = await run(frames: frames, targets: ["500 500", "500 560"], steps: 3)
-        XCTAssertEqual(phone.calls, ["tap"])  // two looks dropped, the third acts: nothing changed where it lands
-        XCTAssertEqual(stale(agent), 2)
+        // logs 11-08: each dropped look was another 7–15 s model call. Nothing changed where the tap lands: it acts.
+        XCTAssertEqual(stale(agent), 0)
+        XCTAssertEqual(phone.calls.first, "tap")
+        XCTAssertTrue(phone.calls.allSatisfy { $0 == "tap" })
     }
 
     func testALiveTargetChosenAgainOnTheNewerScreenIsTapped() async {

@@ -821,10 +821,14 @@ extension Pointer: Gestures {}
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
                     // still (a live clock icon, a video, an animated background): when the model, looking again at a
-                    // newer screen, picks the same spot, the change did not move the target; after two drops, a spot
-                    // where nothing changed is fine too.
+                    // newer screen, picks the same spot, the change did not move the target. An action with a target
+                    // goes ahead at once when nothing changed where it lands (a new bubble, the keyboard rising elsewhere):
+                    // each drop is another model call, 7–15 s each when the model was slow (logs 11-08: 4 drops in one
+                    // report). Without a target (typing, keys) that waits for two drops as before.
                     let again = lastStale.map { Self.sameSpot($0, act) } ?? false
-                    let safe = again || (staleRun > 2 && !Vision.changedNear(seen, screen?.frame, around: pointerPath(act)))
+                    let target = pointerPath(act)
+                    let safe = again || ((staleRun > 2 || !target.isEmpty)
+                        && !Vision.changedNear(seen, screen?.frame, around: target))
                     if !safe {
                         lastStale = act
                         if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh

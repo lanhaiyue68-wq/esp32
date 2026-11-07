@@ -907,6 +907,7 @@ extension AppModel {
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
+        watchStartedAt = now()
         watchJob = Task { [weak self] in await self?.watchLoop() }
         let r = WatchSettings.rules, pin = WatchSettings.ownerPIN
         // What owner authority hangs on, once per start (build 64–65: a passcode task never ran, and nothing said why).
@@ -1253,6 +1254,14 @@ extension AppModel {
             return
         }
         watchStatus = String(localized: "Reporting the phone task result…")
+        if UIApplication.shared.applicationState == .active, now() - watchStartedAt < 15 {
+            // Only right after Start (never when the user opened Lan Agent during a watch).
+            // A watch starting with a report to deliver: Lan Agent is in front, where the quick send cannot run, so the
+            // report became a model run from the Home Screen looking for WeChat's icon (logs 11-08: 68 s and 155 s with
+            // the model answering in 15 s). WeChat directly by its URL; the quick send walks to the chat on the phone.
+            let opened = await hopToWeChat(seesWeChat: { false })
+            DebugLog.write("watch: report at start: WeChat opened by its URL: \(opened ? "yes" : "no")")
+        }
         if await sendReply(result.text, chat: result.chat, back: !WatchSettings.rules.single) {
             watchTaskReply = nil
             watchTaskReplyFailures = 0

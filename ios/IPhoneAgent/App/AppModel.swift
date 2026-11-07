@@ -107,6 +107,7 @@ import UIKit
     var watchLast: [String: [WatchReport.Line]] = [:] { didSet { WatchReport.saveLooks(watchLast) } }
     var pasteHopping = false  // Lan Agent is in front for a paste (hopToPaste): not a reason to hold the run
     var afterPhoneTask = false  // a phone task just ran (maybe in another app): the walk back skips blind back taps
+    var watchStartedAt = 0.0    // when Start was tapped: a report pending then may open WeChat directly
     var watchAnswered: [String: Double] = [:]  // a message answered, by WatchReport.answerKey: when
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
