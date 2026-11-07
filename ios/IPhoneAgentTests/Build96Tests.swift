@@ -40,6 +40,17 @@ import XCTest
         XCTAssertEqual(device.sent.filter { $0.hasPrefix("move") }.count, 3)
     }
 
+    func testLongPressHoldsThenLetsGoAndRepeatsInPlace() async throws {
+        let (p, device) = pointer()
+        try await p.longPress(0.122, 0.952, seconds: 0.05)
+        try await p.longPress(0.122, 0.952, seconds: 0.05)
+        XCTAssertEqual(device.sent.filter { $0.hasPrefix("move") }.count, 1)
+        XCTAssertEqual(device.sent.filter { $0 == "press" }.count, 2)
+        XCTAssertEqual(device.sent.filter { $0 == "release" }.count, 3)  // + the new link's release first
+        XCTAssertEqual(device.sent.last, "release")
+        XCTAssertFalse(device.sent.contains("click"))
+    }
+
     func testClickAgainOnlyInPlaceAndRecently() {
         let last = Pointer.LastClick(x: 0.122, y: 0.952, ux: 49, uy: 762, link: 1, time: 100)
         XCTAssertTrue(Pointer.clickAgain(last, 0.122, 0.952, units: (49, 762), link: 1, at: 105))

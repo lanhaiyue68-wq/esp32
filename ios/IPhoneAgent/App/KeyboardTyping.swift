@@ -8,10 +8,10 @@ extension AppModel {
     /// The globe key under every keyboard on this iPhone, bottom left (logs 11-06/11-08 screenshots: 72,1218 of 592x1280).
     static let globeKey = CGPoint(x: 0.122, y: 0.952)
 
-    /// Lan Agent's keyboard on screen for the focused field. A pointer click on the globe key does not switch
-    /// keyboards: it opens the keyboard menu (logs(9) 11-08 frame: 鍵盤設定…, 简体拼音, English (US), 表情符號, 繁體拼音,
-    /// Lan Agent), so five globe taps only opened and closed that menu. Click the globe once, then "Lan Agent" in the
-    /// menu; a menu already open is used as it is. Only while a system keyboard shows: without one, the globe's spot
+    /// Lan Agent's keyboard on screen for the focused field. Five globe clicks never brought it up (logs(9) 11-08);
+    /// holding the globe key opens the keyboard menu (鍵盤設定…, 简体拼音, English (US), 表情符號, 繁體拼音, Lan Agent),
+    /// where a click on "Lan Agent" picks it (user 11-08: a click on the globe shows no menu). Hold the globe once,
+    /// then click "Lan Agent"; a menu already open is used as it is. Only while a system keyboard shows: without one, the globe's spot
     /// is the app's own control (WeChat's voice button), so nothing is tapped and the caller focuses the field first.
     func showLanAgentKeyboard(tries: Int = 3) async -> Bool {
         if keyboardBridge.onScreen() { return true }
@@ -24,15 +24,15 @@ extension AppModel {
                 DebugLog.write("keyboard: no keyboard on screen to switch from")
                 return false
             }
-            do { try await pointer.tap(Self.globeKey.x, Self.globeKey.y) } catch { return false }
-            if await lanAgentKeyboardUp(within: 0.6) {
-                DebugLog.write("keyboard: Lan Agent's keyboard on screen after the globe key (try \(attempt))")
+            do { try await pointer.longPress(Self.globeKey.x, Self.globeKey.y) } catch { return false }
+            if await lanAgentKeyboardUp(within: 0.4) {
+                DebugLog.write("keyboard: Lan Agent's keyboard on screen after holding the globe key (try \(attempt))")
                 return true
             }
             guard let after = await freshFrame() else { continue }
             let menu = CandidatePicker.rows(in: after, top: 0.3, bottom: 1)
             if CandidatePicker.keyboardMenuOpen(rows: menu) { return await useKeyboardMenu(menu, attempt) }
-            DebugLog.write("keyboard: the globe key switched to another keyboard (try \(attempt))")  // next try: in place
+            DebugLog.write("keyboard: no keyboard menu after holding the globe key (try \(attempt))")  // next try: in place
         }
         DebugLog.write("keyboard: Lan Agent's keyboard did not come up after \(tries) tries (is it added in Settings › Keyboards?)")
         return false

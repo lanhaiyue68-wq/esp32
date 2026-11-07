@@ -478,6 +478,27 @@ import Foundation
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
 
+    /// Press and hold at a spot, then let go: the globe key shows its keyboard menu only on a long press (a click
+    /// switches nothing visible, user 11-08). Like tap, the spot just clicked is held again without moving.
+    func longPress(_ x: Double, _ y: Double, seconds: Double = 0.8) async throws {
+        drawChain = false
+        if let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
+            log(String(format: "long press (%.3f, %.3f): same spot as the last click; holding without moving", x, y))
+        } else {
+            lastClick = nil
+            pos = nil
+            try await point(x, y)
+        }
+        try await device.send("press")
+        do { try await Task.sleep(nanoseconds: UInt64(seconds * 1e9)) } catch {
+            _ = try? await device.send("release")
+            throw error
+        }
+        try await device.send("release")
+        if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
+        try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
     struct LastClick: Equatable { var x: Double, y: Double, ux: Int, uy: Int, link: Int, time: Double }
     static let sameSpot = 0.004       // screen fraction: model coordinates on a 0-1000 grid repeat exactly
     static let clickAgainWindow = 60.0  // seconds; after longer the user may have touched or moved things
