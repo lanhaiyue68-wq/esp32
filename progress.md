@@ -408,3 +408,9 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 - Learning page: 学会的 App 位置 count, cleared with all learning records. Prompts: actor/app-rules/planner prefer `open`.
 - Tests: IPhoneAgentTests/PhaseBTests.swift (open parse/step, keyboard typing + Return, ASCII still by board, screen text order/limit/prompt, AppPlaces, bridge onScreen).
 - Delivered: commits cd2c070 + f73045c (first CI 42400684561 failed: screenText sort too complex to type-check; split). CI 42400902087 green: 501 tests, 0 failures (12 PhaseBTests), app symbols 2303, keyboard appex packaged. Desktop E:/桌面/Lan-Agent-build95-unsigned.ipa 3,279,441 bytes, SHA256 0aeac02d9731d4e0f84334556e68824ff7e4252434bc34059503fea444ce9575; steps E:/桌面/Lan-Agent-build95-階段B測試步驟.md; build94 recycled. Not yet tested on the phone.
+
+## 2026-11-08 build96 keyboard menu + click in place (logs(9))
+- logs(9) (build95, 10 runs): five globe taps never brought Lan Agent's keyboard up (frame showed the keyboard menu open, Lan Agent listed); every tap homed to the corner first (35 homes for 23 clicks, ProbeMap forces rehome).
+- Change 1: `showLanAgentKeyboard` holds the globe key (Pointer.longPress, 0.8 s; user: a click shows no menu), then clicks "Lan Agent" in the menu (CandidatePicker.keyboardMenuEntry: row reading exactly "Lan Agent", left-aligned with a menu-only row such as English (US)/表情符號/鍵盤設定). A menu already open is used; a menu without that row is closed once and the caller falls back.
+- Change 2: Pointer.tap/longPress on the spot just clicked (≤0.004, same tracked units, same board link, ≤60 s, not aimed) clicks in place without homing.
+- Delivered: 3a5ae2c + 42e1615; CI 42404295947 green, 509 tests 0 failures (Build96Tests 9). Desktop Lan-Agent-build96-unsigned.ipa (3,286,128 bytes, SHA256 c86d7d21acc18c4dd0158cae3532b8b732e77c473d2dc6ddd0fa824cac8e570d; app + 2 appex build 96). build95 files recycled.

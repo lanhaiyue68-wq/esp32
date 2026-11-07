@@ -265,3 +265,6 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - Keep (user 2026-11-06): App Shortcuts/saved intents/demo recording, ChatTool + knowledge base, demo data, board Wi-Fi mirroring. Not used yet only because the core is still being stabilised; never remove them to slim the app.
 - [x] build95 phase B: keyboard typing everywhere, `open APP` with learned places, screen text list for the model.
 - [ ] User: phase B on the phone — open Claude, type 你好, send; the second time it must go straight to Claude without Search (if Claude is on a Home Screen page, not only in the dock).
+- [x] build96: hold globe → pick Lan Agent in the keyboard menu; click again in place on the same spot.
+- [ ] Device test build96 (Lan Agent via menu; does the menu stay after release; board Enter sends with our keyboard up; in-place repeat clicks).
+- [ ] build97 candidates (user 11-08): nearby moves from the current pointer spot (keep Bezier, no corner every tap); WeChat only enters chats with a red unread number, never resumes an already-read chat or a saved old report; keyboard-switch method remembered (self-learning of fixed steps).

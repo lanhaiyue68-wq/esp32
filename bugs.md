@@ -285,3 +285,10 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - Our keyboard shows no letter keys, so "keyboard up" checks miss it: focusBox (quick send) and the paste hop's box tap now skip when the keyboard reports in, else the tap would land on its 空格/換行 key.
 - Known limit: apps in the dock have no label under the icon, so `open` cannot learn their spot; they are opened by Search each time.
 - To confirm on the phone: board Enter sends in WeChat/Claude while Lan Agent's keyboard is up (phase A ③ typed, sending not yet confirmed).
+
+## 2026-11-08 logs(9) build95
+- Globe taps did not switch to Lan Agent: a pointer click on the globe opens nothing/menu toggling; menu needs a long press (user). Fixed build96 (hold + menu pick).
+- Every tap re-homed to the corner (Pointer.moveTo rehomes whenever ProbeMap is set; X then Y moves). build96 only fixes same-spot repeats; nearby moves pending (build97).
+- WeChat resumed old work: WatchTaskReply persisted in UserDefaults is resent at watch start; navigator prompt "already in a chat in scope → done, don't check unread" picked out-of-scope 小柳、. Pending build97.
+- Mirror never connected: board waited for xiaomi_804/HUAWEI-510, not on the phone's Wi-Fi within 30 s. Needs user's network info.
+- Alarm task: model did not use `open`, pinyin typed 始终, wandered to Google/App Store, step limit.
