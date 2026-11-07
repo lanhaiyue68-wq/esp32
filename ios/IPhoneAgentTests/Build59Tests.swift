@@ -14,11 +14,14 @@ import XCTest
 
     func testEveryTapStartsFromTheCorner() async throws {
         let (p, device) = pointer()
-        for x in [0.3, 0.5, 0.7] { try await p.tap(x, 0.5) }  // build96: the same spot again clicks in place
+        // build97 (user 11-08): only the first tap starts from the corner; the next ones go from where it rests.
+        for x in [0.3, 0.5, 0.7] { try await p.tap(x, 0.5) }
         let homes = device.sent.enumerated().filter { $0.element == "home" }.map(\.offset)
         let clicks = device.sent.enumerated().filter { $0.element == "click" }.map(\.offset)
-        XCTAssertEqual(homes.count, 3)
-        for (h, c) in zip(homes, clicks) { XCTAssertLessThan(h, c) }
+        XCTAssertEqual(homes.count, 1)
+        XCTAssertEqual(clicks.count, 3)
+        XCTAssertLessThan(homes[0], clicks[0])
+        XCTAssertEqual(device.sent.filter { $0.hasPrefix("move") }, ["move 120 400", "move 80 0", "move 80 0"])
     }
 
     func testQuickTypingSendsPinyinAndCommitsEachChunkWithSpace() async throws {

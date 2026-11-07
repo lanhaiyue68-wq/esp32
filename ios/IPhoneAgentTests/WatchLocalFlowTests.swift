@@ -48,7 +48,7 @@ import UIKit
         XCTAssertEqual(result, .nothing)
         result = await WatchChatOpen.open(phone: phone, screen: LocalScreen(), rules: rules, canAct: { true },
                                           inspectList: { _ in .unknown }, title: { _ in "张三" })
-        XCTAssertEqual(result, .opened("张三"))
+        XCTAssertEqual(result, .inChat("张三"))  // build97: not read in place; back to the list for red numbers
         XCTAssertTrue(phone.calls.isEmpty)
     }
 

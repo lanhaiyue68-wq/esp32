@@ -39,6 +39,7 @@ import Foundation
     private var pos: (Int, Int)?  // pointer position in mouse units; nil = unknown
     private var moves = 0
     private var lastClick: LastClick?  // the last tap's spot, for clicking again in place
+    private var hops = 0  // nearby taps since the pointer was last homed
     private var strokeCommand: Bool?  // does the firmware take `stroke` (v16+)? nil until the first drawing tries it
     // A run of drawing strokes (circle/path) re-homes to the corner only at its start, then continues from the tracked
     // position: no trip to the top-left between every stroke. Any tap or other gesture ends the run (clears drawChain),
@@ -426,7 +427,7 @@ import Foundation
         }
         if pos == nil || (rehome && (maps != nil || moves >= Self.rehomeEvery)) {
             if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
-            (pos, moves) = ((0, 0), 0)
+            (pos, moves, hops) = ((0, 0), 0, 0)
         }
         let (x, y) = pos!
         pos = nil  // unknown until the move succeeds
@@ -470,6 +471,22 @@ import Foundation
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
             return
         }
+        if !aim, !stale, let last = lastClick, let p = pos, hops < Self.nearbyHops,
+           Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
+            // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
+            // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
+            // an aimed tap (after one that changed nothing) always starts from the corner.
+            let (ux, uy) = hopUnits(from: last, to: x, y, units: p)
+            lastClick = nil
+            pos = nil
+            if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
+            (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
+            log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
+            try await device.send("click")
+            if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
+            try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+            return
+        }
         lastClick = nil
         pos = nil
         try await point(x, y, aim: aim)
@@ -497,6 +514,21 @@ import Foundation
         try await device.send("release")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
+    static let nearbyHops = 6      // taps from where the pointer rests before one re-homes again
+    static let hopWindow = 120.0   // seconds; after longer, start from the corner
+
+    /// The pointer still rests where the last click put it: nothing moved it since and the link is the same.
+    static func canHop(_ last: LastClick, units: (Int, Int), link: Int, at now: Double) -> Bool {
+        units == (last.ux, last.uy) && link == last.link && now - last.time >= 0 && now - last.time <= hopWindow
+    }
+
+    /// Mouse units from the last click's spot to (x, y): the measured probe maps' hop for that distance, or the
+    /// calibrated span (linear) without them.
+    func hopUnits(from last: LastClick, to x: Double, _ y: Double, units p: (Int, Int)) -> (Int, Int) {
+        if let mx = maps?["x"], let my = maps?["y"] { return (mx.hop(x - last.x), my.hop(y - last.y)) }
+        return (dx(x) - p.0, dy(y) - p.1)
     }
 
     struct LastClick: Equatable { var x: Double, y: Double, ux: Int, uy: Int, link: Int, time: Double }

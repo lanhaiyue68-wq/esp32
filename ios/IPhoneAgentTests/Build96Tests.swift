@@ -3,6 +3,26 @@ import XCTest
 
 /// build96 (logs(9) 11-08): a pointer click on the globe key opens the keyboard menu instead of switching, and every
 /// tap went back to the corner first, so five globe taps took ~16 s and never brought Lan Agent's keyboard up.
+@MainActor private final class HopPhone: HIDDevice {
+    var links = 1
+    var connected = true
+    var at = CGPoint.zero
+    var clicks: [CGPoint] = []
+    var homes = 0
+    func waitConnected(_ timeout: TimeInterval) async -> Bool { true }
+    func send(_ command: String) async throws -> String {
+        if command == "curve" { return "on" }
+        if command == "home" { at = .zero; homes += 1 }
+        if command == "click" { clicks.append(at) }
+        let parts = command.split(separator: " ")
+        if parts.first == "move", parts.count == 3, let x = Double(parts[1]), let y = Double(parts[2]) {
+            at.x = min(max(at.x + x / 300, 0), 1)
+            at.y = min(max(at.y + y / 650, 0), 1)
+        }
+        return ""
+    }
+}
+
 @MainActor final class Build96Tests: XCTestCase {
     private func pointer() -> (Pointer, FakeDevice) {
         let device = FakeDevice()
@@ -26,7 +46,8 @@ import XCTest
         try await p.tap(0.122, 0.952)
         try await p.tap(0.2, 0.78)
         try await p.tap(0.122, 0.952)
-        XCTAssertEqual(device.sent.filter { $0 == "home" }.count, 3)
+        XCTAssertEqual(device.sent.filter { $0 == "home" }.count, 1)  // build97: hops from where it rests
+        XCTAssertEqual(device.sent.filter { $0.hasPrefix("move") }.count, 3)
         XCTAssertEqual(device.sent.filter { $0 == "click" }.count, 3)
     }
 
@@ -49,6 +70,29 @@ import XCTest
         XCTAssertEqual(device.sent.filter { $0 == "release" }.count, 3)  // + the new link's release first
         XCTAssertEqual(device.sent.last, "release")
         XCTAssertFalse(device.sent.contains("click"))
+    }
+
+    // build97 (user 11-08): taps go from where the pointer rests, on the measured probe maps, and land where asked.
+    func testNearbyHopsLandOnTheProbeMapsAndReHomeEverySixHops() async throws {
+        let phone = HopPhone()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let mapX: [String: Any] = ["scatter": 0, "knots": [["units": 0, "fraction": 0], ["units": 75, "fraction": 0.25],
+                                                           ["units": 225, "fraction": 0.75], ["units": 300, "fraction": 1]]]
+        let mapY: [String: Any] = ["scatter": 0, "knots": [["units": 0, "fraction": 0], ["units": 130, "fraction": 0.2],
+                                                           ["units": 520, "fraction": 0.8], ["units": 650, "fraction": 1]]]
+        let saved: [String: Any] = ["w": 300, "h": 650, "quality": 0.01, "stale": false,
+            "motionVersion": ProbeMotion.version, "requiresFeedback": false, "maps": ["x": mapX, "y": mapY]]
+        try JSONSerialization.data(withJSONObject: saved).write(to: file)
+        let p = Pointer(device: phone, calibrationFile: file)
+        let spots = [(0.2, 0.3), (0.6, 0.7), (0.25, 0.9), (0.8, 0.1), (0.5, 0.5), (0.1, 0.6), (0.9, 0.95), (0.3, 0.2)]
+        for (x, y) in spots { try await p.tap(x, y) }
+        XCTAssertEqual(phone.clicks.count, spots.count)
+        for (hit, spot) in zip(phone.clicks, spots) {
+            XCTAssertEqual(hit.x, spot.0, accuracy: 0.01)
+            XCTAssertEqual(hit.y, spot.1, accuracy: 0.01)
+        }
+        XCTAssertEqual(phone.homes, 2, "the first tap and the one after six hops start from the corner")
     }
 
     func testClickAgainOnlyInPlaceAndRecently() {

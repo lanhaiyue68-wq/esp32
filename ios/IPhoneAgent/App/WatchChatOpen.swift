@@ -3,7 +3,9 @@ import Foundation
 /// Local navigation never reads messages or sends text. An uncertain screen stays with the existing navigator.
 @MainActor enum WatchChatOpen {
     enum View: Equatable { case chat(String), row(CGPoint), unknown }
-    enum Outcome: Equatable { case opened(String), nothing, fallback, deferred, unverified }
+    /// inChat: the screen is already inside a listed chat, with no red number to say it has news (user 11-08: only
+    /// a red unread number on the list starts work; a chat already read is left alone).
+    enum Outcome: Equatable { case opened(String), inChat(String), nothing, fallback, deferred, unverified }
     /// Several listed chats, read off the chat list: the one to open, nothing unread, or not sure (the model decides).
     enum Unread: Equatable { case row(String, CGPoint), none, unknown }
 
@@ -105,7 +107,7 @@ import Foundation
             guard allowed() else { return .deferred }
             switch look() {
             case .chat(let chat):
-                return chat == rules.targets[0] ? .opened(chat) : .fallback
+                return chat == rules.targets[0] ? .inChat(chat) : .fallback
             case .row(let point):
                 guard allowed() else { return .deferred }
                 tapped = true
@@ -125,8 +127,8 @@ import Foundation
         }
     }
 
-    /// The multi-chat open: already in a listed chat (keep it, as the open task says), or one tap on the badged row of
-    /// the list, verified by the destination's title on a fresh frame.
+    /// The multi-chat open: one tap on the badged row of the list, verified by the destination's title on a fresh
+    /// frame. Already in a listed chat: inChat, and the caller goes back to the list first.
     private static func openUnread(phone: Gestures, screen: ScreenSource, rules: WatchSettings.Rules, canAct: () -> Bool,
                                    inspect: ((Data) -> Unread)?, title: (Data) -> String?) async -> Outcome {
         guard rules.onlyListed, rules.targets.count > 1 else { return .fallback }
@@ -137,7 +139,7 @@ import Foundation
             try await screen.requireFrame(after: nil)
             guard allowed() else { return .deferred }
             guard let frame = screen.frame else { return .fallback }
-            if let chat = title(frame) { return .opened(chat) }
+            if let chat = title(frame) { return .inChat(chat) }
             switch inspect?(frame) ?? unread(in: frame, rules: rules) {
             case .none: return .nothing
             case .unknown: return .fallback

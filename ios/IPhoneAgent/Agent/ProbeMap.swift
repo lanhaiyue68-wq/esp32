@@ -57,6 +57,23 @@ struct ProbeMap: Codable {
         return Int(min(max(units, 0), 100_000).rounded())
     }
 
+    /// Where the pointer rests at home, as a screen fraction: the first two measured landings extended back to zero
+    /// units (the pointer's centre sits a little inside the corner). 0 when they do not say.
+    var inset: Double {
+        let measured = Array(knots.dropFirst())
+        guard let a = measured.first, let b = measured.first(where: { $0.fraction > a.fraction }), b.units > a.units else { return 0 }
+        let rest = a.fraction - a.units * (b.fraction - a.fraction) / (b.units - a.units)
+        return min(max(rest, 0), 0.05)
+    }
+
+    /// Mouse units for a hop of `distance` (screen fraction, signed) from anywhere: the same move from home lands at
+    /// the inset plus that distance, since the board's motion and iOS's acceleration do not depend on where it starts.
+    func hop(_ distance: Double) -> Int {
+        guard abs(distance) > 0.0005 else { return 0 }
+        let units = self.units(for: min(inset + abs(distance), 1))
+        return distance < 0 ? -units : units
+    }
+
     func landed(at units: Double) -> Double {
         let hi = knots.indices.dropFirst().first { knots[$0].units >= units } ?? (knots.count - 1)
         let a = knots[hi - 1], b = knots[hi]

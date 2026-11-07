@@ -111,6 +111,7 @@ import UIKit
     var watchStartedAt = 0.0    // when Start was tapped: a report pending then may open WeChat directly
     var watchAnswered: [String: Double] = [:]  // a message answered, by WatchReport.answerKey: when
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
+    var watchSelfOpened: (chat: String, at: Double)?  // a chat this watch opened from its red number (its badge is gone now)
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
     var watchTaskReply = WatchTaskReply.saved() { didSet { WatchTaskReply.save(watchTaskReply) } }
     var watchTaskReplyFailures = 0

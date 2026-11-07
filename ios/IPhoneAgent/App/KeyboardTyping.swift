@@ -47,7 +47,7 @@ extension AppModel {
             return false
         }
         do { try await pointer.tap(entry.x, entry.y) } catch { return false }
-        let up = await lanAgentKeyboardUp(within: 1.5)
+        let up = await lanAgentKeyboardUp(within: 4)  // first start of the keyboard: up only after ~2-10 s (logs(11))
         DebugLog.write("keyboard: picked Lan Agent in the keyboard menu (try \(attempt)): \(up ? "on screen" : "not reported")")
         return up
     }
@@ -67,6 +67,9 @@ extension AppModel {
         guard await showLanAgentKeyboard() else { return false }
         let ok = await keyboardBridge.type(text, enter: false, within: 4)
         DebugLog.write("keyboard: \(text.count) character(s) \(ok ? "typed" : "not confirmed")")
+        // The field takes the text a moment after the keyboard reports it: the board's Return 0.16 s later did not
+        // send (logs(11) 11-08); the same Return 9 s later did.
+        if ok { try? await Task.sleep(nanoseconds: 600_000_000) }
         return ok
     }
 

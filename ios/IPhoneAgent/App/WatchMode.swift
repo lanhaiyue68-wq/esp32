@@ -225,7 +225,7 @@ enum WatchSettings {
         let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
         let scope = r.onlyListed ? "这些会话：\(names)" : "私聊，以及这些群：\(names.isEmpty ? "无" : names)（公众号、订阅号、服务通知、文件传输助手除外）"
         return """
-        如果已经在范围内的微信会话里，直接完成并返回这个会话名，不要退出再查未读。否则打开微信，回到聊天列表（底部“微信”标签页），在\(scope)里找第一个带红色未读数字或红点的会话并打开。
+        打开微信，回到聊天列表（底部“微信”标签页）；如果现在停在某个会话里，先点左上角返回按钮回到列表，返回按钮旁边的数字是全部未读总数，不是这个会话的。只在列表里，\(scope)中找第一个头像左上角带红色未读数字（或红点）的会话并打开；已经打开过、头像上没有红色数字的会话不要打开。
         一旦进入目标会话就完成，不要返回列表；打开会话会清掉红点，不能因此当成没有新消息。
         打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有未读就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
         """
@@ -318,8 +318,8 @@ enum WatchSettings {
     static func openPlan(_ rules: Rules) -> String {
         if rules.single { return openPlan(chat: rules.targets[0]) }
         return """
-        1. First inspect the CURRENT screen. If an eligible WeChat conversation is already open, finish immediately with {"chat":"its actual title"}. Never go back to check its unread badge.
-        2. Otherwise open WeChat's chat list and inspect unread badges within the scope in the goal. Open one eligible unread conversation.
+        1. Get to WeChat's chat list. If a conversation is open, tap its top-left back button first; the number beside that back button is the total unread count, not this chat's.
+        2. On the list, look at the red unread number on each avatar within the scope in the goal. Open one eligible conversation that has one; a conversation without a red number is never opened.
         3. As soon as that conversation is open, finish with {"chat":"its actual title"}. Opening it clears its unread badge; do not go back or check that badge again.
         4. Only when the chat LIST has no eligible unread conversation, finish with {"chat":""}. Never type or send anything.
         """
@@ -881,7 +881,7 @@ extension AppModel {
         if !MockMode.on {
             guard settings.isConfigured else { return String(localized: "Set up the model in Settings first.") }
             guard pointer.calibrated else { return String(localized: "Calibrate the pointer in Lan Agent first.") }
-            guard board.connected, feed.mirroring else {
+            guard board.connected, feed.watchable else {
                 return String(localized: "The board or Screen Mirroring isn't ready. Connect the board and start Screen Mirroring.")
             }
         }
@@ -904,6 +904,12 @@ extension AppModel {
         watchTaskReplyFailures = 0
         agent.pinyinMisses = 0
         watchListReturn.pending = nil
+        watchSelfOpened = nil
+        if let old = watchTaskReply {
+            // User 11-08: starting to watch must not resume old work; an unsent report from before is dropped.
+            DebugLog.write("watch: start drops an unsent report for \(old.chat) from before")
+            watchTaskReply = nil
+        }
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
@@ -939,11 +945,16 @@ extension AppModel {
     private func watchLoop() async {
         var gate = WatchCheckGate()
         var baseline: Data?, changedAt: Double?, lastCheck = -Double.infinity, quietUntil = 0.0, failures = 0
+        var waitingLogged = false
         while watching && !Task.isCancelled {
             if agent.running || startingAgent || help != nil {
                 baseline = nil  // a check (or a question to the user) is under way
-            } else if !MockMode.on && !(board.connected && feed.mirroring) {
+            } else if !MockMode.on && !(board.connected && feed.watchable) {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
+                if !waitingLogged {
+                    waitingLogged = true
+                    DebugLog.write("watch: waiting (board \(board.connected ? "connected" : "not connected"), screen sharing \(feed.sharingActive ? "on" : "off"), last screen confirmation \(Int(now() - feed.confirmedAt)) s ago)")
+                }
                 baseline = nil
             } else if !MockMode.on && gate.shouldPause(foreground: UIApplication.shared.applicationState == .active) {
                 watchStatus = String(localized: "Paused while Lan Agent is in front…")
@@ -989,6 +1000,7 @@ extension AppModel {
                 guard watching else { break }
                 (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + 6)
             } else {
+                if waitingLogged { waitingLogged = false; DebugLog.write("watch: board and screen back; watching") }
                 let t = now(), frame = feed.frame
                 if t < quietUntil {
                     baseline = nil  // after a check the pointer fades and the screen settles: not new messages
@@ -1061,17 +1073,28 @@ extension AppModel {
             DebugLog.write("watch: no unread badge on the listed chats; navigation model skipped")
             return (true, false)
         }
+        if case .inChat(let inside) = local {
+            if let mine = watchSelfOpened, mine.chat == inside, now() - mine.at < 180 {
+                // This watch opened it from its red number a moment ago (that cleared the number): still read it.
+                DebugLog.write("watch: back in \(inside), opened by this watch from its red number; reading it")
+                guard let look = await readChat(inside) else { return (false, false) }
+                return await finishCheck(chat: inside, screen: look, rules: rules)
+            }
+            // User 11-08: only a red unread number on the chat list starts work. A chat already open has no number
+            // (read already), so go back to the list and look there instead of reading and resuming here.
+            DebugLog.write("watch: already inside \(inside) with no red number; back to the list first")
+            watchListReturn.pending = inside
+            return (true, false)
+        }
         if case .unverified = local {
             DebugLog.write("watch: local open destination not verified; no read or send")
             return (false, false)
         }
         if case .opened(let opened) = local {
             DebugLog.write("watch: local open verified; navigation model skipped")
+            watchSelfOpened = (opened, now())
             guard let look = await readChat(opened) else { return (false, false) }
             (chat, screen) = (opened, look)
-        } else if rules.single, UIApplication.shared.applicationState != .active, let look = await readChat(rules.targets[0]),
-           WatchReport.isChat(look.title, rules.targets[0]) {
-            (chat, screen) = (rules.targets[0], look)  // still in the chat: no agent run to open it (~10 s saved)
         } else {
             // Stop on the destination before the actor can return to the list and consume its unread badge.
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
@@ -1080,9 +1103,15 @@ extension AppModel {
                                              navigation: rules.single ? nil : rules, learnedRoutes: false) else { return (false, false) }
             guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) })
             else { return (true, false) }  // nothing unread
+            watchSelfOpened = (open, now())
             guard let look = await readChat(open) else { return (false, false) }
             (chat, screen) = (open, look)
         }
+        return await finishCheck(chat: chat, screen: screen, rules: rules)
+    }
+
+    /// The rest of a check once the chat is open and read: new messages, replies and owner tasks.
+    private func finishCheck(chat: String, screen: WatchReport.Screen, rules: WatchSettings.Rules) async -> (ok: Bool, scannedChat: Bool) {
 
         let before = watchLast[chat]
         let fresh = WatchReport.new(screen.lines, history: before)

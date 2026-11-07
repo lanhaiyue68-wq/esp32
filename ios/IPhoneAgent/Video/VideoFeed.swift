@@ -158,6 +158,15 @@ extension ScreenSource {
         get { isNative ? directState.usable(at: now()) : mirrorOn }
         set { mirrorOn = newValue }
     }
+    /// Watching between checks. A direct capture publishes only changed pixels, so a still screen sends nothing and
+    /// `mirroring` (a confirmation within 2 s) goes false. The watch loop dropped its baseline in every quiet stretch,
+    /// then took the frame with the new message as the new baseline and never saw a change (logs(11) 11-08: a task
+    /// sent 3:23–3:28 got no reaction). Sharing on with a frame counts while some frame or idle note came within
+    /// 3 minutes (the keep-awake nudge every 25 s shows the pointer, which publishes one).
+    var watchable: Bool {
+        guard isNative else { return mirrorOn }
+        return sharingActive && directState.generation != nil && directState.hasFrame && now() - directState.confirmedAt <= 180
+    }
     var metrics: Metrics?
     weak var device: HIDDevice?
 
@@ -268,10 +277,18 @@ extension ScreenSource {
 
     private func requireDirectFrame(after: Double? = nil, wait: Double = 4) async throws {
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
-        let deadline = now() + max(0, min(wait, 4))
+        let began = now(), deadline = began + max(0, min(wait, 4))
+        var nudged = false
         while !usable(after: after) {
             try Task.checkCancellation()
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
+            if !nudged && after == nil && now() - began > 0.4, let device {
+                // A still screen publishes nothing: show the pointer for a moment so the system sends a frame
+                // (logs(9) 11-08: a run paused with "超过 2 秒未收到系统画面确认" on an idle WeChat list).
+                nudged = true
+                _ = try? await device.send("move 1 0")
+                _ = try? await device.send("move -1 0")
+            }
             guard sharingActive, now() < deadline else {
                 throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕")
             }
