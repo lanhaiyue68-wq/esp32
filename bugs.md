@@ -292,3 +292,8 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - WeChat resumed old work: WatchTaskReply persisted in UserDefaults is resent at watch start; navigator prompt "already in a chat in scope → done, don't check unread" picked out-of-scope 小柳、. Pending build97.
 - Mirror never connected: board waited for xiaomi_804/HUAWEI-510, not on the phone's Wi-Fi within 30 s. Needs user's network info.
 - Alarm task: model did not use `open`, pinyin typed 始终, wandered to Google/App Store, step limit.
+
+## 2026-11-08 logs(11) build96
+- No reaction to a second task: watch baseline dropped while the direct capture was quiet (mirroring false). Fixed build97 (watchable).
+- Lan Agent keyboard reports in >1.5 s after the menu pick on first start; Return right after the keyboard's text did not send. Fixed build97 (4 s / 0.6 s).
+- Redundant report "已在微信会话…中回复收到" after a reply-only owner task. Open.

@@ -268,3 +268,6 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] build96: hold globe → pick Lan Agent in the keyboard menu; click again in place on the same spot.
 - [ ] Device test build96 (Lan Agent via menu; does the menu stay after release; board Enter sends with our keyboard up; in-place repeat clicks).
 - [ ] build97 candidates (user 11-08): nearby moves from the current pointer spot (keep Bezier, no corner every tap); WeChat only enters chats with a red unread number, never resumes an already-read chat or a saved old report; keyboard-switch method remembered (self-learning of fixed steps).
+- [x] build97: watch sees new tasks on a still screen; WeChat red numbers only, no resuming read chats or old reports; keyboard waits; nearby pointer hops.
+- [ ] Device test build97 (two tasks in a row; in-chat goes back to list; start drops old report; Return sends once; hop accuracy).
+- [ ] Open questions: mirror "can't send commands in the app" + phone Wi-Fi; muted groups' red dot; redundant report after a reply-only task.
