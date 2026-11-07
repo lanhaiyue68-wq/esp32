@@ -93,6 +93,7 @@ import UIKit
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     /// Silence during a run, so iOS never suspends the app (and its Wi-Fi video) while it works in the background.
     let keepAwake = BackgroundAudio()
+    let keyboardBridge = KeyboardBridge()  // Lan Agent's keyboard asks it for text over 127.0.0.1 (specs/004)
     /// WeChat watch (WatchMode.swift): waiting on WeChat, a short run whenever new messages show up.
     @Published var watching = false
     @Published var watchStatus = ""
@@ -146,6 +147,7 @@ import UIKit
         agent.metrics = metrics
         feed.device = board.commands
         feed.metrics = metrics
+        keyboardBridge.start()
 
         let say: (String) -> Void = { [weak self] in self?.say($0) }
         board.log = say

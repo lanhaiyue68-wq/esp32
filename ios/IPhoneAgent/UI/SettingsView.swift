@@ -47,6 +47,13 @@ struct SettingsView: View {
                     Text("Run diagnostics are cleaned automatically. Manage saved logs, recent video frames and export files in Logs and Cache.")
                 }
                 Section {
+                    NavigationLink { PhaseATestView(app: app, bridge: app.keyboardBridge) } label: {
+                        SettingsLabel(title: "新架構測試（階段 A）", symbol: "keyboard", color: .indigo)
+                    }
+                } footer: {
+                    Text("Lan Agent 輸入法、ChatGPT Plus 登入的可行性測試")
+                }
+                Section {
                     NavigationLink { DiagnosticsView(app: app, metrics: app.metrics, board: board, feed: app.feed) } label: {
                         SettingsLabel(title: "Diagnostics", symbol: "waveform.path.ecg", color: .green)
                     }

@@ -50,6 +50,8 @@ jobs:
           otool -L "$app/IPhoneAgent" | grep ScreenCaptureKit
           # Release must ship stripped binaries (build85: 79k symbols, 62% of the app binary).
           ls -l "$app/IPhoneAgent" "$app/PlugIns/AgentActivity.appex/AgentActivity" "$app/Assets.car"
+          ls -l "$app/PlugIns/LanAgentKeyboard.appex/LanAgentKeyboard"  # Lan Agent's keyboard (specs/004)
+          /usr/libexec/PlistBuddy -c 'Print NSExtension' "$app/PlugIns/LanAgentKeyboard.appex/Info.plist"
           syms=$(nm "$app/IPhoneAgent" | wc -l); echo "app symbols: $syms"
           test "$syms" -lt 20000
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/

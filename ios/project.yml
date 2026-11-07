@@ -23,11 +23,14 @@ targets:
     sources:
       - IPhoneAgent
       - Shared
+      - KeyboardShared
       - path: ../prompts  # the model prompts, bundled as a folder
         type: folder
         buildPhase: resources
     dependencies:
       - target: AgentActivity
+        embed: true
+      - target: LanAgentKeyboard
         embed: true
     info:
       path: IPhoneAgent/Info.plist
@@ -99,6 +102,34 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        SKIP_INSTALL: YES
+  # Lan Agent's keyboard (specs/004 phase A): types text the app hands it over 127.0.0.1. No App Group: the app is
+  # installed through 全能簽, whose re-signing does not carry one. Needs "Allow Full Access" for the local connection.
+  LanAgentKeyboard:
+    type: app-extension
+    platform: iOS
+    sources: [LanAgentKeyboard, KeyboardShared]
+    info:
+      path: LanAgentKeyboard/Info.plist
+      properties:
+        CFBundleDisplayName: Lan Agent
+        CFBundleDevelopmentRegion: en
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: zh-Hans
+            RequestsOpenAccess: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(IA_BUNDLE_ID).keyboard
+        PRODUCT_NAME: LanAgentKeyboard
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
   IPhoneAgentTests:
     type: bundle.unit-test

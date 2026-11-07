@@ -1,0 +1,120 @@
+import Network
+import UIKit
+
+/// Lan Agent's keyboard (phase A test version). While it is on screen it asks Lan Agent, over 127.0.0.1, for text to
+/// type and puts it straight into the focused field: no app switch and no pasteboard (iOS lets only the app in front
+/// fill the pasteboard, and that switch failed whenever other apps were used in between, logs 11-06 to 11-08).
+/// Needs "Allow Full Access" for the local connection. A few manual keys stay for the user.
+final class KeyboardViewController: UIInputViewController {
+    private let status = UILabel()
+    private var timer: Timer?
+    private var busy = false
+    private let queue = DispatchQueue(label: "lan-agent-keyboard")
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let height = view.heightAnchor.constraint(equalToConstant: 216)
+        height.priority = UILayoutPriority(999)
+        height.isActive = true
+
+        status.text = "Lan Agent 輸入法"
+        status.font = .systemFont(ofSize: 15, weight: .medium)
+        status.textAlignment = .center
+        status.numberOfLines = 3
+
+        let globe = key("🌐 下一個", nil)  // tap: next keyboard; hold: the list (Apple's handler)
+        globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+        let row = UIStackView(arrangedSubviews: [globe, key("空格", #selector(space)), key("⌫", #selector(backspace)),
+                                                key("換行", #selector(returnKey))])
+        row.distribution = .fillEqually
+        row.spacing = 6
+
+        let stack = UIStackView(arrangedSubviews: [status, row])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            row.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard hasFullAccess else {
+            status.text = "請到 設定 › 一般 › 鍵盤 › Lan Agent\n打開「允許完整取用」"
+            return
+        }
+        status.text = "Lan Agent 輸入法：等待要打的字…"
+        exchange(KeyboardLink.line(.hello(fullAccess: true))) { _ in }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in self?.poll() }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func poll() {
+        guard !busy else { return }
+        busy = true
+        exchange(KeyboardLink.line(.next)) { [weak self] reply in
+            guard let self else { return }
+            guard let reply, let job = KeyboardLink.job(reply) else {
+                if reply == nil { self.status.text = "連不上 Lan Agent（請先打開 Lan Agent）" }
+                self.busy = false
+                return
+            }
+            self.textDocumentProxy.insertText(job.text)
+            if job.enter { self.textDocumentProxy.insertText("\n") }
+            self.status.text = "已填入：\(job.text.prefix(20))"
+            self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
+        }
+    }
+
+    /// One request line to Lan Agent and its one reply line (nil when it cannot be reached), on the main thread.
+    private func exchange(_ line: String, reply: @escaping (String?) -> Void) {
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: KeyboardLink.port)!, using: .tcp)
+        var finished = false
+        func finish(_ text: String?) {
+            guard !finished else { return }
+            finished = true
+            connection.cancel()
+            DispatchQueue.main.async { reply(text) }
+        }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                connection.send(content: Data(line.utf8), completion: .contentProcessed { error in
+                    if error != nil { return finish(nil) }
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                        finish(data.flatMap { String(data: $0, encoding: .utf8) })
+                    }
+                })
+            case .failed, .waiting: finish(nil)
+            default: break
+            }
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 1.5) { finish(nil) }
+    }
+
+    private func key(_ title: String, _ action: Selector?) -> UIButton {
+        let b = UIButton(type: .system)
+        b.setTitle(title, for: .normal)
+        b.titleLabel?.font = .systemFont(ofSize: 16)
+        b.backgroundColor = UIColor.secondarySystemBackground
+        b.layer.cornerRadius = 6
+        if let action { b.addTarget(self, action: action, for: .touchUpInside) }
+        return b
+    }
+
+    @objc private func space() { textDocumentProxy.insertText(" ") }
+    @objc private func backspace() { textDocumentProxy.deleteBackward() }
+    @objc private func returnKey() { textDocumentProxy.insertText("\n") }
+}
