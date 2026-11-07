@@ -135,15 +135,22 @@ extension Pointer: Gestures {}
     /// The screen's text pieces, top to bottom and left to right, as `"text" x y` lines (0-1000); nil when none.
     /// At most `limit` lines, so a long list or chat does not crowd the prompt.
     static func screenText(_ rows: [[CandidatePicker.Piece]], limit: Int = 45) -> String? {
-        let pieces = rows.flatMap { $0 }
+        func readsBefore(_ a: CandidatePicker.Piece, _ b: CandidatePicker.Piece) -> Bool {
+            let dy: CGFloat = a.box.midY - b.box.midY
+            if abs(dy) > 0.008 { return dy < 0 }   // another line: the higher one first
+            return a.box.midX < b.box.midX         // the same line: left to right
+        }
+        let shown: [CandidatePicker.Piece] = rows.flatMap { $0 }
             .filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
-            .sorted { abs($0.box.midY - $1.box.midY) > 0.008 ? $0.box.midY < $1.box.midY : $0.box.midX < $1.box.midX }
-            .prefix(limit)
+        let pieces = Array(shown.sorted(by: readsBefore).prefix(limit))
         guard !pieces.isEmpty else { return nil }
-        return pieces.map { piece -> String in
+        var lines: [String] = []
+        for piece in pieces {
             let text = piece.text.replacingOccurrences(of: "\"", with: "'")
-            return "\"\(text)\" \(Int((piece.box.midX * 1000).rounded())) \(Int((piece.box.midY * 1000).rounded()))"
-        }.joined(separator: "\n")
+            let x = Int((piece.box.midX * 1000).rounded()), y = Int((piece.box.midY * 1000).rounded())
+            lines.append("\"\(text)\" \(x) \(y)")
+        }
+        return lines.joined(separator: "\n")
     }
     /// A fixed plan (WeChat watch's open and send tasks, whose steps never change): used as is, without the
     /// planner's call. Empty for ordinary runs.

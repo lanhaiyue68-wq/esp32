@@ -67,7 +67,8 @@ extension AppModel {
             try await swipePages(page)
             // Its label anywhere on the learned page: tapped where it is now (and the spot updated).
             if let rows = await homeRows(), let spot = AppPlaces.label(name, in: rows) {
-                DebugLog.write("open \(name): learned page \(page + 1)\(abs(spot.x - place.x) + abs(spot.y - place.y) > 0.06 ? ", moved on it" : "")")
+                let moved: Bool = abs(spot.x - place.x) + abs(spot.y - place.y) > 0.06
+                DebugLog.write("open \(name): learned page \(page + 1)" + (moved ? ", moved on it" : ""))
                 return try await tapIcon(spot, name: name, page: page)
             }
             DebugLog.write("open \(name): not on its learned page any more; looking again")
