@@ -140,6 +140,10 @@ import XCTest
             p.y == 0.3 ? ("20:20", p) : ("微信", p)
         })
         XCTAssertEqual(route.map(\.anchor), ["微信"], "the route ends before a tap on a time, which changes by the next run")
+        let fragment = try XCTUnwrap(RouteBook.route(steps: steps, shots: [0: home, 1: list]) { _, p in
+            p.y == 0.3 ? ("它", p) : ("微信", p)
+        })
+        XCTAssertEqual(fragment.map(\.anchor), ["微信"], "one character (logs 11-07: 它) is a message fragment")
     }
 }
 

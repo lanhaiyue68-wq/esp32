@@ -52,21 +52,23 @@ import Foundation
 
     /// Several listed chats ("only these chats"): the topmost listed chat whose avatar carries WeChat's red unread
     /// badge, picked on the list itself instead of by an agent run (logs26: 6–35 s). `badge` tells whether the avatar
-    /// next to a title box is badged. "Nothing unread" only when every listed chat shows exactly once; a duplicate
-    /// name (logs26 had two 蓝海乐), a truncated one or a chat out of view leaves the choice to the model.
+    /// next to a title box is badged. A duplicate name (logs26 had two 蓝海乐) or a truncated one leaves the choice to
+    /// the model. A listed chat out of view is not unread: WeChat moves a chat with a new message to the top, and the
+    /// model, shown this same screen, only guessed — it opened 主人蓝海乐 four checks in a row with nothing new and once
+    /// a group that is not listed, 2 model calls and 7–11 s a check, because 蓝海乐 was rarely in view (logs 11-06).
     static func unread(rows: [[CandidatePicker.Piece]], rules: WatchSettings.Rules, badge: (CGRect) -> Bool) -> Unread {
         guard rules.onlyListed, rules.targets.count > 1, WatchListReturn.view(rows: rows, chat: "") == .list else { return .unknown }
-        var hits: [(chat: String, box: CGRect)] = [], missing = false
+        var hits: [(chat: String, box: CGRect)] = []
         for chat in rules.targets {
             let name = chat.filter { !$0.isWhitespace }
             guard !name.isEmpty, !name.contains("…"), !name.contains("...") else { return .unknown }
             let found = titles(rows, name)
             if found.count > 1 { return .unknown }
-            guard let box = found.first else { missing = true; continue }
+            guard let box = found.first else { continue }
             if badge(box) { hits.append((chat, box)) }
         }
         if let top = hits.min(by: { $0.box.midY < $1.box.midY }) { return .row(top.chat, CGPoint(x: 0.5, y: top.box.midY)) }
-        return missing ? .unknown : .none
+        return .none
     }
 
     /// Where the unread badge sits: on the top-right corner of the avatar, left of the title.

@@ -60,3 +60,46 @@ import XCTest
         }.jpegData(compressionQuality: 0.8)!
     }
 }
+
+/// logs 11-07: an alarm's hour wheel took 35 swipes and the run hit its step limit.
+@MainActor final class WheelGuardTests: XCTestCase {
+    func testASecondWheelSwipeIsRefusedWithTheTypingInstruction() async throws {
+        let (agent, phone) = run("THINK: 小时滚轮当前显示9，我向上滑动滚轮把它调到8。\nDO: swipe 300 600 300 540")
+        _ = try await agent.step(); _ = try await agent.step()
+        XCTAssertEqual(phone.swipes, 1, "the first wheel swipe goes through, the next is refused")
+        XCTAssertEqual(agent.steps.last?["action"], .str("blocked"))
+        XCTAssertTrue(agent.steps.last?["reason"]?.str?.contains("type 0800") == true)
+    }
+
+    func testScrollingAListIsNotAWheel() async throws {
+        let (agent, phone) = run("THINK: 列表里还没看到测试群，继续向上滑动列表。\nDO: swipe 500 700 500 400")
+        _ = try await agent.step(); _ = try await agent.step()
+        XCTAssertEqual(phone.swipes, 2)
+    }
+
+    private func run(_ reply: String) -> (AgentLoop, WheelPhone) {
+        let screen = FakeScreen()
+        screen.frame = CursorAndAcknowledgementSpeedTests.chat(caret: false)
+        let phone = WheelPhone(screen: screen)
+        let actor = FakeModel { _ in reply }
+        return (AgentLoop(phone: phone, screen: screen, actor: actor, planner: actor, trace: nil), phone)
+    }
+}
+
+@MainActor private final class WheelPhone: Gestures {
+    let device: HIDDevice = FakeDevice()
+    let screen: FakeScreen
+    var swipes = 0
+    init(screen: FakeScreen) { self.screen = screen }
+    func tap(_ x: Double, _ y: Double, aim: Bool) async throws {}
+    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool) async throws {
+        swipes += 1  // the wheel turns: the screen changes
+        screen.frame = CursorAndAcknowledgementSpeedTests.chat(caret: false, sheet: swipes % 2 == 1)
+    }
+    func drag(_ points: [CGPoint], hold: Bool) async throws {}
+    func type(_ text: String) async throws {}
+    func key(_ combo: String) async throws {}
+    func goHome() async throws {}
+    func goBack() async throws {}
+    func reset() async throws {}
+}

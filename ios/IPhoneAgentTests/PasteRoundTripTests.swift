@@ -47,6 +47,22 @@ import XCTest
         XCTAssertEqual(phone.visited, ["Claude", "Lan Agent", "WeChat"], "one direct return, no reverse swipes")
     }
 
+    // logs 11-07: after a phone task in Clock and a drawing app, 6 hops in a row never reached Lan Agent.
+    func testLanAgentIsOpenedThroughSearchWhenItIsNotThePreviousApp() async {
+        let phone = PasteApps(["Lan Agent", "Clock", "Draw", "WeChat"], at: 3)
+        let result = await phone.paste("这次任务未能确认完成", reopen: true, search: true)
+        XCTAssertEqual(result, .filled)
+        XCTAssertEqual(phone.current, "WeChat")
+        XCTAssertEqual(phone.visited, ["Draw", "Search", "Lan Agent", "WeChat"], "one swipe, then Search, never deeper")
+    }
+
+    func testWithoutSearchASecondSwipeGoesDeeperAndLoses() async {
+        let phone = PasteApps(["Lan Agent", "Clock", "Draw", "WeChat"], at: 3)
+        let result = await phone.paste("这次任务未能确认完成", reopen: true)
+        XCTAssertEqual(result, .lost)
+        XCTAssertNil(phone.clipboard)
+    }
+
     func testFailureToFindLanAgentNeverWritesTheClipboard() async {
         let phone = PasteApps(["WeChat", "Claude"], at: 1)
         let result = await phone.paste("你好")
@@ -138,7 +154,7 @@ import XCTest
 
     init(_ apps: [String], at index: Int) { self.apps = apps; self.index = index }
 
-    func paste(_ text: String, reopen: Bool = false) async -> PasteHopResult {
+    func paste(_ text: String, reopen: Bool = false, search: Bool = false) async -> PasteHopResult {
         let source = current
         let reopenSource: (() async throws -> Void)? = reopen ? {
             self.index = self.apps.firstIndex(of: source) ?? self.index
@@ -153,6 +169,11 @@ import XCTest
             guard self.current == "Lan Agent", self.allowClipboard else { return false }
             self.clipboard = text
             return true
-        }, verifySource: { self.current == source && self.current != "Lan Agent" }, reopenSource: reopenSource)
+        }, verifySource: { self.current == source && self.current != "Lan Agent" }, reopenSource: reopenSource,
+           openAgent: search ? {
+            self.index = self.apps.firstIndex(of: "Lan Agent") ?? self.index
+            self.visited.append("Search")
+            self.visited.append(self.current)
+        } : nil)
     }
 }

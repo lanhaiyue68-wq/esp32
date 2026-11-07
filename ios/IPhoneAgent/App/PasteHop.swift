@@ -23,7 +23,8 @@ extension AppModel {
         // same chat. Reversed swipes depend on the app order: with Claude used last they stopped in Claude, the check
         // refused, and the reply fell to a 65 s model run that failed the same way (logs 11-06, build89).
         var reopen: (() async throws -> Void)?
-        if WatchReport.navigationChat(in: source, targets: WatchSettings.rules.targets) != nil {
+        let sourceChat = WatchReport.navigationChat(in: source, targets: WatchSettings.rules.targets)
+        if sourceChat != nil {
             reopen = {
                 guard let url = URL(string: "weixin://"), await UIApplication.shared.open(url) else {
                     throw DeviceError(message: "WeChat did not open")
@@ -69,16 +70,41 @@ extension AppModel {
                 }
                 guard !Task.isCancelled, UIApplication.shared.applicationState == .background,
                       let returned = self.feed.frame else { return false }
-                let matched = PasteRoundTrip.matchesSource(source, returned)
+                // Reopened WeChat: the same watched chat by its title is the destination even when the keyboard went
+                // down and the messages moved (logs 11-06: 2 of 5 URL returns refused by the content match).
+                let byTitle = sourceChat != nil
+                    && WatchReport.navigationChat(in: returned, targets: WatchSettings.rules.targets) == sourceChat
+                let matched = byTitle || PasteRoundTrip.matchesSource(source, returned)
                 self.agent.trace?.write(returned, kind: "paste target",
                                         ["stage": .str("return"), "matched": .bool(matched), "look": .int(attempt + 1)])
-                if matched { return true }
+                if matched {
+                    if byTitle, !CandidatePicker.keyboardUp(in: returned) {
+                        DebugLog.write("paste hop: back in \(sourceChat ?? "") without the keyboard; tapping the input box")
+                        try? await self.pointer.tap(0.45, 0.925)  // WeChat's box above the home bar
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                    }
+                    return true
+                }
             }
             return false
-        }, reopenSource: reopen)
+        }, reopenSource: reopen, openAgent: sourceChat == nil ? nil : {
+            try await self.openLanAgentBySearch()
+        })
         DebugLog.write("paste hop: \(result), original target \(result == .lost ? "unverified" : "verified")"
                        + (reopen == nil ? "" : " (WeChat reopened by its URL)"))
         return result
+    }
+
+    /// Lan Agent to the front whatever the app order: Home, swipe down on the Home Screen for Search, type its name
+    /// (plain letters, which the board's keyboard types), Return opens the top hit.
+    func openLanAgentBySearch() async throws {
+        try await pointer.goHome()
+        try await Task.sleep(nanoseconds: 800_000_000)
+        try await pointer.swipe(0.5, 0.32, 0.5, 0.62, hold: false)
+        try await Task.sleep(nanoseconds: 900_000_000)
+        try await pointer.type("Lan Agent")
+        try await Task.sleep(nanoseconds: 700_000_000)
+        try await pointer.key("enter")
     }
 
     /// WeChat to the front from wherever a task left the phone: Lan Agent first (the app switch back, as the paste's

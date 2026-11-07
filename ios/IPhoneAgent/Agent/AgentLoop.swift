@@ -64,6 +64,18 @@ extension Pointer: Gestures {}
     private var sendTap: (point: CGPoint, frame: Data)?  // this run's send tap and the screen it was made on
     private var backMissed = false                        // the last back swipe changed nothing
     private var actFrame: Data?                           // the screen just before the latest action
+    private var wheelSwipes = 0, wheelBlocks = 0          // swipes on a time/number wheel this run, and refusals
+
+    /// A swipe whose thought is about a time or number wheel (a picker).
+    static func aboutWheel(_ act: JObject) -> Bool {
+        let thought = ((act["thought"]?.str ?? "") + (act["thought_zh"]?.str ?? "")).lowercased()
+        return ["滚轮", "轮盘", "选择器", "滚盘", "wheel", "picker"].contains { thought.contains($0) }
+    }
+
+    static let wheelReason = "Not swiped: a swipe moves a time or number wheel by an unpredictable amount (an alarm "
+        + "took 35 swipes and never stayed on 8). Tap the number in the wheel's centre row once, then type the digits, "
+        + "e.g. type 0800 for 8:00 (and pick 上午/AM if there is such a column); check the result. Swipe only if typing "
+        + "does nothing."
     private var replayedRoute: String?  // the learned route this run started with
     private var learnedThrough = -1
     private var lessonRun = UUID().uuidString
@@ -529,6 +541,7 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (sendTap, backMissed, actFrame) = (nil, false, nil)
+        (wheelSwipes, wheelBlocks) = (0, 0)
         do {
             do { try await replay() }
             catch let e where e is CancellationError || Task.isCancelled { throw e }
@@ -848,6 +861,17 @@ extension Pointer: Gestures {}
                     aimNext = true
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
                     return false
+                }
+                if name == "swipe", Self.aboutWheel(act) {
+                    // logs 11-07: an alarm's hour wheel took 35 swipes (9→8→4→10→2→6…) and the run hit its step limit;
+                    // the prompt's "tap the centre number and type the digits" was never tried. After one wheel swipe,
+                    // twice per run, the next one is refused with that instruction.
+                    if wheelSwipes >= 1, wheelBlocks < 2 {
+                        wheelBlocks += 1
+                        record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.wheelReason)])  // never swiped
+                        return false
+                    }
+                    wheelSwipes += 1
                 }
                 if name == "type", keyboardGuard, sentTexts.contains(Self.typedKey(act["text"]?.str ?? "")) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed

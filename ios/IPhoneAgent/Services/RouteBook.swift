@@ -133,6 +133,8 @@ import Foundation
                 // A time or a count changes by the next run ("20:20" stopped every replay of a route, logs 11-06).
                 let bare = text.filter { !$0.isWhitespace }
                 if !bare.isEmpty, bare.allSatisfy({ $0.isNumber || ":.-/+".contains($0) }) { break }
+                // One character read under a tap ("它", logs 11-07) is a fragment of a message, not a control's name.
+                if bare.count < 2 { break }
                 step.anchor = found.text
                 step.offsetX = values[0] - Int((found.centre.x * 1000).rounded())
                 step.offsetY = values[1] - Int((found.centre.y * 1000).rounded())

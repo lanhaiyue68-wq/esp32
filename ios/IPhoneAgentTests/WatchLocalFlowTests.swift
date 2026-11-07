@@ -25,10 +25,11 @@ import UIKit
         XCTAssertEqual(point.y, 0.391, accuracy: 0.002)
     }
 
-    func testNothingUnreadOnlyWhenEveryListedChatIsVisible() {
+    // logs 11-06: with 蓝海乐 rarely in view, every check went to the model, which opened chats with nothing new.
+    func testAListedChatOutOfViewIsNotUnread() {
         XCTAssertEqual(WatchChatOpen.unread(rows: list([("测试群", 0.20), ("张三", 0.29)]), rules: rules, badge: { _ in false }), .none)
-        XCTAssertEqual(WatchChatOpen.unread(rows: list([("测试群", 0.20)]), rules: rules, badge: { _ in false }), .unknown,
-                       "张三 may be below the screen")
+        XCTAssertEqual(WatchChatOpen.unread(rows: list([("测试群", 0.20)]), rules: rules, badge: { _ in false }), .none,
+                       "a chat with a new message moves to the top of the list")
     }
 
     func testDuplicateNamesAndOtherScreensStayWithTheModel() {

@@ -6,13 +6,22 @@ import Foundation
                         previousApp: () async throws -> Void, nextApp: () async throws -> Void,
                         waitForAgent: () async -> Bool, put: (String) -> Bool,
                         verifySource: () async -> Bool,
-                        reopenSource: (() async throws -> Void)? = nil) async -> PasteHopResult {
+                        reopenSource: (() async throws -> Void)? = nil,
+                        openAgent: (() async throws -> Void)? = nil) async -> PasteHopResult {
         guard !Task.isCancelled, !isActive() else { return .lost }
         do {
             var hops = 0
-            for _ in 0..<2 {
+            for attempt in 0..<2 {
                 try Task.checkCancellation()
-                try await previousApp()
+                if attempt == 1, reopenSource != nil, let openAgent {
+                    // A second swipe goes further into whatever apps were used last (logs 11-07: after the phone task
+                    // opened Clock and a drawing app, 6 hops in a row never reached Lan Agent and the result was never
+                    // sent). Search opens it whatever the order; the source is reopened directly, so no swipe to undo.
+                    DebugLog.write("paste hop: Lan Agent is not the previous app; opening it through Search")
+                    try await openAgent()
+                } else {
+                    try await previousApp()
+                }
                 hops += 1
                 if await waitForAgent(), isActive() { break }
             }
