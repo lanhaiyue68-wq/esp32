@@ -45,6 +45,17 @@
         }
       }
     },
+    "Learned app places" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学会的 App 位置"
+          }
+        }
+      }
+    },
     "Learned buttons" : {
       "extractionState" : "manual",
       "localizations" : {

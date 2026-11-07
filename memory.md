@@ -6,3 +6,7 @@
 
 ## 发布与回退保留规则 — 2026-10-25
 用户明确指定回退基准时，必须同时保留旧IPA、校验码和使用说明，并做独立校验备份；该基准不受“交付新版自动回收旧包”的默认清理规则影响，直到用户明确同意丢弃。本次固定build51作为build52试验的回退基准，记录见E:/Backups/esp32-build51-rollback-20261025/rollback-manifest.json。
+
+- 用户要求 ESP32 Agent 的旧版本不要长期积压：新 IPA 经完整测试及版本/hash 核验交付后，清理已确认的旧安装包和可再生成构建缓存；保留最新可用 IPA、活动源代码/Git 历史和原始诊断资料。清理前校验绝对路径，排除 Git 目录和 Junction/ReparsePoint。
+
+- User explicitly requires the existing Bezier pointer motion to remain enabled. Calibration repairs must preserve this behavior and must not silently persist curve-off or substitute straight runtime motion.

@@ -31,6 +31,8 @@ Looking for an item in a list: scroll less than one screen at a time so nothing 
 visible item. If you reached both ends of the list and the item is not there, stop with fail and name the
 closest options you saw; do not keep scrolling.
 Only tap things you can actually see on this screenshot; never guess where a button might be.
+When the request lists "Text read on this screen", a labelled control (a chat, a button, a menu item) is at
+those coordinates: tap them rather than estimating from the picture.
 If you are unsure what an element does, tap it alone (one DO line) and check the result next round.
 If an action fails, compare the current screen with the intended result and correct only the failed step.
 Keep completed work. After two ineffective attempts, change the target or method; use replan if the route is wrong.
@@ -60,6 +62,8 @@ Actions:
   type "JSON string"        (use JSON quoting for exact text, code, leading/trailing spaces, quotes, emoji or
                              multiple lines; escape newline as \n, tab as \t, quote as \" and backslash as \\;
                              keep it on ONE DO line. The app chooses verified typing or exact paste.)
+  open APP_NAME             (opens the app by the name under its icon, e.g. open 微信, open Claude: the app goes
+                             to its learned Home Screen spot or searches for it; prefer it to finding the icon yourself)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
   home | back | wait
   replan                    (the plan no longer fits the screen)

@@ -16,6 +16,11 @@ import Network
     /// `port`: the keyboard's (KeyboardLink.port); tests use their own, since the app they run in listens there.
     init(port: UInt16 = KeyboardLink.port) { self.port = port }
 
+    /// Lan Agent's keyboard is on screen now: while shown it asks every 0.35 s.
+    func onScreen(at time: Date = Date()) -> Bool {
+        lastSeen.map { time.timeIntervalSince($0) < 0.9 } ?? false
+    }
+
     func start() {
         guard listener == nil else { return }
         do {

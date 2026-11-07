@@ -78,7 +78,7 @@ extension AppModel {
                 self.agent.trace?.write(returned, kind: "paste target",
                                         ["stage": .str("return"), "matched": .bool(matched), "look": .int(attempt + 1)])
                 if matched {
-                    if byTitle, !CandidatePicker.keyboardUp(in: returned) {
+                    if byTitle, !CandidatePicker.keyboardUp(in: returned), !self.keyboardBridge.onScreen() {  // ours shows no letter keys
                         DebugLog.write("paste hop: back in \(sourceChat ?? "") without the keyboard; tapping the input box")
                         try? await self.pointer.tap(0.45, 0.925)  // WeChat's box above the home bar
                         try? await Task.sleep(nanoseconds: 800_000_000)

@@ -23,6 +23,7 @@ private struct LearningContent: View {
     @ObservedObject var experience: ExperienceStore
     @AppStorage(ExperienceStore.enabledKey) private var enabled = true
     @State private var clearing = false
+    @State private var appPlaces = AppPlaces.count  // UserDefaults, not observed: read on appear and after clearing
 
     var body: some View {
         List {
@@ -33,6 +34,7 @@ private struct LearningContent: View {
                 LabeledContent("Measured feedback", value: "\(experience.count)")
                 LabeledContent("Learned routes", value: "\(app.agent.routes?.count ?? 0)")
                 LabeledContent("Learned buttons", value: "\(app.agent.controls?.count ?? 0)")
+                LabeledContent("Learned app places", value: "\(appPlaces)")
             } footer: {
                 Text(LocalizedStringKey(enabled
                      ? "Related lessons are included in later task requests. This is local experience memory, not model-weight training. A reference does not prove success."
@@ -50,11 +52,12 @@ private struct LearningContent: View {
         .confirmationDialog("Clear all learning records?", isPresented: $clearing, titleVisibility: .visible) {
             Button("Clear all learning records", role: .destructive) {
                 book.clear(); experience.clear(); app.agent.routes?.clear(); app.agent.controls?.clear()
+                AppPlaces.clear(); appPlaces = 0
             }
         } message: {
             Text("Saved lessons, feedback and review records will be removed. A review already in progress cannot restore them.")
         }
-        .onAppear { app.runs.reload() }
+        .onAppear { app.runs.reload(); appPlaces = AppPlaces.count }
         .onChange(of: enabled) { _, value in
             book.enabled = value; experience.enabled = value; app.agent.routes?.enabled = value; app.agent.controls?.enabled = value
         }

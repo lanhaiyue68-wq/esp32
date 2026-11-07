@@ -120,7 +120,7 @@ import Foundation
         var out: [Step] = []
         for (i, s) in steps.enumerated() {
             let name = s["action"]?.str ?? ""
-            if ["type", "key", "path", "circle", "compose", "send missed"].contains(name) { break }
+            if ["type", "key", "path", "circle", "compose", "send missed", "open"].contains(name) { break }  // open: by name, never replayed
             guard ["tap", "swipe", "home", "back"].contains(name), s["changed"] != .bool(false),
                   s["performed"] != .bool(false), let shot = shots[i], let scene = Vision.experienceScene(shot) else { continue }
             let keys = name == "tap" ? ["x", "y"] : name == "swipe" ? ["x1", "y1", "x2", "y2"] : []

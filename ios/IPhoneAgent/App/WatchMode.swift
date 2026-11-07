@@ -1398,8 +1398,11 @@ extension AppModel {
             return feed.frame
         }
         // A tap where the box sits without the keyboard hits the space bar while the keyboard is up (logs(17)).
+        // Lan Agent's keyboard has no letter keys to see: when it reports in, the box is focused, and the box's old spot
+        // is on that keyboard now (its space or 換行 key).
         func focusBox() async throws {
-            if let now = await look(), CandidatePicker.keyboardUp(in: now) { return }
+            if keyboardBridge.onScreen() { return }
+            if let now = await look(), CandidatePicker.keyboardUp(in: now) || keyboardBridge.onScreen() { return }
             try await pointer.tap(box.x, box.y)
         }
         // Pinyin, first candidate per chunk, one look: ~1 s where the paste's trip through Lan Agent took ~5 s.
@@ -1454,7 +1457,11 @@ extension AppModel {
             // A draft (PC harness: 你好 left in 测试群) or text a swipe typed would join the reply: empty the box first.
             try await pointer.key("cmd+a")
             try await pointer.key("backspace")
-            var landed = try await typedQuickly()
+            // Phase B (specs/004): Lan Agent's keyboard puts the reply in exactly, 0.4 s after it shows (phase A on the
+            // phone); pinyin and the paste hop stay as the fallback when it is not added or not confirmed.
+            var landed = await typeWithLanAgentKeyboard(text)
+            if landed { DebugLog.write("watch: quick send: typed by Lan Agent's keyboard") }
+            if !landed { landed = try await typedQuickly() }
             if !landed {
                 guard await hopToPaste(text) == .filled else { return .notTried }
                 guard let returned = await look(), WatchReport.navigationChat(in: returned, targets: [chat]) == chat else {

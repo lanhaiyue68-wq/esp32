@@ -206,3 +206,204 @@ Fixed old file replies and mixed-batch owner downgrade; preserve per-message aut
 - 失败报告具体说明停在输入/粘贴核验，源和返回帧进入正常本机诊断；不放宽目标验证。
 - RED 40339071043：357测试12失败；最终 https://github.com/ChenQian-hub/esp32-iphone-agent-app/actions/runs/40341342030：unsigned device build成功、359测试0失败；代码7a7c52b。本地137 Swift语法0错误，diff check通过。
 - 桌面 E:/桌面/Lan-Agent-build73-unsigned.ipa，5,132,514 bytes，SHA256 f7f1127677e560fc8ec509932fe3737e9121c52986c96abd39eba58d94f6b295。App/Widget73、ZIP CRC/哈希通过，旧70/71/72保留。未签名安装或完成真机复测。
+
+## 2026-10-27 视频对照分析
+已逐段检查 Mobinono 抖音演示并核对 pymobiledevice3 官方文档。推测电脑端调试隧道控制，底层库未证实；不将演示视为同任务性能基准。报告：docs/douyin-mobinono-comparison-2026-10-27.md。无运行代码修改，无新增实机验证。
+
+## 2026-10-27 iOS27方案核查
+用户明确当前系统为iOS27，以此覆盖日志34历史版本。已读取指定ChatGPT讨论并核对苹果ScreenCaptureKit文档与源码：直接取屏可行，推荐先保留现有USB HID与固件做App侧验证。记录：docs/ios27-capture-feasibility-2026-10-27.md。未改生产代码或进行真机验证。
+
+## 2026-10-27 无线约束与成本澄清
+用户明确手机与板之间无USB，实机为Wi-Fi/蓝牙/镜像，手机充电口必须可用。此前本记录及答复中“保留USB HID”推断作废；本地USB HID示例不等于实机固件。6为单次回复动作上限，不是截图或任务总量。已修正可行性报告；本轮仅核查代码/官方图片计量文档，未改运行代码，未做新真机验证。
+
+速度估算：日志34本次13轮actor合计32.11秒，frame等待7.736秒，HID6.985秒；75.743秒为失败过程，非build73正常任务基准。只换取屏的直接收益不能据此承诺倍速。详见可行性报告。
+
+日志35核查：4次新尝试均0模型调用，73卡在取屏/后台首帧确认，完成记录分别33.251、13.480、71.569秒。用户升级后未试旧版，不能确认iOS27因果。72到73取屏及RunSession源码无变化；未改产品代码或发布新包。详见docs/logs35-startup-diagnosis-2026-10-27.md。
+
+
+## 2026-10-27 — build74 iOS27 direct capture preview
+
+User-approved native whole-display preview completed; existing wireless controls and build73 input safeguards preserved. Skills: spec-kit-orchestration + test-driven-development + ponytail; review used scoped source inspection, Jev advisory scoring and CI. Spec/plan/tasks/quickstart/review: specs/002-ios27-direct-capture. Source8e8248645be1276daf5333b975c369225126a061; final CI40407538020 passed 8 policy + 368 simulator tests and device Release. Artifact E:/桌面/Lan-Agent-build74-unsigned.ipa, SHA256c1f1ee76575e01610e03f2e3bed9421ebfc5f4ab77e8018e9c9c79e548c2aaca. Inspected build74/SDK27.1/backgroundscreen-capture/linked framework/no signature/ZIP integrity. No new firmware, hardware, USB or cloud frame-streaming requirement. Device-only system consent/cross-app/background/cursor/gestures/input/CPU/thermal and matched speed comparison remain pending user-installed signed build plus exported logs. User asked storage: existing bounded app-owned diagnostic retention was verified and explained, no Photos writes introduced.
+
+
+## 2026-10-27 build75: logs36 correction checkpoint
+
+- Evidence confirms native capture is live; send coordinates are correct, but a blinking caret is misread as the mouse and triggers a wrong correction. A misplaced click is then committed as sent, blocking recovery. Long Chinese IME text is also a homophone.
+- Added regression tests. Old code fails the caret, disappearing-pointer, fragmented keyboard, long Chinese paste, extra-letter verification and missed-send cases in CI runs 40411177155 and 40411545507.
+- Repair committed in c8d8a85; additional OCR boundary test in 94add13. Validation continues in 40412541122 and 40412668563; do not deliver their IPA before all assertions pass.
+- Constraints: iOS27 direct display capture, Wi-Fi/BLE controls, no USB and no firmware changes. Raw diagnostics remain outside Git.
+- Skills: systematic-debugging + test-driven-development. Next: resolve any observed boundary failures, full green CI, inspect and copy final build75 IPA to E:\桌面.
+
+
+## 2026-10-27 build75: learning UI and build account checkpoint
+- User extended scope to general input reliability and visible autonomous learning. Skills: systematic-debugging, TDD, spec-kit-orchestration and ponytail; native SwiftUI reuse, no automatic sub-agents. Spec truth: specs/003-reliable-input-learning.
+- Source commit124bcb6 adds shared exact-paste routing, JSON-quoted text preservation, real LessonBook/ExperienceStore inspection and controls, bounded review journal, request-based reference counts and localized Home/Settings entry. Device Release compiled successfully in run40416810591; simulator validation pending.
+- Original account billing prevented run40414661324 from starting. User authorized a new private compilation repository, winesettbumpas609-boop/esp32-iphone-agent-build; invited and accepted lanhaiyue-web with Write, pushed source to main. Native capture and wireless hardware constraints remain.
+- Baseline regression run40415984720 and implementation/boundary run40416810591 are active. New operator/punctuation and refused-paste tests intentionally precede their final repair. Do not deliver artifacts from a failing run.
+
+## 2026-10-27 build75 boundary verification checkpoint
+- Scope remains shared text fidelity, logs36 input/send recovery and a real native Learning entry; keep iOS27 capture and BLE/Wi-Fi, no USB/firmware change.
+- Private build repository winesettbumpas609-boop/esp32-iphone-agent-build is active; lanhaiyue-web has accepted Write collaboration. Original owner Actions billing remains blocked.
+- Baseline run40415984720 proved missing Unicode/multiline routing, JSON text preservation and learning persistence/status behavior. Implementation run40416810591 compiled device Release and ran 393 tests; six assertions failed across four test methods. Root input and primary learning tests passed.
+- Corrected symbol-preserving full-text OCR matching and refused unsafe keyboard fallback for newlines/Tab/unsupported Unicode. Corrected send fixture to isolate its fake keyboard path. Run40418603814 compiled device Release, but simulator build exposed an inaccessible task setter in a test fixture; a98364c removes that invalid test setup and preserves nil for an unnamed step-only task.
+- Current source a98364c is pushed to original draft branch and new build main. Full simulator/device verification is pending; no IPA from a failing run may be delivered.
+- Routing: systematic-debugging + test-driven-development; feature intent and tasks under specs/003-reliable-input-learning; final converge/review, artifact/version/hash verification and draft PR refresh remain pending. Raw diagnostics remain outside Git.
+
+## 2026-10-27 build75 delivered and old build outputs cleaned
+- Completed shared input fidelity, caret/pointer rejection, bounded corrupted-draft recovery, unsent completion protection and the native real Learning page. Key files: AgentLoop.swift, CandidatePicker.swift, Vision.swift, LessonBook.swift, ExperienceStore.swift, RunSession.swift, LearningView.swift, HomeView.swift, SettingsView.swift, PrivacyViews.swift and regression tests.
+- Verified source a98364cf8df689bd7ca2a342ce54e25084e0202a: run40418981465 passed Release device build, 393 simulator tests and eight direct-frame policy checks, zero failures. Device tests do not establish physical phone operation.
+- Delivered unsigned E:/桌面/Lan-Agent-build75-unsigned.ipa; SHA-256 94b139cb9432ff2ecd0508c7de96d7e15401ddaa37e696016cf911ed10b4300e. arm64, build75, native capture linkage and ZIP integrity verified. Signing remains necessary before installation.
+- Updated original draft PR1 to the final build75 scope; no merge. Private build mirror and accepted Write collaboration are active.
+- User-requested bounded cleanup deleted 1,633 old output/cache files, 500,557,380 bytes. Source/Git checkouts, original diagnostics and current build75 retained. Manifest outside Git: E:/AgentStorage/esp32/log36-inspection/cleanup-old-builds.json.
+- Feature003 spec/plan/tasks convergence found no additional implementation gap; physical iPhone acceptance remains: install signed build75, test arbitrary text/send tasks and inspect actual Learning history. See docs/build75-final-review.md and docs/build75-reliable-input-learning.md.
+
+- Build mirror cleanup complete: deleted failed-run artifacts 12696686292, 12695128022 and 12695094009; API confirms only verified build75 artifact12697905343 remains. Source and CI history retained.
+
+
+## 2026-10-27 logs37 / build76 in progress
+- Confirmed build75 on iOS27.0.1, live direct display capture. Included WeChat frames show a send tap landing near (0.97,0.98) instead of (0.863,0.887); correct draft remains. Actual Claude frames were excluded by five later internal runs.
+- RED 40424580741, source560788b: 398 tests, 11 expected assertions in six new/updated regression methods; no unrelated failures. Pixel-probe regression RED is running at7f8e42d /40425693931.
+- Bounded repair: visually aim send taps, withhold unverified precision clicks, recover only on positive same-draft/no-new-bubble evidence, export retained bounded history. Original logs stay outside Git. Native iOS27 capture and Wi-Fi/BLE retained; no USB or firmware changes.
+- Routing: systematic-debugging + test-driven-development. Source under ios/IPhoneAgent/Agent/{Pointer,AgentLoop,CandidatePicker}.swift and Services/DiagnosticFiles.swift. Final CI/artifact validation and source review remain.
+
+- logs37 checkpoint: RED2 run40425693931 confirmed rendered probe endpoint error (actualx0.8848,targetx0.863),401 tests/12 expected assertions. App source fixf9531e9 compiled for device. Its CIrun40426883061 stalled without test output; canceled/force-canceled, not counted as pass or app failure. Its unvalidated IPA was removed locally and from Actions. Desktop still retains build75.
+- Current CIrun40428771305/source19261178cee60e645ce66efe4bee4117cc7aedf4: app sources identical to f9531e9; workflow streams test progress, bounds individual test execution and publishes only after tests pass. Final delivery remains pending this run. Update log37-inspection/deliver-build76.ps1 to final run/hash before execution.
+
+
+## 2026-10-27 build76 delivered
+- Final CI40428771305/source19261178cee60e645ce66efe4bee4117cc7aedf4 is GREEN: Release device compile,401 simulator tests and8 direct-capture tests, zero failures. App code matches f9531e9. Real rendered post-probe pointer regression passed.
+- Desktop E:/桌面/Lan-Agent-build76-unsigned.ipa,5,262,281 bytes,SHA256 4bf606f017a5e9635fa028bdbb3b626e8efe0ca2965e51321541a65f3380f1c9; signing required. Physical iPhone results remain unverified.
+- Local/cloud build75, RED and canceled candidate outputs cleared; duplicate final download removed. Only current desktop IPA and final cloud artifact12701835846 remain. Source/original diagnostics retained. Details:docs/logs37-missed-send-review.md.
+
+
+## logs38 investigation (2026-10-27)
+- Build76 direct capture is live. Acknowledgement is visibly sent but actor marks it unverified; sent=false prevents authorized owner execution. Subsequent own bubble hides request from pending selection. See docs/logs38-acknowledgement-regression.md.
+- RED focused CI40433368981 at cad6c5e; implementation and full validation pending. No physical-phone success claimed.
+
+
+## logs38 build77 delivery
+- Fixed independent owner dispatch and anchored whole-reply confirmation in WatchMode/AgentLoop. App source480db61; full CI40434017643 passed408 simulator +8 capture tests, zero failures. RED before repair was7 tests/6 assertion failures.
+- Delivered E:/桌面/Lan-Agent-build77-unsigned.ipa, SHA256 c04e0d4b9fac2215a474c2796c4fdbfcf58bbcf89f103efae5bfdc403d6a80b2. Superseded IPA/test artifacts cleaned. No phone/USB/firmware validation claimed.
+
+
+### 2026-10-27 logs39 checkpoint
+logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before screen-sharing interruption. Five regression tests running on source f011955. Implement settled axis positioning, edge interpolation, transactional multi-point validation, and middle-edge WeChat return. Phone validation remains outstanding.
+
+
+### 2026-10-27 build78 implementation checkpoint
+- Active goal: repair logs39 calibration >2% and native stop-sharing alert after top-left back taps.
+- Source 6ea708b758758e5183dfa83a5f5b8732315a4c12. Build78 full CI 40441518572 running; device compile previously passed at 9751904, final adds homing consistency for gesture starts.
+- Changed ProbeMap/ProbeMotion, Pointer provisional persistence/motion version, AutoCalibrator, TouchCalibration, WatchListReturn. No capture or firmware changes; wireless only.
+- RED f011955 / 40439396466: all five regression tests failed, seven assertion failures. Final suite adds thirteen regression methods.
+- Raw logs and frames remain outside Git: E:/AgentStorage/esp32/log39-inspection. Sanitised diagnosis: docs/logs39-pointer-calibration.md.
+- Next: inspect full CI results, repair failures if any, verify IPA build/hash/arm64/ScreenCaptureKit, deliver desktop build78, delete superseded77 and temporary cloud test artifacts only after verified new package. Update PR1 and final docs. No physical phone verification available.
+
+
+### 2026-10-27 build78 delivered
+- Source 6ea708b758758e5183dfa83a5f5b8732315a4c12; CI 40441518572 passed Release build, 421 simulator tests (13 new regressions), 8 capture-policy tests, zero failures.
+- Verified desktop E:/桌面/Lan-Agent-build78-unsigned.ipa, 5,267,769 bytes, SHA256 072d43b2f0756558fcc88173720fcc50d77d2c0a337cecf956a00bad5c1afd30. Build78/arm64/ScreenCaptureKit and ZIP integrity confirmed.
+- Removed obsolete desktop77, duplicate downloaded78, and old cloud build/test artifacts after new package verification. Preserved source/Git and original diagnostic ZIPs.
+- Fixed measured movement mapping, provisional multi-point calibration <=1.5%, legacy calibration migration, gesture homing consistency and middle-edge WeChat return. No USB/firmware/capture API changes.
+- Remaining: actual phone installation/calibration/task validation; no physical phone attached. Do not claim real HID accuracy from simulator results.
+
+
+## 2026-10-27 build79 / logs40 checkpoint
+- Goal: fix repeated build78 calibration residual 2.1% without loosening accuracy.
+- Evidence: v34 metrics curve=true rev20; identical move 140 265 differs by 5.1% in x. Matching firmware uses random Bezier paths even for axis-only move commands.
+- Change cb6d2f2: query curve before mapped home, disable and require off acknowledgement; explicit unsupported-command only permits old straight firmware; invalidate old motionVersion1; 7 sampling + 4 fresh checks, optional bounded refinement.
+- Validation: RED run40444842738 reproduced 7 failing tests / 10 assertions out of8. Final build79 Release and complete tests pending.
+- Skills/routing: systematic-debugging + test-driven-development. Spec-kit triage resolves to bounded bug fix after logs40 identifies firmware mode, so no core model rewrite. Headroom processed log40 calibration evidence locally.
+- Paths: ios/IPhoneAgent/Agent/ProbeMap.swift, Pointer.swift, App/TouchCalibration.swift, tools/pointer-motion-tests, docs/logs40-straight-motion.md. Raw evidence stays E:/AgentStorage/esp32/calibration78-inspection.
+- Next: inspect CI, repair failures, verify IPA build/arch/hash, then replace78 and clean old outputs. No physical phone attached; no USB/firmware changes.
+
+- build79 CI attempt1: Release + both policy suites passed. Simulator runner restarted during Logs36RegressionTests.testLongChineseReportUsesExactPasteBeforeHomophonePronePinyin; no assertion failure shown. Distinct passing tests: 422. Full job attempt2 restarted with identical cb6d2f2 source; package delivery remains blocked on successful validation, not user approval.
+
+- build79 verified/delivered: CI40445212700 attempt2 all423 simulator +8 motion +8 capture tests passed; prior interrupted Chinese paste case passed9.938s. Source cb6d2f2. Desktop E:/桌面/Lan-Agent-build79-unsigned.ipa, 5269969 bytes, SHA256 8c3f2d71cea78493ed471ea473a3c95ad2a2fe9f2e1b2779edd1ca2abb22a016. ZIP/arm64/ScreenCaptureKit/build79/extension79 verified. Old78 + checksum and duplicate download removed after hash check. Raw logs retained outside Git. Physical iPhone landing accuracy still needs installed-device validation; no USB or firmware change. Permanent motion tests live in ipa.yml; temporary RED workflow removed.
+
+- 2026-10-27 build80 in validation: user requires Bezier preserved; build79 persistent curve-off withdrawn. logs41 confirms repeated y=.09 -> .109 despite straight mode. Plateau midpoint pooling and invented zero-origin low inverse reproduced RED (run40450951228); fix retains measured flat intervals and low-end gain. All real scatter and 1.5% fresh-validation requirement retained; no firmware/USB/raw-log upload. Source6f213bd, CI40451309403 running; no package delivered yet.
+
+- build80 complete: CI40451309403 attempt1 passed Release +423 simulator +12 Bezier/map +8 capture tests. Desktop E:/桌面/Lan-Agent-build80-unsigned.ipa (5269123 bytes), SHA256 c2795d45fbb81e1f6df82729e0340fc586573c600a36d886e4a772d72ddd1b76; ZIP/arm64/capture/build80/extension80 verified. Source6f213bd. Superseded79 desktop/cloud package and duplicate downloaded IPA removed after new hash check. Bezier restored for calibration/runtime; real landing accuracy still needs installed-phone confirmation. Key source ios/IPhoneAgent/Agent/ProbeMap.swift; record docs/logs41-bezier-calibration.md. No firmware/USB/raw-log upload.
+
+- logs42 follow-up: build80 still fails eight fresh rounds; curve on confirmed. Identical150/150 varies X0.541–0.604; per-axis map cannot certify random/coupled motion. Reusing existing bounded visual aim for measured curved calibration/runtime; no curve/firmware change. RED source f9b616c; run40455498579 in new private caoshihui5211314-cloud/esp32-iphone-agent-build, main account invitation accepted. Production unchanged pending RED. Local evidence E:/AgentStorage/esp32/logs42-inspection; plan docs/logs42-feedback-positioning.md.
+
+
+## 2026-10-27 logs42 / build81 delivery
+- Source 70e5094392dab44ba7f38ef38ff4f6d6069171df; native iOS27 capture and firmware Bezier remain enabled, wireless only.
+- Variable/coupled curved landings are now corrected and visually confirmed before ordinary clicks/gesture starts. Four fresh physical calibration clicks still require <=1.5%; raw scatter is retained. Nudge localization uses observed displacement. System edge gestures allow only a bounded cursor-centre inset; ordinary taps keep exact tolerance.
+- TDD evidence: build80 RED 17 tests/11 assertion failures; first GREEN17/0; review RED21/2 for border gestures; final full CI434 simulator +12 motion/map +8 capture tests,0 failures. Release build succeeded.
+- New private build mirror caoshihui5211314-cloud/esp32-iphone-agent-build; lanhaiyue-web collaborator accepted. CI40457162983.
+- Desktop E:/桌面/Lan-Agent-build81-unsigned.ipa: 5,271,490 bytes, SHA256 f75d56caf9a1d7883e366062b1f2ddc5f78b43dc0eb256ec2287c7a4a9f09cfc. App/extension81, arm64, ScreenCaptureKit and ZIP/hash verified. Unsigned; physical phone unverified, install/sign and recalibrate once.
+- Removed verified superseded build80 desktop/cloud IPA and temporary diagnostic artifacts; removed duplicate new download after hash verification. User logs retained locally.
+- Routing/plan/acceptance: docs/logs42-feedback-positioning.md; local checkpoint E:/AgentStorage/esp32/logs42-inspection/checkpoint.json.
+
+## 2026-10-27 logs43 / build82 delivery (Claude Code)
+- logs43 (build81 on phone): calibration failed 3/4 tries on check (0.06,0.50) ("pointer not found"/"lost"); both watch runs failed at step 1 — WeChat icon tap (0.85,0.59) on the home screen withheld 3x ("Pointer position could not be verified") → "3 errors in a row". build77 (open-loop) had completed the same watch task.
+- Cause: Vision.pointer needs moved pixels to keep their values; the translucent pointer over icons/wallpaper/grid line/probe dots breaks that. Offline with the frame's own cursor on the logs43 home frame: found 30/300, fails at the WeChat icon; plain WeChat screens 250/300. Shape-only match rejected (>1.5% error in up to 1/4 of hits). build81 made this detector mandatory for every click.
+- build82 (source 3959f4d): ordinary taps/gestures correct when seen, else click at the calibrated estimate; lost during correction → re-home and click at estimate; seen-but-still-off stays withheld; precision (aim:true) stays strict. Calibration board plain white (corner squares only) during the 4 checks.
+- CI 40461232391 (caoshihui5211314-cloud/esp32-iphone-agent-build): Release + motion/capture policy + 436 simulator tests, 0 failures (4 new/rewritten Logs42 tests). Desktop E:/桌面/Lan-Agent-build82-unsigned.ipa 5,272,133 bytes, SHA256 a883a0346720bb822f44902cb6c1be4fa2ac86f949c2995ebdfae211727b0151; build81 recycled. Physical phone unverified. Notes: docs/logs43-unseen-pointer.md; raw logs E:/AgentStorage/esp32/logs43-inspection.
+
+## 2026-10-27 logs44 / build83 delivery (Claude Code)
+- logs44 (build82): try 1 probe click got no touch (app briefly went background); try 2 first check (0.06,0.50) unseen on the plain board, click landed (0.090,0.493) 3.0% → failed; try 3 user cancelled. Same curved command scatters up to 5% (move 140 75 → x 0.480 / 0.530).
+- build83 (7b9f7b4): each calibration check corrects from the real click landing (move resting pointer by the measured miss, ≤2 re-clicks; pixel-aim failure clicks in place instead of failing); final landing still ≤1.5%; 0.4 s repaint wait before checks.
+- CI 40463137744: 437 simulator tests, 0 failures. Desktop E:/桌面/Lan-Agent-build83-unsigned.ipa 5,275,728 bytes, SHA256 f50bba2fd3e8b0e8a81a7bd382d443234a34f4b0b019d07fc0eae8f09f129e07; build82 recycled. Physical phone unverified.
+
+## 2026-11-05 logs46 / build84 delivery (Claude Code)
+- logs46 (build83, 10-29 02:09–02:15 Taipei): calibration passed ±1.3% (landing correction 3.0%→0.2%). Phone in dark appearance: every type refused "no keyboard" with the keyboard up (OCR missed the dark keys) → paste hop; hop 1 withheld the home-bar swipe (pointer x 0.210 for 0.200, 0.8% tolerance), hop 2 never reached Lan Agent (previous app was Claude). Owner task "去 claude 说一句你好，并把 claude 回复的内容发给我" held after the first send by endAfterSend and failed with the reply on screen.
+- build84 (34a4b01 + d4c45a9): Vision.letterKeyboard layout detector (offline 53/53 keyboard frames light+dark, 0/57 false positives) used before OCR in keyboardUp; edge swipes 3% along the border; bring-back phrases count as severalParts and the phone prompt says to finish with the reply in the answer. Fixed date-bound DiagnosticFilesTests (October run names expired by the 7-day limit).
+- CI 42024739284: 443 simulator tests, 0 failures. Desktop E:/桌面/Lan-Agent-build84-unsigned.ipa 5,280,424 bytes, SHA256 33ad5958b1b088b942a559570b3df52f79b44bf9310e8415fe4fdd349fefc9c2; build83 recycled. Physical phone unverified. Notes: docs/logs46-dark-keyboard-and-bring-back.md.
+
+## 2026-11-05 build85: learned routes + lesson cleanup (Claude Code)
+- User: no learning felt; wants it for all apps, and lessons cleaned. Evidence: LessonBook only adds prompt advice; ExperienceStore never keeps successes; logs43/46 applied 4–5 lessons per run, the most-used (20×) unrelated ("先选择中间三个按钮的左边那个…"), several contradicting, some with coordinates.
+- build85 (8a96bbd..b4bf415): RouteBook (Services/RouteBook.swift) keeps a done run's navigation up to the first typing (scene signature + OCR label per tap; detours/dead taps dropped; 发送/付款/删除… end a route); AgentLoop.replay walks a matching route without the model, hands over at the first differing screen/missing label/no-change step. Lessons: Jaccard ≥ 0.2 added to matching, coordinate lessons rejected, self-learned lessons reset once (selfLessonsReset85); Learning page shows/clears routes.
+- CI 42032226698: 452 simulator tests, 0 failures (9 new). Desktop E:/桌面/Lan-Agent-build85-unsigned.ipa 5,308,591 bytes, SHA256 620d1d0064c226222325c3879858b86f4de27770db2bfa1197fa4b3d341ddece; build84 recycled. Physical phone unverified. Notes: docs/learned-routes.md.
+
+## 2026-11-06 logs 11-06 / build86: paste hop + stripped release (Claude Code)
+- logs (build85, 11-06 18:55–19:05 Taipei): 10/12 paste hops "lost" so replies never went out. Trace frames: back-button unread count 321→322 and WeChat banners for other groups broke the exact OCR match; once 8 s in Lan Agent let iOS re-order the app switcher, reverse swipe did nothing. Also owner false: chats ["测试群","主人蓝海乐"] vs senders ["蓝海乐"]; keyboard is 9-key Pinyin.
+- build86 (a774996, pushed build81 main + chen-private): number-only OCR pieces not compared; return check looks up to 3× (0/2/4 s, fresh, equally strict); reverse swipe that stays in Lan Agent → one forward swipe; Release strips (DEPLOYMENT_POSTPROCESSING) with CI guard; iPhone only; duplicate Logo + unreferenced Discord/GitHub/X images removed. All features kept (user: intents/ChatTool/knowledge/demo/Wi-Fi mirroring will be used).
+- CI 42210816847: 455 simulator tests, 0 failures (3 new); app binary 9.6 MB→3.97 MB (symbols 79,062→2,272), widget 916 KB→328 KB, Assets.car 2.6→1.3 MB; IPA 5.31→3.16 MB. Old-code RED not run.
+- Desktop E:/桌面/Lan-Agent-build86-unsigned.ipa 3,156,457 bytes, SHA256 f5e3472426ee2d7b87cdddd270db5501a59f74b9f41518572f3acd7ea097159b; build85 to Recycle Bin. Physical phone unverified.
+
+## 2026-11-06 evening logs / build87: send with Return, taps without pointer search (Claude Code)
+- logs (build86, 19:40–19:47 Taipei): paste hop now filled on its 3rd look, but the confirm-send run tapped the keyboard's 发送 key as a precise tap; pointer unseen on the dark keyboard → 6× withheld → "3 errors in a row" (76 s, 16 model calls). Owner task typed 你好 and stuck the same way. 11 taps wiggled the pointer 104 times; the search found it 6/31; all 10 completed taps landed via the map estimate. RouteBook replayed 6 navigation runs without the model.
+- build87 (39df6f6 + 8e7c75d, pushed build81 main + chen-private): tap on the keyboard's bottom-right key (x≥760, y 845–925) with a keyboard up → key enter; ordinary taps open-loop on the map (precise taps / edge gestures still aim); app switch aims once. Tests: 2 new (Return key, same spot without keyboard), Logs42 ordinary-tap test rewritten, 2 TapAccuracy send tests count Return.
+- First CI 42214069074: 2 old send tests failed (counted taps; the send now is Return). Fixed tests only. CI 42215193701: 457 simulator tests, 0 failures; app symbols 2,271.
+- Desktop E:/桌面/Lan-Agent-build87-unsigned.ipa 3,158,588 bytes, SHA256 0df7e360bb4eaebceffbd35cf79ef6ee7f635df7bc9c89aaf04cb30c901d9442; build86 to Recycle Bin. Physical phone unverified.
+
+## 2026-11-06 night / build88 + build89: watch loop, back, Claude send, learned buttons (Claude Code)
+- logs (build87, 20:18–20:29 Taipei): sends via Return worked. Problems: unread check replayed a learned "tap 主人蓝海乐" route every check (in/out loop); 13/13 edge back swipes failed, 7/7 model chevron taps worked; Claude 发送 (0.908, 0.543, above the keyboard) withheld 17× unseen → fail; first send run opened 小柳 and another group.
+- build88 (d9f818e; CI 42219717381, 459 tests, 0 failures): learnedRoutes off for unread check + return fallback; WatchListReturn taps the verified chevron first, swipe second; unseen precise taps click at the estimate while calibration is trusted; watch send runs snap list taps to the target chat's OCR row.
+- build89 (c017360; CI 42220795266, 467 tests, 0 failures, 8 new ControlBookTests): Services/ControlBook.swift learned buttons — 24×24 gray patch at 180 px width, NCC ≥ 0.88 with 0.03 margin, ±¼ screen around the learned row. send: learned at run end (done + sent by tap); used as prompt hint + snaps nearby send taps. back: learned from the first top tap (y ≤ 0.15) that changed the screen after a back swipe that did not; next back on a matching screen taps it. Failed twice and more than worked → forgotten. LearningView "Learned buttons" (学会的按钮), clear + switch wired.
+- Desktop E:/桌面/Lan-Agent-build89-unsigned.ipa 3,177,491 bytes, SHA256 0ee3ec67b113f5aa3f3ee487195b1b6a9664dbb5a027a05c58a6a93a8fe93b02; build87 to Recycle Bin. Physical phone unverified.
+
+## 2026-11-06 night / build90 + build91: second run faster (Claude Code)
+- logs (build89, 21:03–21:12 Taipei), "Claude 你好" twice: learned send button worked (score 1.00; Claude part 35 → 29 s) but round 2 took 207 s vs 156 s (ack paste hop stopped in Claude → 65 s failed run; route not joined; walk tapped Claude's menu).
+- build90 (b029823; CI 42224607864, 471 tests, 0 failures): RouteBook.entry joins a route at the step learned on the current screen; times/counts never anchors; watched WeChat chats reopened by weixin:// after the pasteboard is filled; afterPhoneTask skips blind back taps.
+- build91 (1e45dce + a0f7bac; first CI 42226064273 had 1 failure, the stale-check cursor test on device JPEG; CI 42227329252: 476 tests, 0 failures): Vision.look/visiblyChanged (24×48 below the status bar, cell diff > 16); VideoFeed.changedAt drives settled() (cursor blink no longer forces the 2 s / 4 s cap); stale check ignores a caret-only change; WatchSettings.taskAcknowledgement = "收到" (typed as pinyin, no hop).
+- Desktop E:/桌面/Lan-Agent-build91-unsigned.ipa 3,179,473 bytes, SHA256 51deea7759992d2d8d0fdc9fe832d3e0ca0f6ddc0f1b8f47c6a4dded029eb8f9; build89 to Recycle Bin. Physical phone unverified; expected ~100 s per round (from ~200 s).
+
+## 2026-11-08 logs (build91, 11-06 21:51 + 11-07 22:59) / build92 (Claude Code)
+- User: "every time a new problem". Full-session review found: 6 report hops never reached Lan Agent after a multi-app phone task (watch stopped); 2/5 weixin:// returns refused by content match; unread checks always delegated to the model because 蓝海乐 was out of view (2 calls, 7–11 s, wrong opens); alarm+draw+message task hit the step limit twice (~35 hour-wheel swipes); 1-char route anchors.
+- build92 (d4be86b; CI 42386505086: 480 tests, 0 failures): PasteRoundTrip openAgent → AppModel.openLanAgentBySearch (Home, swipe down, type "Lan Agent", Return) as the second attempt for watched WeChat chats; WeChat return verified by navigation title, input box re-tapped when the keyboard is down; WatchChatOpen.unread treats out-of-view listed chats as not unread; AgentLoop wheel guard (2nd wheel swipe refused with "type 0800", twice per run); RouteBook drops 1-char anchors.
+- Desktop E:/桌面/Lan-Agent-build92-unsigned.ipa 3,182,723 bytes, SHA256 e8ac244bf61a75a2d16785b63fea9ffc7656ee3245ab08dbdb416d31c87b3de5; build91 to Recycle Bin. Physical phone unverified. Unknowns: Clock wheel accepting typed digits on iOS 27; Spotlight top hit for "Lan Agent"; "你去给我画一个" failure not analysed (trace rotated).
+
+## 2026-11-08 logs (build92, 00:01 Taipei) / build93 (Claude Code)
+- User: "doesn't work, slower; check before delivering". Evidence: model first token 11.5 s avg (headers after 15–16 s) vs 1.3–1.4 s on 11-06/07 at the same prompt size → service-side slowdown. App-side: step frame waits 0.15–0.9 s (was 2.1 s), start settle 3.4 s (was 7 s), weixin:// paste hop filled. The watch kept starting with the 11-07 pending report as a model run from the Home Screen (quick send cannot run in front): 68 s and 155 s, stopped by the user.
+- build93 (40b639e; CI 42390288036: 480 tests, 0 failures): deliverWatchTaskReply opens WeChat by URL within 15 s of Start (watchStartedAt) before the quick send; a stale look with a target acts at once when nothing changed near it (typing/keys keep the 2-drop rule; Build14ReviewTests updated). Self-review: full diff since build91 re-read; added the 15 s guard so a user-opened Lan Agent is never switched away; confirmed the stale/loop tests that pin a change under the target still hold.
+- Desktop E:/桌面/Lan-Agent-build93-unsigned.ipa 3,185,251 bytes, SHA256 6e4d0a21e5a5eb943041aca7d6ca7547a68f7938d9d09c9042d17189559185fb; build92 to Recycle Bin. Physical phone unverified.
+
+## 2026-11-08 new architecture decided / build94 phase A (Claude Code)
+- After the Android "native Codex phone" video, user decided (specs/004-codex-style-agent/design.md): iPhone only; eyes = share entire screen; typing = Lan Agent keyboard; apps = search + remembered icon positions; brain in the iPhone app, ChatGPT Plus first, Doubao API fallback; multi-task parallel. Signing is 全能簽 → no App Group, keyboard talks to the app over 127.0.0.1.
+- build94 (7c65365; CI 42396733674: 490 tests, 0 failures): LanAgentKeyboard extension (polls 127.0.0.1:47820 while shown, inserts text, optional return; needs Allow Full Access); KeyboardBridge in the app (each text handed out once, waits for DONE); ChatGPTPlus (device-code sign-in, token exchange/refresh, /models, streamed /responses with a screenshot, x-codex headers) following openai/codex rust-v0.167.0; Settings › 新架構測試（階段 A）. Plus is not an interface OpenAI offers to third parties; user accepted the account risk.
+- Desktop E:/桌面/Lan-Agent-build94-unsigned.ipa 3,259,317 bytes, SHA256 87b2209a15ff172469f597b95e18d49a46df1dd221dd82283e7d4d9a7e34e02f; steps E:/桌面/Lan-Agent-build94-階段A測試步驟.md; build93 to Recycle Bin. Device unverified: does iOS show the keyboard while the board is attached as a hardware keyboard; does Plus sign-in/models/ask work.
+
+## 2026-11-09 phase A results (build94 logs, 11-08 01:43–02:03 Taipei)
+- Keyboard: works with the board attached. ① typed ×3, ② typed + return ×2, ③ typed + board Enter ×3, all ✅; full access true; picked up 0.4 s after the keyboard appeared, 21 ms when already on screen. Still to confirm from the user: whether WeChat sent on ② (keyboard "\n") and ③ (board Enter).
+- Plus: device-code sign-in OK (second attempt; the first was abandoned when the app was swiped away/reopened at 01:52), account id present. Models: gpt-6.1-sol, gpt-6-astra, gpt-6.1-terra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol/terra/luna, gpt-reserve, codex-auto-review. Ask with a screenshot on gpt-6.1-terra: first token 3.0 s / 1.9 s, total 3.4 s / 2.4 s. Quota headers: plan plus, 5 h window used 1% after 2 asks, 7-day window used 73% (resets in ~4.4 days), no credits.
+- Conclusion: both phase A paths are feasible. Plus quota (weekly 73% used) means planner-only use as designed; per-step execution on Doubao.
+
+## 2026-11-09 build95 phase B (specs/004)
+- Typing: every Chinese/exact text the agent types and every WeChat reply/report/「收到」 goes through Lan Agent's keyboard first (globe key cycled until the keyboard reports in, ≤5 taps), board Enter sends; pinyin and the paste hop stay as fallback.
+- `open APP` action: learned Home Screen page/spot (AppPlaces, UserDefaults appPlacesV1) → else OCR of the first 4 Home Screen pages → else Search typed by the keyboard (result label tapped, else Return). Apps only in the dock/App Library stay "by search".
+- The model gets the screen's OCR text with coordinates (≤45 lines) and a note when our keyboard is up. Box taps are skipped while our keyboard reports in (it has no letter keys; the box's old spot is on it).
+- Learning page: 学会的 App 位置 count, cleared with all learning records. Prompts: actor/app-rules/planner prefer `open`.
+- Tests: IPhoneAgentTests/PhaseBTests.swift (open parse/step, keyboard typing + Return, ASCII still by board, screen text order/limit/prompt, AppPlaces, bridge onScreen).

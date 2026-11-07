@@ -137,3 +137,131 @@
 - [x] 验证候选词/输入框真实 Vision OCR、已输入内容交接发送、明确错字修正、未确认输入不重贴；359测试通过。
 - [x] 校验 build73 IPA 并放桌面，保留旧版，更新 PR与交接。
 - [ ] 使用原有签名方式安装后真机复测 Claude 你好：文字保留、只发一次、有结果后完成；需要粘贴时核查跨 App 画面。
+
+## 2026-10-27 视频对照
+- [x] 核对原视频、作者隧道评论与官方控制接口资料。
+- [ ] 后续：建立同任务分阶段耗时基准，验证画面时效与中文输入通道；尚未实施。
+
+## 2026-10-27 直接取屏方案
+- [x] 评估iOS27 ScreenCaptureKit、现有ScreenSource接口与参考项目。
+- [ ] 尚未实施：直接取屏跨App最小验证；通过后再增加高速/精准/自动策略。
+
+## 2026-10-27 无线运行与token要求
+- [x] 修正USB假设，明确全程无线与充电口保留；澄清每次回复6动作。
+- [ ] 实施前核对板上实际无线控制固件与协议，再接入iOS27直接取屏。
+- [ ] 分离本地采帧与云端请求；用相同任务对照调用数、token、耗时和成功率。
+
+- [ ] 速度验收须使用相同任务、模型、网络和成功标准，对比旧链路/直接取屏的总时长、模型次数、帧年龄与成功率；历史失败过程不作成功速度基准。
+
+- [ ] 日志35：补齐视频回传→组帧→解码边界证据与当前完整OS版本；处理后台首帧启动20+30秒重试造成的长等待。全程无线，保留新鲜度检查；实际恢复仍待真机验证。
+
+
+## 2026-10-27 — build74 iOS27 direct capture preview
+
+User-approved native whole-display preview completed; existing wireless controls and build73 input safeguards preserved. Skills: spec-kit-orchestration + test-driven-development + ponytail; review used scoped source inspection, Jev advisory scoring and CI. Spec/plan/tasks/quickstart/review: specs/002-ios27-direct-capture. Source8e8248645be1276daf5333b975c369225126a061; final CI40407538020 passed 8 policy + 368 simulator tests and device Release. Artifact E:/桌面/Lan-Agent-build74-unsigned.ipa, SHA256c1f1ee76575e01610e03f2e3bed9421ebfc5f4ab77e8018e9c9c79e548c2aaca. Inspected build74/SDK27.1/backgroundscreen-capture/linked framework/no signature/ZIP integrity. No new firmware, hardware, USB or cloud frame-streaming requirement. Device-only system consent/cross-app/background/cursor/gestures/input/CPU/thermal and matched speed comparison remain pending user-installed signed build plus exported logs. User asked storage: existing bounded app-owned diagnostic retention was verified and explained, no Photos writes introduced.
+
+
+## 2026-10-27 logs36 / build75
+
+- [x] Trace correct greeting, incorrect mouse correction, send guard and Chinese homophone to independent evidence.
+- [x] Reproduce failures against old code before repair.
+- [x] Implement transport checks, resilient keyboard recognition, exact text verification, long Chinese paste preference and bounded draft recovery.
+- [ ] Complete final CI and review duplicate-send/false-completion boundaries.
+- [ ] Inspect final unsigned build75 IPA, copy to desktop, report real-device validation limits.
+
+
+## 2026-10-27 build75 scope extension
+- [x] Create private compilation repository under user-designated account and accept main account Write invitation.
+- [x] Implement generic exact text routing and inspectable real learning stores; expose Home/Settings entry, provenance, request counts and per-item controls.
+- [x] Compile device Release for commit124bcb6 on new account.
+- [ ] Confirm baseline RED evidence and fix remaining input boundary failures; run complete green simulator suite.
+- [ ] Converge feature003, review, inspect and deliver final build75 IPA; physical phone validation remains external.
+
+- [x] Finish build75 exact-SHA full CI on new private build repository, converge feature003, verify IPA build75/hash, refresh draft PR and deliver unsigned IPA to E:/桌面. No physical-phone validation claimed.
+
+- [x] Clean old ESP32 Agent install/build outputs while retaining build75 and active source (500,557,380 bytes freed).
+
+
+## 2026-10-27 logs37 / build76
+- [x] Correlate version, HID commands, unchanged drafts and visible actual pointer endpoint.
+- [x] Reproduce first-send, precision click and export failures before implementation.
+- [ ] Verify real pixel probe endpoint regression, complete bounded repair, run full simulator/device CI.
+- [ ] Verify final build76 IPA/hash, refresh PR, deliver and remove superseded/failed build outputs.
+
+- [x] logs37/build76: complete first-send visual aim, post-probe endpoint check, strict click boundary, two-frame bounded unchanged-draft recovery and bounded-history export.
+- [x] Confirm401+8 zero-failure tests, inspect final artifact, deliver build76, remove superseded/failed/duplicate packages.
+- [ ] External acceptance: physical-phone arbitrary text/send task after signing build76; CI does not establish that result.
+
+
+## logs38 repair
+- [x] Inspect actual build76 phone trace and send frames; identify acknowledgement/execution coupling.
+- [ ] Verify focused RED regressions, repair receipt and authenticated task gate, then full CI.
+- [ ] Review and deliver build77; clean superseded packages only after verification.
+
+
+## logs38 verification completed
+- [x] Observe RED, implement independent authorized task gate and anchored send receipt, preserve cancellation/duplicate guards.
+- [x] Release build +408 simulator +8 capture tests; verify build77 IPA and desktop hash, remove old install packages and temporary CI selector/branch.
+- [ ] Physical iPhone verification after signed build77 installation (not available in this environment).
+
+
+### 2026-10-27 logs39 checkpoint
+logs39 pending: reproduce five failures; implement consistent calibration/runtime motion; multi-point <=1.5% acceptance; full build78 CI; verify IPA; replace desktop old package only after successful build.
+
+
+### 2026-10-27 build78 implementation checkpoint
+- Active goal: repair logs39 calibration >2% and native stop-sharing alert after top-left back taps.
+- Source 6ea708b758758e5183dfa83a5f5b8732315a4c12. Build78 full CI 40441518572 running; device compile previously passed at 9751904, final adds homing consistency for gesture starts.
+- Changed ProbeMap/ProbeMotion, Pointer provisional persistence/motion version, AutoCalibrator, TouchCalibration, WatchListReturn. No capture or firmware changes; wireless only.
+- RED f011955 / 40439396466: all five regression tests failed, seven assertion failures. Final suite adds thirteen regression methods.
+- Raw logs and frames remain outside Git: E:/AgentStorage/esp32/log39-inspection. Sanitised diagnosis: docs/logs39-pointer-calibration.md.
+- Next: inspect full CI results, repair failures if any, verify IPA build/hash/arm64/ScreenCaptureKit, deliver desktop build78, delete superseded77 and temporary cloud test artifacts only after verified new package. Update PR1 and final docs. No physical phone verification available.
+
+
+### 2026-10-27 build78 delivered
+- Source 6ea708b758758e5183dfa83a5f5b8732315a4c12; CI 40441518572 passed Release build, 421 simulator tests (13 new regressions), 8 capture-policy tests, zero failures.
+- Verified desktop E:/桌面/Lan-Agent-build78-unsigned.ipa, 5,267,769 bytes, SHA256 072d43b2f0756558fcc88173720fcc50d77d2c0a337cecf956a00bad5c1afd30. Build78/arm64/ScreenCaptureKit and ZIP integrity confirmed.
+- Removed obsolete desktop77, duplicate downloaded78, and old cloud build/test artifacts after new package verification. Preserved source/Git and original diagnostic ZIPs.
+- Fixed measured movement mapping, provisional multi-point calibration <=1.5%, legacy calibration migration, gesture homing consistency and middle-edge WeChat return. No USB/firmware/capture API changes.
+- Remaining: actual phone installation/calibration/task validation; no physical phone attached. Do not claim real HID accuracy from simulator results.
+
+
+## 2026-10-27 build79 / logs40 checkpoint
+- Goal: fix repeated build78 calibration residual 2.1% without loosening accuracy.
+- Evidence: v34 metrics curve=true rev20; identical move 140 265 differs by 5.1% in x. Matching firmware uses random Bezier paths even for axis-only move commands.
+- Change cb6d2f2: query curve before mapped home, disable and require off acknowledgement; explicit unsupported-command only permits old straight firmware; invalidate old motionVersion1; 7 sampling + 4 fresh checks, optional bounded refinement.
+- Validation: RED run40444842738 reproduced 7 failing tests / 10 assertions out of8. Final build79 Release and complete tests pending.
+- Skills/routing: systematic-debugging + test-driven-development. Spec-kit triage resolves to bounded bug fix after logs40 identifies firmware mode, so no core model rewrite. Headroom processed log40 calibration evidence locally.
+- Paths: ios/IPhoneAgent/Agent/ProbeMap.swift, Pointer.swift, App/TouchCalibration.swift, tools/pointer-motion-tests, docs/logs40-straight-motion.md. Raw evidence stays E:/AgentStorage/esp32/calibration78-inspection.
+- Next: inspect CI, repair failures, verify IPA build/arch/hash, then replace78 and clean old outputs. No physical phone attached; no USB/firmware changes.
+
+- build79 CI attempt1: Release + both policy suites passed. Simulator runner restarted during Logs36RegressionTests.testLongChineseReportUsesExactPasteBeforeHomophonePronePinyin; no assertion failure shown. Distinct passing tests: 422. Full job attempt2 restarted with identical cb6d2f2 source; package delivery remains blocked on successful validation, not user approval.
+
+- build79 verified/delivered: CI40445212700 attempt2 all423 simulator +8 motion +8 capture tests passed; prior interrupted Chinese paste case passed9.938s. Source cb6d2f2. Desktop E:/桌面/Lan-Agent-build79-unsigned.ipa, 5269969 bytes, SHA256 8c3f2d71cea78493ed471ea473a3c95ad2a2fe9f2e1b2779edd1ca2abb22a016. ZIP/arm64/ScreenCaptureKit/build79/extension79 verified. Old78 + checksum and duplicate download removed after hash check. Raw logs retained outside Git. Physical iPhone landing accuracy still needs installed-device validation; no USB or firmware change. Permanent motion tests live in ipa.yml; temporary RED workflow removed.
+
+- 2026-10-27 build80 in validation: user requires Bezier preserved; build79 persistent curve-off withdrawn. logs41 confirms repeated y=.09 -> .109 despite straight mode. Plateau midpoint pooling and invented zero-origin low inverse reproduced RED (run40450951228); fix retains measured flat intervals and low-end gain. All real scatter and 1.5% fresh-validation requirement retained; no firmware/USB/raw-log upload. Source6f213bd, CI40451309403 running; no package delivered yet.
+
+- build80 complete: CI40451309403 attempt1 passed Release +423 simulator +12 Bezier/map +8 capture tests. Desktop E:/桌面/Lan-Agent-build80-unsigned.ipa (5269123 bytes), SHA256 c2795d45fbb81e1f6df82729e0340fc586573c600a36d886e4a772d72ddd1b76; ZIP/arm64/capture/build80/extension80 verified. Source6f213bd. Superseded79 desktop/cloud package and duplicate downloaded IPA removed after new hash check. Bezier restored for calibration/runtime; real landing accuracy still needs installed-phone confirmation. Key source ios/IPhoneAgent/Agent/ProbeMap.swift; record docs/logs41-bezier-calibration.md. No firmware/USB/raw-log upload.
+
+- logs42 follow-up: build80 still fails eight fresh rounds; curve on confirmed. Identical150/150 varies X0.541–0.604; per-axis map cannot certify random/coupled motion. Reusing existing bounded visual aim for measured curved calibration/runtime; no curve/firmware change. RED source f9b616c; run40455498579 in new private caoshihui5211314-cloud/esp32-iphone-agent-build, main account invitation accepted. Production unchanged pending RED. Local evidence E:/AgentStorage/esp32/logs42-inspection; plan docs/logs42-feedback-positioning.md.
+
+
+## 2026-10-27 logs42 / build81
+- [x] Reproduce variable Bezier landings and unsafe clicks without feedback before modifying production.
+- [x] Persist mandatory endpoint feedback, retain raw scatter, verify four real calibration clicks within1.5%.
+- [x] Correct observed nudge displacement and preserve system border gestures without relaxing ordinary taps.
+- [x] Migrate private build mirror, run full simulator/policy suites and Release build, verify/deliver build81.
+- [x] Clean obsolete desktop/cloud IPA and temporary diagnostic artifacts after new package verification.
+- [ ] Physical iPhone: install signed build81, recalibrate once, confirm real operation. No physical-device success claimed.
+- [x] logs43: stop withholding unseen ordinary taps; plain calibration board for checks; deliver build82 (CI 40461232391).
+- [x] logs44: calibration checks correct from real click landings; deliver build83 (CI 40463137744).
+- [x] logs46: dark keyboard detection, edge swipe tolerance, bring-back tasks; deliver build84 (CI 42024739284).
+- [x] build85: learned routes replay + lesson cleanup (CI 42032226698).
+- [ ] Physical iPhone: install signed build85; run the same task twice (second run should log "route: replayed"); test dark-mode reply and the Claude bring-back task; send logs.
+- [ ] Check why an unrelated lesson is applied to the WeChat watch task.
+- [x] build86: paste hop return check (unread count, banner retry, app-order reset), stripped Release, iPhone only, unused images removed.
+- [x] build87: keyboard 发送 tap → Return; ordinary taps without pointer search.
+- [ ] User: senders whitelist must say 主人蓝海乐 (the private chat's name); switch the keyboard to 拼音-全键盘; install signed build94 and run phase A (keyboard ①②③ with the board attached; Plus sign-in, models, one ask); export logs (search "phase A", "keyboard bridge").
+- Keep (user 2026-11-06): App Shortcuts/saved intents/demo recording, ChatTool + knowledge base, demo data, board Wi-Fi mirroring. Not used yet only because the core is still being stabilised; never remove them to slim the app.
+- [x] build95 phase B: keyboard typing everywhere, `open APP` with learned places, screen text list for the model.
+- [ ] User: phase B on the phone — open Claude, type 你好, send; the second time it must go straight to Claude without Search (if Claude is on a Home Screen page, not only in the dock).

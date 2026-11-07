@@ -124,6 +124,27 @@ extension Pointer: Gestures {}
     /// Reference text the user chose for this run (WeChat watch: the selected knowledge files), appended to the
     /// planner and actor prompts. Empty for ordinary runs.
     var reference = ""
+    /// Phase B (specs/004): text typed by Lan Agent's keyboard into the focused field (true when it confirmed);
+    /// whether that keyboard is on screen; and opening an app by name. Nil in tests and demo data.
+    var keyboardType: ((String) async -> Bool)?
+    var ourKeyboardOnScreen: (() -> Bool)?
+    var openApp: ((String) async throws -> Bool)?
+    /// Give the model the screen's text with positions (off in tests whose fake frames carry no text).
+    var readsScreenText = false
+
+    /// The screen's text pieces, top to bottom and left to right, as `"text" x y` lines (0-1000); nil when none.
+    /// At most `limit` lines, so a long list or chat does not crowd the prompt.
+    static func screenText(_ rows: [[CandidatePicker.Piece]], limit: Int = 45) -> String? {
+        let pieces = rows.flatMap { $0 }
+            .filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            .sorted { abs($0.box.midY - $1.box.midY) > 0.008 ? $0.box.midY < $1.box.midY : $0.box.midX < $1.box.midX }
+            .prefix(limit)
+        guard !pieces.isEmpty else { return nil }
+        return pieces.map { piece -> String in
+            let text = piece.text.replacingOccurrences(of: "\"", with: "'")
+            return "\"\(text)\" \(Int((piece.box.midX * 1000).rounded())) \(Int((piece.box.midY * 1000).rounded()))"
+        }.joined(separator: "\n")
+    }
     /// A fixed plan (WeChat watch's open and send tasks, whose steps never change): used as is, without the
     /// planner's call. Empty for ordinary runs.
     var presetPlan = ""
@@ -859,8 +880,9 @@ extension Pointer: Gestures {}
                             + "Only use explicit correction keys if a visible mistake needs fixing.")])
                     return false
                 }
+                // Lan Agent's keyboard has no letter keys to see, but it reports itself: a field it is up for is focused.
                 if name == "type", keyboardGuard, noKeyboard < 2, let shown = screen?.frame, Vision.image(shown) != nil,
-                   !CandidatePicker.keyboardUp(in: shown) {
+                   !CandidatePicker.keyboardUp(in: shown), ourKeyboardOnScreen?() != true {
                     noKeyboard += 1
                     aimNext = true
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
@@ -1053,6 +1075,15 @@ extension Pointer: Gestures {}
             try await phone.key("cmd+a")
             try await phone.key("backspace")
         }
+        // Lan Agent's keyboard first: exact text in place, no pinyin candidates and no app switch (phase B).
+        if Pasteboard.needed(text), let keyboardType, await keyboardType(text) {
+            if returnSends {
+                try await phone.key("enter")
+                returnSent = true
+                return DebugLog.write("type: typed by Lan Agent's keyboard, sent with Return")
+            }
+            return DebugLog.write("type: typed by Lan Agent's keyboard")
+        }
         if Pasteboard.needed(text), try await typedQuickly(text, phone: phone) {
             if returnSends {
                 try await phone.key("enter")
@@ -1179,7 +1210,7 @@ extension Pointer: Gestures {}
         return (now() - started) * 1000
     }
 
-    private static let observedActions: Set<String> = ["tap", "swipe", "back", "home", "key", "type", "path", "circle", "compose"]
+    private static let observedActions: Set<String> = ["tap", "swipe", "back", "home", "key", "type", "path", "circle", "compose", "open"]
     /// Planner and guard records never erase the result of the last actual gesture.
     private var lastObservedAction: JObject? {
         steps.last { Self.observedActions.contains($0["action"]?.str ?? "") && $0["performed"] != .bool(false) }
@@ -1255,6 +1286,15 @@ extension Pointer: Gestures {}
                     + "button at x \(Int(Double(hit.point.x) * 1000)), y \(Int(Double(hit.point.y) * 1000))."
             }
         }
+        // Phase B (specs/004): the text read on this phone with where it is, so a labelled control is tapped where it
+        // really is instead of where the model estimates it from the picture.
+        if readsScreenText, let shown = screen?.frame,
+           let list = Self.screenText(CandidatePicker.rows(in: shown, top: 0.055, bottom: 1)) {
+            prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
+        }
+        if ourKeyboardOnScreen?() == true {
+            prompt += "\n\nThe keyboard on screen is the app's own (\"Lan Agent 輸入法\"): the field is focused, use type."
+        }
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
@@ -1319,11 +1359,18 @@ extension Pointer: Gestures {}
                                         extra: p("r") < 0.06 ? 0.25 : 0), hold: true)
         case "type":
             let text = a["text"]?.str ?? ""
-            if fastText || Pasteboard.prefersExact(text) { try await typeFast(text) }
-            else { try await phone.type(text) }
+            if fastText || Pasteboard.prefersExact(text) || (Pasteboard.needed(text) && keyboardType != nil) {
+                try await typeFast(text)
+            } else { try await phone.type(text) }
         case "key": try await phone.key(a["combo"]?.str ?? "")
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()
+        case "open":
+            let app = a["app"]?.str ?? ""
+            guard let openApp else { throw DeviceError(message: "Opening apps by name is not available here; use the Home Screen.") }
+            guard try await openApp(app) else {
+                throw DeviceError(message: "Could not open \(app): it was neither on the first Home Screen pages nor in Search under this name.")
+            }
         case "wait": break
         case let other: throw Actions.ParseError(message: "unknown action \(other ?? "nil")")
         }

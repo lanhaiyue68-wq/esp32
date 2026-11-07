@@ -209,6 +209,11 @@ import UIKit
         agent.onHelp = { [weak self] reason in await self?.needsHelp(reason) ?? .stop }
         agent.gate = { [weak self] in try await self?.holdWhileInFront() }
         agent.pasteHop = { [weak self] text in await self?.hopToPaste(text) ?? .lost }
+        // Phase B (specs/004): typing by Lan Agent's keyboard, opening apps by name, the screen's text for the model.
+        agent.keyboardType = { [weak self] text in await self?.typeWithLanAgentKeyboard(text) ?? false }
+        agent.ourKeyboardOnScreen = { [weak self] in self?.keyboardBridge.onScreen() ?? false }
+        agent.openApp = { [weak self] name in try await self?.openApp(name) ?? false }
+        agent.readsScreenText = !MockMode.on
         AgentControl.handle = { [weak self] command in await self?.control(command) }
         AgentRequests.handle = { [weak self] request in await self?.handle(request) ?? AgentRequests.unavailable }
         notifier.onAction = { [weak self] action, run in self?.notificationAction(action, run: run) }
