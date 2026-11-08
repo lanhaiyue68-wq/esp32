@@ -51,7 +51,7 @@ extension AppModel {
             return .json(["stopped": .bool(true)])
 
         case ("POST", "/share"):
-            feed.startNativeSharing()
+            if !feed.restartCapture() { feed.startNativeSharing() }
             return .json(["status": .str(feed.nativeStatus)])
 
         case ("POST", "/watch"):
