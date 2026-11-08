@@ -35,9 +35,10 @@ import Foundation
             !match.text.isEmpty && body.contains(where: { preview in
                 (0.018...0.050).contains(preview.box.midY - match.box.midY) &&
                 abs(preview.box.minX - match.box.minX) <= 0.06 &&
-                // Not taller than the title. "Smaller" (×0.92) lost every row on the CI replica of logs(12)'s list,
-                // 24 px titles over 19 px previews; the next row's title is 0.08 or more below, never this close.
-                preview.box.height >= 0.006 && preview.box.height <= match.box.height * 1.05
+                // Position only: box heights say nothing here. On the CI replica of logs(12)'s list a 19 px preview
+                // was as tall as its 24 px title, and 小柳's two characters were shorter than their preview with Latin
+                // letters. The next row's title is 0.08 or more below, never this close.
+                preview.box.height >= 0.006
             })
         }
     }
