@@ -208,3 +208,16 @@ import UIKit
         XCTAssertNil(routes.recipe(for: "打开微信给测试组发你好并截图保存"), "another chat")
     }
 }
+
+/// build104 live 11-08: part 1 (the alarm) was done, refused three times as "nothing has been drawn" (part 2 was the
+/// drawing), and the run stopped for help. The task's own checks are for the done that ends the task.
+@MainActor final class PartDoneChecksTests: XCTestCase {
+    func testAnEarlierPartIsNotHeldToTheWholeTasksChecks() async {
+        let planner = FakeModel { _ in "1. Notes is open - open 备忘录\n2. A sun is drawn - draw it" }
+        let actor = FakeModel { _ in "THINK: finished\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: "打开备忘录，然后画一个太阳", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(agent.steps.compactMap { $0["action"]?.str }, ["plan", "part done", "done rejected", "done rejected", "fail"])
+    }
+}

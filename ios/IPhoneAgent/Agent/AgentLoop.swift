@@ -855,7 +855,10 @@ extension Pointer: Gestures {}
             let unsentReason: String? = endAfterSend != nil && unsent != nil
                 ? "The requested message still awaits sending. Inspect the current draft, correct any visible mistake, send once, then verify a NEW matching message before claiming done."
                 : nil
-            if name == "done", let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) {
+            // The task's own checks (drawn, sent) are for the done that ends it: build104 live 11-08, part 1 (the alarm)
+            // was done three times and refused each time as "nothing has been drawn" (that was part 2), and the run stopped.
+            let endsTask = parts.count < 2 || partIndex >= parts.count - 1
+            if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) {
                 doneRejected += 1
                 if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
                     record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])
