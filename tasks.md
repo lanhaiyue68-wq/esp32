@@ -273,3 +273,6 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [ ] Open questions: mirror "can't send commands in the app" + phone Wi-Fi; muted groups' red dot; redundant report after a reply-only task.
 - [x] build98: app sends without a board mirror (direct capture); keep-awake while sharing; red marks (number or muted dot) open any chat, listed first, others read only.
 - [ ] Device test build98 (send from the app; owner/listed task on red mark; muted group dot; other chat read only and back to list; phone stays awake).
+- [x] build99: top list row and long previews seen; one misread char allowed; taps past the calibrated range from the right border; first watch check opens WeChat by URL.
+- [ ] Device test build99 (owner's long task from the list; alarm ✓ hit once; watch start goes straight to WeChat).
+- [ ] Reading the test phone over USB needs a tool (pymobiledevice3) + Apple Mobile Device Service running + trust on the phone: awaiting the user's OK.

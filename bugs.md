@@ -303,3 +303,8 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - Keep-awake never nudged a still direct-captured screen (live needs ≤2 s confirmation): could lock, watch blind after 3 min. Fixed build98.
 - One listed chat was tapped without a red mark. Fixed build98 (one list path for all).
 - Redundant report after a reply-only task: by design (sent after the task finishes, user 11-09). Closed.
+
+## 2026-11-08 logs(12) build98
+- Owner's task never seen on the list: top row (0.145) and long previews (to 0.94) were outside the row filter; preview heights not smaller; OCR misread one char. Fixed build99.
+- Taps past the calibrated x range (0.864) overshot (0.899 → 0.975): alarm ✓ never hit. Fixed build99 (right-border approach).
+- Watch start ran the model with Lan Agent in front (opened an unlisted group, then a listed chat with no red mark). Fixed build99 (WeChat by URL, local list).
