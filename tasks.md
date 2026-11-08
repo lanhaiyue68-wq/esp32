@@ -279,4 +279,6 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] build100: phone's own app names; dead taps tried around the spot; right-border y last; visible still-screen nudges.
 - [ ] Device test build100 (alarm end to end, live over USB).
 - [ ] caoshihui5211314-cloud Actions billing (user's account): until fixed, take IPAs from ChenQian-hub/esp32-iphone-agent-app.
-- [ ] Phase C: ChatGPT Plus (Codex) as planner, doubao as actor; multi-task scheduling.
+- [x] Phase C (part): ChatGPT Plus plans, Doubao acts, Doubao fallback; steps per plan part (build101).
+- [ ] Device test build101 (Plus signed in; the 3-part owner task end to end, live over USB).
+- [ ] Phase C/D rest: scheduler, think parts in parallel, per-part results.

@@ -445,3 +445,9 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 - A report run paused mid-run ("直接取屏尚未就绪"): the nudge was move 1/−1 within one display frame, no pixel changed, and only when no frame-after was asked. Now move 4, 120 ms, move −4, any time; keep-awake the same.
 - CI: caoshihui5211314-cloud's Actions job was not started (account payment failed / spending limit). The same workflow on ChenQian-hub/esp32-iphone-agent-app (remote chen-private) built it: run 42455900549, 522 tests 0 failures. Desktop Lan-Agent-build100-unsigned.ipa (SHA256 8dd1c95bed0288e14eb9ed894513c1fe3c418cb5ff7312f61afd18cb59e001f1); app + both appex build 100. build99 files to the Recycle Bin.
 - Codex: ChatGPT Plus sign-in was only checked in phase A (11-07); every run so far used doubao-seed-2-1-lite for planner and actor (865 calls in this log). Plus as planner is phase C, not started.
+
+## 2026-11-08 build101 phase C: ChatGPT Plus plans (the commander), Doubao acts
+- PlusChat (Services/PlusChat.swift): a ChatModel that asks ChatGPT Plus (Codex backend, the phase A sign-in) with the planner's own instructions and the screen; RunSession wraps the planner with PlusChat.planner(fallback:). Not signed in / switched off / any failure → Doubao plans (429 rests Plus 30 min, others 2 min); the log says "planner: …" and "plus planner: …". Toggle + model on the phase A page (UserDefaults plusPlanner, plusPlannerModel; default gpt-6.1-terra).
+- AgentLoop.stepBudget: 20 steps per numbered plan part, at least the old limit, at most 100.
+- Includes build100's fixes. Commit 760a076; ChenQian-hub CI run 42457021487: 528 tests 0 failures. Desktop Lan-Agent-build101-unsigned.ipa (SHA256 d95807dc9ca5ffc768e5666c0da037060c89ad908710aa1c929989b5bc5117c7); app + both appex build 101; build100 files to the Recycle Bin.
+- Not yet: the scheduler (think tasks in parallel, screen tasks interleaved: phase D) and per-part results; device test of Plus planning.
