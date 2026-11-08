@@ -66,13 +66,21 @@ import UIKit
         return try XCTUnwrap(image.jpegData(compressionQuality: 0.72))
     }
 
+    /// Each piece: text, x range, middle y, height and the red share beside it, for a failure on the real recognizer.
+    private func describe(_ frame: Data) throws -> String {
+        let cg = try XCTUnwrap(Vision.image(frame))
+        return CandidatePicker.rows(in: frame, top: 0.055, bottom: 1).flatMap { $0 }.map {
+            String(format: "%@@%.3f-%.3f,%.3f h%.4f red%.3f", $0.text, $0.box.minX, $0.box.maxX, $0.box.midY, $0.box.height,
+                   Vision.redShare(cg, in: WatchChatOpen.badgeArea($0.box)))
+        }.joined(separator: " ")
+    }
+
     func testTheOwnersNewTaskOnTheTopRowWithALongPreviewIsSeen() throws {
         let frame = try list(badgeOnTop: true)
         let pick = WatchChatOpen.unread(in: frame, rules: rules)
         guard case .row(let chat, let point) = pick else {
-            let rows = CandidatePicker.rows(in: frame, top: 0.055, bottom: 1)
-            let seen = rows.map { $0.map { String(format: "%@@%.3f-%.3f,%.3f", $0.text, $0.box.minX, $0.box.maxX, $0.box.midY) }.joined(separator: " ") }
-            return XCTFail("the owner's row has a red number: got \(pick); rows \(seen)")
+            let info = (try? describe(frame)) ?? "?"
+            return XCTFail("the owner's row has a red number: got \(pick); rows \(info)")
         }
         XCTAssertEqual(chat, "主人蓝海乐")
         XCTAssertEqual(point.y, 0.145, accuracy: 0.015)
@@ -82,9 +90,8 @@ import UIKit
         let frame = try list(badgeOnTop: false)
         let pick = WatchChatOpen.unread(in: frame, rules: rules)
         guard case .other(_, let point) = pick else {
-            let rows = CandidatePicker.rows(in: frame, top: 0.055, bottom: 1)
-            let seen = rows.map { $0.map { String(format: "%@@%.3f-%.3f,%.3f", $0.text, $0.box.minX, $0.box.maxX, $0.box.midY) }.joined(separator: " ") }
-            return XCTFail("小柳 has a red dot: got \(pick); rows \(seen)")
+            let info = (try? describe(frame)) ?? "?"
+            return XCTFail("小柳 has a red dot: got \(pick); rows \(info)")
         }
         XCTAssertEqual(point.y, 0.322, accuracy: 0.015, "小柳's row, not 官方賬號's above it")
     }
@@ -105,6 +112,10 @@ import UIKit
         XCTAssertEqual(WatchChatOpen.withoutTime("蓝海乐昨天"), "蓝海乐")
         XCTAssertEqual(WatchChatOpen.withoutTime("蓝海乐"), "蓝海乐")
         XCTAssertEqual(WatchChatOpen.withoutTime("1:30"), "1:30", "nothing left: keep what was read")
+        XCTAssertTrue(WatchReport.sameName("主人监海乐", "主人蓝海乐"))
+        XCTAssertFalse(WatchReport.sameName("测验群", "测试群"), "short names must match exactly")
+        XCTAssertFalse(WatchReport.sameName("主人蓝海乐", "蓝海乐"))
+        XCTAssertFalse(WatchReport.sameName("主人蓝海", "主人蓝海乐"))
     }
 
     func testPastTheCalibratedRangeTheTapComesBackFromTheRightBorder() async throws {

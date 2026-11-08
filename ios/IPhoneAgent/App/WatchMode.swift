@@ -567,8 +567,17 @@ enum WatchReport {
             let name = fullTitle(header.map(\.text).joined())
             return name.isEmpty ? nil : name
         }
-        let matches = targets.filter { !fullTitle($0).isEmpty && titles.contains(fullTitle($0)) }
+        let matches = targets.filter { target in !fullTitle(target).isEmpty && titles.contains { sameName($0, fullTitle(target)) } }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// The same chat name as read by the text recognizer: exact, or a name of four or more characters with one
+    /// character misread (主人蓝海乐 read as 主人监海乐). Shorter names must match exactly: 测试群 is not 测验群.
+    static func sameName(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        let x = Array(a), y = Array(b)
+        guard x.count == y.count, x.count >= 4 else { return false }
+        return zip(x, y).filter { $0 != $1 }.count <= 1
     }
 
     /// The text recognizer is given a band wider than the title row (navigationChat keeps only what sits in it): on

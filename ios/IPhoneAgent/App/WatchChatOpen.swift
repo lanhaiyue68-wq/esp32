@@ -35,7 +35,9 @@ import Foundation
             !match.text.isEmpty && body.contains(where: { preview in
                 (0.018...0.050).contains(preview.box.midY - match.box.midY) &&
                 abs(preview.box.minX - match.box.minX) <= 0.06 &&
-                preview.box.height >= 0.006 && preview.box.height < match.box.height * 0.92
+                // Not taller than the title. "Smaller" (×0.92) lost every row on the CI replica of logs(12)'s list,
+                // 24 px titles over 19 px previews; the next row's title is 0.08 or more below, never this close.
+                preview.box.height >= 0.006 && preview.box.height <= match.box.height * 1.05
             })
         }
     }
@@ -47,9 +49,10 @@ import Foundation
         return cut.isEmpty ? text : cut
     }
 
-    /// List rows whose title is exactly `target` (no whitespace).
+    /// List rows whose title is `target` (no whitespace), allowing one misread character in a long name: the CI
+    /// replica of logs(12)'s list read 主人蓝海乐 as 主人监海乐.
     private static func titles(_ rows: [[CandidatePicker.Piece]], _ target: String) -> [CGRect] {
-        listTitles(rows).filter { $0.text == target }.map(\.box)
+        listTitles(rows).filter { WatchReport.sameName($0.text, target) }.map(\.box)
     }
 
     /// The row of `chat` on the chat list: one exact title with its preview (the report's way back to the owner's
@@ -83,8 +86,10 @@ import Foundation
             if badge(box) { hits.append((chat, box)) }
         }
         if let top = hits.min(by: { $0.box.midY < $1.box.midY }) { return .row(top.chat, CGPoint(x: 0.5, y: top.box.midY)) }
-        let listed = Set(rules.targets.map { $0.filter { !$0.isWhitespace } })
-        let others = listTitles(rows).filter { !listed.contains($0.text) && !notChats.contains($0.text) && badge($0.box) }
+        let listed = rules.targets.map { $0.filter { !$0.isWhitespace } }
+        let others = listTitles(rows).filter { row in
+            !listed.contains { WatchReport.sameName(row.text, $0) } && !notChats.contains(row.text) && badge(row.box)
+        }
         if let top = others.min(by: { $0.box.midY < $1.box.midY }) { return .other(top.text, CGPoint(x: 0.5, y: top.box.midY)) }
         return .none
     }
@@ -108,7 +113,7 @@ import Foundation
     static func sameChat(_ title: String, listName: String) -> Bool {
         let t = title.filter { !$0.isWhitespace }, n = listName.filter { !$0.isWhitespace }
         guard !t.isEmpty, !n.isEmpty else { return false }
-        if t == n { return true }
+        if WatchReport.sameName(t, n) { return true }
         let cut = n.replacingOccurrences(of: "…", with: "").replacingOccurrences(of: "...", with: "")
         return cut != n && cut.count >= 2 && t.hasPrefix(cut)
     }
