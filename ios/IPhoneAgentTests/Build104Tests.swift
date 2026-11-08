@@ -118,3 +118,65 @@ import UIKit
         XCTAssertEqual(Pointer.learned(estimate, moved: -0.01, units: 4), estimate)      // the wrong way: not trusted
     }
 }
+
+/// User 11-08: "加了 codex，爲啥 codex 也做不好這個活，這不是説明 codex 根本就沒介入嗎" (Plus planned 3 of 53
+/// decisions). The planner splits a task into parts, checks each on the screen, and drives when the executor stalls.
+@MainActor final class PlannerCommandsTests: XCTestCase {
+    private let task = "打开设置，再打开备忘录"
+    private let twoParts = "1. Settings is open - open 设置\n2. Notes is open - open 备忘录"
+    private func actions(_ agent: AgentLoop) -> [String] { agent.steps.compactMap { $0["action"]?.str } }
+
+    func testEachPartIsCheckedByThePlannerBeforeTheNextBegins() async {
+        let planner = FakeModel { n in
+            switch n {
+            case 1: return self.twoParts
+            case 2: return #"{"done": false, "why": "the Settings list is not on screen", "next": "tap the Settings icon"}"#
+            default: return #"{"done": true, "why": "it is on screen"}"#
+            }
+        }
+        let actor = FakeModel { _ in "THINK: this part looks finished\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: task, plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actions(agent), ["plan", "part not done", "part done", "part done", "done"])
+        XCTAssertEqual(actor.prompts.count, 3)
+        XCTAssertTrue(actor.prompts[0].contains("Current part (1 of 2): 1. Settings is open"))
+        XCTAssertTrue(actor.prompts[1].contains("Planner: tap the Settings icon"))
+        XCTAssertTrue(actor.prompts[2].contains("Current part (2 of 2): 2. Notes is open"))
+        XCTAssertTrue(actor.prompts[2].contains("Done and checked by the planner: 1. Settings is open"))
+    }
+
+    func testAfterTwoRefusalsThePlannerDrivesThePartItself() async {
+        let planner = FakeModel { n in
+            switch n {
+            case 1: return self.twoParts
+            case 2, 3: return #"{"done": false, "why": "still the home screen", "next": "open 设置"}"#
+            default: return "THINK: I open it myself\nDO: done opened"
+            }
+        }
+        let actor = FakeModel { _ in "THINK: finished\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: task, plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actions(agent), ["plan", "part not done", "part not done", "planner drives", "part done", "part done", "done"])
+        XCTAssertEqual(actor.prompts.count, 2, "the executor stops once the planner drives")
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
+    }
+
+    func testAOnePartTaskIsNotCheckedTwice() async {
+        let planner = FakeModel { _ in "1. Settings is open - open 设置" }
+        let actor = FakeModel { _ in "THINK: Settings is open\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actions(agent), ["plan", "done"])
+        XCTAssertEqual(planner.prompts.count, 1)
+    }
+
+    func testTheCheckIsReadFromItsJSONAndPartsFromNumberedLines() {
+        let v = AgentLoop.partVerdict("Sure.\n{\"done\": false, \"why\": \"no alarm\", \"next\": \"tap +\"}")
+        XCTAssertEqual(v?.done, false); XCTAssertEqual(v?.next, "tap +")
+        XCTAssertNil(AgentLoop.partVerdict("1. Open Clock"))
+        XCTAssertEqual(AgentLoop.parts(of: "Plan:\n1. A\n  2) B\nnote\n3、C"), ["1. A", "2) B", "3、C"])
+    }
+}

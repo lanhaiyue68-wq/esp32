@@ -107,6 +107,16 @@ extension Pointer: Gestures {}
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
+    /// Codex commanding part by part (specs/004 §2.1; user 11-08: "加了 codex，爲啥 codex 也做不好這個活，這不是説明
+    /// codex 根本就沒介入嗎" — it planned 3 of 53 decisions). A plan the planner wrote is a list of parts, each a result
+    /// the screen can show; the executor works on one at a time, the planner checks each on the screen before the
+    /// next begins, and when the executor stalls the planner drives the next steps itself.
+    private(set) var parts: [String] = []
+    private(set) var partIndex = 0
+    private(set) var doneParts: [String] = []
+    private(set) var plannerNote: String?
+    private(set) var takeover = 0
+    private var stepsInPart = 0, partRejected = 0
     @Published var steps: [JObject] = []
     @Published private(set) var shots: [Int: Data] = [:]  // step index -> screenshot the model decided on
     @Published private(set) var running = false
@@ -582,6 +592,7 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         replayedRoute = nil
+        (parts, partIndex, doneParts, plannerNote, takeover, stepsInPart, partRejected) = ([], 0, [], nil, 0, 0, 0)
         (sendTap, backMissed, actFrame) = (nil, false, nil)
         (wheelSwipes, wheelBlocks) = (0, 0)
         do {
@@ -609,6 +620,14 @@ extension Pointer: Gestures {}
                         continue
                     }
                     failures = 0
+                    if parts.count >= 2 {
+                        stepsInPart += 1
+                        if stepsInPart >= Self.partSteps {
+                            record(nil, ["action": .str("part stalled"),
+                                         "reason": .str("part \(partIndex + 1) not done after \(Self.partSteps) steps")])
+                            try await replan(stuck: true)
+                        }
+                    }
                     if let n = endAfterSend, !sentTexts.isEmpty, unsent == nil {
                         quietSinceSend += 1
                         if quietSinceSend > n {
@@ -856,6 +875,7 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
                 return false
             }
+            if name == "done", try await partFinished(act, shot: planned.shot) { return false }
             if name != "done" && name != "fail" {
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
@@ -1279,11 +1299,78 @@ extension Pointer: Gestures {}
     /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
     /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 100.
     static func stepBudget(plan: String, base: Int) -> Int {
-        let parts = plan.split(separator: "\n").filter { line in
-            line.trimmingCharacters(in: .whitespaces).range(of: #"^\d{1,2}\s*[.)、．]"#, options: .regularExpression) != nil
-        }.count
+        let parts = Self.parts(of: plan).count
         guard parts >= 2 else { return base }
         return max(base, min(parts * 20, 100))
+    }
+
+    /// The numbered lines of a plan ("1. ...", "2) ...", "3、..."), trimmed.
+    static func parts(of plan: String) -> [String] {
+        plan.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.range(of: #"^\d{1,2}\s*[.)、．]"#, options: .regularExpression) != nil }
+    }
+
+    static let partSteps = 20      // steps on one part before the planner looks and drives
+    static let takeoverSteps = 5   // steps the planner drives itself after a stall
+
+    /// What the executor is told about its part (nothing for a plan of one part or a fixed plan).
+    private var partFocus: String {
+        guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
+        var text = "Current part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])\n"
+        if !doneParts.isEmpty { text += "Done and checked by the planner: " + doneParts.joined(separator: " | ") + "\n" }
+        if let plannerNote { text += "Planner: \(plannerNote)\n" }
+        return text + "Work on the current part only. When it is finished on the screen, answer done with what it achieved;"
+            + " the planner checks it and gives you the next part.\n\n"
+    }
+
+    /// The executor's "done" on a plan of several parts: the planner checks the part on the current screen. Done, the
+    /// next part begins (the last one ends the run); not done, the executor gets the planner's note, and after two
+    /// refusals the planner drives the part itself. A part the planner finished while driving is not checked again.
+    /// True: the run goes on.
+    private func partFinished(_ act: JObject, shot: Data?) async throws -> Bool {
+        guard parts.count >= 2, partIndex < parts.count, let planner else { return false }
+        let n = partIndex + 1, part = parts[partIndex]
+        var verdict = (done: true, why: "finished by the planner itself", next: "")
+        if act["by"]?.str == "planner" {
+            record(shot, ["action": .str("part done"), "part": .int(n), "reason": .str(verdict.why)])
+        } else {
+            let prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nPart \(n) of \(parts.count): \(part)"
+                + "\nThe executor says this part is done: \(act["answer"]?.str ?? "")"
+                + "\n\nRecent actions:\n\(recentActions)\n\nLook at the current screen. Is part \(n) really done?"
+            let (reply, seconds, frame) = try await ask("planner", planner, Self.partCheckPrompt, prompt)
+            if let v = Self.partVerdict(reply) { verdict = v } else { verdict.why = "the check was unclear; taken as done" }
+            record(frame, ["action": .str(verdict.done ? "part done" : "part not done"), "part": .int(n),
+                           "reason": .str(verdict.why), "think_s": .num(seconds)])
+        }
+        if verdict.done {
+            doneParts.append(part)
+            (partIndex, stepsInPart, partRejected, plannerNote) = (partIndex + 1, 0, 0, nil)
+            return partIndex < parts.count
+        }
+        partRejected += 1
+        plannerNote = verdict.next.isEmpty ? verdict.why : verdict.next
+        if partRejected >= 2 {
+            takeover = Self.takeoverSteps
+            record(nil, ["action": .str("planner drives"), "reason": .str("part \(n) refused twice: the planner takes the next \(Self.takeoverSteps) steps")])
+        }
+        return true
+    }
+
+    static let partCheckPrompt = """
+        You command an executor that operates an iPhone with a mouse and keyboard. It says one part of the plan is done.
+        Judge from the screenshot and the recent actions whether that part is really done. Anything already sent, saved
+        or deleted counts as done when the screen or the actions show it: never ask for it again.
+        Reply with one JSON object and nothing else:
+        {"done": true or false, "why": "one short sentence", "next": "if not done: the next concrete thing to do on this screen"}
+        """
+
+    /// The planner's check: {"done": Bool, "why": String, "next": String}; nil when the reply holds no such object.
+    static func partVerdict(_ reply: String) -> (done: Bool, why: String, next: String)? {
+        guard let a = reply.firstIndex(of: "{"), let b = reply.lastIndex(of: "}"), a < b,
+              let data = String(reply[a...b]).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let done = object["done"] as? Bool else { return nil }
+        return (done, object["why"] as? String ?? "", object["next"] as? String ?? "")
     }
 
     func replan(stuck: Bool = false) async throws {
@@ -1295,10 +1382,19 @@ extension Pointer: Gestures {}
                 + "\n\(plan)\nLook at the current screen and plan from here, another way if needed."
                 + "\nKeep steps that already succeeded; resume from the current screen."
                 + "\n\nRecent actions:\n\(recentActions)"
+            if !doneParts.isEmpty {
+                prompt += "\n\nAlready done and checked on the screen (never redo): " + doneParts.joined(separator: " | ")
+                    + "\nPlan only what is left."
+            }
         }
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
         plan = en
+        (parts, partIndex, stepsInPart, partRejected, plannerNote) = (Self.parts(of: en), 0, 0, 0, nil)
+        if stuck {
+            takeover = Self.takeoverSteps
+            record(nil, ["action": .str("planner drives"), "reason": .str("stuck: the planner takes the next \(Self.takeoverSteps) steps")])
+        }
         record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),
                        "think_s": .num(seconds)])
     }
@@ -1324,7 +1420,9 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(recentActions)\n\nNext action?"
+        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\n\nNext action?"
+        let driving = takeover > 0 && planner != nil
+        if driving { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
         if let controls, let shown = screen?.frame {
             if unsent != nil, let hit = controls.find("send", in: shown) {
@@ -1347,7 +1445,8 @@ extension Pointer: Gestures {}
         }
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
-            let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
+            let (text, seconds, frame) = try await ask("actor", driving ? planner ?? actor : actor, actorPrompt, prompt,
+                                                       temperature: 0.4 * Double(attempt))
             reply = text
             var acts: [JObject]
             do { acts = try Actions.parseActions(text) } catch {
@@ -1385,6 +1484,7 @@ extension Pointer: Gestures {}
                 continue
             }
             acts[0]["think_s"] = .num(seconds)
+            if driving { for i in acts.indices { acts[i]["by"] = .str("planner") } }
             return acts.map { Planned(act: $0, shot: frame) }
         }
         throw Actions.ParseError(message: "actor gave no valid action: \(reply.prefix(200))")
