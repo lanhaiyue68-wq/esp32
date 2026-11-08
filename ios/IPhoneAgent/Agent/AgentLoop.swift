@@ -95,7 +95,7 @@ extension Pointer: Gestures {}
     private(set) var partIndex = 0
     private(set) var doneParts: [String] = []
     private(set) var takeover = 0
-    private var stepsInPart = 0, rescued = false
+    private var stepsInPart = 0, rescued = false, troubles = 0
     /// How this task was done the last time it finished (nil: never, or a fixed plan such as watching WeChat).
     private(set) var recipe: RouteBook.Recipe?
     @Published var steps: [JObject] = []
@@ -578,7 +578,7 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         replayedRoute = nil
-        (parts, partIndex, doneParts, takeover, stepsInPart, rescued) = ([], 0, [], 0, 0, false)
+        (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         (sendTap, backMissed, actFrame) = (nil, false, nil)
         do {
@@ -606,6 +606,7 @@ extension Pointer: Gestures {}
             if budget > (stepLimit ?? maxSteps) { DebugLog.write("run: \(budget) steps for a plan of several parts") }
             for _ in 0..<budget {
                 do {
+                    let recordsBefore = steps.count
                     if try await step() {
                         if try await rescue() { continue }
                         guard steps.last?["action"]?.str == "fail", try await askForHelp() else { return finish() }
@@ -617,10 +618,15 @@ extension Pointer: Gestures {}
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
                     if presetPlan.isEmpty, planner != nil, takeover == 0 {
                         stepsInPart += 1
-                        if stepsInPart >= Self.partSteps {
+                        troubles += steps.dropFirst(recordsBefore).filter(Self.isTrouble).count
+                        let gestures = steps.suffix(Self.swipesInARow + 2).filter { $0["action"]?.str != "stale plan" }
+                        let swiping = gestures.count >= Self.swipesInARow
+                            && gestures.suffix(Self.swipesInARow).allSatisfy { $0["action"]?.str == "swipe" }
+                        if stepsInPart >= Self.partSteps || troubles >= Self.troubleLimit || swiping {
                             record(nil, ["action": .str("part stalled"),
                                          "reason": .str((parts.count >= 2 ? "part \(partIndex + 1)" : "the task")
-                                                        + " not done after \(Self.partSteps) steps")])
+                                                        + " not getting on: \(stepsInPart) steps, \(troubles) failed, swiping \(swiping)")])
+                            troubles = 0
                             try await replan(stuck: true)
                         }
                     }
@@ -1309,6 +1315,15 @@ extension Pointer: Gestures {}
     }
 
     static let partSteps = 20       // steps on one part before Codex looks and drives
+    static let troubleLimit = 3     // or this many steps that plainly failed
+    static let swipesInARow = 5     // or this many swipes in a row (a wheel: 14 wrong swipes, then one tap by Codex)
+
+    /// A step that plainly failed: it changed nothing, or was refused, or a stroke left no ink.
+    static func isTrouble(_ step: JObject) -> Bool {
+        step["changed"] == .bool(false)
+            || ["no ink", "blocked", "done rejected", "refused", "loop"].contains(step["action"]?.str ?? "")
+    }
+
     static let takeoverSteps = 15   // steps Codex drives after a stall, until its part is done
 
     /// What the executor is told about its part (nothing for a plan of one part or a fixed plan).

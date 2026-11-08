@@ -66,3 +66,28 @@ import XCTest
         XCTAssertEqual(device.sent, ["flickhome"])
     }
 }
+
+/// Over USB 11-09: a timer's wheel took Doubao 14 wrong swipes before Codex came at step 20 and did it with one tap.
+@MainActor final class CodexComesEarlierTests: XCTestCase {
+    func testAStepThatPlainlyFailedIsTrouble() {
+        XCTAssertTrue(AgentLoop.isTrouble(["action": .str("tap"), "changed": .bool(false)]))
+        XCTAssertTrue(AgentLoop.isTrouble(["action": .str("no ink")]))
+        XCTAssertTrue(AgentLoop.isTrouble(["action": .str("blocked")]))
+        XCTAssertFalse(AgentLoop.isTrouble(["action": .str("tap"), "changed": .bool(true)]))
+        XCTAssertFalse(AgentLoop.isTrouble(["action": .str("stale plan")]), "the screen moved: not the executor's failure")
+    }
+
+    func testFiveSwipesInARowBringCodex() async {
+        let planner = FakeModel { n in n <= 2 ? "1. The timer is set" : "THINK: tap the value\nDO: done set" }
+        var n = 0
+        let actor = FakeModel { _ in n += 1; return "THINK: turn the wheel\nDO: swipe 500 500 500 \(400 - n * 10)" }
+        let phone = FakeGestures()
+        let screen = FakeScreen()
+        let agent = AgentLoop(phone: phone, screen: screen, actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: "把計時器設成一分鐘", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertTrue(agent.steps.contains { $0["action"] == .str("planner drives") })
+        XCTAssertLessThanOrEqual(actor.prompts.count, 6, "Codex comes after the fifth swipe")
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
+    }
+}

@@ -255,9 +255,9 @@ extension HIDDevice {
                 if now() - last > idle && screenLive() {
                     // held a moment: there and back within one display frame changes no pixel, and the watch needs a
                     // frame now and then on a still screen (VideoFeed.watchable)
-                    try await send("move 4 0")
+                    try await send("move 8 0")  // 4 can send nothing: the board keeps a remainder (4 units a count)
                     try await Task.sleep(nanoseconds: 120_000_000)
-                    try await send("move -4 0")
+                    try await send("move -8 0")
                 } else {
                     try await send("ping")
                 }

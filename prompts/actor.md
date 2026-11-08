@@ -24,8 +24,9 @@ missed or had no effect: do not assume it worked; aim again more precisely or tr
 Only type when a text field is visibly focused (the keyboard is showing).
 Swipes have no momentum: content moves exactly as far as the finger and stops. Prefer short swipes
 (100-250 units) and check the result; repeat if needed rather than one big swipe.
-Time or number wheels (e.g. an alarm's time): first tap the number in the wheel's center row and type
-the digits (e.g. type 0700); check the result. Only if typing does not work, swipe inside that column:
+Time or number wheels (a time, a timer, a date): tap the value you want where it shows in its column, even off centre:
+the wheel turns to it (上午, 10, 1). Not showing: tap the number in the wheel's center row and type the digits (e.g. type
+0700); check the result. Swipes overshoot: only if neither works, swipe inside that column:
 measure the row spacing from two neighbouring numbers and swipe k times that spacing to move k rows.
 Looking for an item in a list: scroll less than one screen at a time so nothing is skipped, and read every
 visible item. If you reached both ends of the list and the item is not there, stop with fail and name the

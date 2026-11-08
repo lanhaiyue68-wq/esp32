@@ -283,19 +283,21 @@ extension ScreenSource {
     private func requireDirectFrame(after: Double? = nil, wait: Double = 4) async throws {
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
         let began = now(), deadline = began + max(0, min(wait, 4))
-        var nudged = false
+        var nudged = 0.0
         while !usable(after: after) {
             try Task.checkCancellation()
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
-            if !nudged && now() - began > 0.4, let device {
+            if now() - began > 0.4, now() - nudged > 1, let device {
                 // A still screen publishes nothing: show the pointer for a moment so the system sends a frame
                 // (logs(9) 11-08: a run paused with "超过 2 秒未收到系统画面确认" on an idle WeChat list). Live test
                 // 11-08: 1 unit there and back within one display frame changed no pixel, and a report run paused the
                 // same way mid-run (a frame after its last action was asked for): 4 units, held a moment, any time.
-                nudged = true
-                _ = try? await device.send("move 4 0")
+                // Over USB 11-09: a run paused the same way: 4 units can send nothing (the board keeps a remainder of up
+                // to 3, 4 units make one count). 8 always send one; and again each second while waiting.
+                nudged = now()
+                _ = try? await device.send("move 8 0")
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                _ = try? await device.send("move -4 0")
+                _ = try? await device.send("move -8 0")
             }
             guard sharingActive, now() < deadline else {
                 throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕")
