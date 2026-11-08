@@ -1341,13 +1341,13 @@ extension Pointer: Gestures {}
         let (en, zh) = Actions.parsePlan(reply)
         plan = en
         (parts, partIndex, stepsInPart) = (Self.parts(of: en), 0, 0)
+        record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),
+                       "think_s": .num(seconds)])
         if stuck {
             takeover = Self.takeoverSteps
             record(nil, ["action": .str("planner drives"),
                          "reason": .str("the executor did not get on: Codex drives until this part is done, at most \(Self.takeoverSteps) steps")])
         }
-        record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),
-                       "think_s": .num(seconds)])
     }
 
     private var recentActions: String {
