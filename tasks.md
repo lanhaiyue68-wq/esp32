@@ -271,3 +271,5 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] build97: watch sees new tasks on a still screen; WeChat red numbers only, no resuming read chats or old reports; keyboard waits; nearby pointer hops.
 - [ ] Device test build97 (two tasks in a row; in-chat goes back to list; start drops old report; Return sends once; hop accuracy).
 - [ ] Open questions: mirror "can't send commands in the app" + phone Wi-Fi; muted groups' red dot; redundant report after a reply-only task.
+- [x] build98: app sends without a board mirror (direct capture); keep-awake while sharing; red marks (number or muted dot) open any chat, listed first, others read only.
+- [ ] Device test build98 (send from the app; owner/listed task on red mark; muted group dot; other chat read only and back to list; phone stays awake).

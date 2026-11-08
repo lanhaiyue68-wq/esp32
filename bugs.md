@@ -297,3 +297,9 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - No reaction to a second task: watch baseline dropped while the direct capture was quiet (mirroring false). Fixed build97 (watchable).
 - Lan Agent keyboard reports in >1.5 s after the menu pick on first start; Return right after the keyboard's text did not send. Fixed build97 (4 s / 0.6 s).
 - Redundant report "已在微信会话…中回复收到" after a reply-only owner task. Open.
+
+## 2026-11-09 build98
+- App send button blocked with direct capture ("Start Screen Mirroring"): checked the board's AirPlay state only. Fixed build98.
+- Keep-awake never nudged a still direct-captured screen (live needs ≤2 s confirmation): could lock, watch blind after 3 min. Fixed build98.
+- One listed chat was tapped without a red mark. Fixed build98 (one list path for all).
+- Redundant report after a reply-only task: by design (sent after the task finishes, user 11-09). Closed.
