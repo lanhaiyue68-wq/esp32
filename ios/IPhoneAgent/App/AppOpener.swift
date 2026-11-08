@@ -221,7 +221,7 @@ enum AppNames {
     /// The form to type into Search: the phone's own language.
     static func searchName(_ name: String, language: String = Locale.preferredLanguages.first ?? "") -> String {
         // An app that has one name everywhere, asked for by it: "Safari" was typed as 瀏覽器 (over USB, 11-09).
-        if let alias = aliases[base(name)], alias.tw == nil, alias.en?.lowercased() == name.lowercased() { return name }
+        if let alias = aliases[base(name)], alias.tw == nil, alias.en.lowercased() == name.lowercased() { return name }
         let b = base(name), alias = aliases[b], l = language.lowercased()
         if l.hasPrefix("zh-hant") || l.hasPrefix("zh-tw") || l.hasPrefix("zh-hk") || l.hasPrefix("zh-mo") { return alias?.tw ?? hant(b) }
         if l.hasPrefix("zh") { return b }
