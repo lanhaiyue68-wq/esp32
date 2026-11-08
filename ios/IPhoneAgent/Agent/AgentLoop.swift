@@ -590,7 +590,9 @@ extension Pointer: Gestures {}
             } else {
                 try await replan()
             }
-            for _ in 0..<(stepLimit ?? maxSteps) {
+            let budget = Self.stepBudget(plan: plan, base: stepLimit ?? maxSteps)
+            if budget > (stepLimit ?? maxSteps) { DebugLog.write("run: \(budget) steps for a plan of several parts") }
+            for _ in 0..<budget {
                 do {
                     if try await step() {
                         guard steps.last?["action"]?.str == "fail", try await askForHelp() else { return finish() }
@@ -1257,6 +1259,16 @@ extension Pointer: Gestures {}
 
     private func recoveringSend(_ act: JObject) -> Bool {
         aimNext && unsent != nil && (1...2).contains(sendCorrections) && act["action"] == .str("tap") && Self.sends(act)
+    }
+
+    /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
+    /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 100.
+    static func stepBudget(plan: String, base: Int) -> Int {
+        let parts = plan.split(separator: "\n").filter { line in
+            line.trimmingCharacters(in: .whitespaces).range(of: #"^\d{1,2}\s*[.)、．]"#, options: .regularExpression) != nil
+        }.count
+        guard parts >= 2 else { return base }
+        return max(base, min(parts * 20, 100))
     }
 
     func replan(stuck: Bool = false) async throws {

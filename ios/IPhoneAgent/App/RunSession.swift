@@ -71,7 +71,8 @@ extension AppModel {
             try checkStart()
             agent.actor = try await settings.client("actor")
             try checkStart()
-            agent.planner = try await settings.client("planner")
+            let plannerModel = try await settings.client("planner")
+            agent.planner = PlusChat.planner(fallback: plannerModel)  // phase C: Plus commands, Doubao if it fails
             try checkStart()
         } catch is CancellationError { return }
         catch {

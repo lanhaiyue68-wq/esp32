@@ -168,23 +168,24 @@ enum ChatGPTPlus {
     }
 
     /// One question with an optional screenshot, streamed; refreshes the sign-in once when it has expired.
-    static func ask(_ tokens: Tokens, model: String, prompt: String, image: Data?) async throws -> (Answer, Tokens) {
+    /// `system`: the developer instructions (the planner's prompt); nil for the phase A test's short one.
+    static func ask(_ tokens: Tokens, model: String, system: String? = nil, prompt: String, image: Data?) async throws -> (Answer, Tokens) {
         do {
-            return (try await askOnce(tokens, model: model, prompt: prompt, image: image), tokens)
+            return (try await askOnce(tokens, model: model, system: system, prompt: prompt, image: image), tokens)
         } catch let failure as Failure where failure.message.hasPrefix("HTTP 401") {
             let fresh = try await refresh(tokens)
-            return (try await askOnce(fresh, model: model, prompt: prompt, image: image), fresh)
+            return (try await askOnce(fresh, model: model, system: system, prompt: prompt, image: image), fresh)
         }
     }
 
-    private static func askOnce(_ tokens: Tokens, model: String, prompt: String, image: Data?) async throws -> Answer {
+    private static func askOnce(_ tokens: Tokens, model: String, system: String?, prompt: String, image: Data?) async throws -> Answer {
         var content: [[String: Any]] = [["type": "input_text", "text": prompt]]
         if let image { content.append(["type": "input_image", "image_url": "data:image/jpeg;base64,\(image.base64EncodedString())"]) }
         let body: [String: Any] = [
             "model": model, "stream": true,
             "input": [
                 ["type": "message", "role": "developer",
-                 "content": [["type": "input_text", "text": "You are Lan Agent, an assistant that operates an iPhone. Answer briefly."]]],
+                 "content": [["type": "input_text", "text": system ?? "You are Lan Agent, an assistant that operates an iPhone. Answer briefly."]]],
                 ["type": "message", "role": "user", "content": content],
             ],
             "tool_choice": "auto", "parallel_tool_calls": false, "store": false, "include": [String](),

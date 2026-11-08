@@ -14,7 +14,8 @@ struct PhaseATestView: View {
     @State private var signedIn = ChatGPTPlus.saved != nil
     @State private var signingIn = false
     @State private var models: [String] = []
-    @State private var model = ChatGPTPlus.fallbackModel
+    @AppStorage(PlusChat.modelKey) private var model = PlusChat.defaultModel  // the test's and the commander's
+    @AppStorage(PlusChat.enabledKey) private var plusPlanner = true
     @State private var answer = ""
     @State private var asking = false
 
@@ -50,6 +51,9 @@ struct PhaseATestView: View {
                     ForEach(models.isEmpty ? [model] : models, id: \.self) { Text($0).tag($0) }
                 }
                 Button(asking ? "詢問中…" : "用目前畫面問一次") { askOnce() }.disabled(!signedIn || asking)
+                Toggle("用 Plus 當總指揮（規劃者）", isOn: $plusPlanner)
+                Text(plusPlanner && signedIn ? "任務的規劃與卡住時重新規劃用 \(model)；每一步的操作仍用設定裡的模型。Plus 出錯或額度用完時自動改用設定裡的模型。"
+                     : "規劃用設定裡的模型。").font(.footnote).foregroundStyle(.secondary)
                 if !plusStatus.isEmpty { Text(plusStatus).font(.callout) }
                 if !answer.isEmpty { Text(answer).font(.callout).textSelection(.enabled) }
                 if signedIn {
