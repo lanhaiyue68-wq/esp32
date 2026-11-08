@@ -242,9 +242,9 @@ enum Vision {
         for cy in stride(from: y0, through: y1, by: 2) {
             for cx in stride(from: x0, through: x1, by: 2) {
                 let (fin, nin) = share(cx, cy, inner, changed: true)
-                guard nin >= inner.count * 55 / 100, fin >= 0.75 else { continue }
+                guard nin >= inner.count * 55 / 100, fin >= 0.95 else { continue }  // a real disk: 1.0; an icon's hover lift, a clock's digits: 0.75-0.94 (frames, 11-09)
                 let (fout, nout) = share(cx, cy, outer, changed: false)
-                guard nout >= outer.count * 4 / 10, fout >= 0.7 else { continue }
+                guard nout >= outer.count * 4 / 10, fout >= 0.88 else { continue }  // a real disk: 0.98-1.0; those: 0.71-0.82
                 found.append((fin * fout, cx, cy))
             }
         }

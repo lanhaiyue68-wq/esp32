@@ -54,13 +54,14 @@ final class Build103Tests: XCTestCase {
         XCTAssertEqual(seen.y, to.y, accuracy: 0.006)
     }
 
-    func testThePointerIsFoundEvenWhenTextMovedAroundIt() throws {
-        // CI 11-08: expected nothing here, but the disk was still found exactly; the text's changes are thin strokes,
-        // never a filled disk with a quiet ring around it.
+    func testTextMovingAroundThePointerIsNeverTakenForAnotherPlace() throws {
+        // Frames over USB 11-09: an icon's hover lift or a clock's digits looked like a disk and pulled the pointer away.
+        // Only a filled disk with a quiet ring counts: moving text around it may hide it, but never moves it.
         let target = CGPoint(x: 0.4, y: 0.33)
         let before = try frame(pointers: []), after = try frame(pointers: [target], shiftContent: true)
-        let seen = try XCTUnwrap(Vision.arrival(before, after, near: target))
-        XCTAssertEqual(seen.x, target.x, accuracy: 0.006)
-        XCTAssertEqual(seen.y, target.y, accuracy: 0.006)
+        if let seen = Vision.arrival(before, after, near: target) {
+            XCTAssertEqual(seen.x, target.x, accuracy: 0.006)
+            XCTAssertEqual(seen.y, target.y, accuracy: 0.006)
+        }
     }
 }
