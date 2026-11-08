@@ -212,6 +212,7 @@ import UIKit
         agent.pasteHop = { [weak self] text in await self?.hopToPaste(text) ?? .lost }
         // Phase B (specs/004): typing by Lan Agent's keyboard, opening apps by name, the screen's text for the model.
         agent.keyboardType = { [weak self] text in await self?.typeWithLanAgentKeyboard(text) ?? false }
+        agent.keyboardReturn = { [weak self] in await self?.keyboardBridge.type("", enter: true, within: 4) ?? false }
         agent.ourKeyboardOnScreen = { [weak self] in self?.keyboardBridge.onScreen() ?? false }
         agent.openApp = { [weak self] name in try await self?.openApp(name) ?? false }
         agent.readsScreenText = !MockMode.on

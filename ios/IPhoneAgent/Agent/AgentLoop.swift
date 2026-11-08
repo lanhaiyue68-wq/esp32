@@ -129,6 +129,9 @@ extension Pointer: Gestures {}
     /// whether that keyboard is on screen; and opening an app by name. Nil in tests and demo data.
     var keyboardType: ((String) async -> Bool)?
     var ourKeyboardOnScreen: (() -> Bool)?
+    /// The keyboard's own Return while Lan Agent's keyboard is up: WeChat sends on it, and the board's Enter did
+    /// nothing there (build104 live 11-08: "收到" stayed in the box twice). True when the keyboard pressed it.
+    var keyboardReturn: (() async -> Bool)?
     var openApp: ((String) async throws -> Bool)?
     /// Give the model the screen's text with positions (off in tests whose fake frames carry no text).
     var readsScreenText = false
@@ -1121,7 +1124,7 @@ extension Pointer: Gestures {}
         // Lan Agent's keyboard first: exact text in place, no pinyin candidates and no app switch (phase B).
         if Pasteboard.needed(text), let keyboardType, await keyboardType(text) {
             if returnSends {
-                try await phone.key("enter")
+                if ourKeyboardOnScreen?() == true, let keyboardReturn, await keyboardReturn() {} else { try await phone.key("enter") }
                 returnSent = true
                 return DebugLog.write("type: typed by Lan Agent's keyboard, sent with Return")
             }
@@ -1129,7 +1132,7 @@ extension Pointer: Gestures {}
         }
         if Pasteboard.needed(text), try await typedQuickly(text, phone: phone) {
             if returnSends {
-                try await phone.key("enter")
+                if ourKeyboardOnScreen?() == true, let keyboardReturn, await keyboardReturn() {} else { try await phone.key("enter") }
                 returnSent = true
                 return DebugLog.write("type: typed as pinyin, seen in the field, sent with Return")
             }
@@ -1478,7 +1481,11 @@ extension Pointer: Gestures {}
             if fastText || Pasteboard.prefersExact(text) || (Pasteboard.needed(text) && keyboardType != nil) {
                 try await typeFast(text)
             } else { try await phone.type(text) }
-        case "key": try await phone.key(a["combo"]?.str ?? "")
+        case "key":
+            let combo = a["combo"]?.str ?? ""
+            if ["enter", "return"].contains(combo.lowercased()), ourKeyboardOnScreen?() == true,
+               let keyboardReturn, await keyboardReturn() { break }
+            try await phone.key(combo)
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()
         case "open":
