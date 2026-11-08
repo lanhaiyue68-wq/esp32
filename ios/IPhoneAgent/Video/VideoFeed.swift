@@ -244,6 +244,7 @@ extension ScreenSource {
         case .began(let id):
             directState.begin(id, fullDisplay: true)
             resetPixels(); sharingActive = true; requestingSharing = false
+            DebugLog.write("capture: whole-screen sharing began")
             nativeStatus = "已共享整屏，等待完整画面"
         case .frame(let id, let seq, let jpeg, let width, let height, let timestamp, let ms):
             guard !jpeg.isEmpty, width > 0, height > width,
@@ -271,6 +272,7 @@ extension ScreenSource {
             guard id == nil || id == directState.generation else { return }
             directState.stop(); resetPixels()
             sharingActive = false; requestingSharing = false; nativeStatus = reason; note = reason
+            DebugLog.write("capture: whole-screen sharing stopped: \(reason)")
         }
     }
 

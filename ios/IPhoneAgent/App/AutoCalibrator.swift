@@ -136,10 +136,17 @@ import UIKit
         app.say("accuracy test: \(spots.count) spots, tapped like a task")
         try? await app.pointer.reset()
         try? await Task.sleep(nanoseconds: 400_000_000)  // the board painted plain
-        var misses: [Double] = []
+        // The closed loop sees where the pointer arrived; without a frame the test measures blind taps only
+        // (11-08: three runs after a relaunch, sharing off, no frame, nothing said). The reset's move publishes one.
+        for _ in 0..<20 where app.feed.frame == nil { try? await Task.sleep(nanoseconds: 100_000_000) }
+        guard app.feed.frame != nil else {
+            return app.say("accuracy test: no screen frame (share the whole screen on Home first); not measured")
+        }
+        var misses: [Double] = [], eye: [Pointer.Arrival?] = []
         for (i, (x, y)) in spots.enumerated() {
             if Task.isCancelled { break }
             let sent = now()
+            app.pointer.lastArrival = nil
             do { try await app.pointer.tap(x, y) } catch {
                 app.say(String(format: "accuracy %ld: (%.2f, %.2f) not tapped: %@", i + 1, x, y, error.localizedDescription))
                 continue
@@ -147,7 +154,10 @@ import UIKit
             if let p = await app.probe.tap(since: sent, timeout: Self.tapTimeout) {
                 let miss = max(abs(Double(p.x) - x), abs(Double(p.y) - y))
                 misses.append(miss)
-                app.say(String(format: "accuracy %ld: (%.2f, %.2f) landed (%.3f, %.3f), miss %.1f%%", i + 1, x, y, p.x, p.y, miss * 100))
+                let saw = app.pointer.lastArrival
+                eye.append(saw)
+                app.say(String(format: "accuracy %ld: (%.2f, %.2f) landed (%.3f, %.3f), miss %.1f%%, eye %@", i + 1, x, y, p.x, p.y,
+                               miss * 100, saw.map { "\($0)" } ?? "none"))
             } else {
                 app.say(String(format: "accuracy %ld: (%.2f, %.2f) no touch caught", i + 1, x, y))
             }
@@ -156,8 +166,10 @@ import UIKit
         guard !misses.isEmpty else { return app.say("accuracy test: no touches caught") }
         let within1 = misses.filter { $0 <= 0.01 }.count, within2 = misses.filter { $0 <= 0.02 }.count
         let mean = misses.reduce(0, +) / Double(misses.count)
-        app.say(String(format: "accuracy test: %ld of %ld caught; within 1%%: %ld, within 2%%: %ld; mean %.1f%%, worst %.1f%%",
-                       misses.count, spots.count, within1, within2, mean * 100, (misses.max() ?? 0) * 100))
+        app.say(String(format: "accuracy test: %ld of %ld caught; within 1%%: %ld, within 2%%: %ld; mean %.1f%%, worst %.1f%%; eye on target %ld, off %ld, unseen %ld",
+                       misses.count, spots.count, within1, within2, mean * 100, (misses.max() ?? 0) * 100,
+                       eye.filter { $0 == .onTarget }.count, eye.filter { $0 == .offTarget }.count,
+                       eye.filter { $0 == .unseen || $0 == nil }.count))
     }
 
     private func runOnce() async {

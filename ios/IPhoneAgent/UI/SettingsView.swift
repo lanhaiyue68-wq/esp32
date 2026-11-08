@@ -20,7 +20,7 @@ struct SettingsView: View {
                         row("Board", "cable.connector", .blue,
                             value: board.connected ? board.name : String(localized: "Not connected"))
                     }
-                    CalibrationRow(app: app, calibrator: app.calibrator, pointer: app.pointer)
+                    CalibrationRow(app: app, calibrator: app.calibrator, pointer: app.pointer, feed: app.feed)
                     Button { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) } label: {
                         HStack {
                             SettingsLabel(title: "Language", symbol: "globe", color: .indigo)
@@ -169,8 +169,11 @@ struct CalibrationRow: View {
     @ObservedObject var app: AppModel
     @ObservedObject var calibrator: AutoCalibrator
     @ObservedObject var pointer: Pointer
+    @ObservedObject var feed: VideoFeed
 
     private var ready: Bool { MockMode.on || calibrator.boardReady }
+    /// The accuracy test checks each tap with the eye; without sharing it would measure blind taps only.
+    private var seeing: Bool { MockMode.on || !feed.isNative || feed.sharingActive }
 
     var body: some View {
         Button { calibrator.calibrate() } label: {
@@ -196,9 +199,14 @@ struct CalibrationRow: View {
         .disabled(!ready || calibrator.busy)
         // user 11-08: the hand proven with numbers — 20 spots tapped like a task, each real touch measured
         Button { calibrator.testAccuracy() } label: {
-            Label { Text("準度測試（點 20 個位置）") } icon: { SettingsIcon(symbol: "target", color: .green) }
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("準度測試（點 20 個位置）")
+                    if !seeing { Text("先在首頁共享整個屏幕，才會邊看邊修正").font(.footnote).foregroundStyle(.secondary) }
+                }
+            } icon: { SettingsIcon(symbol: "target", color: .green) }
         }
         .tint(.primary)
-        .disabled(!ready || calibrator.busy || !pointer.calibrated)
+        .disabled(!ready || calibrator.busy || !pointer.calibrated || !seeing)
     }
 }

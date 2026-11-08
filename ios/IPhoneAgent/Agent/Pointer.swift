@@ -535,6 +535,8 @@ import Foundation
     }
 
     enum Arrival { case onTarget, unseen, offTarget }
+    /// What the last tap's arrival check saw (nil: the tap clicked again in place, no move to check).
+    var lastArrival: Arrival?
 
     /// Closed loop for every tap (user 11-08: make it tap right, not patch by patch). Open-loop moves land 3–7 % off
     /// (curved moves through iOS's pointer acceleration; the calibration's own note: one command scatters up to 5 %):
@@ -544,7 +546,19 @@ import Foundation
     /// changed there), the click goes at the estimate as before.
     @discardableResult
     func arrive(_ x: Double, _ y: Double, before: Data?) async throws -> Arrival {
-        guard let screen, let before, let span else { return .unseen }
+        let seen = try await look(x, y, before: before)
+        lastArrival = seen
+        return seen
+    }
+
+    private func look(_ x: Double, _ y: Double, before: Data?) async throws -> Arrival {
+        // Accuracy test 11-08: after a relaunch screen sharing was off, every tap skipped this without a word and
+        // 20 spots were blind. No frame is said, every time.
+        guard let screen, let span else { return .unseen }
+        guard let before else {
+            log(String(format: "arrive (%.3f, %.3f): no screen frame before the move (screen sharing off?); clicking at the estimate", x, y))
+            return .unseen
+        }
         var last = before
         for pass in 1...2 {
             let moved = now()
