@@ -171,6 +171,15 @@ enum Vision {
         return false
     }
 
+    /// Whether two looks show the same screen: the pointer, a pressed key or a number in a display may differ, a new
+    /// page, a sheet or a scrolled list differs far more (a calculator's key is ~20 cells of the 1080 below the status bar).
+    static func sameScreen(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        guard a.count == b.count, a.count == 24 * 48 else { return false }
+        var different = 0
+        for i in (3 * 24)..<a.count where abs(Int(a[i]) - Int(b[i])) > 16 { different += 1 }
+        return different <= 64
+    }
+
     /// True when the screen changed near `points` (fractions): where an action would land. Changes elsewhere (a
     /// clock, an animation, a banner) do not count; a missing frame does.
     static func changedNear(_ before: Data?, _ after: Data?, around points: [CGPoint], radius: Double = 0.08) -> Bool {
@@ -203,7 +212,9 @@ enum Vision {
         let r = radius * Double(w)
         guard r >= 3 else { return nil }
         let x0 = max(0, Int(Double(near.x) * Double(w) - window * Double(w))), x1 = min(w - 1, Int(Double(near.x) * Double(w) + window * Double(w)))
-        let y0 = max(0, Int(Double(near.y) * Double(h) - window * Double(h))), y1 = min(h - 1, Int(Double(near.y) * Double(h) + window * Double(h)))
+        // Not in the status bar: the signal bars and the clock change on their own, and were read as the pointer (a tap
+        // pulled away from its target, over USB 11-09).
+        let y0 = max(Int(topMask * Double(h)), Int(Double(near.y) * Double(h) - window * Double(h))), y1 = min(h - 1, Int(Double(near.y) * Double(h) + window * Double(h)))
         guard x1 > x0, y1 > y0 else { return nil }
         // the changed mask over the search area, padded by the outer ring
         let pad = Int(r * 1.5) + 1

@@ -6,5 +6,6 @@ part: write "1. ..." only. Never split one result into single taps. A planner ch
 the next one begins.
 Plan only what the goal needs, from what you can see; never invent accounts, emails, logins or
 screens you have not seen.
-To open an app, write "open 微信" (the app's name) in the how: the app opens it by name. If that fails, prefer search over paging through home screens: tap the "Search" pill above
-the dock (or swipe down from the middle of the home screen), type the app name, tap the result.
+To open an app, write "open 微信" (the app's name) in the how: it goes through the Home Screen and Search by itself, so
+never plan a search by hand. If it reports the app is not on this phone, that is the answer: stop and say so.
+Something read in one part and needed in another: say so in the how ("note the price"); the executor keeps notes across apps.

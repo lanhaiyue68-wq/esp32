@@ -427,8 +427,10 @@ import Foundation
             (pos, link) = (nil, device.links)
         }
         if pos == nil || (rehome && (maps != nil || moves >= Self.rehomeEvery)) {
+            let homing = now()
             if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
             (pos, moves, hops) = ((0, 0), 0, 0)
+            await noteCorner(since: homing)
         }
         let (x, y) = pos!
         pos = nil  // unknown until the move succeeds
@@ -452,8 +454,10 @@ import Foundation
             try await device.send("release")
             (pos, link) = (nil, device.links)
         }
+        let homing = now()
         try await ProbeMotion.home(device)
         pos = nil
+        await noteCorner(since: homing)
         let ty = dy(y), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
         // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
         // ordinary move; after the short way back it follows a move like the calibrated ones.
@@ -494,7 +498,8 @@ import Foundation
     /// always moves, since it follows a tap that changed nothing.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
-        let before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
+        var before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
+        defer { lastSpot = CGPoint(x: x, y: y) }
         if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
             try await device.send("click")
@@ -521,17 +526,37 @@ import Foundation
         }
         lastClick = nil
         pos = nil
+        // Going back near where the pointer rests, the frame before the move already shows it there: it comes back to
+        // the same wrong spot, nothing changes and the eye sees nothing (over USB 11-09: Clock's icon tapped 15 times,
+        // always the same miss). The frame to compare against is then the one with the pointer in the corner.
+        cornerLook = lastSpot.map { hypot($0.x - x, $0.y - y) < Self.restsNear } ?? false
+        cornerFrame = nil
+        defer { cornerLook = false }
+        try await point(x, y, aim: false)
+        if let corner = cornerFrame { (before, began) = (corner.data, corner.at) }
         if aim {
             // a precise tap: the arrival check first; the older wiggle search only if it did not see the pointer there
-            try await point(x, y, aim: false)
             if try await arrive(x, y, before: before, began: began) != .onTarget { try await self.aim(x, y, required: true) }
         } else {
-            try await point(x, y, aim: false)
             try await arrive(x, y, before: before, began: began)
         }
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
+    /// Where the last tap aimed: about where the pointer rests.
+    private var lastSpot: CGPoint?
+    private var cornerLook = false
+    private var cornerFrame: (data: Data, at: Double)?
+    /// A target this close to where the pointer rests (a landing can be 9 % off) needs the look from the corner.
+    static let restsNear = 0.12
+
+    /// The pointer has just gone to the corner: keep the frame that shows it there, if this tap needs it.
+    private func noteCorner(since began: Double) async {
+        guard cornerLook, let screen else { return }
+        let shown = await stopped(since: began, on: screen, wait: 0.5) ?? screen.frame
+        cornerFrame = shown.map { (data: $0, at: now()) }
     }
 
     enum Arrival { case onTarget, unseen, offTarget }
@@ -579,7 +604,7 @@ import Foundation
             log(String(format: "arrive (%.3f, %.3f): pointer not seen; clicking at the estimate", x, y))
             return .unseen
         }
-        var corrections = 0
+        var corrections = 0, unmoved = 0, sentX = 0, sentY = 0
         while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)
             let offX = abs(ex) > Self.arrivalTolerance, offY = abs(ey) > Self.arrivalTolerance
@@ -602,10 +627,19 @@ import Foundation
             let moved = now()
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             if let p = pos { pos = (p.0 + ux, p.1 + uy) }
+            (sentX, sentY) = (sentX + ux, sentY + uy)
             // Nothing on screen changed: the board held the counts back (it keeps a remainder); the same again sends them.
             guard let after = await stopped(since: moved, on: screen, wait: 0.6) else { continue }
             guard let next = Vision.arrival(before, after, near: target) else {
                 log(String(format: "arrive (%.3f, %.3f): pointer not seen after a correction; clicking at the estimate", x, y))
+                return .unseen
+            }
+            // What was seen does not follow the moves: it is not the pointer, and the moves only pulled the real one away.
+            unmoved = hypot(next.x - seen.x, next.y - seen.y) < 0.002 ? unmoved + 1 : 0
+            if unmoved >= 2 {
+                log(String(format: "arrive (%.3f, %.3f): what was seen at (%.3f, %.3f) does not move; back to the estimate", x, y, next.x, next.y))
+                if maps != nil { try await ProbeMotion.move(device, -sentX, -sentY) } else { try await device.send("move \(-sentX) \(-sentY)") }
+                if let p = pos { pos = (p.0 - sentX, p.1 - sentY) }
                 return .unseen
             }
             if ux != 0 { fineX = Self.learned(fineX ?? 1 / Double(span.w), moved: Double(next.x - seen.x), units: ux) }

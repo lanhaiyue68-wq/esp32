@@ -24,10 +24,4 @@ final class Build100Tests: XCTestCase {
         XCTAssertNil(AppPlaces.label("无边记", in: rows))
     }
 
-    func testADeadTapIsTriedAroundItsSpotUpFirst() {
-        let nudges = AgentLoop.deadTapNudges
-        XCTAssertEqual(nudges.count, 4)
-        XCTAssertLessThan(nudges[0].1, 0, "up first: misses near the top landed low")
-        for (dx, dy) in nudges { XCTAssertLessThanOrEqual(max(abs(dx), abs(dy)), 0.03, "still the same spot, so the count goes on") }
-    }
 }

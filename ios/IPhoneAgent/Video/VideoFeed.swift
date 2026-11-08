@@ -300,7 +300,7 @@ extension ScreenSource {
                 _ = try? await device.send("move -8 0")
             }
             guard sharingActive, now() < deadline else {
-                throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕")
+                throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕", sharingOn: sharingActive)
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }

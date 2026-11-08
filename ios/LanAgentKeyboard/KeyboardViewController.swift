@@ -10,6 +10,23 @@ final class KeyboardViewController: UIInputViewController {
     private var timer: Timer?
     private var busy = false
     private let queue = DispatchQueue(label: "lan-agent-keyboard")
+    private lazy var returnButton = key("換行", #selector(returnKey))
+
+    /// The key says what Return does in this field: a key that read 換行 in a chat, where it sends, had the agent looking
+    /// for a send button all over the screen (over USB 11-09).
+    override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        let title: String
+        switch textDocumentProxy.returnKeyType {
+        case .send: title = "發送"
+        case .search, .google, .yahoo: title = "搜尋"
+        case .go, .route, .join: title = "前往"
+        case .done: title = "完成"
+        case .next, .continue: title = "下一步"
+        default: title = "換行"
+        }
+        returnButton.setTitle(title, for: .normal)
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -24,8 +41,7 @@ final class KeyboardViewController: UIInputViewController {
 
         let globe = key("🌐 下一個", nil)  // tap: next keyboard; hold: the list (Apple's handler)
         globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
-        let row = UIStackView(arrangedSubviews: [globe, key("空格", #selector(space)), key("⌫", #selector(backspace)),
-                                                key("換行", #selector(returnKey))])
+        let row = UIStackView(arrangedSubviews: [globe, key("空格", #selector(space)), key("⌫", #selector(backspace)), returnButton])
         row.distribution = .fillEqually
         row.spacing = 6
 
@@ -49,6 +65,7 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         status.text = "Lan Agent 輸入法：等待要打的字…"
+        textDidChange(nil)
         exchange(KeyboardLink.line(.hello(fullAccess: true))) { _ in }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in self?.poll() }

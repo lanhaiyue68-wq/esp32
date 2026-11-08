@@ -141,9 +141,17 @@ enum AppPlaces {
         let hits = pieces.filter { wants.contains(normalized($0.text)) && (0.07...0.55).contains($0.box.midY) }
             .sorted { $0.box.midY < $1.box.midY }
         let hit: CandidatePicker.Piece?
+        let web = header(["建議", "建议", "suggestions"])
         if let app = header(["app"]), let under = hits.first(where: { $0.box.midY > app }) {
             hit = under
-        } else if let web = header(["建議", "建议", "suggestions"]) {
+        } else if let app = header(["app"]), let part = pieces.sorted(by: { $0.box.midY < $1.box.midY }).first(where: { piece in
+            // Under the App header, part of the name is enough: "open 高德" for 高德地圖.
+            let text = normalized(piece.text)
+            return piece.box.midY > app && piece.box.midY < (web ?? 0.55) && text.count >= 2 && text != "app"
+                && wants.contains { text.contains($0) || $0.contains(text) }
+        }) {
+            hit = part
+        } else if let web {
             hit = hits.first { $0.box.midY < web }
         } else {
             hit = hits.first
@@ -240,27 +248,42 @@ extension AppModel {
         defer { DebugLog.write(String(format: "open %@: %.1f s", name, now() - started)) }
         try await pointer.goHome()
         try? await Task.sleep(nanoseconds: 300_000_000)
-        guard var rows = await homeRows(top: 0.02) else { return try await openBySearch(name) }
-        if let spot = AppPlaces.label(name, in: rows) { return try await tapIcon(spot, name: name, on: "the page in front") }
+        guard var rows = await homeRows(top: 0.02) else { return try await bySearch(name) }
+        if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
         if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows) {
             try await mapHomeScreen()
-            guard let now = await homeRows(top: 0.02) else { return try await openBySearch(name) }
+            guard let now = await homeRows(top: 0.02) else { return try await bySearch(name) }
             rows = now
-            if let spot = AppPlaces.label(name, in: rows) { return try await tapIcon(spot, name: name, on: "the page in front") }
+            if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
         }
-        if let target = AppPlaces.page(of: name), let current = AppPlaces.page(showing: rows), target != current {
-            for _ in 0..<abs(target - current) {
-                try await swipePage(next: target > current)
-            }
-            if let now = await homeRows(top: 0.02), let spot = AppPlaces.label(name, in: now) {
-                return try await tapIcon(spot, name: name, on: "page \(target + 1), as remembered")
+        if let target = AppPlaces.page(of: name) {
+            if let current = AppPlaces.page(showing: rows), target != current {
+                for _ in 0..<abs(target - current) {
+                    try await swipePage(next: target > current)
+                }
+                if let now = await homeRows(top: 0.02), let spot = AppPlaces.label(name, in: now),
+                   try await tapIcon(spot, name: name, on: "page \(target + 1), as remembered") { return true }
+            } else if AppPlaces.page(showing: rows) == nil {
+                // The page in front was not recognised: it is on a page all the same, so look through them.
+                if try await openFromPages(name) { return true }
             }
             DebugLog.write("open \(name): not on page \(target + 1) any more; the pages are read again next time")
             AppPlaces.mapped = false
             try await pointer.goHome()
         }
-        if try await openBySearch(name) { return true }
-        return try await openFromPages(name)
+        return try await bySearch(name)
+    }
+
+    /// Search; the pages only when Search itself would not work. An app Search does not list is not on the phone (a made-up
+    /// name spent 248 s on Search, Safari's suggestions and the pages, over USB 11-09).
+    private func bySearch(_ name: String) async throws -> Bool {
+        switch try await openBySearch(name) {
+        case .opened: return true
+        case .absent:
+            try await pointer.goHome()
+            return false
+        case .unusable: return try await openFromPages(name)
+        }
     }
 
     /// Read every Home Screen page once: to the leftmost, then right up to the App Library.
@@ -294,9 +317,17 @@ extension AppModel {
         DebugLog.write(String(format: "open: %ld Home Screen page(s) read, %ld names known, %.1f s", page, AppPlaces.count, now() - began))
     }
 
+    /// To the next page, and until it has stopped sliding: a page read in mid-slide was missed (page 3, over USB 11-09).
     private func swipePage(next: Bool) async throws {
         try await pointer.swipe(next ? 0.85 : 0.15, 0.5, next ? 0.15 : 0.85, 0.5, hold: false)
         try? await Task.sleep(nanoseconds: 700_000_000)
+        var shown = await freshFrame().flatMap(Vision.look)
+        for _ in 0..<4 {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let now = await freshFrame().flatMap(Vision.look)
+            if let a = shown, let b = now, !Vision.visiblyChanged(a, b) { return }
+            shown = now
+        }
     }
 
     /// Only when Search would not work (no keyboard came): the pages to the right up to the App Library, then to the left.
@@ -315,15 +346,23 @@ extension AppModel {
         return false
     }
 
+    /// True once the app has left the Home Screen: a tap that missed reported success, and the model then found itself on
+    /// the Home Screen (8 of 27 opens, over USB 11-09). A second try goes through the eye.
     private func tapIcon(_ label: CGPoint, name: String, on place: String) async throws -> Bool {
         DebugLog.write("open \(name): \(place)")
         let icon = AppPlaces.icon(above: label)
-        try await pointer.tap(icon.x, icon.y)
-        try? await Task.sleep(nanoseconds: 900_000_000)  // the app opens
-        return true
+        for aimed in [false, true] {
+            try await pointer.tap(icon.x, icon.y, aim: aimed)
+            try? await Task.sleep(nanoseconds: 900_000_000)  // the app opens
+            guard let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows), AppPlaces.label(name, in: rows) != nil else { return true }
+            DebugLog.write("open \(name): still on the Home Screen after the tap")
+        }
+        return false
     }
 
-    private func openBySearch(_ name: String) async throws -> Bool {
+    private enum SearchOutcome { case opened, absent, unusable }
+
+    private func openBySearch(_ name: String) async throws -> SearchOutcome {
         // Measured over USB 11-09: Cmd+Space opens Search from the Home Screen (not from inside an app), its last words
         // selected and with the keyboard last used. The pill or a pull down only if it does not come.
         try await pointer.key("cmd+space")
@@ -341,13 +380,13 @@ extension AppModel {
         if typed != name { DebugLog.write("open \(name): searching for \(typed), the phone's own name") }
         guard await showLanAgentKeyboard() else {
             DebugLog.write("open \(name): Search did not take the name")
-            return false
+            return .unusable
         }
         try await pointer.key("cmd+a")
         try await pointer.key("backspace")
         guard await keyboardBridge.type(typed, enter: false, within: 4) else {
             DebugLog.write("open \(name): Search did not take the name")
-            return false
+            return .unusable
         }
         // The results come a moment later; a Return before them opens nothing (over USB, 11-09).
         try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -361,10 +400,14 @@ extension AppModel {
             DebugLog.write("open \(name): tapped its Search result")
         } else {
             DebugLog.write("open \(name): not in Search's results")
-            return false
+            return .absent
         }
         try? await Task.sleep(nanoseconds: 900_000_000)
-        return true
+        if let after = await homeRows(top: 0.02), AppPlaces.inSearch(after) || AppPlaces.looksLikeHome(after) {
+            DebugLog.write("open \(name): Search is still up after opening; not opened")
+            return .unusable
+        }
+        return .opened
     }
 
     private func homeRows(top: Double = 0.07) async -> [[CandidatePicker.Piece]]? {

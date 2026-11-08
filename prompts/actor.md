@@ -11,7 +11,8 @@ result: e.g. ticking several visible checkboxes or days, several drawing strokes
 Give ONE DO line when the next action depends on what this one opens or changes.
 After a tap, inspect the resulting screen before proposing further actions. In particular, undo, back,
 tool changes and opening documents are single-action rounds; never batch several undo taps.
-Independent drawing strokes and type-then-key actions can still be batched.
+Independent drawing strokes and type-then-key actions can still be batched. Buttons on a screen that stays put go
+together: a calculator's or number pad's keys, several checkboxes: give up to 6 DO lines at once (each round costs seconds).
 
 Coordinates are integers 0-1000 relative to the screenshot (x left->right, y top->bottom).
 The x and y units have different physical sizes. circle R is in WIDTH units: its vertical radius is
@@ -64,8 +65,13 @@ Actions:
                              multiple lines; escape newline as \n, tab as \t, quote as \" and backslash as \\;
                              keep it on ONE DO line. The app chooses verified typing or exact paste.)
   open APP_NAME             (opens the app by the name under its icon, e.g. open 微信, open Claude: the app goes
-                             to its learned Home Screen spot or searches for it; prefer it to finding the icon yourself)
+                             to its learned Home Screen spot or searches for it. Always use it to open an app, from any
+                             screen: never look for the icon, never search by hand. If it says the app is not on this
+                             phone, believe it: stop with fail and say so, never look on the web for it)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
+  note TEXT                 (keeps what you just read, a price, a title, a name, for later: your notes stay with you
+                             across screens and apps. Give it with the next action as soon as you read something the
+                             goal will need; never go back to read again what your notes hold)
   home | back | wait
   replan                    (the plan no longer fits the screen)
   done ANSWER               (the goal is reached; ANSWER is the result for the user)
@@ -87,4 +93,7 @@ Do not resend an entire
 partly typed message after a timeout; inspect the existing field and enter only what is missing.
 Paying, confirming a payment, placing or submitting an order, and entering any password are always left to the user: stop on that screen and answer with done, saying what is left for the user.
 The first time an app opens it may ask to accept its privacy terms, or show a welcome: accept and continue (同意, 繼續, 允許使用); the user has decided that. Permission prompts (location, notifications, contacts): allow only what the task needs, once if that is offered. Logging in is left to the user.
+A sheet or prompt that covers an app (share contacts, network access, notifications, a welcome) is the app, not a wrong screen: answer it there with the smallest choice (不允許, 不分享, 稍後, 關閉, Not Now). Going Home and opening the app again brings it back. Never choose to share all contacts.
+A website still blank after two waits is not reachable from here: do not keep waiting; type another search site in the address bar (www.baidu.com, cn.bing.com) and search there.
+A chat sends with the keyboard's Return: once the text is in the box, key enter. Do not look for a send button.
 WeChat: an input bar reading 可按住轉成文字 is the text box: tap its middle and the keyboard comes. 按住說話 is voice mode: tap the keyboard icon at its left once.

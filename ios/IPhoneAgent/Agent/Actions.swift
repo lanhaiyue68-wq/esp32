@@ -14,7 +14,7 @@ enum Actions {
     static let actions: [String: [String]] = [
         "tap": ["x", "y"], "swipe": ["x1", "y1", "x2", "y2"], "circle": ["x", "y", "r"], "path": ["points"],
         "type": ["text"], "key": ["combo"], "done": ["answer"], "fail": ["reason"],
-        "home": [], "back": [], "wait": [], "replan": [], "open": ["app"],
+        "home": [], "back": [], "wait": [], "replan": [], "open": ["app"], "note": ["text"],
     ]
     static let textArgs: Set<String> = ["text", "combo", "answer", "reason", "app"]
 

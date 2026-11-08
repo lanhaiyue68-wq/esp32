@@ -3,7 +3,15 @@ import Foundation
 /// The screen feed is gone; acting now would be guessing.
 struct BlindError: LocalizedError {
     var reason = "lost the phone screen: reconnect Screen Mirroring"
+    /// Sharing is on and only a new frame is late: looking again is the fix, there is nothing for the user to do.
+    var sharingOn = false
     var errorDescription: String? { reason }
+}
+
+/// The app is on no Home Screen page and Search lists no such app.
+struct AppNotOnPhone: LocalizedError {
+    let name: String
+    var errorDescription: String? { name + " is not on this phone" }
 }
 
 struct InputNeedsVerification: LocalizedError {
@@ -94,6 +102,13 @@ extension Pointer: Gestures {}
     private(set) var parts: [String] = []
     private(set) var partIndex = 0
     private(set) var doneParts: [String] = []
+    /// What the agent read and wrote down in this run (a price, a title, a name). A task across apps forgot what it had
+    /// read in the last one and went back for it, ten times over (over USB 11-09): this goes with every look.
+    private(set) var notes: [String] = []
+    /// How often each way off a screen was taken from that screen, in this run.
+    private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
+    private var circleRefused = 0
+    private var blindLooks = 0
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
     /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
@@ -467,6 +482,12 @@ extension Pointer: Gestures {}
         return x >= 760 && (845...925).contains(y)
     }
 
+    /// A tap on Lan Agent keyboard's Return key: the last of its one row of keys, lower right.
+    static func onOurReturnKey(_ act: JObject) -> Bool {
+        guard act["action"]?.str == "tap", let x = act["x"]?.double, let y = act["y"]?.double else { return false }
+        return x >= 760 && y >= 700
+    }
+
     /// Return, or a tap where 发送 sits (next to the box, or the keyboard's bottom-right key).
     static func sends(_ act: JObject) -> Bool {
         switch act["action"]?.str {
@@ -478,9 +499,37 @@ extension Pointer: Gestures {}
 
     static let noKeyboardReason = "Not typed: no keyboard is on screen, so the input box is not focused (the last tap "
         + "missed it). Tap the input box again (this tap is aimed) and type only once the keyboard shows."
-    /// Where a tap that changed nothing is tried next, in screen fractions: up first (misses land low near the top,
-    /// live test 11-08), then down, left, right. Each stays within sameSpot's 0.03, so the count goes on.
-    static let deadTapNudges: [(Double, Double)] = [(0, -0.025), (0, 0.025), (-0.025, 0), (0.025, 0)]
+    static let waitLimit = 3        // waits in a row that changed nothing
+    static let blindLookLimit = 10  // looks of about 6 s each with sharing on before the user is asked
+    static let leaveLimit = 2       // times the same way off the same screen is taken; the next is refused
+
+    static let waitReason = "Refused: you waited several times and nothing changed, so more waiting will not help. Change "
+        + "the method now: reload, go back, or another way to the same result. A website that stays blank is not reachable "
+        + "from here: type another search site in the address bar (www.baidu.com, cn.bing.com)."
+    static let circleReason = "Refused: you already left this same screen this way twice and came back to it. Leaving does "
+        + "not make it go away. Deal with what is on it: a sheet or permission prompt belongs to the app, answer it with the "
+        + "smallest choice (不允許, 不分享, 稍後, 關閉, Not Now), then go on."
+    static let openFailedReason = " is not on this phone: it is not on the Home Screen and Search does not list it as an app. "
+        + "Do not search the web for it and do not try again; if the goal needs it, stop with fail and say so."
+
+    /// True when this is the third time the same way off this screen is taken: it comes back each time (a contacts sheet
+    /// left and reopened for 300 s, over USB 11-09). Counts this one. Another way off, or another app, is another move.
+    func circling(_ act: JObject, on look: [UInt8]) -> Bool {
+        guard ["home", "back", "open"].contains(act["action"]?.str ?? "") else { return false }
+        let move = Actions.key(act)
+        if let i = departures.firstIndex(where: { Actions.key($0.move) == move && Vision.sameScreen($0.look, look) }) {
+            departures[i].times += 1
+            return departures[i].times > Self.leaveLimit
+        }
+        departures.append((look, act, 1))
+        return false
+    }
+
+    /// True when this many waits in a row changed nothing.
+    static func waitedEnough(_ steps: [JObject]) -> Bool {
+        let recent = steps.filter { !["refused", "stale plan"].contains($0["action"]?.str ?? "") }.suffix(waitLimit)
+        return recent.count == waitLimit && recent.allSatisfy { $0["action"]?.str == "wait" && $0["changed"] == .bool(false) }
+    }
 
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
         + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one."
@@ -584,6 +633,7 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
+        (notes, departures, circleRefused, blindLooks) = ([], [], 0, 0)
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
         if plannerLeads { DebugLog.write("run: not done before; the planner does it and it is remembered") }
@@ -620,6 +670,7 @@ extension Pointer: Gestures {}
                         continue
                     }
                     failures = 0
+                    blindLooks = 0
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
@@ -646,6 +697,13 @@ extension Pointer: Gestures {}
                         }
                     }
                 } catch let e as BlindError {
+                    // Over USB 11-09: a run stopped to ask the user to share the screen, while it was being shared.
+                    if e.sharingOn, blindLooks < Self.blindLookLimit {
+                        blindLooks += 1
+                        DebugLog.write("run: no new frame yet with sharing on (\(blindLooks)); looking again")
+                        try await Task.sleep(nanoseconds: 2_000_000_000)
+                        continue
+                    }
                     record(nil, ["action": .str("paused"), "reason": .str(e.reason)])
                     guard try await askForHelp() else { return finish() }
                     continue
@@ -788,8 +846,14 @@ extension Pointer: Gestures {}
     /// One see-think-act round (one or more actions). Returns true when the task is over.
     func step() async throws -> Bool {
         var timing = Metrics.Step()
-        let acts = try await nextActions()
-        timing.llmMs = (acts[0].act["think_s"]?.double ?? 0) * 1000
+        let replied = try await nextActions()
+        timing.llmMs = (replied[0].act["think_s"]?.double ?? 0) * 1000
+        for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
+            if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) { notes.append(text) }
+            record(planned.shot, planned.act)
+        }
+        let acts = replied.filter { $0.act["action"]?.str != "note" }
+        guard !acts.isEmpty else { return false }
         let seen = acts[0].shot
         var spots = [pointerAt]  // where the pointer was and goes: pointer moves are not screen changes
         let stuck = repeating(acts[0].act)
@@ -799,7 +863,8 @@ extension Pointer: Gestures {}
         defer { metrics?.step(timing) }
         for (i, planned) in acts.enumerated() {
             var act = planned.act
-            if Self.onReturnKey(act), let shown = screen?.frame, CandidatePicker.keyboardUp(in: shown) {
+            let ourKeyboard = ourKeyboardOnScreen?() == true
+            if ourKeyboard ? Self.onOurReturnKey(act) : (Self.onReturnKey(act) && screen?.frame.map({ CandidatePicker.keyboardUp(in: $0) }) == true) {
                 // The keyboard's bottom-right key (发送 / 换行 / 前往) is Return, which the board's keyboard presses
                 // without the pointer. As a tap it waited for a seen pointer, which the dark keyboard hides: every
                 // send was withheld until "3 errors in a row" (logs 11-06: 76 s, 16 model calls, nothing sent).
@@ -842,7 +907,7 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("send verification"), "reason": .str(Self.sendVerificationReason)])
                 return false
             }
-            if i > 0, ["tap", "done", "fail"].contains(name) {
+            if i > 0, ["done", "fail"].contains(name) || (name == "tap" && acts[i - 1].act["action"]?.str != "tap") {
                 // Inspect drawing/typing before a later UI tap or a terminal claim about its result.
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
@@ -855,13 +920,23 @@ extension Pointer: Gestures {}
                 return false
             }
             if i == 0 {
+                if name == "wait", endAfterSend == nil, Self.waitedEnough(steps) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.waitReason)])
+                    return false
+                }
+                if endAfterSend == nil, let shot = planned.shot, let look = Vision.look(shot), circling(act, on: look) {
+                    circleRefused += 1
+                    if circleRefused >= 3 { return try await changeOfPlan(planned.shot, "kept leaving the same screen and coming back to it") }
+                    record(planned.shot, ["action": .str("loop"), "reason": .str(Self.circleReason)])
+                    return false
+                }
                 // traces(33): enter the chat, decide the avatar is wrong, go back, enter, go back... twice is enough.
                 // The leaving move (back) is the one refused, so the run stays where it can do the task.
                 if let guarded = bounceGuard, Self.sameSpot(guarded.stop, act) {
                     bounceRefused += 1
                     if bounceRefused >= 3 {
-                        record(planned.shot, ["action": .str("fail"), "reason": .str("kept going back and forth between two screens")])
-                        return true
+                        (bounceGuard, bounceRefused) = (nil, 0)
+                        return try await changeOfPlan(planned.shot, "kept going back and forth between two screens")
                     }
                     record(planned.shot, ["action": .str("loop"), "reason": .str(Self.loopReason)])
                     return false
@@ -908,8 +983,11 @@ extension Pointer: Gestures {}
                     // report). Without a target (typing, keys) that waits for two drops as before.
                     let again = lastStale.map { Self.sameSpot($0, act) } ?? false
                     let target = pointerPath(act)
+                    // A video behind the controls changes everything and every word stays: ~29 s a step (over USB 11-09).
                     let safe = again || ((staleRun > 2 || !target.isEmpty)
                         && !Vision.changedNear(seen, screen?.frame, around: target))
+                        || Self.sameWords(CandidatePicker.rows(in: seen ?? Data(), top: 0.055, bottom: 1),
+                                          CandidatePicker.rows(in: screen?.frame ?? Data(), top: 0.055, bottom: 1))
                     if !safe {
                         lastStale = act
                         if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh
@@ -971,21 +1049,11 @@ extension Pointer: Gestures {}
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0 }
-                if name == "tap" {
-                    let dead = deadTaps.filter({ Self.sameSpot($0, act) }).count
-                    if dead > Self.deadTapNudges.count {
-                        record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
-                        return false
-                    }
-                    if dead > 0, let x = act["x"]?.double, let y = act["y"]?.double {
-                        // Live test 11-08: the alarm's ✓ was missed by 0.027 down, and the same spot was clicked again
-                        // and again. User: where it takes repeated clicks, click around that spot until it is found.
-                        let (dx, dy) = Self.deadTapNudges[dead - 1]
-                        act["x"] = .num(min(max(x + dx * 1000, 0), 1000))
-                        act["y"] = .num(min(max(y + dy * 1000, 0), 1000))
-                        act["nudged"] = .int(dead)
-                        DebugLog.write(String(format: "tap (%.0f, %.0f) did nothing %ld time(s); trying (%+.3f, %+.3f) off it", x, y, dead, dx, dy))
-                    }
+                // The tap after one that changed nothing goes through the eye (missed: aimed), so it lands on the spot.
+                // Moving it around the spot moved it off the button (淘寶's 加入購物車, 10 clicks above it, over USB 11-09).
+                if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
+                    return false
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
@@ -998,6 +1066,10 @@ extension Pointer: Gestures {}
                 momentum = name == "swipe"
                 actFrame = screen?.frame
                 do { try await perform(act) }
+                catch let absent as AppNotOnPhone {
+                    record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
+                    return false
+                }
                 catch let input as InputNeedsVerification {
                     if input.fieldMayBeComplete { pendingInput = input.expected }
                     lastActed = now()
@@ -1095,6 +1167,10 @@ extension Pointer: Gestures {}
                 timing.frameMs += try await settle()
                 steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
                 noteDeadTap()
+                // The keys of a calculator, a number pad, several checkboxes: the next tap still fits while the screen
+                // is the same one (over USB 11-09: 1234 x 5678, one key per model call, 293 s and no answer).
+                if following == "tap", let was = seen.flatMap(Vision.look), let now = screen?.frame.flatMap(Vision.look),
+                   Vision.sameScreen(was, now) { continue }
                 return false
             }
         }
@@ -1328,7 +1404,32 @@ extension Pointer: Gestures {}
     /// A step that plainly failed: it changed nothing, or was refused, or a stroke left no ink.
     static func isTrouble(_ step: JObject) -> Bool {
         step["changed"] == .bool(false)
-            || ["no ink", "blocked", "done rejected", "refused", "loop"].contains(step["action"]?.str ?? "")
+            || ["no ink", "blocked", "done rejected", "refused", "loop", "open failed"].contains(step["action"]?.str ?? "")
+    }
+
+    /// Whether two screens read the same: most of what was read still reads, in the same place (a video or an animation
+    /// behind it moves; on a list that scrolled the words are the same and their places are not).
+    static func sameWords(_ a: [[CandidatePicker.Piece]], _ b: [[CandidatePicker.Piece]]) -> Bool {
+        func words(_ rows: [[CandidatePicker.Piece]]) -> [CandidatePicker.Piece] { rows.flatMap { $0 }.filter { AppPlaces.normalized($0.text).count >= 2 } }
+        let (x, y) = (words(a), words(b))
+        guard x.count >= 3, !y.isEmpty else { return false }
+        let kept = x.filter { p in
+            y.contains { AppPlaces.normalized($0.text) == AppPlaces.normalized(p.text) && abs($0.box.midX - p.box.midX) < 0.02 && abs($0.box.midY - p.box.midY) < 0.01 }
+        }
+        return kept.count * 10 >= max(x.count, y.count) * 7
+    }
+
+    /// A guard saw the run go round: Codex looks afresh once, another way. If it goes round again the run stops. True: it stopped.
+    private func changeOfPlan(_ shot: Data?, _ why: String) async throws -> Bool {
+        guard !rescued else {
+            record(shot, ["action": .str("fail"), "reason": .str(why)])
+            return true
+        }
+        rescued = true
+        circleRefused = 0
+        record(shot, ["action": .str("loop"), "reason": .str(why)])
+        try await replan(stuck: true)
+        return false
     }
 
     static let takeoverSteps = 15   // steps Codex drives after a stall, until its part is done
@@ -1337,7 +1438,7 @@ extension Pointer: Gestures {}
     private var partFocus: String {
         guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
         var text = "Current part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])\n"
-        if !doneParts.isEmpty { text += "Already done: " + doneParts.joined(separator: " | ") + "\n" }
+        if !doneParts.isEmpty { text += "Already done, with what it found: " + doneParts.joined(separator: " | ") + "\n" }
         return text + "Work on the current part only. When it is finished on the screen, answer done with what it achieved;"
             + " then the next part begins.\n\n"
     }
@@ -1347,7 +1448,9 @@ extension Pointer: Gestures {}
     private func partFinished(_ act: JObject, shot: Data?) -> Bool {
         guard parts.count >= 2, partIndex < parts.count else { return false }
         let n = partIndex + 1
-        doneParts.append(parts[partIndex])
+        // What a part found is what the next one needs: a price read in one app goes into a message in another.
+        let found = String((act["answer"]?.str ?? "").prefix(300))
+        doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
         (partIndex, stepsInPart) = (partIndex + 1, 0)
         if act["by"]?.str == "planner" { takeover = 0 }
@@ -1385,6 +1488,7 @@ extension Pointer: Gestures {}
                     + "\nPlan only what is left."
             }
         }
+        prompt += notesText
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
         // build105 live 11-08: Plus timed out, and the fallback answered {"action":"search",...}, which became the plan.
@@ -1401,6 +1505,12 @@ extension Pointer: Gestures {}
             record(nil, ["action": .str("planner drives"),
                          "reason": .str("the executor did not get on: Codex drives until this part is done, at most \(Self.takeoverSteps) steps")])
         }
+    }
+
+    /// The notes, for a prompt ("" when there are none).
+    private var notesText: String {
+        notes.isEmpty ? "" : "\n\nYour notes from this run (already read: use them, never go back to read these again):\n"
+            + notes.map { "- " + $0 }.joined(separator: "\n")
     }
 
     private var recentActions: String {
@@ -1424,7 +1534,7 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\n\nNext action?"
+        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
         let driving = (plannerLeads || takeover > 0) && planner != nil
         if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
@@ -1531,9 +1641,7 @@ extension Pointer: Gestures {}
         case "open":
             let app = a["app"]?.str ?? ""
             guard let openApp else { throw DeviceError(message: "Opening apps by name is not available here; use the Home Screen.") }
-            guard try await openApp(app) else {
-                throw DeviceError(message: "Could not open \(app): it was neither on the first Home Screen pages nor in Search under this name.")
-            }
+            guard try await openApp(app) else { throw AppNotOnPhone(name: app) }
         case "wait": break
         case let other: throw Actions.ParseError(message: "unknown action \(other ?? "nil")")
         }
