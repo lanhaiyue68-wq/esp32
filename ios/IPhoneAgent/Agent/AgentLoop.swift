@@ -607,11 +607,15 @@ extension Pointer: Gestures {}
                         continue
                     }
                     failures = 0
-                    if parts.count >= 2 {
+                    // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
+                    // Codex never came, because only plans of several parts had this budget. Every task the planner or the
+                    // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
+                    if presetPlan.isEmpty, planner != nil, takeover == 0 {
                         stepsInPart += 1
                         if stepsInPart >= Self.partSteps {
                             record(nil, ["action": .str("part stalled"),
-                                         "reason": .str("part \(partIndex + 1) not done after \(Self.partSteps) steps")])
+                                         "reason": .str((parts.count >= 2 ? "part \(partIndex + 1)" : "the task")
+                                                        + " not done after \(Self.partSteps) steps")])
                             try await replan(stuck: true)
                         }
                     }
