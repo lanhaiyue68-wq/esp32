@@ -274,6 +274,16 @@ extension AppModel {
         ended()
         if let last = agent.steps.last { say("finished: \(last["action"]?.str ?? "") \(last["reason"]?.str ?? last["answer"]?.str ?? "")") }
         if !watching { Task { try? await feed.stream(false) } }  // WeChat watch reads the live screen next
+        // User 11-08: "做完任務應該回到主頁，或者開啓微信守候要回到微信裏". A task that finished or gave up leaves the
+        // phone on the Home Screen, not in the app it worked in; a stopped one stays where the user stopped it. WeChat
+        // watch goes back to WeChat itself (its next check hops there and walks to the chat list).
+        if !watching, ["done", "fail"].contains(agent.steps.last?["action"]?.str ?? "") {
+            Task { [weak self] in
+                guard let self, !self.agent.running, !self.startingAgent else { return }
+                do { try await self.pointer.goHome(); self.say("run: back on the Home Screen") }
+                catch { self.say("run: could not go back to the Home Screen: \(error.localizedDescription)") }
+            }
+        }
         endBackgroundTask()
         let run = runID, task = agent.task, steps = agent.steps
         Task { [weak self] in
