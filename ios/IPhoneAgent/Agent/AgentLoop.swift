@@ -86,16 +86,18 @@ extension Pointer: Gestures {}
 
     @Published private(set) var task = ""
     @Published private(set) var plan = ""
-    /// Codex commanding part by part (specs/004 §2.1; user 11-08: "加了 codex，爲啥 codex 也做不好這個活，這不是説明
-    /// codex 根本就沒介入嗎" — it planned 3 of 53 decisions). A plan the planner wrote is a list of parts, each a result
-    /// the screen can show; the executor works on one at a time, the planner checks each on the screen before the
-    /// next begins, and when the executor stalls the planner drives the next steps itself.
+    /// The planner (Codex) as the backstop (user 11-08: "codex要做的是兜底…如果豆包api做不好就讓codex去做"). Its plan
+    /// is a list of parts, each a result the screen can show; the executor (Doubao) works on one at a time. When the
+    /// executor stalls, spends 20 steps on one part, or gives up, Codex looks again and drives itself until that part
+    /// is done. A finished run's whole way is remembered (RouteBook recipe) and followed the next time, without asking
+    /// the planner ("做完之後記住做的路徑，下次就可以快速做出來").
     private(set) var parts: [String] = []
     private(set) var partIndex = 0
     private(set) var doneParts: [String] = []
-    private(set) var plannerNote: String?
     private(set) var takeover = 0
-    private var stepsInPart = 0, partRejected = 0
+    private var stepsInPart = 0, rescued = false
+    /// How this task was done the last time it finished (nil: never, or a fixed plan such as watching WeChat).
+    private(set) var recipe: RouteBook.Recipe?
     @Published var steps: [JObject] = []
     @Published private(set) var shots: [Int: Data] = [:]  // step index -> screenshot the model decided on
     @Published private(set) var running = false
@@ -571,19 +573,25 @@ extension Pointer: Gestures {}
             DebugLog.write("lessons: \(applied.count) applied, rules.md \(Prompts.userRules.isEmpty ? "absent" : "used")")
         }
         replayedRoute = nil
-        (parts, partIndex, doneParts, plannerNote, takeover, stepsInPart, partRejected) = ([], 0, [], nil, 0, 0, 0)
+        (parts, partIndex, doneParts, takeover, stepsInPart, rescued) = ([], 0, [], 0, 0, false)
+        recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         (sendTap, backMissed, actFrame) = (nil, false, nil)
         do {
             do { try await replay() }
             catch let e where e is CancellationError || Task.isCancelled { throw e }
             catch { DebugLog.write("route: replay stopped by \(error.localizedDescription); the model takes over") }
-            if !presetPlan.isEmpty || directStart {
+            if presetPlan.isEmpty, !directStart, let recipe {
+                plan = Self.rememberedPlan(recipe)
+                record(nil, ["action": .str("plan"), "plan": .str(plan), "plan_zh": .str(""), "think_s": .num(0),
+                             "source": .str("remembered")])
+                DebugLog.write("plan: remembered from a run that finished (\(recipe.lines.count) steps); the planner is not asked")
+            } else if !presetPlan.isEmpty || directStart {
                 plan = presetPlan.isEmpty ? """
                 Work from the CURRENT screen and the original Goal; keep completed work.
                 Choose the next action from what is visible, then inspect its result before continuing.
                 If the route is unclear or progress stops, request replan rather than guessing or repeating moves.
                 Finish only after checking the visible result against the Goal, using its required answer format.
-                """ : presetPlan
+                """ + (recipe.map { "\n\n" + Self.rememberedPlan($0) } ?? "") : presetPlan
                 record(nil, ["action": .str("plan"), "plan": .str(plan), "plan_zh": .str(""), "think_s": .num(0),
                              "source": .str(presetPlan.isEmpty ? "direct start" : "fixed plan")])
             } else {
@@ -594,6 +602,7 @@ extension Pointer: Gestures {}
             for _ in 0..<budget {
                 do {
                     if try await step() {
+                        if try await rescue() { continue }
                         guard steps.last?["action"]?.str == "fail", try await askForHelp() else { return finish() }
                         continue
                     }
@@ -691,8 +700,10 @@ extension Pointer: Gestures {}
     private func finish() {
         if let metrics { trace?.writeMetrics(metrics.snapshot()) }
         if let routes, learnedRoutes, steps.last?["action"]?.str == "done" {
-            let run = (task: self.task, steps: self.steps, shots: self.shots, aspect: screen?.aspect ?? 0, used: replayedRoute)
-            Task { await routes.learn(task: run.task, steps: run.steps, shots: run.shots, aspect: run.aspect, replayed: run.used) }
+            let run = (task: self.task, steps: self.steps, shots: self.shots, aspect: screen?.aspect ?? 0, used: replayedRoute,
+                       recipe: presetPlan.isEmpty)
+            Task { await routes.learn(task: run.task, steps: run.steps, shots: run.shots, aspect: run.aspect, replayed: run.used,
+                                      recipe: run.recipe) }
         }
         // A run that sent by tapping and ended done: that spot is this screen's send button, by its look.
         if let controls, steps.last?["action"]?.str == "done", !sentTexts.isEmpty, let tap = sendTap {
@@ -853,7 +864,7 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
                 return false
             }
-            if name == "done", try await partFinished(act, shot: planned.shot) { return false }
+            if name == "done", partFinished(act, shot: planned.shot) { return false }
             if name != "done" && name != "fail" {
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
@@ -1272,67 +1283,44 @@ extension Pointer: Gestures {}
             .filter { $0.range(of: #"^\d{1,2}\s*[.)、．]"#, options: .regularExpression) != nil }
     }
 
-    static let partSteps = 20      // steps on one part before the planner looks and drives
-    static let takeoverSteps = 5   // steps the planner drives itself after a stall
+    static let partSteps = 20       // steps on one part before Codex looks and drives
+    static let takeoverSteps = 15   // steps Codex drives after a stall, until its part is done
 
     /// What the executor is told about its part (nothing for a plan of one part or a fixed plan).
     private var partFocus: String {
         guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
         var text = "Current part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])\n"
-        if !doneParts.isEmpty { text += "Done and checked by the planner: " + doneParts.joined(separator: " | ") + "\n" }
-        if let plannerNote { text += "Planner: \(plannerNote)\n" }
+        if !doneParts.isEmpty { text += "Already done: " + doneParts.joined(separator: " | ") + "\n" }
         return text + "Work on the current part only. When it is finished on the screen, answer done with what it achieved;"
-            + " the planner checks it and gives you the next part.\n\n"
+            + " then the next part begins.\n\n"
     }
 
-    /// The executor's "done" on a plan of several parts: the planner checks the part on the current screen. Done, the
-    /// next part begins (the last one ends the run); not done, the executor gets the planner's note, and after two
-    /// refusals the planner drives the part itself. A part the planner finished while driving is not checked again.
-    /// True: the run goes on.
-    private func partFinished(_ act: JObject, shot: Data?) async throws -> Bool {
-        guard parts.count >= 2, partIndex < parts.count, let planner else { return false }
-        let n = partIndex + 1, part = parts[partIndex]
-        var verdict = (done: true, why: "finished by the planner itself", next: "")
-        if act["by"]?.str == "planner" {
-            record(shot, ["action": .str("part done"), "part": .int(n), "reason": .str(verdict.why)])
-        } else {
-            let prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nPart \(n) of \(parts.count): \(part)"
-                + "\nThe executor says this part is done: \(act["answer"]?.str ?? "")"
-                + "\n\nRecent actions:\n\(recentActions)\n\nLook at the current screen. Is part \(n) really done?"
-            let (reply, seconds, frame) = try await ask("planner", planner, Self.partCheckPrompt, prompt)
-            if let v = Self.partVerdict(reply) { verdict = v } else { verdict.why = "the check was unclear; taken as done" }
-            record(frame, ["action": .str(verdict.done ? "part done" : "part not done"), "part": .int(n),
-                           "reason": .str(verdict.why), "think_s": .num(seconds)])
-        }
-        if verdict.done {
-            doneParts.append(part)
-            (partIndex, stepsInPart, partRejected, plannerNote) = (partIndex + 1, 0, 0, nil)
-            return partIndex < parts.count
-        }
-        partRejected += 1
-        plannerNote = verdict.next.isEmpty ? verdict.why : verdict.next
-        if partRejected >= 2 {
-            takeover = Self.takeoverSteps
-            record(nil, ["action": .str("planner drives"), "reason": .str("part \(n) refused twice: the planner takes the next \(Self.takeoverSteps) steps")])
-        }
+    /// The executor's (or Codex's) "done" on a plan of several parts: the next part begins, the last one ends the run.
+    /// A part Codex rescued is done: the executor takes the next one. True: the run goes on.
+    private func partFinished(_ act: JObject, shot: Data?) -> Bool {
+        guard parts.count >= 2, partIndex < parts.count else { return false }
+        let n = partIndex + 1
+        doneParts.append(parts[partIndex])
+        record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
+        (partIndex, stepsInPart) = (partIndex + 1, 0)
+        if act["by"]?.str == "planner" { takeover = 0 }
+        return partIndex < parts.count
+    }
+
+    /// The executor gave up: Codex takes over once before the user is asked. Never after a message went out (it must
+    /// not go twice), nor when Codex itself gave up.
+    private func rescue() async throws -> Bool {
+        guard let last = steps.last, last["action"]?.str == "fail", last["by"]?.str == "actor",
+              planner != nil, !rescued, sentTexts.isEmpty else { return false }
+        rescued = true
+        try await replan(stuck: true)
         return true
     }
 
-    static let partCheckPrompt = """
-        You command an executor that operates an iPhone with a mouse and keyboard. It says one part of the plan is done.
-        Judge from the screenshot and the recent actions whether that part is really done. Anything already sent, saved
-        or deleted counts as done when the screen or the actions show it: never ask for it again.
-        Reply with one JSON object and nothing else:
-        {"done": true or false, "why": "one short sentence", "next": "if not done: the next concrete thing to do on this screen"}
-        """
-
-    /// The planner's check: {"done": Bool, "why": String, "next": String}; nil when the reply holds no such object.
-    static func partVerdict(_ reply: String) -> (done: Bool, why: String, next: String)? {
-        guard let a = reply.firstIndex(of: "{"), let b = reply.lastIndex(of: "}"), a < b,
-              let data = String(reply[a...b]).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let done = object["done"] as? Bool else { return nil }
-        return (done, object["why"] as? String ?? "", object["next"] as? String ?? "")
+    /// A remembered way as the plan: its steps as hints, not numbered parts.
+    static func rememberedPlan(_ recipe: RouteBook.Recipe) -> String {
+        "Do it the way it was done before; adapt any text, time or name to this goal, and look at each result:\n"
+            + recipe.lines.map { "- " + $0 }.joined(separator: "\n")
     }
 
     func replan(stuck: Bool = false) async throws {
@@ -1352,10 +1340,11 @@ extension Pointer: Gestures {}
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
         plan = en
-        (parts, partIndex, stepsInPart, partRejected, plannerNote) = (Self.parts(of: en), 0, 0, 0, nil)
+        (parts, partIndex, stepsInPart) = (Self.parts(of: en), 0, 0)
         if stuck {
             takeover = Self.takeoverSteps
-            record(nil, ["action": .str("planner drives"), "reason": .str("stuck: the planner takes the next \(Self.takeoverSteps) steps")])
+            record(nil, ["action": .str("planner drives"),
+                         "reason": .str("the executor did not get on: Codex drives until this part is done, at most \(Self.takeoverSteps) steps")])
         }
         record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),
                        "think_s": .num(seconds)])
@@ -1363,7 +1352,7 @@ extension Pointer: Gestures {}
 
     private var recentActions: String {
         // actions and their effect only: echoing earlier thoughts makes the model repeat them instead of looking
-        let hidden: Set<String> = ["t", "plan", "plan_zh", "think_s", "act_s", "shot", "thought", "thought_zh", "changed"]
+        let hidden: Set<String> = ["t", "plan", "plan_zh", "think_s", "act_s", "shot", "thought", "thought_zh", "changed", "by"]
         let history = steps.suffix(8).filter { $0["plan"] == nil }.map { s -> String in
             let effect = s["changed"] == .bool(true) ? " -> screen changed"
                 : s["changed"] == .bool(false) ? " -> screen did NOT change" : ""
@@ -1446,7 +1435,7 @@ extension Pointer: Gestures {}
                 continue
             }
             acts[0]["think_s"] = .num(seconds)
-            if driving { for i in acts.indices { acts[i]["by"] = .str("planner") } }
+            for i in acts.indices { acts[i]["by"] = .str(driving ? "planner" : "actor") }
             return acts.map { Planned(act: $0, shot: frame) }
         }
         throw Actions.ParseError(message: "actor gave no valid action: \(reply.prefix(200))")

@@ -119,64 +119,92 @@ import UIKit
     }
 }
 
-/// User 11-08: "加了 codex，爲啥 codex 也做不好這個活，這不是説明 codex 根本就沒介入嗎" (Plus planned 3 of 53
-/// decisions). The planner splits a task into parts, checks each on the screen, and drives when the executor stalls.
-@MainActor final class PlannerCommandsTests: XCTestCase {
+/// User 11-08: "codex要做的是兜底，而且要做完之後記住做的路徑，下次就可以快速做出來…如果豆包api做不好就讓codex去做".
+/// Doubao works part by part; Codex drives when Doubao stalls or gives up; a finished way is followed next time.
+@MainActor final class CodexBackstopTests: XCTestCase {
     private let task = "打开设置，再打开备忘录"
     private let twoParts = "1. Settings is open - open 设置\n2. Notes is open - open 备忘录"
     private func actions(_ agent: AgentLoop) -> [String] { agent.steps.compactMap { $0["action"]?.str } }
 
-    func testEachPartIsCheckedByThePlannerBeforeTheNextBegins() async {
-        let planner = FakeModel { n in
-            switch n {
-            case 1: return self.twoParts
-            case 2: return #"{"done": false, "why": "the Settings list is not on screen", "next": "tap the Settings icon"}"#
-            default: return #"{"done": true, "why": "it is on screen"}"#
-            }
-        }
+    func testPartsGoOnWithoutAskingCodex() async {
+        let planner = FakeModel { _ in self.twoParts }
         let actor = FakeModel { _ in "THINK: this part looks finished\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.showMock(task: task, plan: "", steps: [], running: false)
         await agent.run()
-        XCTAssertEqual(actions(agent), ["plan", "part not done", "part done", "part done", "done"])
-        XCTAssertEqual(actor.prompts.count, 3)
+        XCTAssertEqual(actions(agent), ["plan", "part done", "part done", "done"])
+        XCTAssertEqual(planner.prompts.count, 1, "Codex only planned")
         XCTAssertTrue(actor.prompts[0].contains("Current part (1 of 2): 1. Settings is open"))
-        XCTAssertTrue(actor.prompts[1].contains("Planner: tap the Settings icon"))
-        XCTAssertTrue(actor.prompts[2].contains("Current part (2 of 2): 2. Notes is open"))
-        XCTAssertTrue(actor.prompts[2].contains("Done and checked by the planner: 1. Settings is open"))
+        XCTAssertTrue(actor.prompts[1].contains("Current part (2 of 2): 2. Notes is open"))
+        XCTAssertTrue(actor.prompts[1].contains("Already done: 1. Settings is open"))
     }
 
-    func testAfterTwoRefusalsThePlannerDrivesThePartItself() async {
+    func testCodexDoesItWhenTheExecutorGivesUp() async {
         let planner = FakeModel { n in
             switch n {
-            case 1: return self.twoParts
-            case 2, 3: return #"{"done": false, "why": "still the home screen", "next": "open 设置"}"#
+            case 1: return "1. Settings is open - open 设置"
+            case 2: return "1. Settings is open - tap the 设置 icon"
             default: return "THINK: I open it myself\nDO: done opened"
             }
         }
-        let actor = FakeModel { _ in "THINK: finished\nDO: done ok" }
-        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
-        agent.showMock(task: task, plan: "", steps: [], running: false)
-        await agent.run()
-        XCTAssertEqual(actions(agent), ["plan", "part not done", "part not done", "planner drives", "part done", "part done", "done"])
-        XCTAssertEqual(actor.prompts.count, 2, "the executor stops once the planner drives")
-        XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
-    }
-
-    func testAOnePartTaskIsNotCheckedTwice() async {
-        let planner = FakeModel { _ in "1. Settings is open - open 设置" }
-        let actor = FakeModel { _ in "THINK: Settings is open\nDO: done ok" }
+        let actor = FakeModel { _ in "THINK: no icon here\nDO: fail cannot find Settings" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
         await agent.run()
-        XCTAssertEqual(actions(agent), ["plan", "done"])
-        XCTAssertEqual(planner.prompts.count, 1)
+        XCTAssertEqual(actions(agent), ["plan", "fail", "replan (stuck)", "planner drives", "done"])
+        XCTAssertEqual(actor.prompts.count, 1)
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
     }
 
-    func testTheCheckIsReadFromItsJSONAndPartsFromNumberedLines() {
-        let v = AgentLoop.partVerdict("Sure.\n{\"done\": false, \"why\": \"no alarm\", \"next\": \"tap +\"}")
-        XCTAssertEqual(v?.done, false); XCTAssertEqual(v?.next, "tap +")
-        XCTAssertNil(AgentLoop.partVerdict("1. Open Clock"))
-        XCTAssertEqual(AgentLoop.parts(of: "Plan:\n1. A\n  2) B\nnote\n3、C"), ["1. A", "2) B", "3、C"])
+    func testAPartCodexRescuedGoesBackToTheExecutor() async {
+        let planner = FakeModel { n in n <= 2 ? self.twoParts : "THINK: Settings now\nDO: done opened Settings" }
+        let actor = FakeModel { n in n == 1 ? "THINK: lost\nDO: fail no Settings icon" : "THINK: Notes is open\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: task, plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actions(agent), ["plan", "fail", "replan (stuck)", "planner drives", "part done", "part done", "done"])
+        XCTAssertEqual(planner.prompts.count, 3)
+        XCTAssertEqual(actor.prompts.count, 2, "the executor takes the next part")
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "actor")
+    }
+
+    func testATaskDoneBeforeFollowsItsWayWithoutThePlanner() async {
+        let routes = RouteBook(file: nil)
+        routes.storeRecipe(task: "打开设置", lines: ["open 设置", "tap “通用”"])
+        let planner = FakeModel { _ in "1. should not be asked" }
+        let actor = FakeModel { _ in "THINK: done as before\nDO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.routes = routes
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actions(agent), ["plan", "done"])
+        XCTAssertEqual(agent.steps.first?["source"]?.str, "remembered")
+        XCTAssertEqual(planner.prompts.count, 0)
+        XCTAssertTrue(actor.prompts[0].contains("- open 设置\n- tap “通用”"))
+    }
+
+    func testTheWholeWayIsRememberedPastTyping() {
+        let shot = Data([1])
+        let steps: [JObject] = [
+            ["action": .str("plan"), "plan": .str("1. x")],
+            ["action": .str("open"), "app": .str("时钟")],
+            ["action": .str("tap"), "x": .num(880), "y": .num(90)],
+            ["action": .str("tap"), "x": .num(500), "y": .num(300)],
+            ["action": .str("swipe"), "x1": .num(500), "y1": .num(600), "x2": .num(500), "y2": .num(500), "changed": .bool(false)],
+            ["action": .str("type"), "text": .str("0800")],
+            ["action": .str("done"), "answer": .str("ok")],
+        ]
+        let lines = RouteBook.recipe(steps: steps, shots: [2: shot, 3: shot], label: { _, p in
+            p.x > 0.8 ? (text: "新建闹钟", centre: p) : nil
+        })
+        XCTAssertEqual(lines, ["open 时钟", "tap “新建闹钟”", "tap 500 300", "type “0800”"])
+        XCTAssertNil(RouteBook.recipe(steps: Array(steps.dropLast()), shots: [:], label: { _, _ in nil }), "only a finished run")
+    }
+
+    func testAWayIntoOneChatIsNotFollowedIntoAnother() {
+        let routes = RouteBook(file: nil)
+        routes.storeRecipe(task: "打开微信给测试群发你好并截图保存", lines: ["open 微信", "tap “测试群”", "type “你好”"])
+        XCTAssertNotNil(routes.recipe(for: "打开微信给测试群发早安并截图保存"), "another text, the same chat")
+        XCTAssertNil(routes.recipe(for: "打开微信给测试组发你好并截图保存"), "another chat")
     }
 }

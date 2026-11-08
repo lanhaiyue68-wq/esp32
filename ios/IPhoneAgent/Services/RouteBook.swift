@@ -32,6 +32,17 @@ import Foundation
                                "send", "pay", "delete", "buy", "purchase"]
 
     @Published private(set) var routes: [Route] = []
+    /// The whole way a finished run did its task, as short lines ("open 时钟", "tap “+”", "type “0800”"), for the next
+    /// similar task: the executor follows it instead of finding the way again, and the planner is not asked (user
+    /// 11-08: "做完之後記住做的路徑，下次就可以快速做出來"). Unlike a route it goes past typing; it is never replayed
+    /// blind, the model reads it and still looks at each screen. Local only, like the routes.
+    struct Recipe: Codable, Equatable {
+        var task: String
+        var lines: [String]
+        var updated: Date
+    }
+    @Published private(set) var recipes: [Recipe] = []
+    static let recipeLines = 30
     var enabled = true
     var clock: () -> Date = Date.init
     private let file: URL?
@@ -41,11 +52,73 @@ import Foundation
         if let file, let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode([Route].self, from: data) {
             routes = saved.filter { !$0.steps.isEmpty }
         }
+        if let recipeFile, let data = try? Data(contentsOf: recipeFile), let saved = try? JSONDecoder().decode([Recipe].self, from: data) {
+            recipes = saved
+        }
         prune()
     }
 
     var count: Int { routes.count }
-    func clear() { routes = []; save() }
+    func clear() { routes = []; recipes = []; save() }
+    private var recipeFile: URL? { file?.deletingLastPathComponent().appendingPathComponent("recipes-v1.json") }
+
+    /// The way the newest similar task was done. An app or a label the old task named must be named by this one too:
+    /// a reply to 蓝海乐 must not follow the way into 测试群.
+    func recipe(for task: String) -> Recipe? {
+        guard enabled else { return nil }
+        prune()
+        let wanted = task.lowercased()
+        return recipes.first { recipe in
+            guard Self.similar(recipe.task, task) else { return false }
+            let named = recipe.task.lowercased()
+            return Self.names(in: recipe.lines).allSatisfy { !named.contains($0) || wanted.contains($0) }
+        }
+    }
+
+    func storeRecipe(task: String, lines: [String]) {
+        guard enabled, !lines.isEmpty else { return }
+        let key = String(task.prefix(512))
+        recipes.removeAll { Self.similar($0.task, key) }
+        recipes.insert(Recipe(task: key, lines: lines, updated: clock()), at: 0)
+        prune(); save()
+    }
+
+    /// The apps opened and the labels tapped in a recipe, lowercased.
+    nonisolated static func names(in lines: [String]) -> [String] {
+        lines.compactMap { line -> String? in
+            if line.hasPrefix("open ") { return String(line.dropFirst(5)).lowercased() }
+            guard line.hasPrefix("tap “"), line.hasSuffix("”") else { return nil }
+            return String(line.dropFirst(5).dropLast()).lowercased()
+        }.filter { !$0.isEmpty }
+    }
+
+    /// The whole way of a finished run: every action that did something, in order (what changed nothing is left out).
+    nonisolated static func recipe(steps: [JObject], shots: [Int: Data],
+                                   label: (Data, CGPoint) -> (text: String, centre: CGPoint)?) -> [String]? {
+        guard steps.last?["action"]?.str == "done" else { return nil }
+        var lines: [String] = []
+        for (i, s) in steps.enumerated() where s["changed"] != .bool(false) && s["performed"] != .bool(false) {
+            func n(_ k: String) -> Int { Int((s[k]?.double ?? 0).rounded()) }
+            switch s["action"]?.str ?? "" {
+            case "open": lines.append("open " + (s["app"]?.str ?? ""))
+            case "tap":
+                if let shot = shots[i], let found = label(shot, CGPoint(x: Double(n("x")) / 1000, y: Double(n("y")) / 1000)),
+                   found.text.filter({ !$0.isWhitespace }).count >= 2 {
+                    lines.append("tap “\(found.text)”")
+                } else {
+                    lines.append("tap \(n("x")) \(n("y"))")
+                }
+            case "type": lines.append("type “\(s["text"]?.str ?? "")”")
+            case "compose": lines.append("type “\(s["expected"]?.str ?? "")”")
+            case "key": lines.append("key " + (s["combo"]?.str ?? ""))
+            case "swipe": lines.append("swipe \(n("x1")) \(n("y1")) \(n("x2")) \(n("y2"))")
+            case "circle", "path": lines.append("draw (\(s["action"]?.str ?? ""))")
+            case "home", "back", "wait": lines.append(s["action"]?.str ?? "")
+            default: break
+            }
+        }
+        return lines.isEmpty ? nil : Array(lines.suffix(recipeLines))
+    }
 
     /// The route for this task that starts on this screen. A label the old task named (an app, a chat) must be named
     /// by this task too: "go to Claude" must not replay into ChatGPT, nor a reply to 蓝海乐 into 测试群.
@@ -80,9 +153,15 @@ import Foundation
     }
 
     /// A finished run: keep its route, and credit the route it replayed.
-    func learn(task: String, steps: [JObject], shots: [Int: Data], aspect: Double, replayed: String?) async {
+    func learn(task: String, steps: [JObject], shots: [Int: Data], aspect: Double, replayed: String?,
+               recipe: Bool = true) async {
         guard enabled, steps.last?["action"]?.str == "done" else { return }
         if let replayed, let i = routes.firstIndex(where: { $0.id == replayed }) { routes[i].successes += 1 }
+        if recipe, let lines = await Task.detached(priority: .utility, operation: {
+            Self.recipe(steps: steps, shots: shots, label: CandidatePicker.label)
+        }).value {
+            storeRecipe(task: task, lines: lines)
+        }
         let found = await Task.detached(priority: .utility) {
             Self.route(steps: steps, shots: shots, label: CandidatePicker.label)
         }.value
@@ -179,10 +258,12 @@ import Foundation
     private func prune() {
         let cutoff = clock().addingTimeInterval(-30 * 86400)
         routes = Array(routes.filter { $0.updated >= cutoff }.prefix(Self.limit))
+        recipes = Array(recipes.filter { $0.updated >= cutoff }.prefix(Self.limit))
     }
 
     private func save() {
         guard let file else { return }
+        if let recipeFile { try? JSONEncoder().encode(recipes).write(to: recipeFile, options: .atomic) }
         do { try JSONEncoder().encode(routes).write(to: file, options: .atomic) }
         catch { DebugLog.write("routes could not be saved: \(error.localizedDescription)") }
     }

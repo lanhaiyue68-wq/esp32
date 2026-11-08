@@ -4,11 +4,14 @@ import XCTest
 /// Needs-your-help pauses, intent hints, the AI optimizer's reply and demonstration drafts.
 @MainActor final class ReviewTests: XCTestCase {
     func testGivingUpAsksForHelpAndGoesOnAfterTakeOver() async {
+        // User 11-08: Codex does it when Doubao cannot; the user is asked only when Codex gives up too.
         let model = SystemRecorder { n in
             switch n {
             case 1: return "1. open it"
             case 2: return "THINK: I need a login\nDO: fail login required"
-            case 3: return "1. go on"
+            case 3: return "1. try another way"
+            case 4: return "THINK: a login is needed\nDO: fail login required"
+            case 5: return "1. go on"
             default: return "THINK: there\nDO: done ok"
             }
         }
@@ -18,7 +21,8 @@ import XCTest
         await agent.run()
         XCTAssertEqual(asked, ["login required"])
         XCTAssertEqual(agent.steps.map { $0["action"]?.str },
-                       ["plan", "fail", "help", "takeover", "replan (stuck)", "done"])
+                       ["plan", "fail", "replan (stuck)", "planner drives", "fail", "help", "takeover", "replan (stuck)",
+                        "planner drives", "done"])
     }
 
     func testStopFromHelpEndsTheRun() async {
