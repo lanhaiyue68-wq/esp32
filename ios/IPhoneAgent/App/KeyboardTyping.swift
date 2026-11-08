@@ -74,9 +74,9 @@ extension AppModel {
 
     /// `text` into the focused field by Lan Agent's keyboard; false when the keyboard could not be shown or did not
     /// confirm, and the caller falls back to the old ways (pinyin, paste).
-    func typeWithLanAgentKeyboard(_ text: String) async -> Bool {
+    func typeWithLanAgentKeyboard(_ text: String, enter: Bool = false) async -> Bool {
         guard await showLanAgentKeyboard() else { return false }
-        let ok = await keyboardBridge.type(text, enter: false, within: 4)
+        let ok = await keyboardBridge.type(text, enter: enter, within: 4)
         DebugLog.write("keyboard: \(text.count) character(s) \(ok ? "typed" : "not confirmed")")
         // The field takes the text a moment after the keyboard reports it: the board's Return 0.16 s later did not
         // send (logs(11) 11-08); the same Return 9 s later did.

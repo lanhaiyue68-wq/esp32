@@ -221,3 +221,25 @@ import UIKit
         XCTAssertEqual(agent.steps.compactMap { $0["action"]?.str }, ["plan", "part done", "done rejected", "done rejected", "fail"])
     }
 }
+
+/// build104 live 11-08: a banner with 主人蓝海乐's message ("9527 去给我画个太阳") covered a group's title; the reading
+/// model took the banner's sender for the title and the group's talk was answered into 主人蓝海乐.
+@MainActor final class WeChatBannerTests: XCTestCase {
+    private func piece(_ text: String, x: Double, width: Double, y: Double) -> CandidatePicker.Piece {
+        .init(text: text, box: CGRect(x: x, y: y, width: width, height: 0.02))
+    }
+
+    func testABannerIsNotTheChatsTitle() {
+        let banner = [[piece("主人蓝海乐", x: 0.2, width: 0.17, y: 0.058)], [piece("9527 去给我画个太阳", x: 0.2, width: 0.44, y: 0.08)]]
+        XCTAssertNil(WatchReport.navigationChat(rows: banner, targets: ["主人蓝海乐", "测试群"]))
+        XCTAssertNil(WatchReport.navigationTitle(rows: banner))
+        XCTAssertEqual(WatchReport.navigationTitle(rows: [[piece("测试群(3)", x: 0.42, width: 0.16, y: 0.08)]]), "测试群")
+    }
+
+    func testTitlesCompareWithoutEmojiAndCounts() {
+        XCTAssertTrue(WatchReport.sameChatTitle("测试群", "测试群🎉"))
+        XCTAssertTrue(WatchReport.sameChatTitle("主人监海乐", "主人蓝海乐"), "one character misread")
+        XCTAssertFalse(WatchReport.sameChatTitle("测试群", "主人蓝海乐"))
+        XCTAssertFalse(WatchReport.sameChatTitle("", "测试群"))
+    }
+}

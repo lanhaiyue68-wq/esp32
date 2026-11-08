@@ -562,11 +562,7 @@ enum WatchReport {
     /// A local title stops navigation only. The model must still identify a real chat and read its messages.
     /// List rows and message text cannot complete navigation; uncertain/truncated names fall back to the actor.
     static func navigationChat(rows: [[CandidatePicker.Piece]], targets: [String]) -> String? {
-        let titles = rows.compactMap { row -> String? in
-            let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
-            let name = fullTitle(header.map(\.text).joined())
-            return name.isEmpty ? nil : name
-        }
+        let titles = rows.compactMap { titleText($0) }
         let matches = targets.filter { target in !fullTitle(target).isEmpty && titles.contains { sameName($0, fullTitle(target)) } }
         return matches.count == 1 ? matches[0] : nil
     }
@@ -589,12 +585,26 @@ enum WatchReport {
 
     /// Any chat's title in the navigation bar, for a chat opened from the list that is not listed. Nil on the chat
     /// list itself (its title is 微信), with no title, or with two.
+    /// A row's text when it sits where a chat's title does: in the navigation bar, centred between the back button and
+    /// "…". build104 live 11-08: a banner with 主人蓝海乐's new message covered a group's title; its lines start beside
+    /// the banner's icon (x ≈ 0.2), and the model, reading the banner, answered the group's talk into 主人蓝海乐.
+    static func titleText(_ row: [CandidatePicker.Piece]) -> String? {
+        let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
+        guard let left = header.map(\.box.minX).min(), let right = header.map(\.box.maxX).max(),
+              left >= 0.22, right <= 0.78, abs((left + right) / 2 - 0.5) <= 0.07 else { return nil }
+        let name = fullTitle(header.map(\.text).joined())
+        return name.isEmpty ? nil : name
+    }
+
+    /// The same chat name with emoji, spaces and punctuation left out (the text recognizer drops emoji).
+    static func sameChatTitle(_ a: String, _ b: String) -> Bool {
+        let plain = { (s: String) in fullTitle(s).filter { $0.isLetter || $0.isNumber } }
+        let x = plain(a), y = plain(b)
+        return !x.isEmpty && sameName(x, y)
+    }
+
     static func navigationTitle(rows: [[CandidatePicker.Piece]]) -> String? {
-        let titles = rows.compactMap { row -> String? in
-            let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
-            let name = fullTitle(header.map(\.text).joined())
-            return name.isEmpty ? nil : name
-        }
+        let titles = rows.compactMap { titleText($0) }
         guard titles.count == 1, !["微信", "WeChat", "Chats", "聊天"].contains(titles[0]) else { return nil }
         return titles[0]
     }
@@ -1364,7 +1374,24 @@ extension AppModel {
         do {
             if !feed.streamOn { try await feed.stream(true) }  // the screen as it is now, not the last frame of the run
             _ = try await feed.currentFrame()
-            guard let frame = feed.frame else { return nil }
+            guard var frame = feed.frame else { return nil }
+            // The chat on screen by its navigation bar (text recognition on the phone), not by the model that reads it:
+            // the model was told which chat to expect and took a banner's sender for the title (build104 live 11-08).
+            // A banner hides the title for about 5 s: wait it out, then give up on this check.
+            var title = WatchReport.navigationTitle(in: frame)
+            for _ in 0..<14 where title == nil {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                _ = try? await feed.currentFrame()
+                if let shown = feed.frame { frame = shown; title = WatchReport.navigationTitle(in: shown) }
+            }
+            guard let title else {
+                DebugLog.write("watch: no chat title readable on screen for \(chat); not read")
+                return nil
+            }
+            guard WatchReport.sameChatTitle(title, chat) else {
+                DebugLog.write("watch: the chat on screen is “\(title)”, not \(chat); not read")
+                return nil
+            }
             // Asked twice at most: the model now and then writes broken JSON (logs(13): a missing quote), and a
             // lost read is a lost check.
             let pin = WatchSettings.ownerPIN
@@ -1544,8 +1571,11 @@ extension AppModel {
             try await pointer.key("backspace")
             // Phase B (specs/004): Lan Agent's keyboard puts the reply in exactly, 0.4 s after it shows (phase A on the
             // phone); pinyin and the paste hop stay as the fallback when it is not added or not confirmed.
-            var landed = await typeWithLanAgentKeyboard(text)
-            if landed { DebugLog.write("watch: quick send: typed by Lan Agent's keyboard") }
+            // build104 live 11-08: with Lan Agent's keyboard up the board's Enter did not send (the reply stayed in
+            // the box); the keyboard's own return is what a keyboard sends with in WeChat.
+            var landed = await typeWithLanAgentKeyboard(text, enter: true)
+            let keyboardReturned = landed
+            if landed { DebugLog.write("watch: quick send: typed and sent with Lan Agent's keyboard return") }
             if !landed { landed = try await typedQuickly() }
             if !landed {
                 guard await hopToPaste(text) == .filled else { return .notTried }
@@ -1560,9 +1590,17 @@ extension AppModel {
                 traces.write(feed.frame, kind: "input verification", ["method": .str("quick paste"), "verified": .bool(false)])
                 return .needsInspection
             }
-            try await pointer.key("enter")
+            if !keyboardReturned { try await pointer.key("enter") }
             try? await Task.sleep(nanoseconds: 700_000_000)
             var sent = await sentAlready(text, chat: chat, after: after)
+            if !sent && keyboardReturned {
+                // The keyboard's return did not send here: the board's Enter once (an empty box sends nothing, so a
+                // reply that did go out is never sent twice).
+                DebugLog.write("watch: quick send: not seen after the keyboard's return; the board's Enter once")
+                try await pointer.key("enter")
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                sent = await sentAlready(text, chat: chat, after: after)
+            }
             if !sent {  // the read may come before the bubble: one more look before anything is sent again
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
                 sent = await sentAlready(text, chat: chat, after: after)
