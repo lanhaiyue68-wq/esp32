@@ -275,4 +275,4 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [ ] Device test build98 (send from the app; owner/listed task on red mark; muted group dot; other chat read only and back to list; phone stays awake).
 - [x] build99: top list row and long previews seen; one misread char allowed; taps past the calibrated range from the right border; first watch check opens WeChat by URL.
 - [ ] Device test build99 (owner's long task from the list; alarm ✓ hit once; watch start goes straight to WeChat).
-- [ ] Reading the test phone over USB needs a tool (pymobiledevice3) + Apple Mobile Device Service running + trust on the phone: awaiting the user's OK.
+- [x] Read the test phone over USB: iphone-pull-logs.cmd (pymobiledevice3 11.47.0).
