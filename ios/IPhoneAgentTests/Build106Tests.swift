@@ -95,10 +95,8 @@ import XCTest
 /// User 11-09: what the phone has not done before, Codex does and it is remembered; Doubao follows it from then on.
 @MainActor final class CodexTeachesDoubaoTests: XCTestCase {
     func testAnUnknownTaskIsDrivenByThePlanner() async {
-        let planner = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there
-DO: done ok" }
-        let actor = FakeModel { _ in "THINK: not me
-DO: done ok" }
+        let planner = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there\nDO: done ok" }
+        let actor = FakeModel { _ in "THINK: not me\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.plannerLeadsUnknown = true
         agent.routes = RouteBook(file: nil)
@@ -112,8 +110,7 @@ DO: done ok" }
         let routes = RouteBook(file: nil)
         routes.storeRecipe(task: "打开设置", lines: ["open 设置"])
         let planner = FakeModel { _ in "1. should not be asked" }
-        let actor = FakeModel { _ in "THINK: as before
-DO: done ok" }
+        let actor = FakeModel { _ in "THINK: as before\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.plannerLeadsUnknown = true
         agent.routes = routes
@@ -125,8 +122,7 @@ DO: done ok" }
 
     func testAPlannerThatAnswersNoActionHandsOver() async {
         let planner = FakeModel { _ in "1. only a plan" }
-        let actor = FakeModel { _ in "THINK: mine now
-DO: done ok" }
+        let actor = FakeModel { _ in "THINK: mine now\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.plannerLeadsUnknown = true
         agent.routes = RouteBook(file: nil)
@@ -136,8 +132,7 @@ DO: done ok" }
     }
 
     func testWithoutPlusTheTaskStillRuns() async {
-        let actor = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there
-DO: done ok" }
+        let actor = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there\nDO: done ok" }
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
         agent.plannerLeadsUnknown = true
         agent.routes = RouteBook(file: nil)
