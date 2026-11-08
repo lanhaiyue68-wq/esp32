@@ -1,5 +1,9 @@
 # 问题与验证
 
+## 2026-11-09 iOS 擷取停住，App 仍顯示共享中
+
+現象：07:23 起 frame_age 一直增加，所有任務啟動時「直接取屏尚未就绪」。根因：系統 SCStream 不再送畫面也不報錯（replayd Health：screenframeCount=0，_screenTimeSeconds 不動）。修法（build110，未上真機）：等畫面時 3 秒什麼事件都沒有，就用已同意的 filter 重開一條串流（VideoFeed.restartCapture、NativeScreenCapture.restart），15 秒最多一次。其餘 14 類原因見 docs/stress-2026-11-09-report.md。
+
 ## 2026-10-24 微信指令无法执行微信外任务
 
 根因：WatchSettings.composePrompt 与 ownerTask 都明确限定微信内操作；主页任务执行器本身支持其他 App。

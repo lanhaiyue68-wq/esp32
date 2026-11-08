@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-09 夜間壓力測試與 build 110 候選版
+- build108 真機 33 個任務 16 個完成（48%），平均 296 秒；詳情與原因見 docs/stress-2026-11-09-report.md。
+- build110 改了 15 類原因，CI lanhaiyue-web run 42530893553：584/0，提交 82b472f。桌面 Lan-Agent-build110-unsigned.ipa，SHA256 5d4f1ed2176a584bedd91f9e98f47965b730dcbd234de49d32dcb90f92dc3b6f。**沒上過真機。**
+- 未完成：07:23 iOS 擷取停住，多任務 e01–e03 與第三批 20 個沒跑到，等裝 110 後跑。
+
 2026-10-24：Codex 接手 Claude「ESP32 网络配置与日志分析」，实际工作目录为本目录，App 基线 build 44。当前分支 codex/wechat-phone-tasks。
 
 已重现：真实 Xcode 流水线 40050688780，203 项测试中仅新增微信外任务测试失败，原有 202 项通过；设备 Release 编译成功。
