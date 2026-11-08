@@ -1366,7 +1366,8 @@ extension Pointer: Gestures {}
 
     /// A remembered way as the plan: its steps as hints, not numbered parts.
     static func rememberedPlan(_ recipe: RouteBook.Recipe) -> String {
-        "Do it the way it was done before; adapt any text, time or name to this goal, and look at each result:\n"
+        "Do it the way it was done before; adapt any text, time or name to this goal. Where the next steps are clear, "
+            + "answer several DO lines at once (each step costs seconds of thinking), and look at the result:\n"
             + recipe.lines.map { "- " + $0 }.joined(separator: "\n")
     }
 

@@ -87,9 +87,19 @@ import Foundation
     nonisolated static func names(in lines: [String]) -> [String] {
         lines.compactMap { line -> String? in
             if line.hasPrefix("open ") { return String(line.dropFirst(5)).lowercased() }
-            guard line.hasPrefix("tap “"), line.hasSuffix("”") else { return nil }
-            return String(line.dropFirst(5).dropLast()).lowercased()
+            guard line.hasPrefix("tap “"), let end = line.firstIndex(of: "”") else { return nil }
+            return String(line[line.index(line.startIndex, offsetBy: 5)..<end]).lowercased()
         }.filter { !$0.isEmpty }
+    }
+
+    /// What a gesture was for, from the thought that chose it: "tap 860 936" alone told the executor nothing, and it
+    /// typed over the last note instead of starting a new one (over USB, 11-09).
+    nonisolated static func purpose(_ step: JObject) -> String {
+        guard var thought = step["thought"]?.str?.trimmingCharacters(in: .whitespacesAndNewlines), !thought.isEmpty else { return "" }
+        for mark in [", so ", "，所以", "所以", "，先", "; "] {
+            if let range = thought.range(of: mark, options: .backwards) { thought = String(thought[range.upperBound...]); break }
+        }
+        return " (" + thought.prefix(70).replacingOccurrences(of: "\n", with: " ") + ")"
     }
 
     /// The whole way of a finished run: every action that did something, in order (what changed nothing is left out).
@@ -104,14 +114,14 @@ import Foundation
             case "tap":
                 if let shot = shots[i], let found = label(shot, CGPoint(x: Double(n("x")) / 1000, y: Double(n("y")) / 1000)),
                    found.text.filter({ !$0.isWhitespace }).count >= 2 {
-                    lines.append("tap “\(found.text)”")
+                    lines.append("tap “\(found.text)”" + purpose(s))
                 } else {
-                    lines.append("tap \(n("x")) \(n("y"))")
+                    lines.append("tap \(n("x")) \(n("y"))" + purpose(s))
                 }
             case "type": lines.append("type “\(s["text"]?.str ?? "")”")
             case "compose": lines.append("type “\(s["expected"]?.str ?? "")”")
             case "key": lines.append("key " + (s["combo"]?.str ?? ""))
-            case "swipe": lines.append("swipe \(n("x1")) \(n("y1")) \(n("x2")) \(n("y2"))")
+            case "swipe": lines.append("swipe \(n("x1")) \(n("y1")) \(n("x2")) \(n("y2"))" + purpose(s))
             case "circle", "path": lines.append("draw (\(s["action"]?.str ?? ""))")
             case "home", "back", "wait": lines.append(s["action"]?.str ?? "")
             default: break
