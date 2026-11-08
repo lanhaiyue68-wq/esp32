@@ -29,7 +29,48 @@ enum AppPlaces {
 
     static func place(for name: String) -> AppPlace? { all[normalized(name)] }
     static var count: Int { all.count }
-    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: mappedKey)
+    }
+
+    /// User 11-09: "盡量走ocr的方式看app在哪邊位置，然後記住這個位置下次就可以直接打開". The Home Screen's pages were read
+    /// once for the names under their icons; pages count from the leftmost. An app on none of them goes through Search.
+    private static let mappedKey = "appPlacesMappedV1"
+    static var mapped: Bool {
+        get { UserDefaults.standard.bool(forKey: mappedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: mappedKey) }
+    }
+
+    /// The names under the icons of a page, read.
+    static func names(_ rows: [[CandidatePicker.Piece]]) -> [CandidatePicker.Piece] {
+        rows.flatMap { $0 }.filter { piece in
+            let text = piece.text.filter { !$0.isWhitespace }
+            return (1...12).contains(text.count) && (0.1...0.86).contains(piece.box.midY) && !text.allSatisfy { $0.isNumber || $0 == "°" }
+        }
+    }
+
+    static func learnPage(_ page: Int, _ rows: [[CandidatePicker.Piece]]) {
+        var places = all
+        for piece in names(rows) { places[normalized(piece.text)] = AppPlace(page: page, x: piece.box.midX, y: piece.box.midY) }
+        if let data = try? JSONEncoder().encode(places) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    /// The page an app was seen on, under any of its names (时钟, 時鐘, Clock).
+    static func page(of name: String) -> Int? {
+        let places = all
+        return AppNames.variants(name).compactMap { places[normalized($0)]?.page }.first
+    }
+
+    /// Which page is in front: the page most of the names read here were seen on.
+    static func page(showing rows: [[CandidatePicker.Piece]]) -> Int? {
+        let places = all
+        var votes: [Int: Int] = [:]
+        for piece in names(rows) {
+            if let page = places[normalized(piece.text)]?.page { votes[page, default: 0] += 1 }
+        }
+        return votes.max { $0.value < $1.value }?.key
+    }
 
     static func normalized(_ name: String) -> String { name.lowercased().filter { !$0.isWhitespace } }
 
@@ -179,25 +220,69 @@ extension AppModel {
         defer { DebugLog.write(String(format: "open %@: %.1f s", name, now() - started)) }
         try await pointer.goHome()
         try? await Task.sleep(nanoseconds: 300_000_000)
-        if let rows = await homeRows(), let spot = AppPlaces.label(name, in: rows) {
-            DebugLog.write("open \(name): on the page in front")
-            return try await tapIcon(spot, name: name, page: 0)
+        guard var rows = await homeRows(top: 0.02) else { return try await openBySearch(name) }
+        if let spot = AppPlaces.label(name, in: rows) { return try await tapIcon(spot, name: name, on: "the page in front") }
+        if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows) {
+            try await mapHomeScreen()
+            guard let now = await homeRows(top: 0.02) else { return try await openBySearch(name) }
+            rows = now
+            if let spot = AppPlaces.label(name, in: rows) { return try await tapIcon(spot, name: name, on: "the page in front") }
+        }
+        if let target = AppPlaces.page(of: name), let current = AppPlaces.page(showing: rows), target != current {
+            for _ in 0..<abs(target - current) {
+                try await swipePage(next: target > current)
+            }
+            if let now = await homeRows(top: 0.02), let spot = AppPlaces.label(name, in: now) {
+                return try await tapIcon(spot, name: name, on: "page \(target + 1), as remembered")
+            }
+            DebugLog.write("open \(name): not on page \(target + 1) any more; the pages are read again next time")
+            AppPlaces.mapped = false
+            try await pointer.goHome()
         }
         if try await openBySearch(name) { return true }
         return try await openFromPages(name)
     }
 
+    /// Read every Home Screen page once: to the leftmost, then right up to the App Library.
+    private func mapHomeScreen() async throws {
+        let began = now()
+        for _ in 0..<8 {
+            try await swipePage(next: false)
+            guard let rows = await homeRows(top: 0.02) else { return }
+            if !AppPlaces.looksLikeHome(rows) {  // Today's widgets, left of the first page
+                try await swipePage(next: true)
+                break
+            }
+        }
+        var page = 0
+        while page < 12 {
+            guard let rows = await homeRows(top: 0.02) else { return }
+            if AppPlaces.inLibrary(rows) || !AppPlaces.looksLikeHome(rows) {
+                try await swipePage(next: false)
+                break
+            }
+            AppPlaces.learnPage(page, rows)
+            page += 1
+            try await swipePage(next: true)
+        }
+        AppPlaces.mapped = true
+        DebugLog.write(String(format: "open: %ld Home Screen page(s) read, %ld names known, %.1f s", page, AppPlaces.count, now() - began))
+    }
+
+    private func swipePage(next: Bool) async throws {
+        try await pointer.swipe(next ? 0.85 : 0.15, 0.5, next ? 0.15 : 0.85, 0.5, hold: false)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+    }
+
     /// Only when Search would not work (no keyboard came): the pages to the right up to the App Library, then to the left.
     private func openFromPages(_ name: String) async throws -> Bool {
         try await pointer.goHome()
-        for (direction, from) in [(1.0, 0.85), (-1.0, 0.15)] {
+        for next in [true, false] {
             for _ in 0..<6 {
-                try await pointer.swipe(from, 0.5, from - direction * 0.7, 0.5, hold: false)
-                try? await Task.sleep(nanoseconds: 700_000_000)
+                try await swipePage(next: next)
                 guard let rows = await homeRows(top: 0.02) else { return false }
                 if let spot = AppPlaces.label(name, in: rows), !AppPlaces.inLibrary(rows) {
-                    DebugLog.write("open \(name): found paging the Home Screen")
-                    return try await tapIcon(spot, name: name, page: 0)
+                    return try await tapIcon(spot, name: name, on: "a page, paging")
                 }
                 if AppPlaces.inLibrary(rows) || !AppPlaces.looksLikeHome(rows) { break }  // the App Library, or Today's widgets
             }
@@ -205,10 +290,10 @@ extension AppModel {
         return false
     }
 
-    private func tapIcon(_ label: CGPoint, name: String, page: Int) async throws -> Bool {
+    private func tapIcon(_ label: CGPoint, name: String, on place: String) async throws -> Bool {
+        DebugLog.write("open \(name): \(place)")
         let icon = AppPlaces.icon(above: label)
         try await pointer.tap(icon.x, icon.y)
-        AppPlaces.set(AppPlace(page: page, x: label.x, y: label.y), for: name)
         try? await Task.sleep(nanoseconds: 900_000_000)  // the app opens
         return true
     }

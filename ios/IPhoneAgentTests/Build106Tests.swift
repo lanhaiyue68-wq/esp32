@@ -166,3 +166,30 @@ import XCTest
         XCTAssertFalse(AppPlaces.returnOpens([[piece("設定", 0.3, 0.58)]]))
     }
 }
+
+/// User 11-09: the Home Screen is read once; an app opens by its remembered page and spot, without Search.
+@MainActor final class HomeMapTests: XCTestCase {
+    override func setUp() { AppPlaces.clear() }
+    override func tearDown() { AppPlaces.clear() }
+    private func piece(_ text: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+        .init(text: text, box: CGRect(x: x - 0.05, y: y - 0.01, width: 0.1, height: 0.02))
+    }
+
+    func testAPageIsRememberedByItsNames() {
+        AppPlaces.learnPage(0, [[piece("天氣", 0.15, 0.2), piece("股市", 0.38, 0.2), piece("16", 0.5, 0.2)]])
+        AppPlaces.learnPage(1, [[piece("抖音", 0.15, 0.14), piece("美團", 0.85, 0.14)]])
+        XCTAssertEqual(AppPlaces.page(of: "抖音"), 1)
+        XCTAssertEqual(AppPlaces.page(of: "美团"), 1, "under another form of its name")
+        XCTAssertNil(AppPlaces.page(of: "微信"))
+        XCTAssertNil(AppPlaces.place(for: "16"), "a number is not a name")
+        XCTAssertEqual(AppPlaces.page(showing: [[piece("抖音", 0.15, 0.14)], [piece("美團", 0.85, 0.14)]]), 1)
+        XCTAssertEqual(AppPlaces.page(showing: [[piece("天氣", 0.15, 0.2)]]), 0)
+        XCTAssertNil(AppPlaces.page(showing: [[piece("沒見過", 0.15, 0.2)]]))
+    }
+
+    func testForgettingForgetsThePagesRead() {
+        AppPlaces.mapped = true
+        AppPlaces.clear()
+        XCTAssertFalse(AppPlaces.mapped)
+    }
+}
