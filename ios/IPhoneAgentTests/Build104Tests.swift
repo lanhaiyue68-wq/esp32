@@ -136,7 +136,7 @@ import UIKit
         XCTAssertEqual(planner.prompts.count, 1, "Codex only planned")
         XCTAssertTrue(actor.prompts[0].contains("Current part (1 of 2): 1. Settings is open"))
         XCTAssertTrue(actor.prompts[1].contains("Current part (2 of 2): 2. Notes is open"))
-        XCTAssertTrue(actor.prompts[1].contains("Already done: 1. Settings is open"))
+        XCTAssertTrue(actor.prompts[1].contains("Already done, with what it found: 1. Settings is open - open 设置 -> ok"))
     }
 
     func testCodexDoesItWhenTheExecutorGivesUp() async {

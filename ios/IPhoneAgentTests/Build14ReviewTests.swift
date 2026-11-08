@@ -92,10 +92,11 @@ import XCTest
 
     private func actions(_ agent: AgentLoop) -> [String] { agent.steps.compactMap { $0["action"]?.str }.filter { $0 != "plan" } }
 
-    func testGoingBackAgainAfterTwoRoundsIsRefusedThenHandedToTheUser() async {
+    func testGoingBackAgainAfterTwoRoundsIsRefusedThenCodexLooksAfresh() async {
         // traces(33): back (57 89), into the chat (264 225), back, into the chat, then it wants to go back again.
+        // Over USB 11-09: a run stopped here to ask the user; the planner looking at the screen another way comes first.
         let agent = await taps(["57 89", "264 225", "57 89", "264 225", "57 89", "57 89", "57 89"], steps: 8)
-        XCTAssertEqual(actions(agent), ["tap", "tap", "tap", "tap", "loop", "loop", "fail"])
+        XCTAssertEqual(Array(actions(agent).prefix(8)), ["tap", "tap", "tap", "tap", "loop", "loop", "loop", "replan (stuck)"])
     }
 
     func testTheLeavingMoveIsRefusedWhenItClosesTheCircle() async {
