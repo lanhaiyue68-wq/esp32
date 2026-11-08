@@ -953,10 +953,15 @@ import Foundation
                 try await tap(Self.searchBlank.x, Self.searchBlank.y)
             } else if AppPlaces.keyboardShown(rows) || shown.map({ CandidatePicker.keyboardUp(in: $0) }) == true {
                 // With a keyboard up the flick opens the app switcher, and the next flick goes back to the app: four
-                // flicks ended a WeChat task nowhere. A drag over the content closes it in most apps, and touches nothing.
+                // flicks ended a WeChat task nowhere. Measured over USB: a tap in the left margin closes it and touches
+                // nothing there (a drag only scrolled the chat); where that does not close it, a drag over the content.
                 log("home: a keyboard is up; closing it first")
-                try await swipe(0.5, 0.2, 0.5, 0.38, hold: false)
+                try await tap(0.02, 0.3)
                 try await Task.sleep(nanoseconds: 500_000_000)
+                if let after = screen.frame, CandidatePicker.keyboardUp(in: after) || AppPlaces.keyboardShown(CandidatePicker.rows(in: after, top: 0.02, bottom: 1)) {
+                    try await swipe(0.5, 0.2, 0.5, 0.38, hold: false)
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                }
                 try await flickHome()
             } else {
                 try await flickHome()
