@@ -79,10 +79,12 @@ enum AppPlaces {
     static func label(_ name: String, in rows: [[CandidatePicker.Piece]], below top: Double = 0.07) -> CGPoint? {
         let wants = Set(AppNames.variants(name).map(normalized).filter { !$0.isEmpty })
         guard !wants.isEmpty else { return nil }
-        return rows.flatMap { $0 }
-            .filter { wants.contains(normalized($0.text)) && $0.box.midY > top }
-            .min { $0.box.midY < $1.box.midY }
-            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        let hits = rows.flatMap { $0 }.filter { wants.contains(normalized($0.text)) && $0.box.midY > top }
+        guard let first = hits.min(by: { $0.box.midY < $1.box.midY }) else { return nil }
+        // An icon's own letters read too (美团 in its icon at y 0.122, 美团 under it at 0.177): the name under it.
+        let under = hits.filter { abs($0.box.midX - first.box.midX) < 0.03 && $0.box.midY - first.box.midY < 0.1 }
+            .max { $0.box.midY < $1.box.midY } ?? first
+        return CGPoint(x: under.box.midX, y: under.box.midY)
     }
 
     /// The icon above a Home Screen label: its centre sits about 0.04 of the screen higher.
@@ -101,12 +103,16 @@ enum AppPlaces {
     }
 
     /// Home Screen Search is open: its section headers.
-    static let searchHeaders = ["siri建議", "siri建议", "sirisuggestions", "最佳搜尋結果", "最佳搜索结果", "tophit", "顯示較多", "显示更多", "showmore"]
+    static let searchHeaders = ["siri建議", "siri建议", "sirisuggestions", "最佳搜尋結果", "最佳搜索结果", "tophit", "顯示較多", "显示更多", "showmore",
+                                "在app中搜尋", "在app中搜索", "searchinapp", "搜尋appstore", "搜索appstore"]
     static func inSearch(_ rows: [[CandidatePicker.Piece]]) -> Bool {
-        rows.flatMap { $0 }.contains { piece in
+        let pieces = rows.flatMap { $0 }
+        if pieces.contains(where: { piece in
             let text = normalized(piece.text)
             return searchHeaders.contains { text.contains($0) }
-        }
+        }) { return true }
+        // No results yet: its field above a keyboard, its magnifier read as a Q ("Q瀏覽器").
+        return keyboardShown(rows) && pieces.contains { $0.text.hasPrefix("Q") && (0.5...0.65).contains($0.box.midY) && $0.box.midX < 0.5 }
     }
 
     /// A Home Screen page: its Search pill, or names in the four icon columns. Apps have many short labels too (the
@@ -123,14 +129,26 @@ enum AppPlaces {
         return placed.count >= 8 && Set(placed).count == 4 && placed.count * 10 >= names.count * 9
     }
 
-    /// The app in Search's results: its name above the web suggestions (Safari's row, which also reads the name: it
-    /// opened Safari, live test 11-08).
+    /// The app in Search's results, read from the phone: under the "App" header, or as the top hit above the web
+    /// suggestions (建議: Safari's row, which also reads the name). The field is lower, above the keyboard. For 美團 the top
+    /// hit was a text message with a login code, and Return opened that.
     static func searchResult(_ name: String, in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
-        let headers = ["建議", "建议", "suggestions"]
-        let web = rows.flatMap { $0 }.filter { headers.contains(normalized($0.text)) }.map { Double($0.box.midY) }.min()
-        guard let spot = label(name, in: rows, below: 0.07) else { return nil }
-        if let web, Double(spot.y) > web { return nil }
-        return spot
+        let pieces = rows.flatMap { $0 }
+        func header(_ names: [String]) -> CGFloat? {
+            pieces.filter { names.contains(normalized($0.text)) }.map(\.box.midY).min()
+        }
+        let wants = Set(AppNames.variants(name).map(normalized).filter { !$0.isEmpty })
+        let hits = pieces.filter { wants.contains(normalized($0.text)) && (0.07...0.55).contains($0.box.midY) }
+            .sorted { $0.box.midY < $1.box.midY }
+        let hit: CandidatePicker.Piece?
+        if let app = header(["app"]), let under = hits.first(where: { $0.box.midY > app }) {
+            hit = under
+        } else if let web = header(["建議", "建议", "suggestions"]) {
+            hit = hits.first { $0.box.midY < web }
+        } else {
+            hit = hits.first
+        }
+        return hit.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
     }
 
     /// The Search pill above the dock (iOS 16+), by its label.
@@ -152,7 +170,7 @@ enum AppPlaces {
     static func returnOpens(_ rows: [[CandidatePicker.Piece]]) -> Bool {
         rows.flatMap { $0 }.contains { piece in
             let text = normalized(piece.text)
-            return piece.box.midY > 0.4 && ["打開", "打开", "open"].contains { text.hasSuffix($0) }
+            return (0.5...0.65).contains(piece.box.midY) && ["打開", "打开", "—open", "｜open"].contains { text.contains($0) }  // "QSafari｜打開）e."
         }
     }
 }
@@ -202,6 +220,8 @@ enum AppNames {
 
     /// The form to type into Search: the phone's own language.
     static func searchName(_ name: String, language: String = Locale.preferredLanguages.first ?? "") -> String {
+        // An app that has one name everywhere, asked for by it: "Safari" was typed as 瀏覽器 (over USB, 11-09).
+        if let alias = aliases[base(name)], alias.tw == nil, alias.en?.lowercased() == name.lowercased() { return name }
         let b = base(name), alias = aliases[b], l = language.lowercased()
         if l.hasPrefix("zh-hant") || l.hasPrefix("zh-tw") || l.hasPrefix("zh-hk") || l.hasPrefix("zh-mo") { return alias?.tw ?? hant(b) }
         if l.hasPrefix("zh") { return b }
@@ -256,7 +276,12 @@ extension AppModel {
         }
         var page = 0
         while page < 12 {
-            guard let rows = await homeRows(top: 0.02) else { return }
+            guard var rows = await homeRows(top: 0.02) else { return }
+            if !AppPlaces.inLibrary(rows), !AppPlaces.looksLikeHome(rows) {  // still sliding?
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard let again = await homeRows(top: 0.02) else { return }
+                rows = again
+            }
             if AppPlaces.inLibrary(rows) || !AppPlaces.looksLikeHome(rows) {
                 try await swipePage(next: false)
                 break
@@ -327,13 +352,16 @@ extension AppModel {
         // The results come a moment later; a Return before them opens nothing (over USB, 11-09).
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         let rows = await freshFrame().map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 0.7) } ?? []
-        if AppPlaces.returnOpens(rows) || AppPlaces.searchResult(name, in: rows) == nil {
+        if AppPlaces.returnOpens(rows) {
             // The keyboard's own Return: the board's Enter does nothing with it up.
             if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
-            DebugLog.write("open \(name): Return for the top hit")
+            DebugLog.write("open \(name): Return, Search says it opens")
         } else if let spot = AppPlaces.searchResult(name, in: rows) {
-            try await pointer.tap(spot.x, max(0.05, spot.y - 0.03))  // its icon, above the label
+            try await pointer.tap(spot.x, spot.y)
             DebugLog.write("open \(name): tapped its Search result")
+        } else {
+            DebugLog.write("open \(name): not in Search's results")
+            return false
         }
         try? await Task.sleep(nanoseconds: 900_000_000)
         return true

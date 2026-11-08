@@ -161,7 +161,7 @@ import XCTest
     }
 
     func testSearchsFieldSaysReturnOpens() {
-        XCTAssertTrue(AppPlaces.returnOpens([[piece("設定 — 打開", 0.3, 0.58)]]))
+        XCTAssertTrue(AppPlaces.returnOpens([[piece("QSafari｜打開）e.", 0.3, 0.583)]]))
         XCTAssertFalse(AppPlaces.returnOpens([[piece("打開", 0.3, 0.2)]]))
         XCTAssertFalse(AppPlaces.returnOpens([[piece("設定", 0.3, 0.58)]]))
     }
@@ -191,5 +191,44 @@ import XCTest
         AppPlaces.mapped = true
         AppPlaces.clear()
         XCTAssertFalse(AppPlaces.mapped)
+    }
+}
+
+/// What the phone read in Search, /ocr over USB 11-09.
+@MainActor final class SearchReadTests: XCTestCase {
+    private func piece(_ text: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+        .init(text: text, box: CGRect(x: x - 0.05, y: y - 0.01, width: 0.1, height: 0.02))
+    }
+
+    func testAnAppUnderItsHeaderIsFoundBelowTheWebSuggestion() {
+        // 美團: the top hit a text message, then Safari's row, then the app.
+        let rows = [[piece("最佳搜尋結果", 0.16, 0.089)], [piece("【美团】2265（登录验证码", 0.59, 0.186)], [piece("建議", 0.083, 0.284)],
+                    [piece("美團", 0.194, 0.34)], [piece("App", 0.083, 0.406)], [piece("美团", 0.128, 0.485)], [piece("美团", 0.296, 0.487)],
+                    [piece("美團", 0.164, 0.582)]]
+        XCTAssertEqual(AppPlaces.searchResult("美团", in: rows)?.y ?? 0, 0.485, accuracy: 0.003)
+        XCTAssertFalse(AppPlaces.returnOpens(rows), "Return would open the text message")
+    }
+
+    func testTheTopHitIsAboveTheWebSuggestion() {
+        let rows = [[piece("最佳搜尋結果", 0.16, 0.088)], [piece("Safari", 0.171, 0.221)], [piece("建議", 0.083, 0.286)], [piece("Safari", 0.215, 0.341)]]
+        XCTAssertEqual(AppPlaces.searchResult("Safari", in: rows)?.y ?? 0, 0.221, accuracy: 0.003)
+    }
+
+    func testTheFieldIsNotAResult() {
+        XCTAssertNil(AppPlaces.searchResult("美团", in: [[piece("美團", 0.164, 0.582)]]))
+    }
+
+    func testSearchWithNoResultsYetIsKnown() {
+        XCTAssertTrue(AppPlaces.inSearch([[piece("Q瀏覽器", 0.16, 0.583)], [piece("下一個", 0.162, 0.794)], [piece("換行", 0.861, 0.794)]]))
+        XCTAssertFalse(AppPlaces.inSearch([[piece("Q搜尋", 0.5, 0.839)]]), "the Home Screen's pill")
+    }
+
+    func testAnIconsOwnLettersAreNotItsName() {
+        let rows = [[piece("美团", 0.848, 0.122)], [piece("美团", 0.848, 0.177)]]
+        XCTAssertEqual(AppPlaces.label("美团", in: rows)?.y ?? 0, 0.177, accuracy: 0.003)
+    }
+
+    func testSafariIsTypedAsSafari() {
+        XCTAssertEqual(AppNames.searchName("Safari", language: "zh-Hant-TW"), "Safari")
     }
 }

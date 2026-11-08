@@ -957,10 +957,6 @@ import Foundation
                 log("home: a keyboard is up; closing it first")
                 try await swipe(0.5, 0.2, 0.5, 0.38, hold: false)
                 try await Task.sleep(nanoseconds: 500_000_000)
-                if let after = screen.frame, CandidatePicker.keyboardUp(in: after) || AppPlaces.keyboardShown(CandidatePicker.rows(in: after, top: 0.02, bottom: 1)) {
-                    try await tap(0.5, 0.25)
-                    try await Task.sleep(nanoseconds: 500_000_000)
-                }
                 try await flickHome()
             } else {
                 try await flickHome()
