@@ -47,6 +47,29 @@ enum AppPlaces {
     /// The icon above a Home Screen label: its centre sits about 0.04 of the screen higher.
     static func icon(above label: CGPoint) -> CGPoint { CGPoint(x: label.x, y: max(0.05, label.y - 0.04)) }
 
+    /// The App Library (past the last Home Screen page), by the search field at its top. build104 live 11-08: the page
+    /// scan swiped into it and looked for icon labels it does not show (美團 sat in its corner), then gave up.
+    static let libraryTitles: Set<String> = ["app資料庫", "app资源库", "applibrary"]
+    static func inLibrary(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        rows.flatMap { $0 }.contains { libraryTitles.contains(normalized($0.text)) && $0.box.midY < 0.15 }
+    }
+    static func libraryField(in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
+        rows.flatMap { $0 }.first { libraryTitles.contains(normalized($0.text)) && $0.box.midY < 0.15 }
+            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
+    /// A Home Screen page: its Search pill, or a grid of short app names. build104 live 11-08: the board's flick up
+    /// left the app switcher open (an app's card) and Search was swiped open on it, every time, for 30 s.
+    static func looksLikeHome(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        guard !inLibrary(rows) else { return false }
+        if searchPill(in: rows) != nil { return true }
+        let names = rows.flatMap { $0 }.filter { piece in
+            let text = piece.text.filter { !$0.isWhitespace }
+            return (1...8).contains(text.count) && (0.1...0.9).contains(piece.box.midY) && !text.allSatisfy(\.isNumber)
+        }
+        return names.count >= 8
+    }
+
     /// The Search pill above the dock (iOS 16+), by its label.
     static func searchPill(in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
         rows.flatMap { $0 }
@@ -119,9 +142,13 @@ extension AppModel {
             try await firstHomePage()
         }
         if AppPlaces.place(for: name)?.bySearch != true {
-            for page in 0..<4 {
+            for page in 0..<6 {
                 if page > 0 { try await swipePages(1) }
-                guard let rows = await homeRows() else { break }
+                guard let rows = await homeRows(top: 0.02) else { break }
+                if AppPlaces.inLibrary(rows) {
+                    DebugLog.write("open \(name): reached the App Library after \(page) page(s); searching there")
+                    return try await openFromLibrary(name, rows: rows)
+                }
                 if let spot = AppPlaces.label(name, in: rows) {
                     DebugLog.write("open \(name): found on Home Screen page \(page + 1); learned")
                     return try await tapIcon(spot, name: name, page: page)
@@ -150,7 +177,14 @@ extension AppModel {
         let typed = AppNames.searchName(name)
         if typed != name { DebugLog.write("open \(name): searching for \(typed), the phone's own name") }
         guard await showLanAgentKeyboard(), await keyboardBridge.type(typed, enter: false, within: 4) else {
-            DebugLog.write("open \(name): Search did not take the name")
+            DebugLog.write("open \(name): Search did not take the name; trying the App Library")
+            try await firstHomePage()
+            for _ in 0..<6 {
+                try await swipePages(1)
+                if let rows = await homeRows(top: 0.02), AppPlaces.inLibrary(rows) {
+                    return try await openFromLibrary(name, rows: rows)
+                }
+            }
             return false
         }
         try? await Task.sleep(nanoseconds: 1_000_000_000)  // the results
@@ -171,10 +205,20 @@ extension AppModel {
 
     /// Home twice: the first leaves the app, the second goes to the first Home Screen page.
     private func firstHomePage() async throws {
-        try await pointer.goHome()
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        try await pointer.goHome()
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        for attempt in 1...3 {
+            try await pointer.goHome()
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            try await pointer.goHome()
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let rows = await homeRows(top: 0.02) else { return }
+            if AppPlaces.looksLikeHome(rows) { return }
+            // The app switcher (the flick was read as a swipe and hold): an empty spot at its top goes home.
+            DebugLog.write("open: not a Home Screen after going home (try \(attempt)); tapping the empty top")
+            try await pointer.tap(0.5, 0.05)
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows) { return }
+        }
+        DebugLog.write("open: no Home Screen seen after three tries")
     }
 
     private func swipePages(_ count: Int) async throws {
@@ -184,8 +228,32 @@ extension AppModel {
         }
     }
 
-    private func homeRows() async -> [[CandidatePicker.Piece]]? {
+    private func homeRows(top: Double = 0.07) async -> [[CandidatePicker.Piece]]? {
         guard let frame = await freshFrame() else { return nil }
-        return CandidatePicker.rows(in: frame, top: 0.07, bottom: 1)
+        return CandidatePicker.rows(in: frame, top: top, bottom: 1)
+    }
+
+    /// The App Library's own search: it lists only apps (no web suggestions), so the result with the name is tapped.
+    private func openFromLibrary(_ name: String, rows: [[CandidatePicker.Piece]]) async throws -> Bool {
+        let field = AppPlaces.libraryField(in: rows) ?? CGPoint(x: 0.5, y: 0.075)
+        try await pointer.tap(field.x, field.y)
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        let typed = AppNames.searchName(name)
+        guard await showLanAgentKeyboard(), await keyboardBridge.type(typed, enter: false, within: 4) else {
+            DebugLog.write("open \(name): the App Library's search did not take the name")
+            return false
+        }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        if let frame = await freshFrame(),
+           let spot = AppPlaces.label(name, in: CandidatePicker.rows(in: frame, top: 0.12, bottom: 0.6), below: 0.12) {
+            try await pointer.tap(spot.x, spot.y)
+            DebugLog.write("open \(name): tapped its App Library result")
+        } else {
+            try await pointer.key("enter")
+            DebugLog.write("open \(name): no App Library result named exactly so; Return for the top one")
+        }
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        if AppPlaces.place(for: name) == nil { AppPlaces.set(AppPlace(page: nil, x: 0, y: 0), for: name) }
+        return true
     }
 }

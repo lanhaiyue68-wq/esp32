@@ -243,3 +243,32 @@ import UIKit
         XCTAssertFalse(WatchReport.sameChatTitle("", "测试群"))
     }
 }
+
+/// build104 live 11-08 (frames from the phone): the flick home left the app switcher open, and the page scan swiped
+/// into the App Library; opening 备忘录, 美团 and even 微信 failed in one run.
+@MainActor final class AppOpenerScreensTests: XCTestCase {
+    private func piece(_ text: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+        .init(text: text, box: CGRect(x: x - 0.05, y: y - 0.01, width: 0.1, height: 0.02))
+    }
+    private var grid: [[CandidatePicker.Piece]] {
+        ["时钟", "相机", "照片", "设置", "备忘录", "日历", "天气", "地图", "微信", "淘宝", "美团", "小红书"].enumerated().map { i, name in
+            [piece(name, 0.15 + Double(i % 4) * 0.23, 0.15 + Double(i / 4) * 0.12)]
+        }
+    }
+
+    func testAHomeScreenIsKnownByItsPillOrItsGrid() {
+        XCTAssertTrue(AppPlaces.looksLikeHome([[piece("搜尋", 0.5, 0.82)]]))
+        XCTAssertTrue(AppPlaces.looksLikeHome(grid))
+    }
+
+    func testTheAppSwitcherIsNotAHomeScreen() {
+        XCTAssertFalse(AppPlaces.looksLikeHome([[piece("無邊記", 0.2, 0.06)], [piece("微信", 0.1, 0.06)]]))
+    }
+
+    func testTheAppLibraryIsKnownByItsSearchField() {
+        let library = [[piece("App 資料庫", 0.5, 0.075)]] + grid
+        XCTAssertTrue(AppPlaces.inLibrary(library))
+        XCTAssertFalse(AppPlaces.looksLikeHome(library))
+        XCTAssertEqual(AppPlaces.libraryField(in: library)?.y ?? 0, 0.075, accuracy: 0.001)
+    }
+}
