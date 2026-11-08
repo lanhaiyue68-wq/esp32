@@ -57,6 +57,9 @@ struct ProbeMap: Codable {
         return Int(min(max(units, 0), 100_000).rounded())
     }
 
+    /// The farthest measured landing: past it, units(for:) only extrapolates.
+    var reach: Double { knots.last?.fraction ?? 1 }
+
     /// Where the pointer rests at home, as a screen fraction: the first two measured landings extended back to zero
     /// units (the pointer's centre sits a little inside the corner). 0 when they do not say.
     var inset: Double {

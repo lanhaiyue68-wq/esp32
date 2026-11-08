@@ -15,14 +15,21 @@ import Foundation
     /// List entries that are not conversations, or not anyone's messages (the model's scope leaves them out too).
     static let notChats: Set<String> = ["订阅号消息", "訂閱號消息", "订阅号", "訂閱號", "服务号", "服務號", "服务通知", "服務通知",
                                         "公众号", "公眾號", "文件传输助手", "文件傳輸助手", "微信团队", "微信團隊", "腾讯新闻", "騰訊新聞",
-                                        "微信支付", "微信运动", "微信運動", "折叠的群聊", "折疊的群聊", "摺疊的群聊"]
+                                        "微信支付", "微信运动", "微信運動", "折叠的群聊", "折疊的群聊", "摺疊的群聊",
+                                        "官方账号", "官方賬號", "官方帳號", "服务账号", "服務賬號", "服務帳號"]
 
     /// Every list row's title: a name with a smaller preview just below it, so a preview is never taken for a title.
+    /// logs(12), iPhone 14 Pro Max: the list has no search bar, so the top row's title sits at 0.145 (the band started at
+    /// 0.16), and a preview runs to 0.94 (pieces had to end by 0.87, to leave out the time). A chat with a new message
+    /// moves to the top, and a long task makes a long preview: the owner's task was never seen, nor a muted dot on a row
+    /// with a long preview. The time column starts at 0.82 or later: pieces are kept by where they start.
     private static func listTitles(_ rows: [[CandidatePicker.Piece]]) -> [(text: String, box: CGRect)] {
         let body = rows.compactMap { row -> (text: String, box: CGRect)? in
-            let pieces = row.filter { $0.box.minX >= 0.19 && $0.box.maxX <= 0.87 && (0.16...0.83).contains($0.box.midY) }
+            let pieces = row.filter { (0.19...0.75).contains($0.box.minX) && (0.10...0.90).contains($0.box.midY) }
             guard !pieces.isEmpty else { return nil }
-            return (pieces.map(\.text).joined().filter { !$0.isWhitespace }, pieces.reduce(CGRect.null) { $0.union($1.box) })
+            let raw = pieces.map(\.text).joined().filter { !$0.isWhitespace }
+            let text = pieces.contains { $0.box.maxX > 0.8 } ? withoutTime(raw) : raw  // read together with the time
+            return (text, pieces.reduce(CGRect.null) { $0.union($1.box) })
         }
         return body.filter { match in
             !match.text.isEmpty && body.contains(where: { preview in
@@ -31,6 +38,13 @@ import Foundation
                 preview.box.height >= 0.006 && preview.box.height < match.box.height * 0.92
             })
         }
+    }
+
+    /// A title read together with the time at the end of its line ("主人蓝海乐下午1:31"): the name alone.
+    static func withoutTime(_ text: String) -> String {
+        let pattern = #"((上午|下午|凌晨|清晨|早上|中午|晚上|昨天|前天)?\d{1,2}:\d{2}|昨天|前天|星期[一二三四五六日天]|\d{1,4}[/年-]\d{1,2}([/月-]\d{1,2}日?)?)$"#
+        let cut = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        return cut.isEmpty ? text : cut
     }
 
     /// List rows whose title is exactly `target` (no whitespace).

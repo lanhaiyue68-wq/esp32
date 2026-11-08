@@ -232,7 +232,8 @@ import Foundation
 
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
-        try await moveTo(dx(x), dy(y), rehome: rehome)
+        if !edgeStart, beyondReach(x) { try await fromRightBorder(x, y) }
+        else { try await moveTo(dx(x), dy(y), rehome: rehome) }
         // Ordinary taps click at the calibrated map without looking for the pointer. On the dark WeChat screens the
         // pixel search found it 6 times in 31 (logs 11-06): every tap wiggled it ~5 times over 4–6 s, often walked it
         // after a misread and lost it, then clicked at this estimate anyway, and all of those taps landed. A tap that
@@ -436,6 +437,30 @@ import Foundation
         (pos, moves) = ((tx, ty), moves + 1)
     }
 
+    /// Right of the farthest calibrated landing the map only extrapolates: logs(12), 267 units meant for 0.899 (the
+    /// alarm's ✓) landed at 0.975, the pointer on the dark sheet was not found, and 14 taps there did nothing.
+    func beyondReach(_ x: Double) -> Bool {
+        guard let mx = maps?["x"] else { return false }
+        return x > mx.reach + 0.01
+    }
+
+    /// The right border is an exact reference: home, push the pointer against it at the target's row, then come back
+    /// the short distance, which the map measured (the same move from the left border lands that far in).
+    private func fromRightBorder(_ x: Double, _ y: Double) async throws {
+        guard let mx = maps?["x"] else { return try await moveTo(dx(x), dy(y)) }
+        if link != device.links {  // new link: a dropped gesture may have left the button down
+            try await device.send("release")
+            (pos, link) = (nil, device.links)
+        }
+        try await ProbeMotion.home(device)
+        pos = nil
+        let ty = dy(y), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
+        try await ProbeMotion.move(device, push, ty)
+        try await ProbeMotion.move(device, -back, 0)
+        (pos, moves, hops) = ((dx(x), ty), 1, 0)
+        log(String(format: "point (%.3f, %.3f): past the calibrated %.3f; from the right border, %ld units back", x, y, mx.reach, back))
+    }
+
     /// Let go of the button and re-home the pointer, whatever state a gesture left.
     func reset() async throws {
         pos = nil
@@ -471,7 +496,7 @@ import Foundation
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
             return
         }
-        if !aim, !stale, let last = lastClick, let p = pos, hops < Self.nearbyHops,
+        if !aim, !stale, !beyondReach(x), let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;

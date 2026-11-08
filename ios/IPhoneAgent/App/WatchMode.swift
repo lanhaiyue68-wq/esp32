@@ -1078,6 +1078,12 @@ extension AppModel {
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
+        if !rules.targets.isEmpty && UIApplication.shared.applicationState == .active && now() - watchStartedAt < 15 {
+            // logs(12): the first check, with Lan Agent in front, went to the model (38 s, 8 calls): it opened a group
+            // that is not listed, backed out, then a listed chat with no red mark. WeChat by its URL instead.
+            let opened = await hopToWeChat(seesWeChat: { false })
+            DebugLog.write("watch: start: WeChat opened by its URL: \(opened ? "yes" : "no")")
+        }
         if !rules.targets.isEmpty && UIApplication.shared.applicationState != .active {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
