@@ -70,4 +70,13 @@ import XCTest
         XCTAssertEqual(AgentLoop.stepBudget(plan: (1...8).map { "\($0). step" }.joined(separator: "\n"), base: 40), 100)
         XCTAssertEqual(AgentLoop.stepBudget(plan: "Work from the CURRENT screen", base: 15), 15)
     }
+
+    func testAnHourTypedAloneIntoATimeWheelIsHHMM() {
+        XCTAssertEqual(AgentLoop.wheelTime("10", thought: "点小时滚轮后输入 10"), "1000")
+        XCTAssertEqual(AgentLoop.wheelTime("8", thought: "set the alarm hour"), "0800")
+        XCTAssertNil(AgentLoop.wheelTime("1000", thought: "alarm"), "already HHMM")
+        XCTAssertNil(AgentLoop.wheelTime("10", thought: "数量填 10"), "not about a time")
+        XCTAssertNil(AgentLoop.wheelTime("25", thought: "hour"))
+        XCTAssertNil(AgentLoop.wheelTime("收到", thought: "alarm"))
+    }
 }

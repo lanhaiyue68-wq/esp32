@@ -72,6 +72,16 @@ extension Pointer: Gestures {}
         return ["滚轮", "轮盘", "选择器", "滚盘", "wheel", "picker"].contains { thought.contains($0) }
     }
 
+    /// An hour typed alone into a time wheel, as the HHMM the wheel takes ("10" → "1000", "8" → "0800"); nil for
+    /// anything else, or when the thought is not about a time.
+    static func wheelTime(_ text: String, thought: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespaces), about = thought.lowercased()
+        guard (1...2).contains(t.count), t.allSatisfy({ $0.isASCII && $0.isNumber }), let hour = Int(t), (0...23).contains(hour),
+              ["小时", "小時", "点", "點", "hour", "闹钟", "鬧鐘", "alarm", "time", "时间", "時間", "滚轮", "wheel"].contains(where: { about.contains($0) })
+        else { return nil }
+        return String(format: "%02d00", hour)
+    }
+
     static let wheelReason = "Not swiped: a swipe moves a time or number wheel by an unpredictable amount (an alarm "
         + "took 35 swipes and never stayed on 8). Tap the number in the wheel's centre row once, then type the digits, "
         + "e.g. type 0800 for 8:00 (and pick 上午/AM if there is such a column); check the result. Swipe only if typing "
@@ -900,6 +910,11 @@ extension Pointer: Gestures {}
                     aimNext = true
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
                     return false
+                }
+                if name == "type", wheelSwipes + wheelBlocks > 0, let typed = act["text"]?.str, let full = Self.wheelTime(typed, thought: act["thought"]?.str ?? "") {
+                    // Live test 11-08: "10" typed into the hour wheel set 0:10 (凌晨 12:10); a time wheel takes HHMM.
+                    act["text"] = .str(full)
+                    DebugLog.write("type: \(typed) into a time wheel as \(full)")
                 }
                 if name == "swipe", Self.aboutWheel(act) {
                     // logs 11-07: an alarm's hour wheel took 35 swipes (9→8→4→10→2→6…) and the run hit its step limit;
