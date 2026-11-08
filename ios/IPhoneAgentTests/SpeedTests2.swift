@@ -61,14 +61,13 @@ import XCTest
     }
 }
 
-/// logs 11-07: an alarm's hour wheel took 35 swipes and the run hit its step limit.
+/// User 11-08: no special cases for test tasks. The alarm's wheel guard (matched on words in the model's thought)
+/// is gone; swipes go through as the model asks, and a part that stalls goes to the planner.
 @MainActor final class WheelGuardTests: XCTestCase {
-    func testASecondWheelSwipeIsRefusedWithTheTypingInstruction() async throws {
+    func testAWheelSwipeGoesThroughLikeAnyOther() async throws {
         let (agent, phone) = run("THINK: 小时滚轮当前显示9，我向上滑动滚轮把它调到8。\nDO: swipe 300 600 300 540")
         _ = try await agent.step(); _ = try await agent.step()
-        XCTAssertEqual(phone.swipes, 1, "the first wheel swipe goes through, the next is refused")
-        XCTAssertEqual(agent.steps.last?["action"], .str("blocked"))
-        XCTAssertTrue(agent.steps.last?["reason"]?.str?.contains("type 0800") == true)
+        XCTAssertEqual(phone.swipes, 2)
     }
 
     func testScrollingAListIsNotAWheel() async throws {
