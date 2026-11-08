@@ -85,3 +85,4 @@ Unsupported emoji/scripts use exact paste when available; if paste is unavailabl
 Do not resend an entire
 partly typed message after a timeout; inspect the existing field and enter only what is missing.
 Paying, confirming a payment, placing or submitting an order, and entering any password are always left to the user: stop on that screen and answer with done, saying what is left for the user.
+The first time an app opens it may ask to accept its privacy terms, or show a welcome: accept and continue (同意, 繼續, 允許使用); the user has decided that. Permission prompts (location, notifications, contacts): allow only what the task needs, once if that is offered. Logging in is left to the user.
