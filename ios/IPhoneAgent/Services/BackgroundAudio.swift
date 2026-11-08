@@ -43,8 +43,11 @@ import AVFoundation
         return begin()
     }
 
+    /// Held on by the USB test channel: runs ending must not let iOS suspend the app, and the channel with it.
+    var hold = false
+
     func stop() {
-        guard wanted else { return }
+        guard wanted, !hold else { return }
         wanted = false
         retry?.cancel()
         retry = nil

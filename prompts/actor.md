@@ -84,3 +84,4 @@ or report failure; never report successful input based only on the Pinyin spelli
 Unsupported emoji/scripts use exact paste when available; if paste is unavailable, inspect the on-screen keyboard.
 Do not resend an entire
 partly typed message after a timeout; inspect the existing field and enter only what is missing.
+Paying, confirming a payment, placing or submitting an order, and entering any password are always left to the user: stop on that screen and answer with done, saying what is left for the user.
