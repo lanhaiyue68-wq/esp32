@@ -37,8 +37,10 @@ import UIKit
         XCTAssertEqual(WatchChatOpen.unread(rows: twins, rules: rules, badge: { _ in true }), .unknown)
         XCTAssertEqual(WatchChatOpen.unread(rows: Array(list([("测试群", 0.20), ("张三", 0.29)]).dropLast()), rules: rules,
                                             badge: { _ in true }), .unknown, "no tab bar: not the chat list")
-        XCTAssertEqual(WatchChatOpen.unread(rows: list([("测试群", 0.20)]), rules: .init(targets: ["测试群"]), badge: { _ in true }),
-                       .unknown, "one chat keeps the single-chat path")
+        guard case .row("测试群", _) = WatchChatOpen.unread(rows: list([("测试群", 0.20)]), rules: .init(targets: ["测试群"]),
+                                                          badge: { _ in true }) else {
+            return XCTFail("build98: one chat is opened for its red mark too")
+        }
     }
 
     func testNothingUnreadNeedsNoTapAndAListedChatOnScreenIsKept() async {
@@ -105,6 +107,84 @@ import UIKit
         XCTAssertTrue(WatchSettings.usableBox(CGPoint(x: 0.45, y: 0.925)))
         XCTAssertFalse(WatchSettings.usableBox(CGPoint(x: 0.45, y: 0.55)), "the box with the keyboard up")
         XCTAssertFalse(WatchSettings.usableBox(CGPoint(x: 0.92, y: 0.925)), "send / + button")
+    }
+    // build98 (user 11-09): the listed chats get tasks; any other chat with a red mark is opened and read only.
+    func testAChatThatIsNotListedWithARedMarkIsOpenedToReadOnly() {
+        let rows = list([("李四", 0.20), ("测试群", 0.29), ("张三", 0.38)])
+        guard case .other(let name, let point) = WatchChatOpen.unread(rows: rows, rules: rules,
+                                                                       badge: { Int($0.minY * 1000) == 200 }) else {
+            return XCTFail("李四 has a red mark")
+        }
+        XCTAssertEqual(name, "李四")
+        XCTAssertEqual(point.y, 0.211, accuracy: 0.002)
+        guard case .row(let chat, _) = WatchChatOpen.unread(rows: rows, rules: rules, badge: { _ in true }) else {
+            return XCTFail("a listed chat with a red mark comes first")
+        }
+        XCTAssertEqual(chat, "测试群")
+    }
+
+    func testListEntriesThatAreNotChatsAreNeverOpened() {
+        let rows = list([("订阅号消息", 0.20), ("服务通知", 0.29), ("文件传输助手", 0.38)])
+        XCTAssertEqual(WatchChatOpen.unread(rows: rows, rules: rules, badge: { _ in true }), .none)
+    }
+
+    func testOnlyListedChatsGetRepliesAndTasks() {
+        XCTAssertFalse(WatchSettings.readOnly("张三", group: false, rules))
+        XCTAssertTrue(WatchSettings.readOnly("李四", group: false, rules))
+        XCTAssertTrue(WatchSettings.readOnly("李四", group: true, rules))
+        let all = WatchSettings.Rules(targets: ["张三"], onlyListed: false)
+        XCTAssertFalse(WatchSettings.readOnly("李四", group: false, all), "all chats: a private chat is answered as before")
+        XCTAssertTrue(WatchSettings.readOnly("某个群", group: true, all), "a group that is not listed is read only")
+    }
+
+    func testAnOtherChatIsVerifiedByItsOwnTitleEvenWhenTheListCutItShort() async {
+        let phone = FakeGestures()
+        var result = await WatchChatOpen.open(phone: phone, screen: LocalScreen(), rules: rules, canAct: { true },
+                                              inspectList: { _ in .other("虾笔刀陪跑…", CGPoint(x: 0.5, y: 0.21)) },
+                                              title: { _ in nil }, anyTitle: { $0 == Data([2]) ? "虾笔刀陪跑学员元群" : nil })
+        XCTAssertEqual(result, .opened("虾笔刀陪跑学员元群"))
+        result = await WatchChatOpen.open(phone: phone, screen: LocalScreen(), rules: rules, canAct: { true },
+                                          inspectList: { _ in .other("李四", CGPoint(x: 0.5, y: 0.21)) },
+                                          title: { _ in nil }, anyTitle: { $0 == Data([2]) ? "王五" : nil })
+        XCTAssertEqual(result, .unverified)
+        XCTAssertEqual(phone.calls, ["tap", "tap"])
+        XCTAssertTrue(WatchChatOpen.sameChat("张三", listName: "张三"))
+        XCTAssertFalse(WatchChatOpen.sameChat("张三丰", listName: "张三"))
+        XCTAssertFalse(WatchChatOpen.sameChat("张飞", listName: "张…"), "too short to tell")
+    }
+
+    func testAnyChatTitleButNotTheListsOwn() {
+        let header = { (text: String) in [[CandidatePicker.Piece(text: text, box: CGRect(x: 0.4, y: 0.08, width: 0.2, height: 0.025))]] }
+        XCTAssertEqual(WatchReport.navigationTitle(rows: header("虾笔刀陪跑学员元群(25)")), "虾笔刀陪跑学员元群")
+        XCTAssertNil(WatchReport.navigationTitle(rows: header("微信(26)")))
+        XCTAssertNil(WatchReport.navigationTitle(rows: []))
+    }
+
+    /// A muted chat shows a small red dot instead of a number (user 11-09: it counts too), on a frame as small as
+    /// direct capture sends (1280 high).
+    func testAMutedChatsSmallRedDotCounts() throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 590, height: 1280), format: format).image { ctx in
+            UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 590, height: 1280))
+            func draw(_ text: String, x: CGFloat, y: CGFloat, size: CGFloat) {
+                (text as NSString).draw(at: CGPoint(x: x, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: size), .foregroundColor: UIColor.white])
+            }
+            draw("微信", x: 265, y: 98, size: 28)
+            draw("测试群", x: 140, y: 255, size: 28); draw("[3条]最新消息", x: 140, y: 300, size: 20)
+            UIColor.gray.setFill(); ctx.fill(CGRect(x: 33, y: 240, width: 72, height: 72))  // avatar
+            UIColor(red: 0.98, green: 0.32, blue: 0.32, alpha: 1).setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 98, y: 235, width: 12, height: 12))  // the muted chat's dot
+            for (i, text) in ["微信", "通讯录", "发现", "我"].enumerated() { draw(text, x: CGFloat(53 + i * 148), y: 1215, size: 22) }
+        }
+        let frame = try XCTUnwrap(image.jpegData(compressionQuality: 0.72))
+        let pick = WatchChatOpen.unread(in: frame, rules: rules)
+        guard case .row(let chat, _) = pick else {
+            let rows = CandidatePicker.rows(in: frame, top: 0.055, bottom: 1)
+            let cg = try XCTUnwrap(Vision.image(frame))
+            let share = rows.flatMap { $0 }.filter { $0.text.contains("测试") }.map { Vision.redShare(cg, in: WatchChatOpen.badgeArea($0.box)) }
+            return XCTFail("the dot must count: got \(pick), red \(share)")
+        }
+        XCTAssertEqual(chat, "测试群")
     }
 }
 

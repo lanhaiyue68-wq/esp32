@@ -45,8 +45,9 @@ struct WatchView: View {
                 } header: {
                     Text("Which Chats to Read")
                 } footer: {
-                    Text(onlyListed ? "Only the chats and groups listed here are opened; everything else stays unread."
-                                    : "Every private chat is read. Groups only when listed here; Official Accounts and service notices never.")
+                    // build98 (user 11-09): a red mark opens any chat; only the listed ones get replies and tasks.
+                    Text(onlyListed ? "这里列出的会话和群：有红色未读数字或免打扰的小红点就打开，可以回复、执行任务。其他会话有红色标记也会打开，但只读，不回复。公众号、服务通知除外。"
+                                    : "所有私聊都会读、也会回复；这里列出的群可以回复、执行任务，其他群只读，不回复。公众号、服务通知除外。")
                 }
                 triggers
                 Section {

@@ -58,7 +58,7 @@ extension AppModel {
             return
         }
         guard !Task.isCancelled else { return }
-        if feed.isNative && !feed.live {
+        if feed.isNative && !feed.watchable {  // a still screen sends nothing; the preflight below nudges for a frame
             say("请先在取屏设置中共享整个屏幕，再开始任务。\(feed.nativeStatus)")
             if UIApplication.shared.applicationState != .background { setupPage = .see }
             return

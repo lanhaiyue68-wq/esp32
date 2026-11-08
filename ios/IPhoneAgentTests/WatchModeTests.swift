@@ -42,7 +42,7 @@ import XCTest
     func testOpeningTheChatNeverReplies() {
         let one = WatchSettings.openTask(rules())
         XCTAssertTrue(one.contains("“客户群”"))
-        XCTAssertTrue(one.contains("已经在这个会话里"))
+        XCTAssertTrue(one.contains("没有红色标记的会话不要打开"))  // build98: one chat needs its red mark too
         XCTAssertTrue(one.contains("不要回复"))
         let many = WatchSettings.openTask(rules { $0.targets = ["客户群", "张三"] })
         XCTAssertTrue(many.contains(#"{"chat":"会话名"}"#))

@@ -213,21 +213,22 @@ enum WatchSettings {
         return mention || r.passphrases.contains { m.text.contains($0) }
     }
 
+    /// User 11-09: the listed chats (the owner's account, the chats and groups set here) get replies and tasks; any
+    /// other chat with a red mark is opened and read only. With "only these chats" off, other private chats are
+    /// answered as before; other groups are still read only.
+    static func readOnly(_ chat: String, group: Bool, _ r: Rules) -> Bool {
+        !r.targets.contains(chat) && (r.onlyListed || group)
+    }
+
     /// Step 1: open the chat to read. Never replies.
     static func openTask(_ r: Rules) -> String {
-        if r.single {
-            let chat = r.targets[0]
-            return """
-            打开微信里的会话“\(chat)”。如果现在已经在这个会话里，什么都不用做，直接完成；否则回到微信聊天列表找到它并打开，列表里没有就用顶部搜索。
-            打开后完成，答案写“\(chat)”。不要回复、不要输入任何内容。
-            """
-        }
         let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
-        let scope = r.onlyListed ? "这些会话：\(names)" : "私聊，以及这些群：\(names.isEmpty ? "无" : names)（公众号、订阅号、服务通知、文件传输助手除外）"
+        let others = "其他任何会话（公众号、订阅号、服务通知、文件传输助手除外）"
+        let scope = names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)"
         return """
-        打开微信，回到聊天列表（底部“微信”标签页）；如果现在停在某个会话里，先点左上角返回按钮回到列表，返回按钮旁边的数字是全部未读总数，不是这个会话的。只在列表里，\(scope)中找第一个头像左上角带红色未读数字（或红点）的会话并打开；已经打开过、头像上没有红色数字的会话不要打开。
+        打开微信，回到聊天列表（底部“微信”标签页）；如果现在停在某个会话里，先点左上角返回按钮回到列表，返回按钮旁边的数字是全部未读总数，不是这个会话的。只在列表里，\(scope)，打开最上面一个头像右上角带红色标记的会话：红色未读数字，或开了免打扰的会话的小红点。已经打开过、头像上没有红色标记的会话不要打开。
         一旦进入目标会话就完成，不要返回列表；打开会话会清掉红点，不能因此当成没有新消息。
-        打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有未读就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
+        打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有红色标记就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
         """
     }
 
@@ -316,10 +317,9 @@ enum WatchSettings {
     }
 
     static func openPlan(_ rules: Rules) -> String {
-        if rules.single { return openPlan(chat: rules.targets[0]) }
-        return """
+        """
         1. Get to WeChat's chat list. If a conversation is open, tap its top-left back button first; the number beside that back button is the total unread count, not this chat's.
-        2. On the list, look at the red unread number on each avatar within the scope in the goal. Open one eligible conversation that has one; a conversation without a red number is never opened.
+        2. On the list, look for a red mark on the top-right corner of each avatar within the scope in the goal: a red unread number, or the small red dot of a muted chat. Open the topmost eligible conversation that has one, listed chats first; a conversation without a red mark is never opened.
         3. As soon as that conversation is open, finish with {"chat":"its actual title"}. Opening it clears its unread badge; do not go back or check that badge again.
         4. Only when the chat LIST has no eligible unread conversation, finish with {"chat":""}. Never type or send anything.
         """
@@ -578,9 +578,25 @@ enum WatchReport {
         navigationChat(rows: CandidatePicker.rows(in: frame, top: 0.02, bottom: 0.22), targets: targets)
     }
 
-    static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules) -> Bool {
+    /// Any chat's title in the navigation bar, for a chat opened from the list that is not listed. Nil on the chat
+    /// list itself (its title is 微信), with no title, or with two.
+    static func navigationTitle(rows: [[CandidatePicker.Piece]]) -> String? {
+        let titles = rows.compactMap { row -> String? in
+            let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
+            let name = fullTitle(header.map(\.text).joined())
+            return name.isEmpty ? nil : name
+        }
+        guard titles.count == 1, !["微信", "WeChat", "Chats", "聊天"].contains(titles[0]) else { return nil }
+        return titles[0]
+    }
+
+    static func navigationTitle(in frame: Data) -> String? {
+        navigationTitle(rows: CandidatePicker.rows(in: frame, top: 0.02, bottom: 0.22))
+    }
+
+    static func confirms(_ screen: Screen, chat: String, rules: WatchSettings.Rules, readOnly: Bool = false) -> Bool {
         !fullTitle(chat).isEmpty && fullTitle(screen.title) == fullTitle(chat)
-            && (!rules.onlyListed || rules.targets.contains(chat))
+            && (readOnly || !rules.onlyListed || rules.targets.contains(chat))
     }
 
     /// The JSON object anywhere in a reply (models sometimes wrap it in words or a code fence).
@@ -1062,7 +1078,7 @@ extension AppModel {
         let rules = WatchSettings.rules
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
-        if (rules.single || rules.onlyListed && rules.targets.count > 1) && UIApplication.shared.applicationState != .active {
+        if !rules.targets.isEmpty && UIApplication.shared.applicationState != .active {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
                 WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed
@@ -1070,7 +1086,7 @@ extension AppModel {
         } else { local = .fallback }
         if case .deferred = local { return (false, false) }
         if case .nothing = local {
-            DebugLog.write("watch: no unread badge on the listed chats; navigation model skipped")
+            DebugLog.write("watch: no red mark on the chat list; navigation model skipped")
             return (true, false)
         }
         if case .inChat(let inside) = local {
@@ -1091,23 +1107,32 @@ extension AppModel {
             return (false, false)
         }
         if case .opened(let opened) = local {
-            DebugLog.write("watch: local open verified; navigation model skipped")
+            DebugLog.write("watch: local open verified\(rules.targets.contains(opened) ? "" : " (\(opened) is not listed: read only)"); navigation model skipped")
             watchSelfOpened = (opened, now())
-            guard let look = await readChat(opened) else { return (false, false) }
+            guard let look = await readChat(opened) else { return skipUnread(opened, rules) }
             (chat, screen) = (opened, look)
         } else {
             // Stop on the destination before the actor can return to the list and consume its unread badge.
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
             // Which chat to open depends on the red badges now, never on the last check: no learned route.
             guard let opened = await watchRun(WatchSettings.openTask(rules), plan: WatchSettings.openPlan(rules),
-                                             navigation: rules.single ? nil : rules, learnedRoutes: false) else { return (false, false) }
-            guard let open = rules.single ? rules.targets[0] : WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) })
+                                             navigation: rules, learnedRoutes: false) else { return (false, false) }
+            guard let open = WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) }), !open.isEmpty
             else { return (true, false) }  // nothing unread
             watchSelfOpened = (open, now())
-            guard let look = await readChat(open) else { return (false, false) }
+            guard let look = await readChat(open) else { return skipUnread(open, rules) }
             (chat, screen) = (open, look)
         }
         return await finishCheck(chat: chat, screen: screen, rules: rules)
+    }
+
+    /// A chat that is not listed could not be read: skip it and go back to the list, instead of counting a failed
+    /// check (four in a row stop the watch). Its red mark is gone, so it is not opened again for the same messages.
+    private func skipUnread(_ chat: String, _ rules: WatchSettings.Rules) -> (ok: Bool, scannedChat: Bool) {
+        guard !rules.targets.contains(chat) else { return (false, false) }
+        DebugLog.write("watch: \(chat) (not listed) could not be read; skipped")
+        watchListReturn.pending = chat
+        return (true, true)
     }
 
     /// The rest of a check once the chat is open and read: new messages, replies and owner tasks.
@@ -1121,6 +1146,15 @@ extension AppModel {
             ReadMessage(chat: chat, group: screen.group, sender: line.sender, text: line.text,
                         atMe: rules.myNames.contains { line.text.contains("@" + $0) },
                         verified: screen.proven.contains(WatchReport.proofKey(line)))
+        }
+        if WatchSettings.readOnly(chat, group: screen.group, rules) {
+            // User 11-09: a chat that is not listed is opened for its red mark and only read: no reply, no task.
+            ReadLog.append(read)
+            watchRead += read.count
+            if WatchSettings.serverOn { chatTool.report(read) }
+            watchListReturn.pending = chat
+            DebugLog.write("watch: \(chat) (not listed): \(read.count) new message(s), read only")
+            return (true, true)
         }
 
         var reply: String?, task: String?
@@ -1319,7 +1353,8 @@ extension AppModel {
                 traces.write(frame, kind: "watch read", ["chat": .str(chat), "reply": .str(WatchSettings.hidePIN(reply.text, pin))])
                 if let read = WatchReport.screen(reply.text) {
                     let screen = WatchSettings.masked(WatchReport.privateSenders(read, chat: chat), pin: pin)
-                    guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules) else {
+                    guard WatchReport.confirms(screen, chat: chat, rules: WatchSettings.rules,
+                                               readOnly: !WatchSettings.rules.targets.contains(chat)) else {
                         DebugLog.write("watch: read destination mismatch (read “\(screen.title)” for “\(chat)”); ignoring this check")
                         return nil
                     }

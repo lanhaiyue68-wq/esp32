@@ -318,7 +318,10 @@ struct HomeView: View {
     /// The first thing missing before a run, and the setup page that fixes it.
     private var blocker: (text: LocalizedStringKey, page: SetupPage)? {
         if !board.connected { return ("Connect the board", .connect) }
-        if board.status?.ap != "streaming" { return ("Start Screen Mirroring", .see) }
+        if feed.isNative {
+            // Direct capture has no board mirror (user 11-09: the send button asked for one): sharing on is enough.
+            if !feed.watchable { return ("共享整个屏幕", .see) }
+        } else if board.status?.ap != "streaming" { return ("Start Screen Mirroring", .see) }
         if !app.pointer.calibrated { return ("Calibrate the pointer", .act) }
         if !app.modelReady { return ("Set up the model", .brain) }
         return nil

@@ -120,7 +120,7 @@ struct SeePage: View {
         self.app = app; self.board = board; self.feed = app.feed; self._onWiFi = onWiFi
     }
 
-    private var streaming: Bool { feed.isNative ? feed.mirroring : board.connected && board.status?.ap == "streaming" }
+    private var streaming: Bool { feed.isNative ? feed.watchable : board.connected && board.status?.ap == "streaming" }
     // The board reports a connected station and this phone's video TCP: one Wi-Fi, no SSID access needed.
     private var joined: Bool {
         app.otherWiFi == nil && (onWiFi || app.join == .joined || app.hotspotSSID != nil || streaming || app.onSameWiFi)
@@ -242,7 +242,7 @@ struct ActPage: View {
     @ObservedObject var pointer: Pointer
 
     private var mouse: Bool { MockMode.on || board.status?.usb == "ok" }
-    private var mirroring: Bool { MockMode.on || app.feed.mirroring }
+    private var mirroring: Bool { MockMode.on || app.feed.watchable }
 
     var body: some View {
         VStack(spacing: Space.xl) {

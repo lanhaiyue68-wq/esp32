@@ -48,7 +48,7 @@ import UIKit
 
     /// The mouse is up (board connected, USB HID mounted).
     var boardReady: Bool { app.board.connected && app.board.status?.usb == "ok" }
-    var mirroring: Bool { app.feed.isNative ? app.feed.mirroring : app.board.status?.ap == "streaming" }
+    var mirroring: Bool { app.feed.isNative ? app.feed.watchable : app.board.status?.ap == "streaming" }
 
     /// Calibration is due: never done, an aimed tap found it stale, the screen shape changed, or the learned
     /// correction drifted.

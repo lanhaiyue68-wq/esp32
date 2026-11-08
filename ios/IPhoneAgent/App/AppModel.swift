@@ -220,7 +220,14 @@ import UIKit
         notifier.onAction = { [weak self] action, run in self?.notificationAction(action, run: run) }
         wireRecovery()
 
-        timers.append(Task { [weak self] in await self?.board.commands.keepAwake(screenLive: { self?.feed.live ?? false }) })
+        timers.append(Task { [weak self] in
+            await self?.board.commands.keepAwake(screenLive: {
+                guard let feed = self?.feed else { return false }
+                // A still direct-captured screen is never "live" (that needs a confirmation within 2 s): it was never
+                // nudged, could lock, and the watch went blind after 3 minutes. Sharing on is what counts.
+                return feed.isNative ? feed.watchable : feed.live
+            })
+        })
         timers.append(Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

@@ -111,7 +111,7 @@ struct OnboardingView: View {
 
     // MARK: - per page state
 
-    private var streaming: Bool { feed.isNative ? feed.mirroring : board.connected && board.status?.ap == "streaming" }
+    private var streaming: Bool { feed.isNative ? feed.watchable : board.connected && board.status?.ap == "streaming" }
 
     /// The page's goal is reached (drives auto-advance).
     private var pageDone: Bool {
