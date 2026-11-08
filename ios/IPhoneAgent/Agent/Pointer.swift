@@ -932,12 +932,32 @@ import Foundation
     /// The board's consumer-control Home key ("AC Home"), which iOS treats like a keyboard's home key. Boards
     /// without it (older firmware) answer an error: then Cmd+H and the flick up from the home bar (a flick, not
     /// a rest: resting opens the app switcher).
+    /// Wallpaper in the app switcher, between the status bar and the cards' labels; between the icon columns on a Home
+    /// Screen, should a page be taken for the switcher.
+    static let switcherGap = CGPoint(x: 0.5, y: 0.09)
+
+    /// build105 live 11-08 (frames from the phone): the board's flick up was read as a swipe and hold and left the app
+    /// switcher open, for the model's "home" as well as the opener's, and whatever came next landed on a card.
+    private func leaveAppSwitcher() async {
+        guard let screen else { return }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard let frame = screen.frame else { return }
+        let rows = CandidatePicker.rows(in: frame, top: 0.02, bottom: 1)
+        guard !rows.isEmpty, !AppPlaces.looksLikeHome(rows), !AppPlaces.inLibrary(rows) else { return }
+        log("home: not a Home Screen after the flick (the app switcher?); tapping its wallpaper")
+        try? await tap(Self.switcherGap.x, Self.switcherGap.y)
+    }
+
     func goHome() async throws {
         // Firmware v14+: the board flicks up from the home bar by itself, press to release with no pause (sent as
         // separate commands, the ~130 ms before `release` read as a rest and opened the app switcher). It moves
         // the pointer, so re-home before the next gesture. Older boards answer an error: fall through.
         drawChain = false
-        if (try? await device.send("flickhome")) != nil { pos = nil; return }
+        if (try? await device.send("flickhome")) != nil {
+            pos = nil
+            await leaveAppSwitcher()
+            return
+        }
         if (try? await device.send("homescreen")) != nil { return }
         try await key("cmd+h")
         try await Task.sleep(nanoseconds: 350_000_000)

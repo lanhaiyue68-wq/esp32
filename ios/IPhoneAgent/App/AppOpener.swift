@@ -50,12 +50,13 @@ enum AppPlaces {
     /// The App Library (past the last Home Screen page), by the search field at its top. build104 live 11-08: the page
     /// scan swiped into it and looked for icon labels it does not show (美團 sat in its corner), then gave up.
     static let libraryTitles: Set<String> = ["app資料庫", "app资源库", "applibrary"]
-    static func inLibrary(_ rows: [[CandidatePicker.Piece]]) -> Bool {
-        rows.flatMap { $0 }.contains { libraryTitles.contains(normalized($0.text)) && $0.box.midY < 0.15 }
+    private static func isLibraryField(_ piece: CandidatePicker.Piece) -> Bool {
+        let text = normalized(piece.text)  // its magnifier can be read as a letter in front ("Q App 資料庫")
+        return piece.box.midY < 0.15 && libraryTitles.contains { text.contains($0) }
     }
+    static func inLibrary(_ rows: [[CandidatePicker.Piece]]) -> Bool { rows.flatMap { $0 }.contains(where: isLibraryField) }
     static func libraryField(in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
-        rows.flatMap { $0 }.first { libraryTitles.contains(normalized($0.text)) && $0.box.midY < 0.15 }
-            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        rows.flatMap { $0 }.first(where: isLibraryField).map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
     }
 
     /// A Home Screen page: its Search pill, or a grid of short app names. build104 live 11-08: the board's flick up
@@ -82,6 +83,16 @@ enum AppPlaces {
 /// Chinese (live test 11-08: "open 时钟" and "open 无边记" each spent ~30 s on pages and Search and found nothing,
 /// twice in one run). Character conversion covers most names; Taiwan names that differ, and English, come from here.
 enum AppNames {
+    /// What the phone's own language means for names on its screen. build105 live 11-08: a search for 无边记 found
+    /// nothing on a phone that says 無邊記.
+    static var languageNote: String {
+        guard let language = Locale.preferredLanguages.first?.lowercased(), language.hasPrefix("zh") else { return "" }
+        let traditional = language.contains("hant") || language.contains("-tw") || language.contains("-hk") || language.contains("-mo")
+        return traditional
+            ? "\nThis phone's language is Traditional Chinese: apps and labels read in Traditional (無邊記, 時鐘, 備忘錄). Type names in Traditional when searching."
+            : "\nThis phone's language is Simplified Chinese: apps and labels read in Simplified (无边记, 时钟, 备忘录). Type names in Simplified when searching."
+    }
+
     static let aliases: [String: (tw: String?, en: String)] = [
         "时钟": ("時鐘", "Clock"), "无边记": ("無邊記", "Freeform"), "设置": ("設定", "Settings"),
         "信息": ("訊息", "Messages"), "日历": ("行事曆", "Calendar"), "计算器": ("計算機", "Calculator"),
@@ -214,7 +225,7 @@ extension AppModel {
             if AppPlaces.looksLikeHome(rows) { return }
             // The app switcher (the flick was read as a swipe and hold): an empty spot at its top goes home.
             DebugLog.write("open: not a Home Screen after going home (try \(attempt)); tapping the empty top")
-            try await pointer.tap(0.5, 0.05)
+            try await pointer.tap(Pointer.switcherGap.x, Pointer.switcherGap.y)
             try? await Task.sleep(nanoseconds: 700_000_000)
             if let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows) { return }
         }

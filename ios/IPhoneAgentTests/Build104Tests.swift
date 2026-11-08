@@ -272,3 +272,22 @@ import UIKit
         XCTAssertEqual(AppPlaces.libraryField(in: library)?.y ?? 0, 0.075, accuracy: 0.001)
     }
 }
+
+/// build105 live 11-08: a search for 无边记 found nothing, and every new word was refused as "already entered", 30 times.
+@MainActor final class PendingInputTests: XCTestCase {
+    func testOtherWordsReplaceAFieldThatCouldNotBeConfirmed() async {
+        let actor = FakeModel { n in n == 1 ? "THINK: wrong name\nDO: type 無邊記" : "THINK: found\nDO: done ok" }
+        let phone = FakeGestures()
+        let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.inputToInspect = "无边记"; agent.directStart = true
+        await agent.run()
+        XCTAssertEqual(phone.calls, ["key", "key", "type"])
+        XCTAssertFalse(agent.steps.contains { $0["action"] == .str("blocked") })
+    }
+
+    func testTheLibraryFieldReadsWithItsMagnifier() {
+        let field = CandidatePicker.Piece(text: "Q App 資料庫", box: CGRect(x: 0.3, y: 0.07, width: 0.4, height: 0.02))
+        XCTAssertTrue(AppPlaces.inLibrary([[field]]))
+        XCTAssertFalse(AppPlaces.looksLikeHome([[field]]))
+    }
+}

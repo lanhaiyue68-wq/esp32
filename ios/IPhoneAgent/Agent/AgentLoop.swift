@@ -200,6 +200,7 @@ extension Pointer: Gestures {}
     var pinyinMisses = 0
     private var quietSinceSend = 0
     private var pendingInput: String?
+    private var pendingRefused = 0
     /// Text already entered by a quick send, handed over for visual inspection without retyping.
     var inputToInspect: String?
     /// A destination-specific receipt, independent of the actor's next navigation/action guess.
@@ -566,6 +567,7 @@ extension Pointer: Gestures {}
         sendCorrections = 0
         quietSinceSend = 0
         pendingInput = inputToInspect
+        pendingRefused = 0
         if let inputToInspect { unsent = inputToInspect }
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
@@ -694,10 +696,10 @@ extension Pointer: Gestures {}
     }
 
     /// The actor's system prompt: the original, plus this task's hints, the user's lessons and rules.md.
-    var actorPrompt: String { Prompts.actor + "\n" + AssistiveTouchSpots.rule + taught }
+    var actorPrompt: String { Prompts.actor + "\n" + AssistiveTouchSpots.rule + AppNames.languageNote + taught }
 
     /// The planner gets the same: a plan that ignores them makes the actor ignore them too.
-    var plannerPrompt: String { Prompts.plannerApp + "\n" + AssistiveTouchSpots.rule + taught }
+    var plannerPrompt: String { Prompts.plannerApp + "\n" + AssistiveTouchSpots.rule + AppNames.languageNote + taught }
 
     private var taught: String {
         (hints.isEmpty ? "" : "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n"))
@@ -919,11 +921,21 @@ extension Pointer: Gestures {}
                     return false
                 }
                 if name == "type", let pendingInput {
-                    record(planned.shot, ["action": .str("blocked"),
-                        "reason": .str("Text was already entered: \(pendingInput). Inspect the current field. "
-                            + "Do not clear, retype, or paste over correct text; send it once if correct. "
-                            + "Only use explicit correction keys if a visible mistake needs fixing.")])
-                    return false
+                    // build105 live 11-08: a search for 无边记 (the phone says 無邊記) found nothing, and every new word
+                    // was refused as "already entered", 30 times, until the steps ran out. Only the same words are
+                    // refused, twice; other words replace what is in the field.
+                    if Self.typedKey(act["text"]?.str ?? "") == Self.typedKey(pendingInput), pendingRefused < 2 {
+                        pendingRefused += 1
+                        record(planned.shot, ["action": .str("blocked"),
+                            "reason": .str("Text was already entered: \(pendingInput). Inspect the current field. "
+                                + "Do not clear, retype, or paste over correct text; send it once if correct. "
+                                + "Only use explicit correction keys if a visible mistake needs fixing.")])
+                        return false
+                    }
+                    try await phone?.key("cmd+a")
+                    try await phone?.key("backspace")
+                    self.pendingInput = nil
+                    pendingRefused = 0
                 }
                 // Lan Agent's keyboard has no letter keys to see, but it reports itself: a field it is up for is focused.
                 if name == "type", keyboardGuard, noKeyboard < 2, let shown = screen?.frame, Vision.image(shown) != nil,
@@ -1352,8 +1364,13 @@ extension Pointer: Gestures {}
         }
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
-        plan = en
-        (parts, partIndex, stepsInPart) = (Self.parts(of: en), 0, 0)
+        // build105 live 11-08: Plus timed out, and the fallback answered {"action":"search",...}, which became the plan.
+        if !plan.isEmpty, en.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
+            DebugLog.write("plan: the reply was not a plan; keeping the last one")
+        } else {
+            plan = en
+            (parts, partIndex, stepsInPart) = (Self.parts(of: en), 0, 0)
+        }
         record(frame, ["action": .str(stuck ? "replan (stuck)" : "plan"), "plan": .str(en), "plan_zh": .str(zh),
                        "think_s": .num(seconds)])
         if stuck {
