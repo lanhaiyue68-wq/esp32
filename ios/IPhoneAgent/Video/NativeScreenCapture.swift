@@ -24,8 +24,17 @@ enum DirectCaptureEvent {
     private var output: DirectScreenOutput?
     private var generation: UUID?
     private var stopped = false
+    private var shared: SCContentFilter?
 
     init(deliver: @escaping (DirectCaptureEvent) -> Void) { self.deliver = deliver }
+
+    /// A new stream on what the user already agreed to share: no prompt. The stream can go quiet with no error and no
+    /// way back (over USB 11-09: replayd counting screenframeCount=0 for good, sharing "on", every run refused).
+    func restart() -> Bool {
+        guard !stopped, let shared else { return false }
+        select(shared)
+        return true
+    }
 
     func present() {
         let picker = SCContentSharingPicker.shared
@@ -37,6 +46,7 @@ enum DirectCaptureEvent {
 
     func stop() {
         stopped = true
+        shared = nil
         let previous = stream
         stream = nil; output = nil; generation = nil
         let picker = SCContentSharingPicker.shared
@@ -57,6 +67,7 @@ enum DirectCaptureEvent {
             deliver(.stopped(nil, "请选择共享整个屏幕；仅共享当前 App 无法操作其他 App"))
             stop(); return
         }
+        shared = filter
         let id = UUID()
         generation = id
         deliver(.began(id))

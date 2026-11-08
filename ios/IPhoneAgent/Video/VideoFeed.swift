@@ -124,6 +124,8 @@ extension ScreenSource {
     private var directState = DirectFrameState()
     private var nativeOwner: AnyObject?
     private var ownerID = UUID()
+    private var lastCaptureEvent = 0.0
+    private var lastCaptureRestart = 0.0
     var isNative: Bool { source == .direct }
     var confirmedAt: Double { isNative ? directState.confirmedAt : updated }
     var captureReadinessText: String {
@@ -237,9 +239,29 @@ extension ScreenSource {
         if isNative { resetPixels(); nativeStatus = "共享已停止，请重新共享整个屏幕" }
     }
 
+    /// Whether the system's stream has gone quiet: a frame was waited for this long, nudges and all, and nothing at all
+    /// came. A still screen sends nothing until a nudge shows the pointer, so a quiet moment alone does not count.
+    nonisolated static func captureStalled(at: Double, lastEvent: Double, waitingSince: Double, lastRestart: Double) -> Bool {
+        at - waitingSince > 3 && at - lastEvent > 3 && at - lastRestart > 15
+    }
+
+    /// A new stream on the sharing the user agreed to. True if one was started.
+    @discardableResult
+    func restartCapture() -> Bool {
+        #if canImport(ScreenCaptureKit)
+        if #available(iOS 27.0, *), sharingActive, let owner = nativeOwner as? NativeScreenCapture {
+            lastCaptureRestart = now()
+            DebugLog.write("capture: nothing from the system; starting the stream again")
+            return owner.restart()
+        }
+        #endif
+        return false
+    }
+
     /// Internal event boundary is shared by the system output and source-routing tests.
     func receiveDirect(_ event: DirectCaptureEvent) {
         guard isNative else { return }
+        lastCaptureEvent = now()
         switch event {
         case .began(let id):
             directState.begin(id, fullDisplay: true)
@@ -282,7 +304,8 @@ extension ScreenSource {
 
     private func requireDirectFrame(after: Double? = nil, wait: Double = 4) async throws {
         guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
-        let began = now(), deadline = began + max(0, min(wait, 4))
+        let began = now()
+        var deadline = began + max(0, min(wait, 4))
         var nudged = 0.0
         while !usable(after: after) {
             try Task.checkCancellation()
@@ -298,6 +321,10 @@ extension ScreenSource {
                 _ = try? await device.send("move 8 0")
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 _ = try? await device.send("move -8 0")
+            }
+            if sharingActive, Self.captureStalled(at: now(), lastEvent: lastCaptureEvent, waitingSince: began, lastRestart: lastCaptureRestart),
+               restartCapture() {
+                deadline = now() + 4
             }
             guard sharingActive, now() < deadline else {
                 throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕", sharingOn: sharingActive)
@@ -576,7 +603,10 @@ extension ScreenSource {
     /// snap, and snap once more if the GOP still ends before the action.
     func afterAction(since: Double) async {
         if isNative {
-            await settled(quiet: 0.25, least: 0.15, most: 2)
+            // Direct capture publishes at most every 0.25 s, so a quiet of 0.25 s passed between two frames of a page
+            // still arriving: the model answered about a screen that had moved on, one record in eight over USB 11-09
+            // ("stale plan", 8 s of thinking each time).
+            await settled(quiet: 0.45, least: 0.15, most: 3)
             do { try await requireDirectFrame(after: since) }
             catch { DebugLog.write("direct frame after action: \(error.localizedDescription)") }
             return

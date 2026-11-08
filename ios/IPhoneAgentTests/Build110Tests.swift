@@ -54,7 +54,11 @@ import XCTest
             XCTAssertFalse(agent.circling(["action": .str("open"), "app": .str(name)], on: home))
         }
         XCTAssertFalse(agent.circling(reminders, on: home))
-        XCTAssertFalse(agent.circling(["action": .str("tap"), "x": .int(1), "y": .int(1)], on: sheet), "only ways off a screen")
+        XCTAssertFalse(agent.circling(["action": .str("tap"), "x": .int(500), "y": .int(500)], on: sheet), "only ways off a screen")
+        let arrow: JObject = ["action": .str("tap"), "x": .int(98), "y": .int(86)]  // the back arrow, as a tap
+        XCTAssertFalse(agent.circling(arrow, on: sheet))
+        XCTAssertFalse(agent.circling(arrow, on: sheet))
+        XCTAssertTrue(agent.circling(arrow, on: sheet))
     }
 
     func testSameScreenAllowsAKeyAndNotAPage() {
@@ -96,6 +100,17 @@ import XCTest
         let act = try Actions.parseCommand("note 淘寶 ¥19.9，拼多多 ¥13.8")
         XCTAssertEqual(act["action"]?.str, "note")
         XCTAssertEqual(act["text"]?.str, "淘寶 ¥19.9，拼多多 ¥13.8")
+    }
+
+    func testACaptureIsStartedAgainOnlyOnceNothingCame() {
+        func stalled(_ at: Double, event: Double = 0, since: Double = 0, restart: Double = -100) -> Bool {
+            VideoFeed.captureStalled(at: at, lastEvent: event, waitingSince: since, lastRestart: restart)
+        }
+        XCTAssertTrue(stalled(3.5))
+        XCTAssertFalse(stalled(2.5), "a nudge has not had time to bring a frame")
+        XCTAssertFalse(stalled(3.5, event: 3), "the system is still sending")
+        XCTAssertFalse(stalled(3.5, since: 1), "only just began waiting")
+        XCTAssertFalse(stalled(3.5, restart: -5), "not again and again")
     }
 
     func testSharingOnIsNotAReasonToAskTheUser() {

@@ -321,13 +321,7 @@ extension AppModel {
     private func swipePage(next: Bool) async throws {
         try await pointer.swipe(next ? 0.85 : 0.15, 0.5, next ? 0.15 : 0.85, 0.5, hold: false)
         try? await Task.sleep(nanoseconds: 700_000_000)
-        var shown = await freshFrame().flatMap(Vision.look)
-        for _ in 0..<4 {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            let now = await freshFrame().flatMap(Vision.look)
-            if let a = shown, let b = now, !Vision.visiblyChanged(a, b) { return }
-            shown = now
-        }
+        await feed.settled(quiet: 0.5, least: 0.1, most: 2)
     }
 
     /// Only when Search would not work (no keyboard came): the pages to the right up to the App Library, then to the left.
@@ -354,7 +348,10 @@ extension AppModel {
         for aimed in [false, true] {
             try await pointer.tap(icon.x, icon.y, aim: aimed)
             try? await Task.sleep(nanoseconds: 900_000_000)  // the app opens
-            guard let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows), AppPlaces.label(name, in: rows) != nil else { return true }
+            guard let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows), AppPlaces.label(name, in: rows) != nil else {
+                await feed.settled(quiet: 0.8, least: 0.2, most: 4)  // an app coming up: the model looks at it once it has
+                return true
+            }
             DebugLog.write("open \(name): still on the Home Screen after the tap")
         }
         return false
@@ -407,6 +404,7 @@ extension AppModel {
             DebugLog.write("open \(name): Search is still up after opening; not opened")
             return .unusable
         }
+        await feed.settled(quiet: 0.8, least: 0.2, most: 4)
         return .opened
     }
 

@@ -515,7 +515,7 @@ extension Pointer: Gestures {}
     /// True when this is the third time the same way off this screen is taken: it comes back each time (a contacts sheet
     /// left and reopened for 300 s, over USB 11-09). Counts this one. Another way off, or another app, is another move.
     func circling(_ act: JObject, on look: [UInt8]) -> Bool {
-        guard ["home", "back", "open"].contains(act["action"]?.str ?? "") else { return false }
+        guard ["home", "back", "open"].contains(act["action"]?.str ?? "") || Self.leaves(act) else { return false }
         let move = Actions.key(act)
         if let i = departures.firstIndex(where: { Actions.key($0.move) == move && Vision.sameScreen($0.look, look) }) {
             departures[i].times += 1
