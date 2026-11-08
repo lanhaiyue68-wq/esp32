@@ -91,3 +91,58 @@ import XCTest
         XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
     }
 }
+
+/// User 11-09: what the phone has not done before, Codex does and it is remembered; Doubao follows it from then on.
+@MainActor final class CodexTeachesDoubaoTests: XCTestCase {
+    func testAnUnknownTaskIsDrivenByThePlanner() async {
+        let planner = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there
+DO: done ok" }
+        let actor = FakeModel { _ in "THINK: not me
+DO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.plannerLeadsUnknown = true
+        agent.routes = RouteBook(file: nil)
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(actor.prompts.count, 0, "the executor did nothing")
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "planner")
+    }
+
+    func testAKnownTaskIsFollowedByTheExecutor() async {
+        let routes = RouteBook(file: nil)
+        routes.storeRecipe(task: "打开设置", lines: ["open 设置"])
+        let planner = FakeModel { _ in "1. should not be asked" }
+        let actor = FakeModel { _ in "THINK: as before
+DO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.plannerLeadsUnknown = true
+        agent.routes = routes
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(planner.prompts.count, 0)
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "actor")
+    }
+
+    func testAPlannerThatAnswersNoActionHandsOver() async {
+        let planner = FakeModel { _ in "1. only a plan" }
+        let actor = FakeModel { _ in "THINK: mine now
+DO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.plannerLeadsUnknown = true
+        agent.routes = RouteBook(file: nil)
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(agent.steps.last?["by"]?.str, "actor")
+    }
+
+    func testWithoutPlusTheTaskStillRuns() async {
+        let actor = FakeModel { n in n == 1 ? "1. Settings is open" : "THINK: there
+DO: done ok" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.plannerLeadsUnknown = true
+        agent.routes = RouteBook(file: nil)
+        agent.showMock(task: "打开设置", plan: "", steps: [], running: false)
+        await agent.run()
+        XCTAssertEqual(agent.steps.last?["action"]?.str, "done")
+    }
+}

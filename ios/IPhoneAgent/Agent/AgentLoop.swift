@@ -96,6 +96,11 @@ extension Pointer: Gestures {}
     private(set) var doneParts: [String] = []
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
+    /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
+    /// by the planner from the start and its way remembered; from then on the executor follows that way, and the planner
+    /// comes only when it stalls. Fixed plans (watching WeChat) are not tasks of this kind.
+    var plannerLeadsUnknown = false
+    private var plannerLeads = false
     /// How this task was done the last time it finished (nil: never, or a fixed plan such as watching WeChat).
     private(set) var recipe: RouteBook.Recipe?
     @Published var steps: [JObject] = []
@@ -580,6 +585,8 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
+        plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
+        if plannerLeads { DebugLog.write("run: not done before; the planner does it and it is remembered") }
         (sendTap, backMissed, actFrame) = (nil, false, nil)
         do {
             do { try await replay() }
@@ -616,7 +623,7 @@ extension Pointer: Gestures {}
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
-                    if presetPlan.isEmpty, planner != nil, takeover == 0 {
+                    if presetPlan.isEmpty, planner != nil, takeover == 0, !plannerLeads {
                         stepsInPart += 1
                         troubles += steps.dropFirst(recordsBefore).filter(Self.isTrouble).count
                         let gestures = steps.suffix(Self.swipesInARow + 2).filter { $0["action"]?.str != "stale plan" }
@@ -1417,8 +1424,8 @@ extension Pointer: Gestures {}
             }
         }
         var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\n\nNext action?"
-        let driving = takeover > 0 && planner != nil
-        if driving { takeover -= 1 }
+        let driving = (plannerLeads || takeover > 0) && planner != nil
+        if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
         if let controls, let shown = screen?.frame {
             if unsent != nil, let hit = controls.find("send", in: shown) {
@@ -1447,7 +1454,7 @@ extension Pointer: Gestures {}
             var acts: [JObject]
             do { acts = try Actions.parseActions(text) } catch {
                 if driving {  // Codex answered with no action: Doubao goes on rather than Codex being asked again and again
-                    takeover = 0
+                    (takeover, plannerLeads) = (0, false)
                     DebugLog.write("takeover: Codex's reply held no action; the executor goes on")
                     return try await nextActions()
                 }

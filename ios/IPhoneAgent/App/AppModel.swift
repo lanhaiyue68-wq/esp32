@@ -225,6 +225,7 @@ import UIKit
         agent.ourKeyboardOnScreen = { [weak self] in self?.keyboardBridge.onScreen() ?? false }
         agent.openApp = { [weak self] name in try await self?.openApp(name) ?? false }
         agent.readsScreenText = !MockMode.on
+        agent.plannerLeadsUnknown = !MockMode.on
         AgentControl.handle = { [weak self] command in await self?.control(command) }
         AgentRequests.handle = { [weak self] request in await self?.handle(request) ?? AgentRequests.unavailable }
         notifier.onAction = { [weak self] action, run in self?.notificationAction(action, run: run) }
