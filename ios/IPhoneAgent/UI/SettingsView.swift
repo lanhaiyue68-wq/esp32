@@ -194,5 +194,11 @@ struct CalibrationRow: View {
         }
         .tint(.primary)
         .disabled(!ready || calibrator.busy)
+        // user 11-08: the hand proven with numbers — 20 spots tapped like a task, each real touch measured
+        Button { calibrator.testAccuracy() } label: {
+            Label { Text("準度測試（點 20 個位置）") } icon: { SettingsIcon(symbol: "target", color: .green) }
+        }
+        .tint(.primary)
+        .disabled(!ready || calibrator.busy || !pointer.calibrated)
     }
 }

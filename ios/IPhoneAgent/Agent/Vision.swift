@@ -190,6 +190,93 @@ enum Vision {
         return hits >= 6
     }
 
+    /// Where the pointer arrived after a move: the frame before the move against the first frame after it.
+    /// The translucent pointer (a disk of `radius`, a fraction of the width) changes every pixel under it, whatever is
+    /// beneath, and nothing just outside it; the spot it left changes too, so of the disks found the one nearest `near`
+    /// wins, and its centre is the centroid of its changed pixels (nothing pulls it toward `near`). Checked on the live
+    /// test's frames (11-08): the alarm's ✓ tap seen at (0.890, 0.135), and a hop at (0.544, 0.236), both matching the
+    /// pointer drawn in the frame; where the screen itself changed around the spot, nothing is returned.
+    static func arrival(_ before: Data, _ after: Data, near: CGPoint, radius: Double = 0.0253, window: Double = 0.2) -> CGPoint? {
+        guard let ia = image(before), let ib = image(after), ia.width == ib.width, ia.height == ib.height else { return nil }
+        let w = ia.width, h = ia.height
+        let a = rgba(ia, w, h), b = rgba(ib, w, h)
+        let r = radius * Double(w)
+        guard r >= 3 else { return nil }
+        let x0 = max(0, Int(Double(near.x) * Double(w) - window * Double(w))), x1 = min(w - 1, Int(Double(near.x) * Double(w) + window * Double(w)))
+        let y0 = max(0, Int(Double(near.y) * Double(h) - window * Double(h))), y1 = min(h - 1, Int(Double(near.y) * Double(h) + window * Double(h)))
+        guard x1 > x0, y1 > y0 else { return nil }
+        // the changed mask over the search area, padded by the outer ring
+        let pad = Int(r * 1.5) + 1
+        let mx0 = max(0, x0 - pad), mx1 = min(w - 1, x1 + pad), my0 = max(0, y0 - pad), my1 = min(h - 1, y1 + pad)
+        let mw = mx1 - mx0 + 1, mh = my1 - my0 + 1
+        var mask = [Bool](repeating: false, count: mw * mh)
+        for y in my0...my1 {
+            for x in mx0...mx1 {
+                let i = (y * w + x) * 4
+                let d = max(abs(Int(a[i]) - Int(b[i])), abs(Int(a[i + 1]) - Int(b[i + 1])), abs(Int(a[i + 2]) - Int(b[i + 2])))
+                mask[(y - my0) * mw + (x - mx0)] = d > 7
+            }
+        }
+        func offsets(_ r0: Double, _ r1: Double, step: Int) -> [(Int, Int)] {
+            let ri = Int(r1) + 1
+            var out: [(Int, Int)] = []
+            for dy in stride(from: -ri, through: ri, by: step) {
+                for dx in stride(from: -ri, through: ri, by: step) where (r0 * r0...r1 * r1).contains(Double(dx * dx + dy * dy)) {
+                    out.append((dx, dy))
+                }
+            }
+            return out
+        }
+        let inner = offsets(0, r * 0.75, step: 2), outer = offsets(r * 1.2, r * 1.45, step: 2), body = offsets(0, r * 1.3, step: 1)
+        func share(_ cx: Int, _ cy: Int, _ ring: [(Int, Int)], changed: Bool) -> (Double, Int) {
+            var hit = 0, n = 0
+            for (dx, dy) in ring {
+                let x = cx + dx, y = cy + dy
+                guard x >= mx0, x <= mx1, y >= my0, y <= my1, x >= 0, x < w, y >= 0, y < h else { continue }
+                n += 1
+                if mask[(y - my0) * mw + (x - mx0)] == changed { hit += 1 }
+            }
+            return (n == 0 ? 0 : Double(hit) / Double(n), n)
+        }
+        var found: [(score: Double, x: Int, y: Int)] = []
+        for cy in stride(from: y0, through: y1, by: 2) {
+            for cx in stride(from: x0, through: x1, by: 2) {
+                let (fin, nin) = share(cx, cy, inner, changed: true)
+                guard nin >= inner.count * 55 / 100, fin >= 0.75 else { continue }
+                let (fout, nout) = share(cx, cy, outer, changed: false)
+                guard nout >= outer.count * 4 / 10, fout >= 0.7 else { continue }
+                found.append((fin * fout, cx, cy))
+            }
+        }
+        guard !found.isEmpty else { return nil }
+        found.sort { $0.score > $1.score }
+        var disks: [(score: Double, x: Int, y: Int)] = []
+        for f in found where disks.allSatisfy({ Double((f.x - $0.x) * (f.x - $0.x) + (f.y - $0.y) * (f.y - $0.y)) > 4 * r * r }) {
+            disks.append(f)
+        }
+        let centres: [CGPoint] = disks.compactMap { d in
+            var sx = 0, sy = 0, n = 0
+            for (dx, dy) in body {
+                let x = d.x + dx, y = d.y + dy
+                guard x >= mx0, x <= mx1, y >= my0, y <= my1, mask[(y - my0) * mw + (x - mx0)] else { continue }
+                sx += x; sy += y; n += 1
+            }
+            return n == 0 ? nil : CGPoint(x: Double(sx) / Double(n) / Double(w), y: Double(sy) / Double(n) / Double(h))
+        }
+        return centres.min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
+    }
+
+    /// The image's RGBA bytes at w x h.
+    static func rgba(_ img: CGImage, _ w: Int, _ h: Int) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: w * h * 4)
+        out.withUnsafeMutableBytes { buf in
+            let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        return out
+    }
+
     /// Where the pointer is in `before`, given it moved right by `shift` (fraction of width) in `after`.
     ///
     /// Only the pointer moved between the two frames, so the changed pixels within `reach` of `near` are the

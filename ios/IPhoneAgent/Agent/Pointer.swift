@@ -494,6 +494,7 @@ import Foundation
     /// always moves, since it follows a tap that changed nothing.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
+        let before = screen?.frame  // the screen before the move: where the pointer arrives is what changes
         if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
             try await device.send("click")
@@ -512,6 +513,7 @@ import Foundation
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
             log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
+            try await arrive(x, y, before: before)
             try await device.send("click")
             if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
@@ -519,11 +521,64 @@ import Foundation
         }
         lastClick = nil
         pos = nil
-        try await point(x, y, aim: aim)
+        if aim {
+            // a precise tap: the arrival check first; the older wiggle search only if it did not see the pointer there
+            try await point(x, y, aim: false)
+            if try await arrive(x, y, before: before) != .onTarget { try await self.aim(x, y, required: true) }
+        } else {
+            try await point(x, y, aim: false)
+            try await arrive(x, y, before: before)
+        }
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
+
+    enum Arrival { case onTarget, unseen, offTarget }
+
+    /// Closed loop for every tap (user 11-08: make it tap right, not patch by patch). Open-loop moves land 3–7 % off
+    /// (curved moves through iOS's pointer acceleration; the calibration's own note: one command scatters up to 5 %):
+    /// the live test's ✓ at (0.895, 0.108) was reached at (0.890, 0.135), a hop meant for 0.395 at 0.461. The pointer
+    /// is found where it arrived (Vision.arrival: the frame before the move against the first frame after it), a miss
+    /// is corrected by a short move (short moves are near linear) and looked at once more. Unseen (the screen itself
+    /// changed there), the click goes at the estimate as before.
+    @discardableResult
+    func arrive(_ x: Double, _ y: Double, before: Data?) async throws -> Arrival {
+        guard let screen, let before, let span else { return .unseen }
+        var last = before
+        for pass in 1...2 {
+            let moved = now()
+            guard let first = await screen.fresh(since: moved - 0.05, timeout: 0.9) else {
+                log(String(format: "arrive (%.3f, %.3f): no frame after the move; clicking at the estimate", x, y))
+                return .unseen
+            }
+            await screen.settled(quiet: 0.12, least: 0.05, most: 0.5)  // the pointer drawn where it stopped
+            let after = screen.frame ?? first
+            guard let seen = Vision.arrival(last, after, near: CGPoint(x: x, y: y)) else {
+                log(String(format: "arrive (%.3f, %.3f): pointer not seen (pass %ld); clicking at the estimate", x, y, pass))
+                return .unseen
+            }
+            let ex = x - Double(seen.x), ey = y - Double(seen.y)
+            if max(abs(ex), abs(ey)) <= Self.arrivalTolerance {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f)%@", x, y, seen.x, seen.y, pass > 1 ? " after correcting" : ""))
+                return .onTarget
+            }
+            guard max(abs(ex), abs(ey)) <= 0.15, pass < 2 else {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), %@", x, y, seen.x, seen.y,
+                           pass < 2 ? "too far to trust; clicking at the estimate" : "still off after one correction"))
+                return .offTarget
+            }
+            let ux = Int((ex * Double(span.w)).rounded()), uy = Int((ey * Double(span.h)).rounded())
+            log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f); correcting by %ld, %ld units", x, y, seen.x, seen.y, ux, uy))
+            last = after
+            if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
+            if let p = pos { pos = (p.0 + ux, p.1 + uy) }
+        }
+        return .offTarget
+    }
+
+    /// A tap within this of its target needs no correction (fraction of the screen; a WeChat list row is ~0.09 high).
+    static let arrivalTolerance = 0.008
 
     /// Press and hold at a spot, then let go: the globe key shows its keyboard menu only on a long press (a click
     /// switches nothing visible, user 11-08). Like tap, the spot just clicked is held again without moving.

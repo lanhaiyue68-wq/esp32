@@ -108,6 +108,58 @@ import UIKit
         Task { _ = try? await app.pointer.reset() }
     }
 
+    /// The accuracy test (user 11-08: prove the hand with numbers). On the board, 20 spots over the whole screen are
+    /// tapped the way a task taps them (from the corner, hops, the right border, the arrival check) and each real touch
+    /// is caught, so every miss is measured, not guessed. It changes nothing; the log keeps each spot and a summary.
+    static let accuracySpots: [(Double, Double)] = [0.1, 0.3, 0.5, 0.7, 0.9].flatMap { y in [0.12, 0.38, 0.63, 0.9].map { ($0, y) } }
+
+    func testAccuracy() {
+        guard !busy, app.pointer.calibrated, DeviceScreen.foreground else { return }
+        reason = "accuracy test"
+        problem = nil
+        openBoard()
+        let job = Task { await runAccuracy() }
+        current = job
+        Task {
+            await job.value
+            current = nil
+            progress = nil
+            phase = app.pointer.calibrated ? .done : .idle
+            closeBoard()
+        }
+    }
+
+    private func runAccuracy() async {
+        phase = .verifying
+        let spots = Self.accuracySpots
+        progress = Progress(done: 0, total: spots.count)
+        app.say("accuracy test: \(spots.count) spots, tapped like a task")
+        try? await app.pointer.reset()
+        try? await Task.sleep(nanoseconds: 400_000_000)  // the board painted plain
+        var misses: [Double] = []
+        for (i, (x, y)) in spots.enumerated() {
+            if Task.isCancelled { break }
+            let sent = now()
+            do { try await app.pointer.tap(x, y) } catch {
+                app.say(String(format: "accuracy %ld: (%.2f, %.2f) not tapped: %@", i + 1, x, y, error.localizedDescription))
+                continue
+            }
+            if let p = await app.probe.tap(since: sent, timeout: Self.tapTimeout) {
+                let miss = max(abs(Double(p.x) - x), abs(Double(p.y) - y))
+                misses.append(miss)
+                app.say(String(format: "accuracy %ld: (%.2f, %.2f) landed (%.3f, %.3f), miss %.1f%%", i + 1, x, y, p.x, p.y, miss * 100))
+            } else {
+                app.say(String(format: "accuracy %ld: (%.2f, %.2f) no touch caught", i + 1, x, y))
+            }
+            progress = Progress(done: i + 1, total: spots.count)
+        }
+        guard !misses.isEmpty else { return app.say("accuracy test: no touches caught") }
+        let within1 = misses.filter { $0 <= 0.01 }.count, within2 = misses.filter { $0 <= 0.02 }.count
+        let mean = misses.reduce(0, +) / Double(misses.count)
+        app.say(String(format: "accuracy test: %ld of %ld caught; within 1%%: %ld, within 2%%: %ld; mean %.1f%%, worst %.1f%%",
+                       misses.count, spots.count, within1, within2, mean * 100, (misses.max() ?? 0) * 100))
+    }
+
     private func runOnce() async {
         if MockMode.on { return await mockRun() }
         app.say("calibration: \(reason)")
