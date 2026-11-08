@@ -308,3 +308,8 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - Owner's task never seen on the list: top row (0.145) and long previews (to 0.94) were outside the row filter; preview heights not smaller; OCR misread one char. Fixed build99.
 - Taps past the calibrated x range (0.864) overshot (0.899 → 0.975): alarm ✓ never hit. Fixed build99 (right-border approach).
 - Watch start ran the model with Lan Agent in front (opened an unlisted group, then a listed chat with no red mark). Fixed build99 (WeChat by URL, local list).
+
+## 2026-11-08 live test (build99)
+- open App by Simplified name on a Traditional phone: never found. Fixed build100.
+- Alarm ✓ missed 0.027 low, clicked again in place until the step limit. Fixed build100 (taps around a dead spot; y last).
+- Mid-run "直接取屏尚未就绪" pause: 1-unit nudge invisible. Fixed build100.

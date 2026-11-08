@@ -276,3 +276,7 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] build99: top list row and long previews seen; one misread char allowed; taps past the calibrated range from the right border; first watch check opens WeChat by URL.
 - [ ] Device test build99 (owner's long task from the list; alarm ✓ hit once; watch start goes straight to WeChat).
 - [x] Read the test phone over USB: iphone-pull-logs.cmd (pymobiledevice3 11.47.0).
+- [x] build100: phone's own app names; dead taps tried around the spot; right-border y last; visible still-screen nudges.
+- [ ] Device test build100 (alarm end to end, live over USB).
+- [ ] caoshihui5211314-cloud Actions billing (user's account): until fixed, take IPAs from ChenQian-hub/esp32-iphone-agent-app.
+- [ ] Phase C: ChatGPT Plus (Codex) as planner, doubao as actor; multi-task scheduling.
