@@ -24,6 +24,15 @@ extension AppModel {
             guard let frame = feed.frame else { return .json(["error": .str("no frame: is the whole screen shared?")], status: 404) }
             return .init(status: 200, type: "image/jpeg", body: frame)
 
+        case ("GET", "/ocr"):
+            guard let frame = feed.frame else { return .json(["error": .str("no frame")], status: 404) }
+            let rows = CandidatePicker.rows(in: frame, top: 0.02, bottom: 1).map { row in
+                JValue.arr(row.map { .str(String(format: "%@ @%.3f,%.3f %.3fx%.3f", $0.text, $0.box.midX, $0.box.midY, $0.box.width, $0.box.height)) })
+            }
+            return .json(["rows": .arr(rows), "home": .bool(AppPlaces.looksLikeHome(CandidatePicker.rows(in: frame, top: 0.02, bottom: 1))),
+                          "search": .bool(AppPlaces.inSearch(CandidatePicker.rows(in: frame, top: 0.02, bottom: 1))),
+                          "keyboard": .bool(CandidatePicker.keyboardUp(in: frame))])
+
         case ("GET", "/steps"):
             let from = Int(request.query["from"] ?? "") ?? 0
             let steps = agent.steps.dropFirst(max(0, from)).map { JValue.obj($0) }

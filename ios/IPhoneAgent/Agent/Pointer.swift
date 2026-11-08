@@ -937,8 +937,9 @@ import Foundation
     func goHome() async throws {
         drawChain = false
         guard let screen else { return try await flickHome() }
-        for attempt in 0..<4 {
-            let rows = screen.frame.map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 1) } ?? []
+        for attempt in 0..<5 {
+            let shown = screen.frame
+            let rows = shown.map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 1) } ?? []
             if rows.isEmpty {  // nothing to read: the flick, as without eyes
                 if attempt == 0 { try await flickHome() }
                 return
@@ -950,12 +951,23 @@ import Foundation
                 try await key("backspace")
                 try await Task.sleep(nanoseconds: 400_000_000)
                 try await tap(Self.searchBlank.x, Self.searchBlank.y)
+            } else if AppPlaces.keyboardShown(rows) || shown.map({ CandidatePicker.keyboardUp(in: $0) }) == true {
+                // With a keyboard up the flick opens the app switcher, and the next flick goes back to the app: four
+                // flicks ended a WeChat task nowhere. A drag over the content closes it in most apps, and touches nothing.
+                log("home: a keyboard is up; closing it first")
+                try await swipe(0.5, 0.2, 0.5, 0.38, hold: false)
+                try await Task.sleep(nanoseconds: 500_000_000)
+                if let after = screen.frame, CandidatePicker.keyboardUp(in: after) || AppPlaces.keyboardShown(CandidatePicker.rows(in: after, top: 0.02, bottom: 1)) {
+                    try await tap(0.5, 0.25)
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                }
+                try await flickHome()
             } else {
                 try await flickHome()
             }
             try await Task.sleep(nanoseconds: 800_000_000)
         }
-        log("home: no Home Screen seen after four tries")
+        log("home: no Home Screen seen after five tries")
     }
 
     /// Between Search's suggestions and its field, above the keyboard.

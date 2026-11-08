@@ -94,9 +94,25 @@ enum AppPlaces {
 
     /// The Search pill above the dock (iOS 16+), by its label.
     static func searchPill(in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
-        rows.flatMap { $0 }
-            .first { ["搜索", "搜尋", "search"].contains(normalized($0.text)) && $0.box.midY > 0.7 }
-            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        rows.flatMap { $0 }.first { piece in
+            let text = normalized(piece.text)  // its magnifier can be read as a letter in front ("Q 搜尋")
+            return text.count <= 8 && ["搜索", "搜尋", "search"].contains { text.hasSuffix($0) }
+                && piece.box.midY > 0.7 && abs(piece.box.midX - 0.5) < 0.12
+        }.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
+    /// Lan Agent's keyboard, read: it has no letter keys for CandidatePicker to see.
+    static func keyboardShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let keys = rows.flatMap { $0 }.filter { $0.box.midY > 0.6 }.map { normalized($0.text) }
+        return keys.contains { ["換行", "换行", "空格", "下一個", "下一个"].contains($0) } || keys.contains { $0.hasPrefix("lanagent輸入法") || $0.hasPrefix("lanagent输入法") }
+    }
+
+    /// Search's field says what Return would do: "設定 — 打開".
+    static func returnOpens(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        rows.flatMap { $0 }.contains { piece in
+            let text = normalized(piece.text)
+            return piece.box.midY > 0.4 && ["打開", "打开", "open"].contains { text.hasSuffix($0) }
+        }
     }
 }
 
@@ -198,29 +214,41 @@ extension AppModel {
     }
 
     private func openBySearch(_ name: String) async throws -> Bool {
-        if let rows = await homeRows(), let pill = AppPlaces.searchPill(in: rows) {
-            try await pointer.tap(pill.x, pill.y)
-        } else {
-            try await pointer.swipe(0.5, 0.3, 0.5, 0.55, hold: false)  // swipe down on the Home Screen: Search
+        // Measured over USB 11-09: Cmd+Space opens Search from the Home Screen (not from inside an app), its last words
+        // selected and with the keyboard last used. The pill or a pull down only if it does not come.
+        try await pointer.key("cmd+space")
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        if let rows = await homeRows(top: 0.02), !AppPlaces.inSearch(rows), !AppPlaces.keyboardShown(rows) {
+            DebugLog.write("open \(name): Cmd+Space brought no Search; the pill or a pull down")
+            if let pill = AppPlaces.searchPill(in: rows) {
+                try await pointer.tap(pill.x, pill.y)
+            } else {
+                try await pointer.swipe(0.5, 0.3, 0.5, 0.55, hold: false)
+            }
+            try? await Task.sleep(nanoseconds: 800_000_000)
         }
-        try? await Task.sleep(nanoseconds: 800_000_000)
         let typed = AppNames.searchName(name)
         if typed != name { DebugLog.write("open \(name): searching for \(typed), the phone's own name") }
-        guard await showLanAgentKeyboard(), await keyboardBridge.type(typed, enter: false, within: 4) else {
+        guard await showLanAgentKeyboard() else {
             DebugLog.write("open \(name): Search did not take the name")
             return false
         }
-        try? await Task.sleep(nanoseconds: 1_000_000_000)  // the results
-        // The result named so, read between the top and the keyboard: not the search field, which holds the typed name
-        // too (at the top, or just above the keyboard).
-        if let frame = await freshFrame(),
-           let spot = AppPlaces.searchResult(name, in: CandidatePicker.rows(in: frame, top: 0.07, bottom: 0.5)) {
+        try await pointer.key("cmd+a")
+        try await pointer.key("backspace")
+        guard await keyboardBridge.type(typed, enter: false, within: 4) else {
+            DebugLog.write("open \(name): Search did not take the name")
+            return false
+        }
+        // The results come a moment later; a Return before them opens nothing (over USB, 11-09).
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        let rows = await freshFrame().map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 0.7) } ?? []
+        if AppPlaces.returnOpens(rows) || AppPlaces.searchResult(name, in: rows) == nil {
+            // The keyboard's own Return: the board's Enter does nothing with it up.
+            if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
+            DebugLog.write("open \(name): Return for the top hit")
+        } else if let spot = AppPlaces.searchResult(name, in: rows) {
             try await pointer.tap(spot.x, max(0.05, spot.y - 0.03))  // its icon, above the label
             DebugLog.write("open \(name): tapped its Search result")
-        } else {
-            // Another display name: Return opens the top hit. The keyboard's own (the board's Enter does nothing with it up).
-            if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
-            DebugLog.write("open \(name): no result named exactly so; Return for the top hit")
         }
         try? await Task.sleep(nanoseconds: 900_000_000)
         return true

@@ -141,3 +141,28 @@ import XCTest
         XCTAssertEqual(agent.steps.last?["action"]?.str, "done")
     }
 }
+
+/// Read from the phone over USB, 11-09.
+@MainActor final class HomeAndSearchReadingTests: XCTestCase {
+    private func piece(_ text: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+        .init(text: text, box: CGRect(x: x - 0.05, y: y - 0.01, width: 0.1, height: 0.02))
+    }
+
+    func testThePillIsCentredAndMayCarryItsMagnifier() {
+        XCTAssertNotNil(AppPlaces.searchPill(in: [[piece("Q 搜尋", 0.5, 0.83)]]))
+        XCTAssertNotNil(AppPlaces.searchPill(in: [[piece("搜尋", 0.5, 0.83)]]))
+        XCTAssertNil(AppPlaces.searchPill(in: [[piece("搜尋", 0.2, 0.93)]]), "Settings' own search bar, at the bottom left")
+        XCTAssertNil(AppPlaces.searchPill(in: [[piece("搜尋或輸入網址然後前往這裡", 0.5, 0.93)]]), "Safari's address bar")
+    }
+
+    func testLanAgentsKeyboardIsRead() {
+        XCTAssertTrue(AppPlaces.keyboardShown([[piece("下一個", 0.2, 0.79)], [piece("換行", 0.87, 0.79)]]))
+        XCTAssertFalse(AppPlaces.keyboardShown([[piece("換行", 0.87, 0.3)]]))
+    }
+
+    func testSearchsFieldSaysReturnOpens() {
+        XCTAssertTrue(AppPlaces.returnOpens([[piece("設定 — 打開", 0.3, 0.58)]]))
+        XCTAssertFalse(AppPlaces.returnOpens([[piece("打開", 0.3, 0.2)]]))
+        XCTAssertFalse(AppPlaces.returnOpens([[piece("設定", 0.3, 0.58)]]))
+    }
+}
