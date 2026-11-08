@@ -189,7 +189,10 @@ extension ScreenSource {
         }
     }
 
-    var live: Bool { mirroring && frame != nil && !broken && (device?.connected ?? false) }
+    /// The screen can be looked at. Direct capture: sharing is on (a still screen sends nothing, and a run that thought
+    /// for 10 s between steps paused as "系统屏幕共享已中断" each time, live test 11-08); requireFrame gets a current
+    /// frame when one is needed (it nudges the pointer).
+    var live: Bool { (isNative ? watchable : mirroring) && frame != nil && !broken && (device?.connected ?? false) }
 
     func selectSource(_ next: CaptureSource) {
         guard next != source, next != .direct || CaptureSource.directAvailable else { return }

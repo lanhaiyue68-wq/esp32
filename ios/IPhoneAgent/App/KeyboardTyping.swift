@@ -13,8 +13,19 @@ extension AppModel {
     /// where a click on "Lan Agent" picks it (user 11-08: a click on the globe shows no menu). Hold the globe once,
     /// then click "Lan Agent"; a menu already open is used as it is. Only while a system keyboard shows: without one, the globe's spot
     /// is the app's own control (WeChat's voice button), so nothing is tapped and the caller focuses the field first.
-    func showLanAgentKeyboard(tries: Int = 3) async -> Bool {
+    func showLanAgentKeyboard(tries: Int = 3, appear: Double = 2.5) async -> Bool {
         if keyboardBridge.onScreen() { return true }
+        // Live test 11-08: Search's keyboard came up after the opener's 0.8 s, "no keyboard on screen" was decided at
+        // once, and "open 时钟" failed with 時鐘 ready to type. A keyboard (or its menu) gets `appear` s to show.
+        let deadline = now() + appear
+        while now() < deadline {
+            if keyboardBridge.onScreen() { return true }
+            if let frame = await freshFrame() {
+                let rows = CandidatePicker.rows(in: frame, top: 0.3, bottom: 1)
+                if CandidatePicker.keyboardUp(in: frame) || CandidatePicker.keyboardMenuOpen(rows: rows) { break }
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
         for attempt in 1...tries {
             guard let frame = await freshFrame() else { return keyboardBridge.onScreen() }
             let rows = CandidatePicker.rows(in: frame, top: 0.3, bottom: 1)

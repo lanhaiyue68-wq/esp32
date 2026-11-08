@@ -1090,7 +1090,10 @@ extension AppModel {
         if !rules.targets.isEmpty && UIApplication.shared.applicationState == .active && now() - watchStartedAt < 15 {
             // logs(12): the first check, with Lan Agent in front, went to the model (38 s, 8 calls): it opened a group
             // that is not listed, backed out, then a listed chat with no red mark. WeChat by its URL instead.
+            let hopped = now()
             let opened = await hopToWeChat(seesWeChat: { false })
+            // WeChat's own screen, not Lan Agent's last frame (live test 11-08: the chat WeChat reopened was not seen)
+            if opened { _ = await feed.fresh(since: hopped, timeout: 3); await feed.settled() }
             DebugLog.write("watch: start: WeChat opened by its URL: \(opened ? "yes" : "no")")
         }
         if !rules.targets.isEmpty && UIApplication.shared.applicationState != .active {
@@ -1262,7 +1265,10 @@ extension AppModel {
             // A task with several parts keeps its ordinary steps.
             agent.endAfterSend = phone && !WatchSettings.severalParts(task) ? 5 : nil
             let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
-                                      stepLimit: phone ? agent.maxSteps : 25, fastText: true, directStart: phone)
+                                      stepLimit: phone ? agent.maxSteps : 25, fastText: true,
+                                      // Live test 11-08 (build101): an owner task of three parts started with no
+                                      // plan, so the commander (Plus) never split it and it had 40 steps for all.
+                                      directStart: phone && !WatchSettings.severalParts(task))
             agent.endAfterSend = nil
             afterPhoneTask = phone
             if phone, let source = phoneMessages.last {
