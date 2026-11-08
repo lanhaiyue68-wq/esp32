@@ -287,3 +287,5 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [ ] Then step 2: Codex commanding per part (split, verify each part, take over when stuck); step 3: tools (AlarmKit, EventKit, URL schemes).
 - [x] build104 built on lanhaiyue-web (542/0) and delivered.
 - [ ] Live USB session: varied everyday tasks in several apps; collect all failures, fix by cause in one build.
+- [x] build105 delivered (548/0).
+- [ ] Next: stale plans / model latency (largest time sink), app icons learned from every scanned page, watch navigation speed.

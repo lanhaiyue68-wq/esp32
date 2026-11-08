@@ -313,3 +313,9 @@ logs39 confirmed: maxCheckError=5%; applyProbe saved before verification; missin
 - open App by Simplified name on a Traditional phone: never found. Fixed build100.
 - Alarm ✓ missed 0.027 low, clicked again in place until the step limit. Fixed build100 (taps around a dead spot; y last).
 - Mid-run "直接取屏尚未就绪" pause: 1-unit nudge invisible. Fixed build100.
+
+## 2026-11-08 build104 live session (fixed in build105)
+- WeChat banner covering the title → model read the banner's sender as the chat → group talk answered into 主人蓝海乐 (privacy risk). Fixed: centred navigation title via local OCR, banner waited out.
+- Reply stayed in the input box: board Enter does nothing while Lan Agent keyboard is up. Fixed: keyboard return (newline), board Enter fallback.
+- flickhome sometimes opens the app switcher; page scan swiped into the App Library; app opening failed for 备忘录/美团/微信. Fixed: Home verified on screen, App Library search.
+- Part done refused by whole-task checks; refused count not reset after help; single-part tasks never reached Codex. Fixed.
