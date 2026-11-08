@@ -494,7 +494,7 @@ import Foundation
     /// always moves, since it follows a tap that changed nothing.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
-        let before = screen?.frame  // the screen before the move: where the pointer arrives is what changes
+        let before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
         if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
             try await device.send("click")
@@ -513,7 +513,7 @@ import Foundation
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
             log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
-            try await arrive(x, y, before: before)
+            try await arrive(x, y, before: before, began: began)
             try await device.send("click")
             if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
@@ -524,10 +524,10 @@ import Foundation
         if aim {
             // a precise tap: the arrival check first; the older wiggle search only if it did not see the pointer there
             try await point(x, y, aim: false)
-            if try await arrive(x, y, before: before) != .onTarget { try await self.aim(x, y, required: true) }
+            if try await arrive(x, y, before: before, began: began) != .onTarget { try await self.aim(x, y, required: true) }
         } else {
             try await point(x, y, aim: false)
-            try await arrive(x, y, before: before)
+            try await arrive(x, y, before: before, began: began)
         }
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
@@ -545,13 +545,24 @@ import Foundation
     /// is corrected by a short move (short moves are near linear) and looked at once more. Unseen (the screen itself
     /// changed there), the click goes at the estimate as before.
     @discardableResult
-    func arrive(_ x: Double, _ y: Double, before: Data?) async throws -> Arrival {
-        let seen = try await look(x, y, before: before)
+    func arrive(_ x: Double, _ y: Double, before: Data?, began: Double) async throws -> Arrival {
+        let seen = try await look(x, y, before: before, began: began)
         lastArrival = seen
         return seen
     }
 
-    private func look(_ x: Double, _ y: Double, before: Data?) async throws -> Arrival {
+    /// Accuracy test 11-08 (sharing on, real touches): where the eye saw the pointer it was right to 0.1-0.2 %, but
+    /// 9 of 20 taps never looked and the corrections did not land. Three causes, measured there:
+    /// - Direct capture publishes only on change, at most every 0.25 s. The frame of the pointer stopping often came
+    ///   in before the move command answered, and the wait for a "new" frame began after the answer: none came.
+    ///   The wait now begins when the move began, then lets one publish period pass so the last change is in.
+    /// - The board sends 4 units as one count and keeps the rest for the next move, and one count moves the pointer
+    ///   3-7 pt: corrections of 2-5 units often sent nothing, and the one correction was never looked at again.
+    ///   Corrections now repeat, looking each time, until each axis is within the tolerance; what a unit really
+    ///   moved is learned from what was seen.
+    /// - After a correction of a few pixels the old and new disks overlap and their diff shows no disk: every look
+    ///   compares against the frame before the whole move, where the pointer was elsewhere.
+    private func look(_ x: Double, _ y: Double, before: Data?, began: Double) async throws -> Arrival {
         // Accuracy test 11-08: after a relaunch screen sharing was off, every tap skipped this without a word and
         // 20 spots were blind. No frame is said, every time.
         guard let screen, let span else { return .unseen }
@@ -559,40 +570,84 @@ import Foundation
             log(String(format: "arrive (%.3f, %.3f): no screen frame before the move (screen sharing off?); clicking at the estimate", x, y))
             return .unseen
         }
-        var last = before
-        for pass in 1...2 {
-            let moved = now()
-            guard let first = await screen.fresh(since: moved - 0.05, timeout: 0.9) else {
-                log(String(format: "arrive (%.3f, %.3f): no frame after the move; clicking at the estimate", x, y))
-                return .unseen
-            }
-            await screen.settled(quiet: 0.12, least: 0.05, most: 0.5)  // the pointer drawn where it stopped
-            let after = screen.frame ?? first
-            guard let seen = Vision.arrival(last, after, near: CGPoint(x: x, y: y)) else {
-                log(String(format: "arrive (%.3f, %.3f): pointer not seen (pass %ld); clicking at the estimate", x, y, pass))
-                return .unseen
-            }
+        let target = CGPoint(x: x, y: y)
+        guard let first = await stopped(since: began, on: screen, wait: 0.9) else {
+            log(String(format: "arrive (%.3f, %.3f): no frame after the move; clicking at the estimate", x, y))
+            return .unseen
+        }
+        guard var seen = Vision.arrival(before, first, near: target) else {
+            log(String(format: "arrive (%.3f, %.3f): pointer not seen; clicking at the estimate", x, y))
+            return .unseen
+        }
+        var corrections = 0
+        while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)
-            if max(abs(ex), abs(ey)) <= Self.arrivalTolerance {
-                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f)%@", x, y, seen.x, seen.y, pass > 1 ? " after correcting" : ""))
+            let offX = abs(ex) > Self.arrivalTolerance, offY = abs(ey) > Self.arrivalTolerance
+            if !offX && !offY {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f) after %ld correction(s)", x, y, seen.x, seen.y, corrections))
                 return .onTarget
             }
-            guard max(abs(ex), abs(ey)) <= 0.15, pass < 2 else {
-                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), %@", x, y, seen.x, seen.y,
-                           pass < 2 ? "too far to trust; clicking at the estimate" : "still off after one correction"))
+            guard max(abs(ex), abs(ey)) <= 0.15 else {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), too far to trust; clicking at the estimate", x, y, seen.x, seen.y))
                 return .offTarget
             }
-            let ux = Int((ex * Double(span.w)).rounded()), uy = Int((ey * Double(span.h)).rounded())
+            guard corrections < Self.maxCorrections else {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), still off after %ld corrections", x, y, seen.x, seen.y, corrections))
+                return .offTarget
+            }
+            let ux = offX ? Self.fineUnits(ex, perUnit: fineX ?? 1 / Double(span.w)) : 0
+            let uy = offY ? Self.fineUnits(ey, perUnit: fineY ?? 1 / Double(span.h)) : 0
             log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f); correcting by %ld, %ld units", x, y, seen.x, seen.y, ux, uy))
-            last = after
+            corrections += 1
+            let moved = now()
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             if let p = pos { pos = (p.0 + ux, p.1 + uy) }
+            // Nothing on screen changed: the board held the counts back (it keeps a remainder); the same again sends them.
+            guard let after = await stopped(since: moved, on: screen, wait: 0.6) else { continue }
+            guard let next = Vision.arrival(before, after, near: target) else {
+                log(String(format: "arrive (%.3f, %.3f): pointer not seen after a correction; clicking at the estimate", x, y))
+                return .unseen
+            }
+            if ux != 0 { fineX = Self.learned(fineX ?? 1 / Double(span.w), moved: Double(next.x - seen.x), units: ux) }
+            if uy != 0 { fineY = Self.learned(fineY ?? 1 / Double(span.h), moved: Double(next.y - seen.y), units: uy) }
+            seen = next
         }
-        return .offTarget
     }
+
+    /// The newest frame once the pointer has stopped after a move that began at `began`: something captured since
+    /// then, and then one publish period with nothing newer, so the last change is in. nil: nothing changed.
+    private func stopped(since began: Double, on screen: ScreenSource, wait: Double) async -> Data? {
+        guard await screen.fresh(since: began, timeout: wait) != nil else { return nil }
+        let answered = now(), cap = answered + 0.8
+        while now() < cap, now() - max(answered, screen.updated) < Self.publishQuiet {
+            if Task.isCancelled { break }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+        return screen.frame
+    }
+
+    /// Units for a correction of `error` (screen fraction): at least one board count (4 units), so it always sends one.
+    static func fineUnits(_ error: Double, perUnit: Double) -> Int {
+        let units = Int((error / max(perUnit, 1e-6)).rounded())
+        return abs(units) >= unitsPerCount ? units : (error < 0 ? -unitsPerCount : unitsPerCount)
+    }
+
+    /// Screen fraction per unit a short correction really moved, blended into the estimate (a move the board held
+    /// back, one too small to measure, or one the wrong way teaches nothing).
+    static func learned(_ estimate: Double, moved: Double, units: Int) -> Double {
+        let measured = moved / Double(units)
+        guard abs(moved) >= 0.002, measured > 0 else { return estimate }
+        return min(max(0.5 * estimate + 0.5 * measured, estimate / 3), estimate * 3)
+    }
+
+    /// Screen fraction per unit of short corrections, learned from what the eye saw (nil: from the span).
+    private(set) var fineX: Double?, fineY: Double?
 
     /// A tap within this of its target needs no correction (fraction of the screen; a WeChat list row is ~0.09 high).
     static let arrivalTolerance = 0.008
+    static let maxCorrections = 3
+    static let unitsPerCount = 4      // the board's BLE_MOVE_DIV: 4 app units make one HID count over Bluetooth
+    static let publishQuiet = 0.35    // direct capture publishes at most every 0.25 s; one period and the encode
 
     /// Press and hold at a spot, then let go: the globe key shows its keyboard menu only on a long press (a click
     /// switches nothing visible, user 11-08). Like tap, the spot just clicked is held again without moving.
