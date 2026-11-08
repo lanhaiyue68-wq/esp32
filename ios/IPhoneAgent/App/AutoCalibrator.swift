@@ -111,7 +111,9 @@ import UIKit
     /// The accuracy test (user 11-08: prove the hand with numbers). On the board, 20 spots over the whole screen are
     /// tapped the way a task taps them (from the corner, hops, the right border, the arrival check) and each real touch
     /// is caught, so every miss is measured, not guessed. It changes nothing; the log keeps each spot and a summary.
-    static let accuracySpots: [(Double, Double)] = [0.1, 0.3, 0.5, 0.7, 0.9].flatMap { y in [0.12, 0.38, 0.63, 0.9].map { ($0, y) } }
+    // build104 live 11-08: with the closed loop the spot (0.9, 0.1) landed on the board's Back button and ended the
+    // test 4 times (blind taps had missed it by 3 %); no row this close to the top.
+    static let accuracySpots: [(Double, Double)] = [0.2, 0.35, 0.5, 0.7, 0.9].flatMap { y in [0.12, 0.38, 0.63, 0.9].map { ($0, y) } }
 
     func testAccuracy() {
         guard !busy, app.pointer.calibrated, DeviceScreen.foreground else { return }
