@@ -678,6 +678,9 @@ extension Pointer: Gestures {}
         case .skip:
             record(nil, ["action": .str("skipped"), "reason": .str("the user asked to skip this step: \(reason)")])
         }
+        // build104 live 11-08: after the user's answer the next refused done stopped the run again at once (the count
+        // of refusals went on from 3). The user's answer starts the count again.
+        doneRejected = 0
         await screen?.settled()
         try await replan(stuck: true)
         return true
