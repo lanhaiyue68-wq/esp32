@@ -468,6 +468,10 @@ extension Pointer: Gestures {}
 
     static let noKeyboardReason = "Not typed: no keyboard is on screen, so the input box is not focused (the last tap "
         + "missed it). Tap the input box again (this tap is aimed) and type only once the keyboard shows."
+    /// Where a tap that changed nothing is tried next, in screen fractions: up first (misses land low near the top,
+    /// live test 11-08), then down, left, right. Each stays within sameSpot's 0.03, so the count goes on.
+    static let deadTapNudges: [(Double, Double)] = [(0, -0.025), (0, 0.025), (-0.025, 0), (0.025, 0)]
+
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
         + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one."
 
@@ -919,9 +923,21 @@ extension Pointer: Gestures {}
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0 }
-                if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
-                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
-                    return false
+                if name == "tap" {
+                    let dead = deadTaps.filter({ Self.sameSpot($0, act) }).count
+                    if dead > Self.deadTapNudges.count {
+                        record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
+                        return false
+                    }
+                    if dead > 0, let x = act["x"]?.double, let y = act["y"]?.double {
+                        // Live test 11-08: the alarm's ✓ was missed by 0.027 down, and the same spot was clicked again
+                        // and again. User: where it takes repeated clicks, click around that spot until it is found.
+                        let (dx, dy) = Self.deadTapNudges[dead - 1]
+                        act["x"] = .num(min(max(x + dx * 1000, 0), 1000))
+                        act["y"] = .num(min(max(y + dy * 1000, 0), 1000))
+                        act["nudged"] = .int(dead)
+                        DebugLog.write(String(format: "tap (%.0f, %.0f) did nothing %ld time(s); trying (%+.3f, %+.3f) off it", x, y, dead, dx, dy))
+                    }
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()

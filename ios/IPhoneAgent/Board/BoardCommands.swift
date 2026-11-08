@@ -253,8 +253,11 @@ extension HIDDevice {
             do {
                 // nudge only a phone that is awake and mirroring: there is nothing to keep awake otherwise
                 if now() - last > idle && screenLive() {
-                    try await send("move 1 0")
-                    try await send("move -1 0")
+                    // held a moment: there and back within one display frame changes no pixel, and the watch needs a
+                    // frame now and then on a still screen (VideoFeed.watchable)
+                    try await send("move 4 0")
+                    try await Task.sleep(nanoseconds: 120_000_000)
+                    try await send("move -4 0")
                 } else {
                     try await send("ping")
                 }

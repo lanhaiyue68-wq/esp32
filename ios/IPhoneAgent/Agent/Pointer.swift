@@ -267,7 +267,7 @@ import Foundation
             pos = nil
             guard !unseenClicks else {
                 log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
-                try await moveTo(dx(x), dy(y))
+                if beyondReach(x) { try await fromRightBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
                 return
             }
             throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
@@ -455,8 +455,13 @@ import Foundation
         try await ProbeMotion.home(device)
         pos = nil
         let ty = dy(y), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
-        try await ProbeMotion.move(device, push, ty)
+        // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
+        // ordinary move; after the short way back it follows a move like the calibrated ones.
+        try await ProbeMotion.move(device, push, 0)
+        try await Task.sleep(nanoseconds: 150_000_000)
         try await ProbeMotion.move(device, -back, 0)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await ProbeMotion.move(device, 0, ty)
         (pos, moves, hops) = ((dx(x), ty), 1, 0)
         log(String(format: "point (%.3f, %.3f): past the calibrated %.3f; from the right border, %ld units back", x, y, mx.reach, back))
     }

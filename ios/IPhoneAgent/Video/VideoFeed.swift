@@ -282,12 +282,15 @@ extension ScreenSource {
         while !usable(after: after) {
             try Task.checkCancellation()
             guard device?.connected == true else { throw VideoReadinessError.boardDisconnected }
-            if !nudged && after == nil && now() - began > 0.4, let device {
+            if !nudged && now() - began > 0.4, let device {
                 // A still screen publishes nothing: show the pointer for a moment so the system sends a frame
-                // (logs(9) 11-08: a run paused with "超过 2 秒未收到系统画面确认" on an idle WeChat list).
+                // (logs(9) 11-08: a run paused with "超过 2 秒未收到系统画面确认" on an idle WeChat list). Live test
+                // 11-08: 1 unit there and back within one display frame changed no pixel, and a report run paused the
+                // same way mid-run (a frame after its last action was asked for): 4 units, held a moment, any time.
                 nudged = true
-                _ = try? await device.send("move 1 0")
-                _ = try? await device.send("move -1 0")
+                _ = try? await device.send("move 4 0")
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                _ = try? await device.send("move -4 0")
             }
             guard sharingActive, now() < deadline else {
                 throw BlindError(reason: "直接取屏尚未就绪：\(captureReadinessText)。请回 App 重新共享整个屏幕")

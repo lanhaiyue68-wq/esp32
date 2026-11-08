@@ -33,12 +33,13 @@ enum AppPlaces {
 
     static func normalized(_ name: String) -> String { name.lowercased().filter { !$0.isWhitespace } }
 
-    /// The centre of the label that reads exactly `name` (an app's name under its icon), the topmost if several.
+    /// The centre of the label that reads `name` (an app's name under its icon) in any of its forms (时钟, 時鐘, Clock),
+    /// the topmost if several.
     static func label(_ name: String, in rows: [[CandidatePicker.Piece]], below top: Double = 0.07) -> CGPoint? {
-        let want = normalized(name)
-        guard !want.isEmpty else { return nil }
+        let wants = Set(AppNames.variants(name).map(normalized).filter { !$0.isEmpty })
+        guard !wants.isEmpty else { return nil }
         return rows.flatMap { $0 }
-            .filter { normalized($0.text) == want && $0.box.midY > top }
+            .filter { wants.contains(normalized($0.text)) && $0.box.midY > top }
             .min { $0.box.midY < $1.box.midY }
             .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
     }
@@ -51,6 +52,49 @@ enum AppPlaces {
         rows.flatMap { $0 }
             .first { ["搜索", "搜尋", "search"].contains(normalized($0.text)) && $0.box.midY > 0.7 }
             .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+}
+
+/// An app's name as the phone shows it. The model names apps in Simplified Chinese; the test phone runs in Traditional
+/// Chinese (live test 11-08: "open 时钟" and "open 无边记" each spent ~30 s on pages and Search and found nothing,
+/// twice in one run). Character conversion covers most names; Taiwan names that differ, and English, come from here.
+enum AppNames {
+    static let aliases: [String: (tw: String?, en: String)] = [
+        "时钟": ("時鐘", "Clock"), "无边记": ("無邊記", "Freeform"), "设置": ("設定", "Settings"),
+        "信息": ("訊息", "Messages"), "日历": ("行事曆", "Calendar"), "计算器": ("計算機", "Calculator"),
+        "快捷指令": ("捷徑", "Shortcuts"), "文件": ("檔案", "Files"), "备忘录": ("備忘錄", "Notes"),
+        "相机": ("相機", "Camera"), "照片": (nil, "Photos"), "天气": ("天氣", "Weather"), "地图": ("地圖", "Maps"),
+        "提醒事项": ("提醒事項", "Reminders"), "电话": ("電話", "Phone"), "邮件": ("郵件", "Mail"),
+        "音乐": ("音樂", "Music"), "钱包": ("錢包", "Wallet"), "健康": (nil, "Health"), "翻译": ("翻譯", "Translate"),
+        "指南针": ("指南針", "Compass"), "图书": ("書籍", "Books"), "播客": ("Podcast", "Podcasts"),
+        "通讯录": ("聯絡人", "Contacts"), "微信": (nil, "WeChat"), "浏览器": (nil, "Safari"), "录音机": ("語音備忘錄", "Voice Memos")]
+
+    static func hant(_ s: String) -> String { s.applyingTransform(StringTransform(rawValue: "Hans-Hant"), reverse: false) ?? s }
+    static func hans(_ s: String) -> String { s.applyingTransform(StringTransform(rawValue: "Hant-Hans"), reverse: false) ?? s }
+
+    /// The Simplified name this one stands for: itself, its character conversion, or the name whose alias it is.
+    private static func base(_ name: String) -> String {
+        let simple = hans(name)
+        if aliases[simple] != nil { return simple }
+        let key = AppPlaces.normalized(name)
+        return aliases.first { AppPlaces.normalized($0.value.en) == key || $0.value.tw.map(AppPlaces.normalized) == key }?.key ?? simple
+    }
+
+    /// Every form the phone may show, the given one first.
+    static func variants(_ name: String) -> [String] {
+        let b = base(name), alias = aliases[b]
+        var out: [String] = []
+        for v in [name, alias?.tw, hant(b), b, alias?.en].compactMap({ $0 }) where !v.isEmpty && !out.contains(v) { out.append(v) }
+        return out
+    }
+
+    /// The form to type into Search: the phone's own language.
+    static func searchName(_ name: String, language: String = Locale.preferredLanguages.first ?? "") -> String {
+        let b = base(name), alias = aliases[b], l = language.lowercased()
+        if l.hasPrefix("zh-hant") || l.hasPrefix("zh-tw") || l.hasPrefix("zh-hk") || l.hasPrefix("zh-mo") { return alias?.tw ?? hant(b) }
+        if l.hasPrefix("zh") { return b }
+        if l.hasPrefix("en") { return alias?.en ?? name }
+        return name
     }
 }
 
@@ -103,7 +147,9 @@ extension AppModel {
             try await pointer.swipe(0.5, 0.32, 0.5, 0.62, hold: false)  // swipe down on the Home Screen: Search
         }
         try? await Task.sleep(nanoseconds: 800_000_000)
-        guard await showLanAgentKeyboard(), await keyboardBridge.type(name, enter: false, within: 4) else {
+        let typed = AppNames.searchName(name)
+        if typed != name { DebugLog.write("open \(name): searching for \(typed), the phone's own name") }
+        guard await showLanAgentKeyboard(), await keyboardBridge.type(typed, enter: false, within: 4) else {
             DebugLog.write("open \(name): Search did not take the name")
             return false
         }
