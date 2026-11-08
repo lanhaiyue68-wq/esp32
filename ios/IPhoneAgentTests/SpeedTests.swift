@@ -29,7 +29,8 @@ import XCTest
         let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         agent.directStart = true
         try await finish(agent)
-        XCTAssertEqual(planner.prompts.count, 1)
+        // User 11-08: Codex then drives; a reply of its with no action hands the step back to the executor.
+        XCTAssertEqual(planner.prompts.count, 2)
         XCTAssertTrue(planner.prompts.first?.contains("got stuck") == true)
         XCTAssertEqual(agent.steps.last?["action"], .str("done"))
     }

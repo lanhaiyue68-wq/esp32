@@ -1401,6 +1401,11 @@ extension Pointer: Gestures {}
             reply = text
             var acts: [JObject]
             do { acts = try Actions.parseActions(text) } catch {
+                if driving {  // Codex answered with no action: Doubao goes on rather than Codex being asked again and again
+                    takeover = 0
+                    DebugLog.write("takeover: Codex's reply held no action; the executor goes on")
+                    return try await nextActions()
+                }
                 prompt += "\n\nYour previous reply could not be parsed (\(String(error.localizedDescription.prefix(160))))."
                     + " No action from that reply was executed."
                     + " Reply with one brief THINK line followed immediately by valid DO lines; no extra explanation."
