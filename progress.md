@@ -486,3 +486,9 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 - User's design: a task not done before is driven by Codex from the start and remembered; then Doubao follows; Codex only if it stalls.
 - Results on build106: brightness 159 s, note 129 s, timer 209 s (Codex one tap after 14 wrong swipes), calendar 43 s, all done; two others were cut by limits/pause. Doubao averages ~9 s a step.
 - CI lanhaiyue-web 42500870800: 563 tests 0 failures. Desktop Lan-Agent-build107-unsigned.ipa (SHA256 b9a7dd4574a654e6b1d33d59a0e207cc13b1eed3ada500da8de38fe4e861b07f); app + both appex 107; build106 to the Recycle Bin.
+
+## 2026-11-09 build108: Home Screen map, keyboard before the flick, Cmd+Space
+- Measured: with a keyboard up the flick opens the app switcher; Cmd+Space opens Search from the Home Screen only; Return before the results opens nothing.
+- Results on build107: note, brightness, web, timer each twice, all done; AMap 174 s, WeChat to the test group 259 s (bubble seen in the frame); Xiaohongshu cut by the limit, Meituan needs identity verification, Douyin failed on Home (fixed here).
+- Added: every Home Screen page read once and every app's page and spot kept (user's idea), opened by page; Search only for apps on no page; recipes say each gesture's purpose; /ocr route.
+- CI lanhaiyue-web 42507304259: 568 tests 0 failures. Desktop Lan-Agent-build108-unsigned.ipa (SHA256 5ea739181c069bd73840caa144f2c135d4d30ed694e5efb2c33162028f0b32f8); build107 to the Recycle Bin.
