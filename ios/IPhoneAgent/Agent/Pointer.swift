@@ -656,9 +656,13 @@ import Foundation
         if let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "long press (%.3f, %.3f): same spot as the last click; holding without moving", x, y))
         } else {
+            // build105 live 11-08: the globe key was held 9 of 11 times without its menu coming up: a long press went
+            // to the blind estimate (bottom row: 1-4 % off, the key 10 % x 5 %), then held the same spot again.
+            let before = screen?.frame, began = now()
             lastClick = nil
             pos = nil
             try await point(x, y)
+            try await arrive(x, y, before: before, began: began)
         }
         try await device.send("press")
         do { try await Task.sleep(nanoseconds: UInt64(seconds * 1e9)) } catch {
