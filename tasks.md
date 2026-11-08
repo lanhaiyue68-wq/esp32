@@ -282,3 +282,6 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] Phase C (part): ChatGPT Plus plans, Doubao acts, Doubao fallback; steps per plan part (build101).
 - [ ] Device test build101 (Plus signed in; the 3-part owner task end to end, live over USB).
 - [ ] Phase C/D rest: scheduler, think parts in parallel, per-part results.
+- [x] build103: closed-loop taps (Vision.arrival) + accuracy test.
+- [ ] User runs Settings › 準度測試 on build103; pull "accuracy" lines over USB. Target: 20/20 within 1 %.
+- [ ] Then step 2: Codex commanding per part (split, verify each part, take over when stuck); step 3: tools (AlarmKit, EventKit, URL schemes).
