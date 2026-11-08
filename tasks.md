@@ -285,5 +285,5 @@ logs39 pending: reproduce five failures; implement consistent calibration/runtim
 - [x] build103: closed-loop taps (Vision.arrival) + accuracy test.
 - [ ] User runs Settings › 準度測試 on build103; pull "accuracy" lines over USB. Target: 20/20 within 1 %.
 - [ ] Then step 2: Codex commanding per part (split, verify each part, take over when stuck); step 3: tools (AlarmKit, EventKit, URL schemes).
-- [ ] User fixes GitHub billing (ChenQian-hub or caoshihui) → CI on 924ac8d (all tests) → deliver build104 IPA + test steps.
+- [x] build104 built on lanhaiyue-web (542/0) and delivered.
 - [ ] Live USB session: varied everyday tasks in several apps; collect all failures, fix by cause in one build.
