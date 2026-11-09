@@ -16,7 +16,7 @@ extension AppModel {
     func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
              frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false, keyboardGuard: Bool = false,
-             learnedRoutes: Bool = true) async {
+             learnedRoutes: Bool = true, approveSend: ((String) async -> Bool)? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -33,6 +33,7 @@ extension AppModel {
         agent.returnSends = returnSends
         agent.keyboardGuard = keyboardGuard
         agent.learnedRoutes = learnedRoutes
+        agent.approveSend = approveSend  // only a task from the cloud asks; every other run clears it
         await startAgent(task)
     }
 

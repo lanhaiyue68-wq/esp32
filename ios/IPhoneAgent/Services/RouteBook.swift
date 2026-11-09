@@ -62,18 +62,30 @@ import Foundation
     func clear() { routes = []; recipes = []; save() }
     private var recipeFile: URL? { file?.deletingLastPathComponent().appendingPathComponent("recipes-v1.json") }
 
-    /// The way the newest similar task was done. An app or a label the old task named must be named by this one too:
-    /// a reply to 蓝海乐 must not follow the way into 测试群.
+    /// The way the newest similar task was done. An app the old task named must be named by this one too ("go to Claude"
+    /// is not the way into ChatGPT). A chat or a label it named and this one does not is the same way to another place
+    /// (user 11-10: "方法都是一样的，只是换了个群"): the old name is taken out, so a reply to 蓝海乐 cannot follow the way
+    /// into 测试群, and the model goes where this goal says.
     func recipe(for task: String) -> Recipe? {
         guard enabled else { return nil }
         prune()
         let wanted = task.lowercased()
-        return recipes.first { recipe in
-            guard Self.similar(recipe.task, task) else { return false }
+        for recipe in recipes where Self.similar(recipe.task, task) {
             let named = recipe.task.lowercased()
-            return Self.names(in: recipe.lines).allSatisfy { !named.contains($0) || wanted.contains($0) }
+            let apps = recipe.lines.filter { $0.hasPrefix("open ") }.map { String($0.dropFirst(5)).lowercased() }
+            guard apps.allSatisfy({ !named.contains($0) || wanted.contains($0) }) else { continue }
+            let elsewhere = Self.names(in: recipe.lines).filter { !apps.contains($0) && named.contains($0) && !wanted.contains($0) }
+            guard !elsewhere.isEmpty else { return recipe }
+            var adapted = recipe
+            adapted.lines = recipe.lines.map { line in
+                elsewhere.reduce(line) { $0.replacingOccurrences(of: $1, with: Self.otherPlace, options: .caseInsensitive) }
+            }
+            return adapted
         }
+        return nil
     }
+
+    static let otherPlace = "[the one this goal names]"
 
     func storeRecipe(task: String, lines: [String]) {
         guard enabled, !lines.isEmpty else { return }

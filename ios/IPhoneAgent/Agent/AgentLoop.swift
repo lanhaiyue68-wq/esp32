@@ -511,6 +511,44 @@ extension Pointer: Gestures {}
     static let refusalsInARow = 3
     static let offlineWaitLimit = 24  // waits of 5 s for the network before the user is asked
     private var offlineWaits = 0
+    private var sendBlocks = 0
+    /// Set for a task the cloud gave: asked before each message is sent; false stops the run with nothing sent.
+    var approveSend: ((String) async -> Bool)?
+    private var approvedTexts: Set<String> = []
+    static let notApprovedAnswer = "没有发送：这条消息未获批准。"
+
+    static let wrongPlaceReason = "Not sent: this is not where the goal says to send. Go to the conversation the goal names "
+        + "(back to the list, or search for it), then type and send there. Seen: "
+
+    static let sendCheck = """
+    An agent on an iPhone is about to send a message. You get the goal and the screen now.
+    Reply with exactly one line: OK, or NO: where it is instead, in a few words.
+    Say NO only when the conversation open on the screen (its name is at the top) is clearly not the one the goal says to send to.
+    Never judge the message itself.
+    """
+
+    /// The goal sends a message somewhere: a check before each send is worth its seconds.
+    static func asksToSend(_ task: String) -> Bool {
+        let t = task.lowercased()
+        let verbs = ["發", "发", "傳給", "传给", "回覆", "回复", "send", "reply"]
+        let places = ["群", "給", "给", "聊天", "訊息", "消息", "message", "chat"]
+        return verbs.contains { t.contains($0) } && places.contains { t.contains($0) }
+    }
+
+    /// Where a message would go now, if that is not where the goal says (nil: fine, or the check could not be made).
+    private func wrongPlace(frame: Data?) async -> String? {
+        guard let model = actor else { return nil }
+        do {
+            let reply = try await model.chat(system: Self.sendCheck, text: "Goal: \(task)\n\nThe image is the screen now.",
+                                             image: frame, maxTokens: 80, temperature: 0).text
+            trace?.write(kind: "send check", ["reply": .str(String(reply.prefix(300)))])
+            DebugLog.write("send check: \(reply.prefix(160))")
+            return Self.wrongness(reply)
+        } catch {
+            DebugLog.write("send check failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
     static let leaveLimit = 2       // times the same way off the same screen is taken; the next is refused
 
     static let waitReason = "Refused: you waited several times and nothing changed, so more waiting will not help. Change "
@@ -645,7 +683,8 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
-        (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits) = ([], [], 0, 0, 0, 0)
+        (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
+        approvedTexts = []
         checksLeft = 2
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
@@ -903,6 +942,8 @@ extension Pointer: Gestures {}
         for (i, planned) in acts.enumerated() {
             var act = planned.act
             if act["action"]?.str == "swipe" { act = Self.safeSwipe(act, after: steps) }
+            // Over USB 11-10 one reply opened WeChat twice, 18 s each.
+            if i > 0, act["action"]?.str == "open", acts[i - 1].act["action"]?.str == "open", acts[i - 1].act["app"] == act["app"] { continue }
             let ourKeyboard = ourKeyboardOnScreen?() == true
             if ourKeyboard ? Self.onOurReturnKey(act) : (Self.onReturnKey(act) && screen?.frame.map({ CandidatePicker.keyboardUp(in: $0) }) == true) {
                 // The keyboard's bottom-right key (发送 / 换行 / 前往) is Return, which the board's keyboard presses
@@ -1117,6 +1158,30 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
+                // Over USB 11-10 the way into 测试群 was followed for 验证群: WeChat opened on the last chat and the message went
+                // there. Before a message goes, something looks at where it would go.
+                if unsent != nil, endAfterSend == nil, Self.sends(act) || act["learned"] == .str("send"), Self.asksToSend(task),
+                   let wrong = await wrongPlace(frame: screen?.frame ?? planned.shot) {
+                    sendBlocks += 1
+                    if sendBlocks >= 2 {
+                        sendBlocks = 0
+                        return try await changeOfPlan(planned.shot, "about to send into the wrong place: \(wrong)")
+                    }
+                    record(planned.shot, ["action": .str("send blocked"), "reason": .str(Self.wrongPlaceReason + wrong)])
+                    return false
+                }
+                // Customer spec 11-10 (§0.6, §13.3): a message from a task the cloud gave waits for approval before it goes.
+                if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
+                   !approvedTexts.contains(Self.typedKey(text)) {
+                    record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(text.prefix(120)))])
+                    let approved = await approveSend(text)
+                    try Task.checkCancellation()
+                    guard approved else {
+                        record(screen?.frame, ["action": .str("done"), "answer": .str(Self.notApprovedAnswer), "approval": .str("rejected")])
+                        return true
+                    }
+                    approvedTexts.insert(Self.typedKey(text))
+                }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 if name == "tap", missed || aimNext || (unsent != nil && Self.sends(act)) {
@@ -1239,6 +1304,13 @@ extension Pointer: Gestures {}
         timing.frameMs += try await settle()
         // feedback for the next round
         steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+        // A swipe from the margin over a page that moves by itself (Weather's sky) "changed" the screen without scrolling it:
+        // over USB 11-10, 20 swipes on Beijing's forecast and the run ran out of time. The words tell whether it scrolled.
+        if let last = steps.last, last["action"]?.str == "swipe", last["x1"]?.int == Self.marginX, let was = seen, let shown = screen?.frame {
+            let before = await CandidatePicker.rowsOffMain(in: was, top: 0.055, bottom: 1)
+            let after = await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)
+            if Self.sameWords(before, after) { steps[steps.count - 1]["scrolled"] = .bool(false) }
+        }
         noteDeadTap()
         return false
     }
@@ -1514,14 +1586,16 @@ extension Pointer: Gestures {}
     /// A list is scrolled from the screen's margin: a press that starts on a button can click it (over USB 11-09 three
     /// swipes each moved a permission sheet a step on). Measured in Settings: from the margin it scrolls the same. Not from
     /// the floating bars at the bottom either. What the margin does not move (a time picker) gets the model's own spot.
+    static let marginX = 40
+
     static func safeSwipe(_ act: JObject, after steps: [JObject]) -> JObject {
         guard let x1 = act["x1"]?.double, let y1 = act["y1"]?.double, let x2 = act["x2"]?.double, let y2 = act["y2"]?.double,
               abs(x2 - x1) < 100, abs(y2 - y1) > 100 else { return act }
         if let last = steps.last(where: { $0["action"]?.str != "stale plan" }), last["action"]?.str == "swipe",
-           last["changed"] == .bool(false) { return act }
+           last["changed"] == .bool(false) || last["scrolled"] == .bool(false) { return act }
         let shift = max(0, max(y1, y2) - 800)
         var safe = act
-        safe["x1"] = .int(40); safe["x2"] = .int(40)
+        safe["x1"] = .int(marginX); safe["x2"] = .int(marginX)
         safe["y1"] = .int(Int(y1 - shift)); safe["y2"] = .int(Int(y2 - shift))
         return safe
     }
@@ -1551,16 +1625,7 @@ extension Pointer: Gestures {}
     /// nothing is wrong or the check itself failed (a check must not stop the work).
     private func wrongClaim(_ answer: String, frame: Data?) async -> String? {
         guard let model = planner ?? actor else { return nil }
-        let did = steps.compactMap { s -> String? in
-            switch s["action"]?.str {
-            case "open": return "opened " + (s["app"]?.str ?? "?")
-            case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
-            case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
-            // Over USB 11-09 a note was reopened from the list, twice, and the check said it never was: it saw no taps.
-            case "tap": return "tapped " + String((s["thought"]?.str ?? "").prefix(60))
-            default: return nil
-            }
-        }.suffix(40).joined(separator: "\n")
+        let did = Self.whatItDid(steps)
         let prompt = "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
         do {
             let reply = try await model.chat(system: Self.doneCheck, text: prompt, image: frame, maxTokens: 120, temperature: 0).text
@@ -1606,10 +1671,30 @@ extension Pointer: Gestures {}
         return true
     }
 
+    /// What a run did, for the check: every app opened, text typed and note, and the last taps. Over USB 11-10 50 calculator
+    /// taps pushed the opening of 淘寶 and 拼多多 out of the last 40 lines, and the check said they were never opened.
+    static func whatItDid(_ steps: [JObject], taps: Int = 20) -> String {
+        let tapIndices = steps.indices.filter { steps[$0]["action"]?.str == "tap" }
+        let kept = Set(tapIndices.suffix(taps))
+        return steps.indices.compactMap { i -> String? in
+            let s = steps[i]
+            switch s["action"]?.str {
+            case "open": return "opened " + (s["app"]?.str ?? "?")
+            case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
+            case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
+            // Over USB 11-09 a note was reopened from the list, twice, and the check said it never was: it saw no taps.
+            case "tap" where kept.contains(i): return "tapped " + String((s["thought"]?.str ?? "").prefix(60))
+            default: return nil
+            }
+        }.joined(separator: "\n")
+    }
+
     /// A remembered way as the plan: its steps as hints, not numbered parts.
     static func rememberedPlan(_ recipe: RouteBook.Recipe) -> String {
         "Do it the way it was done before; adapt any text, time or name to this goal. Where the next steps are clear, "
-            + "answer several DO lines at once (each step costs seconds of thinking), and look at the result:\n"
+            + "answer several DO lines at once (each step costs seconds of thinking), and look at the result. "
+            + "The earlier run may have begun somewhere else (already inside a chat or a page): before typing, check that the "
+            + "screen is where this goal says (the title at the top), and go there first if it is not:\n"
             + recipe.lines.map { "- " + $0 }.joined(separator: "\n")
     }
 

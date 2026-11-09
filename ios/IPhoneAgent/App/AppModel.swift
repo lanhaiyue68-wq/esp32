@@ -95,6 +95,8 @@ import UIKit
     let keepAwake = BackgroundAudio()
     let keyboardBridge = KeyboardBridge()  // Lan Agent's keyboard asks it for text over 127.0.0.1 (specs/004)
     let testChannel = TestChannel()        // tasks and gestures from the USB computer, with the token on the phone
+    let cloud = CloudBridge()              // tasks from the customer's cloud (CloudBridge.swift), off until turned on
+    var cloudSink: AnyCancellable?
     /// WeChat watch (WatchMode.swift): waiting on WeChat, a short run whenever new messages show up.
     @Published var watching = false
     @Published var watchStatus = ""
@@ -154,10 +156,11 @@ import UIKit
             await self?.answerTestChannel(request) ?? .json(["error": .str("not ready")], status: 503)
         }
         testChannel.start()
-        if TestChannel.token() != nil {  // testing is on: the channel must live once the app is in the background
+        if TestChannel.token() != nil || cloud.enabled {  // the channel must live once the app is in the background
             keepAwake.hold = true
             keepAwake.start()
         }
+        connectCloud()
 
         let say: (String) -> Void = { [weak self] in self?.say($0) }
         board.log = say

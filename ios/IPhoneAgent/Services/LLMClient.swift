@@ -67,6 +67,8 @@ struct LLMError: LocalizedError {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30  // no byte for this long = hung; the agent retries
             config.timeoutIntervalForResource = 60  // a step answers in seconds with thinking off; a hang retries sooner
+            config.urlCache = nil  // a model's answer is never asked twice (iOS's disk-write report of 11-09: CFNetwork's cache)
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
             return URLSession(configuration: config)
         }()
     }

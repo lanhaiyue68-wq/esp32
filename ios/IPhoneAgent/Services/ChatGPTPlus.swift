@@ -178,6 +178,14 @@ enum ChatGPTPlus {
         }
     }
 
+    /// Answers are never asked for twice: no disk cache (iOS's disk-write report of 11-09 showed CFNetwork's cache database).
+    private static let answers: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+
     private static func askOnce(_ tokens: Tokens, model: String, system: String?, prompt: String, image: Data?) async throws -> Answer {
         var content: [[String: Any]] = [["type": "input_text", "text": prompt]]
         if let image { content.append(["type": "input_image", "image_url": "data:image/jpeg;base64,\(image.base64EncodedString())"]) }
@@ -198,7 +206,7 @@ enum ChatGPTPlus {
         request.timeoutInterval = 30  // no byte for this long: unreachable (it took 76 s to give up on 11-09)
 
         let started = Date()
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await answers.bytes(for: request)
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
         guard status == 200 else {

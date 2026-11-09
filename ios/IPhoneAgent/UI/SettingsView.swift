@@ -20,6 +20,9 @@ struct SettingsView: View {
                         row("Board", "cable.connector", .blue,
                             value: board.connected ? board.name : String(localized: "Not connected"))
                     }
+                    NavigationLink { CloudSettingsView(cloud: app.cloud) } label: {
+                        row("云端任务", "cloud", .teal, value: app.cloud.enabled ? app.cloud.state : "已关闭")
+                    }
                     CalibrationRow(app: app, calibrator: app.calibrator, pointer: app.pointer, feed: app.feed)
                     Button { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) } label: {
                         HStack {

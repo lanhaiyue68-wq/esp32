@@ -205,7 +205,10 @@ import UIKit
         let routes = RouteBook(file: nil)
         routes.storeRecipe(task: "打开微信给测试群发你好并截图保存", lines: ["open 微信", "tap “测试群”", "type “你好”"])
         XCTAssertNotNil(routes.recipe(for: "打开微信给测试群发早安并截图保存"), "another text, the same chat")
-        XCTAssertNil(routes.recipe(for: "打开微信给测试组发你好并截图保存"), "another chat")
+        // build 115 (user 11-10): another chat follows the same way, with the old chat's name taken out
+        let other = routes.recipe(for: "打开微信给测试组发你好并截图保存")
+        XCTAssertEqual(other?.lines, ["open 微信", "tap “\(RouteBook.otherPlace)”", "type “你好”"])
+        XCTAssertNil(routes.recipe(for: "打开QQ给测试群发你好并截图保存"), "another app is another way")
     }
 }
 
