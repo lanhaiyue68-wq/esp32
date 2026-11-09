@@ -47,7 +47,7 @@ final class DiagnosticFilesTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path)); XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
     }
     func testVideoRingIsBoundedAndKeepsNewest() throws {
-        storage.policy.videoFrames = 2; storage.policy.videoBytes = 2; storage.policy.videoInterval = 05
+        storage.policy.videoFrames = 2; storage.policy.videoBytes = 25
         let active = try run("20261021-000000")
         for n in 1...4 { _ = try put("Documents/traces/20261021-000000/video/00\(n).jpg", bytes: 10) }
         _ = try storage.maintain(active: active)

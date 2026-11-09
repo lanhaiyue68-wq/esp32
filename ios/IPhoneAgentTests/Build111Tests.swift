@@ -32,7 +32,7 @@ import XCTest
         try await first
         try await second
         // One after the other, whichever came first: the second hops from where the first one left the pointer.
-        let shape = board.log.filter { $0 != "curve" }.map { String($0.split(separator: " ")[0]) }
+        let shape = board.log.filter { $0 != "curve" && $0 != "release" }.map { String($0.split(separator: " ")[0]) }
         XCTAssertEqual(shape, ["home", "move", "click", "move", "click"], "\(board.log)")
     }
 
