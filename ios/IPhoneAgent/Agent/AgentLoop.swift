@@ -115,6 +115,9 @@ extension Pointer: Gestures {}
     /// by the planner from the start and its way remembered; from then on the executor follows that way, and the planner
     /// comes only when it stalls. Fixed plans (watching WeChat) are not tasks of this kind.
     var plannerLeadsUnknown = false
+    /// A finished task is looked at once more before it is reported (see wrongClaim). Fixed flows keep their own checks.
+    var verifiesDone = false
+    private var checksLeft = 2
     private var plannerLeads = false
     /// How this task was done the last time it finished (nil: never, or a fixed plan such as watching WeChat).
     private(set) var recipe: RouteBook.Recipe?
@@ -634,6 +637,7 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (notes, departures, circleRefused, blindLooks) = ([], [], 0, 0)
+        checksLeft = 2
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
         if plannerLeads { DebugLog.write("run: not done before; the planner does it and it is remembered") }
@@ -849,7 +853,10 @@ extension Pointer: Gestures {}
         let replied = try await nextActions()
         timing.llmMs = (replied[0].act["think_s"]?.double ?? 0) * 1000
         for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
-            if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) { notes.append(text) }
+            if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) {
+                notes.append(text)
+                gotOn()
+            }
             record(planned.shot, planned.act)
         }
         let acts = replied.filter { $0.act["action"]?.str != "note" }
@@ -863,6 +870,7 @@ extension Pointer: Gestures {}
         defer { metrics?.step(timing) }
         for (i, planned) in acts.enumerated() {
             var act = planned.act
+            if act["action"]?.str == "swipe" { act = Self.safeSwipe(act, after: steps) }
             let ourKeyboard = ourKeyboardOnScreen?() == true
             if ourKeyboard ? Self.onOurReturnKey(act) : (Self.onReturnKey(act) && screen?.frame.map({ CandidatePicker.keyboardUp(in: $0) }) == true) {
                 // The keyboard's bottom-right key (发送 / 换行 / 前往) is Return, which the board's keyboard presses
@@ -967,6 +975,17 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
                 return false
             }
+            if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
+                if checksLeft > 0 {
+                    if let wrong = await wrongClaim(act["answer"]?.str ?? "", frame: screen?.frame ?? planned.shot) {
+                        checksLeft -= 1
+                        record(planned.shot, ["action": .str("done rejected"), "reason": .str(wrong)])
+                        return false
+                    }
+                } else if let answer = act["answer"]?.str {  // told twice and it stands by it: reported, but not as checked
+                    act["answer"] = .str("（未能核實）" + answer)
+                }
+            }
             if name == "done", partFinished(act, shot: planned.shot) { return false }
             if name != "done" && name != "fail" {
                 try await gate?()
@@ -984,10 +1003,13 @@ extension Pointer: Gestures {}
                     let again = lastStale.map { Self.sameSpot($0, act) } ?? false
                     let target = pointerPath(act)
                     // A video behind the controls changes everything and every word stays: ~29 s a step (over USB 11-09).
-                    let safe = again || ((staleRun > 2 || !target.isEmpty)
+                    var safe = again || ((staleRun > 2 || !target.isEmpty)
                         && !Vision.changedNear(seen, screen?.frame, around: target))
-                        || Self.sameWords(CandidatePicker.rows(in: seen ?? Data(), top: 0.055, bottom: 1),
-                                          CandidatePicker.rows(in: screen?.frame ?? Data(), top: 0.055, bottom: 1))
+                    if !safe {
+                        let (was, now) = (seen ?? Data(), screen?.frame ?? Data())
+                        safe = Self.sameWords(await CandidatePicker.rowsOffMain(in: was, top: 0.055, bottom: 1),
+                                              await CandidatePicker.rowsOffMain(in: now, top: 0.055, bottom: 1))
+                    }
                     if !safe {
                         lastStale = act
                         if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh
@@ -1443,6 +1465,71 @@ extension Pointer: Gestures {}
             + " then the next part begins.\n\n"
     }
 
+    /// Something was found or finished: coming back to a screen from here is the work, not a circle. A task of several
+    /// parts goes back and forth by nature, and the guard stopped runs with the first part done (e01, f02, f06 on 11-09).
+    private func gotOn() {
+        (departures, circleRefused, bounceGuard, bounceRefused) = ([], 0, nil, 0)
+    }
+
+    /// A list is scrolled from the screen's margin: a press that starts on a button can click it (over USB 11-09 three
+    /// swipes each moved a permission sheet a step on). Measured in Settings: from the margin it scrolls the same. Not from
+    /// the floating bars at the bottom either. What the margin does not move (a time picker) gets the model's own spot.
+    static func safeSwipe(_ act: JObject, after steps: [JObject]) -> JObject {
+        guard let x1 = act["x1"]?.double, let y1 = act["y1"]?.double, let x2 = act["x2"]?.double, let y2 = act["y2"]?.double,
+              abs(x2 - x1) < 100, abs(y2 - y1) > 100 else { return act }
+        if let last = steps.last(where: { $0["action"]?.str != "stale plan" }), last["action"]?.str == "swipe",
+           last["changed"] == .bool(false) { return act }
+        let shift = max(0, max(y1, y2) - 800)
+        var safe = act
+        safe["x1"] = .int(40); safe["x2"] = .int(40)
+        safe["y1"] = .int(Int(y1 - shift)); safe["y2"] = .int(Int(y2 - shift))
+        return safe
+    }
+
+    static let doneCheck = """
+    You check another agent's finished work on an iPhone. You get the goal, its answer, what it did and noted, and the screen now.
+    Reply with exactly one line: OK, or NO: what is wrong, in a few words.
+    Say NO only for one of these:
+    - Something the goal asks for was not done or is missing from the answer.
+    - A value in the answer (date, number, price, name, count) differs from the notes or from what the screen shows.
+    - The answer reports something from an app the steps never opened.
+    - The answer says something was sent or saved, the screen is where it would show, and it does not show.
+    The screen may have moved on: what was noted earlier stands unless the screen contradicts it. Never judge style or wording.
+    """
+
+    /// Over USB 11-09, 5 of 14 "done" were wrong: a Pinduoduo price from an app never opened, a message never sent, the 17th
+    /// read off a screen saying the 16th. The model's word is not the result: something else looks. What it says, or nil when
+    /// nothing is wrong or the check itself failed (a check must not stop the work).
+    private func wrongClaim(_ answer: String, frame: Data?) async -> String? {
+        guard let model = planner ?? actor else { return nil }
+        let did = steps.compactMap { s -> String? in
+            switch s["action"]?.str {
+            case "open": return "opened " + (s["app"]?.str ?? "?")
+            case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
+            case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
+            default: return nil
+            }
+        }.suffix(40).joined(separator: "\n")
+        let prompt = "Goal: \(task)\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
+        do {
+            let reply = try await model.chat(system: Self.doneCheck, text: prompt, image: frame, maxTokens: 120, temperature: 0).text
+            trace?.write(kind: "done check", ["reply": .str(String(reply.prefix(300)))])
+            DebugLog.write("done check: \(reply.prefix(160))")
+            return Self.wrongness(reply)
+        } catch {
+            DebugLog.write("done check failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func wrongness(_ reply: String) -> String? {
+        let line = reply.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first ?? ""
+        guard line.range(of: #"^NO\b"#, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
+        let why = line.dropFirst(2).trimmingCharacters(in: CharacterSet(charactersIn: " :：,，-"))
+        return "A check of the finished work says: " + (why.isEmpty ? "the answer is not supported" : why)
+            + ". Fix it on the phone or correct the answer, then finish again."
+    }
+
     /// The executor's (or Codex's) "done" on a plan of several parts: the next part begins, the last one ends the run.
     /// A part Codex rescued is done: the executor takes the next one. True: the run goes on.
     private func partFinished(_ act: JObject, shot: Data?) -> Bool {
@@ -1452,6 +1539,7 @@ extension Pointer: Gestures {}
         let found = String((act["answer"]?.str ?? "").prefix(300))
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
+        gotOn()
         (partIndex, stepsInPart) = (partIndex + 1, 0)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
@@ -1551,7 +1639,7 @@ extension Pointer: Gestures {}
         // Phase B (specs/004): the text read on this phone with where it is, so a labelled control is tapped where it
         // really is instead of where the model estimates it from the picture.
         if readsScreenText, let shown = screen?.frame,
-           let list = Self.screenText(CandidatePicker.rows(in: shown, top: 0.055, bottom: 1)) {
+           let list = Self.screenText(await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }
         if ourKeyboardOnScreen?() == true {

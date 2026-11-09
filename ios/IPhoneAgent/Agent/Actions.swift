@@ -20,7 +20,8 @@ enum Actions {
 
     /// One DO line, e.g. "tap 152 362" -> {"action": "tap", "x": 152, "y": 362}.
     static func parseCommand(_ line: String) throws -> JObject {
-        let (head, rest) = partition(line.trimmingCharacters(in: .whitespacesAndNewlines))
+        let (head, whole) = partition(line.trimmingCharacters(in: .whitespacesAndNewlines))
+        let rest = withoutRunOn(whole)
         let name = head.lowercased()
         guard let keys = actions[name] else { throw ParseError(message: "unknown action: \(line.prefix(100))") }
         if let first = keys.first, textArgs.contains(first) {
@@ -58,6 +59,13 @@ enum Actions {
     }
 
     /// Parse a THINK / DO… reply (an optional ZH line is kept); the thought goes on the first action.
+    /// The next label run on in one line is not part of the command: `type 1152"THINK: check the note` typed the thought
+    /// into a note, and the digits in `tap 300 132 THINK: the 2nd row` would be taken for coordinates (11-09).
+    static func withoutRunOn(_ text: String) -> String {
+        guard let label = text.range(of: #""?\s*(?<![A-Za-z])(THINK|DO)\s*[:：]"#, options: .regularExpression) else { return text }
+        return String(text[..<label.lowerBound]).trimmingCharacters(in: .whitespaces)
+    }
+
     static func parseActions(_ text: String) throws -> [JObject] {
         // Some models join THINK and DO on one line (log24). Accept only that explicit labelled form.
         let normalized = text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,

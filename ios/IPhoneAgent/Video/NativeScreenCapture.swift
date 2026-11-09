@@ -30,10 +30,47 @@ enum DirectCaptureEvent {
 
     /// A new stream on what the user already agreed to share: no prompt. The stream can go quiet with no error and no
     /// way back (over USB 11-09: replayd counting screenframeCount=0 for good, sharing "on", every run refused).
+    /// The old stream stays until the new one runs: iOS refuses a start in the background ("無法開始串流"), and stopping
+    /// the old one first lost the sharing three times on 11-09, when it had only been quiet for a moment.
     func restart() -> Bool {
-        guard !stopped, let shared else { return false }
-        select(shared)
+        guard !stopped, let filter = shared else { return false }
+        let id = UUID()
+        let next = SCStream(filter: filter, configuration: Self.configuration(filter), delegate: self)
+        let sink = DirectScreenOutput(generation: id) { [weak self] event in
+            Task { @MainActor in
+                guard let self, !self.stopped, self.generation == id else { return }
+                self.deliver(event)
+            }
+        }
+        do {
+            try next.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
+        } catch {
+            DebugLog.write("capture: no new stream: \(error.localizedDescription); keeping the one there is")
+            return false
+        }
+        next.startCapture { [weak self] error in
+            Task { @MainActor in
+                guard let self, !self.stopped else { next.stopCapture { _ in }; return }
+                if let error {
+                    DebugLog.write("capture: the new stream was refused: \(error.localizedDescription); keeping the one there is")
+                    return
+                }
+                let previous = self.stream
+                self.stream = next; self.output = sink; self.generation = id
+                self.deliver(.began(id))
+                previous?.stopCapture { _ in }
+                DebugLog.write("capture: the new stream runs; the old one is stopped")
+            }
+        }
         return true
+    }
+
+    private static func configuration(_ filter: SCContentFilter) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.capturesAudio = false
+        config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
+        config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
+        return config
     }
 
     func present() {
@@ -71,11 +108,7 @@ enum DirectCaptureEvent {
         let id = UUID()
         generation = id
         deliver(.began(id))
-        let config = SCStreamConfiguration()
-        config.capturesAudio = false
-        config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
-        config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
-        let next = SCStream(filter: filter, configuration: config, delegate: self)
+        let next = SCStream(filter: filter, configuration: Self.configuration(filter), delegate: self)
         let sink = DirectScreenOutput(generation: id) { [weak self] event in
             Task { @MainActor in
                 guard let self, !self.stopped, self.generation == id else { return }

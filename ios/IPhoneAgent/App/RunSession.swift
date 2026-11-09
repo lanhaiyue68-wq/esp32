@@ -73,6 +73,10 @@ extension AppModel {
             try checkStart()
             let plannerModel = try await settings.client("planner")
             agent.planner = PlusChat.planner(fallback: plannerModel)  // phase C: Plus commands, Doubao if it fails
+            agent.verifiesDone = true
+            PlusRest.shared.onFailure = { [weak self] in self?.say($0) }
+            if PlusRest.shared.failures > 0 { say("Codex 目前連不上，這次由豆包規劃；恢復後會自動換回") }
+            DebugLog.write("planner state: \(PlusRest.shared.summary); \(StallWatch.snapshot)")
             try checkStart()
         } catch is CancellationError { return }
         catch {

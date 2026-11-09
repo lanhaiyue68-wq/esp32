@@ -78,6 +78,14 @@ jobs:
             ios/IPhoneAgent-build*-unsigned.ipa
             ios/ipa.sha256
           retention-days: 7
+      - name: Keep the debug symbols
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPhoneAgent-dsym
+          path: ios/build-device/Build/Products/Release-iphoneos/*.dSYM
+          if-no-files-found: warn
+          retention-days: 30
       - name: Preserve failed test evidence
         if: failure() || cancelled()
         uses: actions/upload-artifact@v4

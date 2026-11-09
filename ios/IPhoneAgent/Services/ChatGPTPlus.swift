@@ -195,7 +195,7 @@ enum ChatGPTPlus {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = 90
+        request.timeoutInterval = 30  // no byte for this long: unreachable (it took 76 s to give up on 11-09)
 
         let started = Date()
         let (bytes, response) = try await URLSession.shared.bytes(for: request)

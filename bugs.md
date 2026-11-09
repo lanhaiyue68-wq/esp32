@@ -1,5 +1,9 @@
 # 问题与验证
 
+## 2026-11-09 build 110 真機問題（未修）
+
+Codex 逾時後默默換豆包且每個任務都卡 76 秒（PlusChat.swift:40、ChatGPTPlus.swift:198）；假完成 5 題（e02、f09、f12、f13、f16）；滑動會變點擊（原因未查清，安全問題）；滑動起點容差過嚴，連 3 次偏離就中止（Pointer.swift:15）；擷取重開反而弄丟共享；繞圈保險誤殺。證據與修法：docs/stress-2026-11-09-build110-report.md。
+
 ## 2026-11-09 iOS 擷取停住，App 仍顯示共享中
 
 現象：07:23 起 frame_age 一直增加，所有任務啟動時「直接取屏尚未就绪」。根因：系統 SCStream 不再送畫面也不報錯（replayd Health：screenframeCount=0，_screenTimeSeconds 不動）。修法（build110，未上真機）：等畫面時 3 秒什麼事件都沒有，就用已同意的 filter 重開一條串流（VideoFeed.restartCapture、NativeScreenCapture.restart），15 秒最多一次。其餘 14 類原因見 docs/stress-2026-11-09-report.md。

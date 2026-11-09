@@ -292,8 +292,21 @@ enum CandidatePicker {
         return pieces
     }
 
+    /// rows(in:) away from the main thread. Recognition can take seconds, and while it ran on the main thread the whole
+    /// app stood still: no frames, no answers from the board, no model replies (5-20 s at a time over USB 11-09).
+    static func rowsOffMain(in jpeg: Data, top: Double, bottom: Double) async -> [[Piece]] {
+        await Task.detached(priority: .userInitiated) { CandidatePicker.rows(in: jpeg, top: top, bottom: bottom) }.value
+    }
+
+    static func keyboardUpOffMain(in jpeg: Data) async -> Bool {
+        await Task.detached(priority: .userInitiated) { CandidatePicker.keyboardUp(in: jpeg) }.value
+    }
+
     /// The text lines in a band of the screen (top and bottom 0-1 from the top), each split into pieces.
     static func rows(in jpeg: Data, top: Double, bottom: Double) -> [[Piece]] {
+        let onMain = Thread.isMainThread
+        if onMain { StallWatch.doing = "text recognition" }
+        defer { if onMain { StallWatch.doing = "" } }
         guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return [] }
         let h = Double(image.height)

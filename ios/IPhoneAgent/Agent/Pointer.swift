@@ -230,6 +230,21 @@ import Foundation
         try? JSONEncoder().encode(saved).write(to: file)
     }
 
+    /// One gesture at a time. Over USB 11-09 the end of a run was going Home when the next command came: one gesture
+    /// emptied `pos` while the other waited for the corner, and the next line crashed the app.
+    private var gestureBusy = false
+    private var gestureWaiters: [CheckedContinuation<Void, Never>] = []
+    @TaskLocal private static var insideGesture = false
+
+    @discardableResult
+    private func oneAtATime<T>(_ body: () async throws -> T) async throws -> T {
+        if Self.insideGesture { return try await body() }
+        if gestureBusy { await withCheckedContinuation { gestureWaiters.append($0) } }
+        gestureBusy = true
+        defer { if gestureWaiters.isEmpty { gestureBusy = false } else { gestureWaiters.removeFirst().resume() } }
+        return try await Self.$insideGesture.withValue(true) { try await body() }
+    }
+
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         if !edgeStart, beyondReach(x) { try await fromRightBorder(x, y) }
@@ -281,8 +296,11 @@ import Foundation
         }
         // A system swipe can start anywhere near its spot along the border: 1% along the home bar is no miss
         // (logs46: the pointer at 0.210 for 0.200 withheld the app switch and the paste hop lost its way).
-        let tolerance = (x: edgeStart && (y <= 0.01 || y >= 0.99) ? Self.edgeAlongTolerance : Self.aimTolerance,
-                         y: edgeStart && (x <= 0.01 || x >= 0.99) ? Self.edgeAlongTolerance : Self.aimTolerance)
+        // A swipe that does not start on the border is no click: 0.9 % off (0.859 for 0.850, turning a Home Screen page)
+        // failed the whole open, and three of those stopped a run over USB 11-09.
+        let swipeStart = edgeStart && !(x <= 0.01 || x >= 0.99 || y <= 0.01 || y >= 0.99)
+        let tolerance = (x: swipeStart || (edgeStart && (y <= 0.01 || y >= 0.99)) ? Self.edgeAlongTolerance : Self.aimTolerance,
+                         y: swipeStart || (edgeStart && (x <= 0.01 || x >= 0.99)) ? Self.edgeAlongTolerance : Self.aimTolerance)
         func onTarget(_ p: CGPoint) -> Bool {
             abs(error(Double(p.x), x)) <= tolerance.x && abs(error(Double(p.y), y)) <= tolerance.y
         }
@@ -318,6 +336,10 @@ import Foundation
         }
         if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
         guard onTarget(found) else {
+            if swipeStart {
+                log(String(format: "aim (%.3f, %.3f): still at (%.3f, %.3f); the swipe starts from there", x, y, found.x, found.y))
+                return
+            }
             pos = nil
             log(String(format: "aim (%.3f, %.3f): still at (%.3f, %.3f); click withheld", x, y, found.x, found.y))
             throw DeviceError(message: "Pointer is still off target after correction; no click was sent. Keep the current draft and inspect another route.")
@@ -432,7 +454,7 @@ import Foundation
             (pos, moves, hops) = ((0, 0), 0, 0)
             await noteCorner(since: homing)
         }
-        let (x, y) = pos!
+        guard let (x, y) = pos else { throw DeviceError(message: "pointer position lost; no move was sent") }
         pos = nil  // unknown until the move succeeds
         if maps != nil && positioning { try await ProbeMotion.move(device, tx - x, ty - y) }
         else { try await device.send("move \(tx - x) \(ty - y)") }
@@ -496,17 +518,25 @@ import Foundation
     /// click landed, so it clicks again without moving (logs(9) 11-08: five globe-key taps each went back to the
     /// corner first, ~3 s apiece). aim: find the pointer and correct it first, and never click unseen; an aimed tap
     /// always moves, since it follows a tap that changed nothing.
-    func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws {
+    func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws { try await oneAtATime { try await tapNow(x, y, aim: aim) } }
+    private func tapNow(_ x: Double, _ y: Double, aim: Bool) async throws {
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
         var before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
         defer { lastSpot = CGPoint(x: x, y: y) }
         if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
-            log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
-            try await device.send("click")
-            lastClick?.time = Date().timeIntervalSince1970
-            try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
-            return
+            if clicksInPlace < Self.clicksInPlaceLimit {
+                clicksInPlace += 1
+                log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
+                try await device.send("click")
+                lastClick?.time = Date().timeIntervalSince1970
+                try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+                return
+            }
+            // Over USB 11-09: seven clicks here on Safari's address bar did nothing; the pointer lay at the bottom border.
+            log(String(format: "tap (%.3f, %.3f): clicked here %ld times again; from the corner this time", x, y, clicksInPlace))
+            (lastClick, pos) = (nil, nil)
         }
+        clicksInPlace = 0
         if !aim, !stale, !beyondReach(x), let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
@@ -544,6 +574,9 @@ import Foundation
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
+
+    private var clicksInPlace = 0
+    static let clicksInPlaceLimit = 2
 
     /// Where the last tap aimed: about where the pointer rests.
     private var lastSpot: CGPoint?
@@ -634,6 +667,15 @@ import Foundation
                 log(String(format: "arrive (%.3f, %.3f): pointer not seen after a correction; clicking at the estimate", x, y))
                 return .unseen
             }
+            // What was seen jumped far past the move: a key lighting up, not the pointer (over USB 11-09: (0.368, 0.544), then
+            // after 4 units (0.361, 0.424) on Calculator's AC, and the next "correction" of 83 units pressed the wrong key).
+            let commanded = hypot(Double(ux) * (fineX ?? 1 / Double(span.w)), Double(uy) * (fineY ?? 1 / Double(span.h)))
+            if Double(hypot(next.x - seen.x, next.y - seen.y)) > max(Self.jumpLimit, 3 * commanded) {
+                log(String(format: "arrive (%.3f, %.3f): what was seen jumped to (%.3f, %.3f); not the pointer, back to the estimate", x, y, next.x, next.y))
+                if maps != nil { try await ProbeMotion.move(device, -sentX, -sentY) } else { try await device.send("move \(-sentX) \(-sentY)") }
+                if let p = pos { pos = (p.0 - sentX, p.1 - sentY) }
+                return .unseen
+            }
             // What was seen does not follow the moves: it is not the pointer, and the moves only pulled the real one away.
             unmoved = hypot(next.x - seen.x, next.y - seen.y) < 0.002 ? unmoved + 1 : 0
             if unmoved >= 2 {
@@ -680,12 +722,15 @@ import Foundation
     /// A tap within this of its target needs no correction (fraction of the screen; a WeChat list row is ~0.09 high).
     static let arrivalTolerance = 0.008
     static let maxCorrections = 3
+    static let jumpLimit = 0.04       // a reading that moved more than this, and over 3 times the correction, is not the pointer
+    static let leftMargin = 0.03      // a swipe from here presses no button (measured in Settings and on the Home Screen, 11-09)
     static let unitsPerCount = 4      // the board's BLE_MOVE_DIV: 4 app units make one HID count over Bluetooth
     static let publishQuiet = 0.35    // direct capture publishes at most every 0.25 s; one period and the encode
 
     /// Press and hold at a spot, then let go: the globe key shows its keyboard menu only on a long press (a click
     /// switches nothing visible, user 11-08). Like tap, the spot just clicked is held again without moving.
-    func longPress(_ x: Double, _ y: Double, seconds: Double = 0.8) async throws {
+    func longPress(_ x: Double, _ y: Double, seconds: Double = 0.8) async throws { try await oneAtATime { try await longPressNow(x, y, seconds: seconds) } }
+    private func longPressNow(_ x: Double, _ y: Double, seconds: Double) async throws {
         drawChain = false
         if let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "long press (%.3f, %.3f): same spot as the last click; holding without moving", x, y))
@@ -740,10 +785,12 @@ import Foundation
 
     /// Press at the first point, move through the rest, release: one continuous stroke. hold rests at the end
     /// first, so lists and pickers stop exactly there; system gestures (home, back) need the flick.
-    func drag(_ points: [CGPoint], hold: Bool = true) async throws {
+    func drag(_ points: [CGPoint], hold: Bool = true) async throws { try await oneAtATime { try await dragNow(points, hold: hold) } }
+    private func dragNow(_ points: [CGPoint], hold: Bool) async throws {
         guard points.count >= 2, points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
             throw DeviceError(message: "drag needs at least two finite points")
         }
+        guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
         let drawing = points.count > 2
         // Re-home before a drawing stroke only when the run is starting (the first stroke after a tap or other
         // gesture) or when it has drifted past the budget; otherwise keep the tracked position and move straight to
@@ -760,6 +807,8 @@ import Foundation
         let previous = startFromHome ? (0, 0) : (pos ?? (0, 0))
         let travel = hypot(Double(dx(Double(points[0].x)) - previous.0), Double(dy(Double(points[0].y)) - previous.1))
         try await point(Double(points[0].x), Double(points[0].y), rehome: startFromHome, edgeStart: !hold && !drawing)
+        // With the position unknown the next move would go home first: never with the button down.
+        if pos == nil { try await moveTo(dx(Double(points[0].x)), dy(Double(points[0].y)), rehome: true) }
         try await device.send("press")
         do {
             if points.count > 2, strokeCommand != false, let start = pos {
@@ -808,7 +857,8 @@ import Foundation
         }
     }
 
-    func scroll(_ x: Double, _ y: Double, lines: Int) async throws {
+    func scroll(_ x: Double, _ y: Double, lines: Int) async throws { try await oneAtATime { try await scrollNow(x, y, lines: lines) } }
+    private func scrollNow(_ x: Double, _ y: Double, lines: Int) async throws {
         drawChain = false
         try await point(x, y)
         try await device.send("scroll \(lines) 0")
@@ -818,7 +868,8 @@ import Foundation
     /// goes in as toneless pinyin left open for the actor to inspect and select the exact candidate. A run with
     /// Latin letters goes in between two Caps Lock presses, which switch the pinyin keyboard to English and back.
     /// Assumes the phone's keyboard is a pinyin keyboard in Chinese mode, and leaves it that way.
-    func type(_ text: String) async throws {
+    func type(_ text: String) async throws { try await oneAtATime { try await typeNow(text) } }
+    private func typeNow(_ text: String) async throws {
         drawChain = false
         let runs = Self.typingRuns(text)
         // Validate every run before the first side effect; never silently skip an emoji or unsupported script.
@@ -852,7 +903,8 @@ import Foundation
     /// WeChat watch: each Chinese chunk as pinyin, committed with space (the first candidate), with no look per
     /// chunk; the caller checks the field once. On the full pinyin keyboard this typed a 20-character sentence right
     /// in 3 s, against 15.7 s looking at the candidates (PC harness, 2026-10-25).
-    func typeQuick(_ text: String) async throws {
+    func typeQuick(_ text: String) async throws { try await oneAtATime { try await typeQuickNow(text) } }
+    private func typeQuickNow(_ text: String) async throws {
         drawChain = false
         let runs = Self.typingRuns(text)
         for run in runs {
@@ -962,21 +1014,35 @@ import Foundation
         let plain = v.applyingTransform(.stripDiacritics, reverse: false) ?? v
         return plain.lowercased().filter { $0.isASCII && $0.isLetter }
     }
-    func key(_ combo: String) async throws { drawChain = false; try await device.send("key \(combo)") }
+    func key(_ combo: String) async throws { try await oneAtATime { drawChain = false; try await device.send("key \(combo)") } }
     /// Measured on the phone over USB (11-09). A flick up from an app: the Home Screen. A flick up from the Home Screen or
     /// from Search: the app switcher, and the next flick goes back to where it was (the same page, or Search): it never
     /// goes to the first page. "Home twice" therefore always ended in the app switcher, and whatever came next landed on
     /// a card: opening 备忘录, 美团, even 微信 failed. So the screen decides: on a Home Screen nothing is done, Search is
     /// emptied and tapped away, anything else gets the flick, and the result is looked at.
-    func goHome() async throws {
+    func goHome() async throws { try await oneAtATime { try await goHomeNow() } }
+    private func goHomeNow() async throws {
         drawChain = false
         guard let screen else { return try await flickHome() }
         for attempt in 0..<5 {
             let shown = screen.frame
-            let rows = shown.map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 1) } ?? []
+            var rows: [[CandidatePicker.Piece]] = []
+            if let shown { rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.02, bottom: 1) }
             if rows.isEmpty {  // nothing to read: the flick, as without eyes
                 if attempt == 0 { try await flickHome() }
                 return
+            }
+            if AppPlaces.inLibrary(rows) {  // past the last page: a flick here only opens the app switcher
+                log("home: on the App Library; back to the pages")
+                try await swipe(Self.leftMargin, 0.5, 0.85, 0.5, hold: false)
+                try await Task.sleep(nanoseconds: 900_000_000)
+                continue
+            }
+            if AppPlaces.looksLikeOpenFolder(rows) {  // user 11-09: an open folder closes with a tap outside it
+                log("home: a folder is open; tapping outside it")
+                try await tap(0.5, 0.1)
+                try await Task.sleep(nanoseconds: 700_000_000)
+                continue
             }
             if AppPlaces.looksLikeHome(rows) { return }
             if AppPlaces.inSearch(rows) {
@@ -985,14 +1051,16 @@ import Foundation
                 try await key("backspace")
                 try await Task.sleep(nanoseconds: 400_000_000)
                 try await tap(Self.searchBlank.x, Self.searchBlank.y)
-            } else if AppPlaces.keyboardShown(rows) || shown.map({ CandidatePicker.keyboardUp(in: $0) }) == true {
+            } else if await keyboardIsUp(rows, shown) {
                 // With a keyboard up the flick opens the app switcher, and the next flick goes back to the app: four
                 // flicks ended a WeChat task nowhere. Measured over USB: a tap in the left margin closes it and touches
                 // nothing there (a drag only scrolled the chat); where that does not close it, a drag over the content.
                 log("home: a keyboard is up; closing it first")
                 try await tap(0.02, 0.3)
                 try await Task.sleep(nanoseconds: 500_000_000)
-                if let after = screen.frame, CandidatePicker.keyboardUp(in: after) || AppPlaces.keyboardShown(CandidatePicker.rows(in: after, top: 0.02, bottom: 1)) {
+                var stillUp = false
+                if let after = screen.frame { stillUp = await keyboardIsUp(await CandidatePicker.rowsOffMain(in: after, top: 0.02, bottom: 1), after) }
+                if stillUp {
                     try await swipe(0.5, 0.2, 0.5, 0.38, hold: false)
                     try await Task.sleep(nanoseconds: 500_000_000)
                 }
@@ -1003,6 +1071,12 @@ import Foundation
             try await Task.sleep(nanoseconds: 800_000_000)
         }
         log("home: no Home Screen seen after five tries")
+    }
+
+    private func keyboardIsUp(_ rows: [[CandidatePicker.Piece]], _ frame: Data?) async -> Bool {
+        if AppPlaces.keyboardShown(rows) { return true }
+        guard let frame else { return false }
+        return await CandidatePicker.keyboardUpOffMain(in: frame)
     }
 
     /// Between Search's suggestions and its field, above the keyboard.
@@ -1021,12 +1095,14 @@ import Foundation
         try await Task.sleep(nanoseconds: 350_000_000)
         try await swipe(0.5, 0.995, 0.5, 0.45, hold: false)
     }
-    func goBack() async throws {
+    func goBack() async throws { try await oneAtATime { try await goBackNow() } }
+    private func goBackNow() async throws {
         try await swipe(0.005, 0.45, 0.6, 0.45, hold: false)
         pos = nil
     }
     /// The swipe right along the home bar: back to the app used before this one (iOS app switching).
-    func previousApp() async throws {
+    func previousApp() async throws { try await oneAtATime { try await previousAppNow() } }
+    private func previousAppNow() async throws {
         // From the very bottom edge: coming down from the top after a re-home, the pointer stopped a little above the
         // home bar and the swipe only slid inside WeChat (logs(15)). An extra move down pins it against the edge.
         drawChain = false
@@ -1040,7 +1116,8 @@ import Foundation
     }
 
     /// Reverse a previousApp switch along the home bar, returning toward the original target app.
-    func nextApp() async throws {
+    func nextApp() async throws { try await oneAtATime { try await nextAppNow() } }
+    private func nextAppNow() async throws {
         drawChain = false
         defer { pos = nil }
         try await point(0.85, 1)
@@ -1053,9 +1130,9 @@ import Foundation
 
     func probeUnits(_ x: Double, _ y: Double) -> (Int, Int) { (dx(x), dy(y)) }
     private func dx(_ x: Double) -> Int {
-        maps?["x"]?.units(for: x) ?? Int((min(max(fix(x, "x"), 0), 1) * Double(span!.w)).rounded(.toNearestOrEven))
+        maps?["x"]?.units(for: x) ?? Int((min(max(fix(x, "x"), 0), 1) * Double(span?.w ?? 400)).rounded(.toNearestOrEven))
     }
     private func dy(_ y: Double) -> Int {
-        maps?["y"]?.units(for: y) ?? Int((min(max(fix(y, "y"), 0), 1) * Double(span!.h)).rounded(.toNearestOrEven))
+        maps?["y"]?.units(for: y) ?? Int((min(max(fix(y, "y"), 0), 1) * Double(span?.h ?? 800)).rounded(.toNearestOrEven))
     }
 }

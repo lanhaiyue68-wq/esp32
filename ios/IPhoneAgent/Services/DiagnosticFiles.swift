@@ -8,6 +8,7 @@ struct DiagnosticFiles {
         var maxBytes = 80 * 1024 * 1024
         var videoBytes = 8 * 1024 * 1024
         var videoFrames = 120
+        var videoInterval = 1.0  // s between stored frames: every frame wrote 4.3 GB in 9 hours (iOS's report of 11-09)
         var imageBytes = 12 * 1024 * 1024
         var exportBytes = 20 * 1024 * 1024
         var reportBytes = 5 * 1024 * 1024

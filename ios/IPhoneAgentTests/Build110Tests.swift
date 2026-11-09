@@ -103,14 +103,15 @@ import XCTest
     }
 
     func testACaptureIsStartedAgainOnlyOnceNothingCame() {
-        func stalled(_ at: Double, event: Double = 0, since: Double = 0, restart: Double = -100) -> Bool {
+        func stalled(_ at: Double, event: Double = 0, since: Double = 0, restart: Double = -200) -> Bool {
             VideoFeed.captureStalled(at: at, lastEvent: event, waitingSince: since, lastRestart: restart)
         }
-        XCTAssertTrue(stalled(3.5))
-        XCTAssertFalse(stalled(2.5), "a nudge has not had time to bring a frame")
+        XCTAssertTrue(stalled(3.5, event: -30))
+        XCTAssertFalse(stalled(2.5, event: -30), "a nudge has not had time to bring a frame")
         XCTAssertFalse(stalled(3.5, event: 3), "the system is still sending")
-        XCTAssertFalse(stalled(3.5, since: 1), "only just began waiting")
-        XCTAssertFalse(stalled(3.5, restart: -5), "not again and again")
+        XCTAssertFalse(stalled(3.5, event: -15), "silences this short ended by themselves on 11-09")
+        XCTAssertFalse(stalled(3.5, event: -30, since: 1), "only just began waiting")
+        XCTAssertFalse(stalled(3.5, event: -30, restart: -5), "not again and again")
     }
 
     func testSharingOnIsNotAReasonToAskTheUser() {

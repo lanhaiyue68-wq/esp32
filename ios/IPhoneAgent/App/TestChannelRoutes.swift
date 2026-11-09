@@ -26,12 +26,14 @@ extension AppModel {
 
         case ("GET", "/ocr"):
             guard let frame = feed.frame else { return .json(["error": .str("no frame")], status: 404) }
-            let rows = CandidatePicker.rows(in: frame, top: 0.02, bottom: 1).map { row in
+            let read = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 1)
+            let keyboard = await CandidatePicker.keyboardUpOffMain(in: frame)
+            let rows = read.map { row in
                 JValue.arr(row.map { .str(String(format: "%@ @%.3f,%.3f %.3fx%.3f", $0.text, $0.box.midX, $0.box.midY, $0.box.width, $0.box.height)) })
             }
-            return .json(["rows": .arr(rows), "home": .bool(AppPlaces.looksLikeHome(CandidatePicker.rows(in: frame, top: 0.02, bottom: 1))),
-                          "search": .bool(AppPlaces.inSearch(CandidatePicker.rows(in: frame, top: 0.02, bottom: 1))),
-                          "keyboard": .bool(CandidatePicker.keyboardUp(in: frame))])
+            return .json(["rows": .arr(rows), "home": .bool(AppPlaces.looksLikeHome(read)),
+                          "search": .bool(AppPlaces.inSearch(read)),
+                          "keyboard": .bool(keyboard)])
 
         case ("GET", "/steps"):
             let from = Int(request.query["from"] ?? "") ?? 0
@@ -113,6 +115,7 @@ extension AppModel {
             "capture": .str(feed.nativeStatus),
             "watching": .bool(watching),
             "calibrated": .bool(pointer.calibrated),
+            "planner": .str(PlusRest.shared.summary),
             "foreground": .bool(UIApplication.shared.applicationState == .active),
             "keyboard": .bool(keyboardBridge.onScreen()),
             "takeover": .int(agent.takeover),

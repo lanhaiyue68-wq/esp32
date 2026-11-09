@@ -1,7 +1,9 @@
 # 任务状态
 
-- [ ] 裝 build110 後跑 q2e、q3（scratchpad live），對照 docs/stress-2026-11-09-report.md；確認擷取自動重開、note、繞圈保險。
-- [ ] 全部測完：lan_usb release + disarm；110 驗證過後把桌面 108 移到資源回收筒。
+- [x] 裝 build110 後跑 q2e、q3，逐題核對畫面：docs/stress-2026-11-09-build110-report.md。
+- [ ] 使用者恢復手機連 chatgpt.com 的網路，確認聯絡人權限；之後驗證真正的 Codex 表現。
+- [ ] 使用者說改後，一次修完報告列的問題，只出一版；先查清滑動為何會變點擊。
+- [ ] 全部測完：lan_usb release + disarm；新版驗證過後把桌面舊版移到資源回收筒（108、110 先留著）。
 
 - [x] 找到指定 Claude 任务、原始消息、build 44 工作树和可复用执行链。
 - [x] 真实回归测试重现入口仍限定在微信；保留原有功能测试基线。

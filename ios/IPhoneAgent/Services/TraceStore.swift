@@ -7,6 +7,7 @@ import Foundation
     private(set) var dir: URL?
     private var n = 0
     private var recording = false
+    private var lastVideo = -Double.infinity
     private var videoFiles: [(URL, Int)] = []
     private var imageFiles: [(URL, Int)] = []
     private var lastCleanup = Date.distantPast
@@ -62,7 +63,8 @@ import Foundation
     /// Video is a ring of recent frames; it cannot grow for the entire lifetime of a run.
     func writeVideo(_ jpeg: Data) {
         let policy = diagnostics.policy
-        guard recording, let dir, jpeg.count <= policy.videoBytes else { return }
+        guard recording, let dir, jpeg.count <= policy.videoBytes, now() - lastVideo >= policy.videoInterval else { return }
+        lastVideo = now()
         let video = dir.appendingPathComponent("video")
         try? FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
         let file = video.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000)).jpg")

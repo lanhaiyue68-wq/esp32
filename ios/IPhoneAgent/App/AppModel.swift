@@ -263,6 +263,7 @@ import UIKit
 
     /// Every second: metrics; a suspension note; the stream's numbers every 10 s while a run goes.
     private func tick() {
+        StallWatch.shared.start()
         if feed.isNative { feed.objectWillChange.send() } // Readiness expires even if the system stops callbacks.
         let before = metrics.suspensions, gap = now() - lastTick
         metrics.tick()

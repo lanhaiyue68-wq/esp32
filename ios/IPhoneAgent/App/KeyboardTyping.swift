@@ -21,14 +21,14 @@ extension AppModel {
         while now() < deadline {
             if keyboardBridge.onScreen() { return true }
             if let frame = await freshFrame() {
-                let rows = CandidatePicker.rows(in: frame, top: 0.3, bottom: 1)
+                let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.3, bottom: 1)
                 if CandidatePicker.keyboardUp(in: frame) || CandidatePicker.keyboardMenuOpen(rows: rows) { break }
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
         for attempt in 1...tries {
             guard let frame = await freshFrame() else { return keyboardBridge.onScreen() }
-            let rows = CandidatePicker.rows(in: frame, top: 0.3, bottom: 1)
+            let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.3, bottom: 1)
             if CandidatePicker.keyboardMenuOpen(rows: rows) { return await useKeyboardMenu(rows, attempt) }
             guard CandidatePicker.keyboardUp(in: frame) else {
                 if keyboardBridge.onScreen() { return true }
@@ -41,7 +41,7 @@ extension AppModel {
                 return true
             }
             guard let after = await freshFrame() else { continue }
-            let menu = CandidatePicker.rows(in: after, top: 0.3, bottom: 1)
+            let menu = await CandidatePicker.rowsOffMain(in: after, top: 0.3, bottom: 1)
             if CandidatePicker.keyboardMenuOpen(rows: menu) { return await useKeyboardMenu(menu, attempt) }
             DebugLog.write("keyboard: no keyboard menu after holding the globe key (try \(attempt))")  // next try: in place
         }

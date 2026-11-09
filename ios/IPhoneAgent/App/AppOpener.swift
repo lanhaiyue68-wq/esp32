@@ -42,6 +42,31 @@ enum AppPlaces {
         set { UserDefaults.standard.set(newValue, forKey: mappedKey) }
     }
 
+    /// Apps opened since the app started: one of these is on the phone, whatever Search says now (over USB 11-09: Weather
+    /// opened, then "not on this phone" two minutes later, and the task stopped there).
+    private static var opened: Set<String> = []
+    static func noteOpened(_ name: String) { for v in AppNames.variants(name) { opened.insert(normalized(v)) } }
+    static func wasOpened(_ name: String) -> Bool { AppNames.variants(name).contains { opened.contains(normalized($0)) } }
+
+    /// A place that turned out wrong goes, alone: reading all the pages again cost 30-55 s each time, for WeChat, which is
+    /// on no page at all (three times over USB 11-09). Next time Search is the way.
+    static func forget(_ name: String) {
+        var places = all
+        for v in AppNames.variants(name) { places[normalized(v)] = nil }
+        if let data = try? JSONEncoder().encode(places) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    /// A folder open on the Home Screen: a few short names in the panel in the middle, and nothing else but the clock. It
+    /// closes with a tap outside it (user 11-09); going Home from it took 34 s and opened the keyboard's language menu.
+    static func looksLikeOpenFolder(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let pieces = rows.flatMap { $0 }.filter { $0.box.midY > 0.07 }
+        guard (3...20).contains(pieces.count) else { return false }
+        return pieces.allSatisfy { piece in
+            (0.12...0.88).contains(piece.box.midX) && (0.2...0.75).contains(piece.box.midY)
+                && piece.text.filter { !$0.isWhitespace }.count <= 8
+        }
+    }
+
     /// The names under the icons of a page, read.
     static func names(_ rows: [[CandidatePicker.Piece]]) -> [CandidatePicker.Piece] {
         rows.flatMap { $0 }.filter { piece in
@@ -244,6 +269,15 @@ extension AppModel {
     /// the agent's next look checks it is the right app. Opening Clock took the model ~20 steps (logs 11-08: pinyin
     /// typed 始终 for 时钟, then Google results, then the App Store).
     func openApp(_ name: String) async throws -> Bool {
+        if try await openAppNow(name) {
+            AppPlaces.noteOpened(name)
+            return true
+        }
+        if AppPlaces.wasOpened(name) { throw DeviceError(message: "\(name) did not open this time, but it is on this phone") }
+        return false
+    }
+
+    private func openAppNow(_ name: String) async throws -> Bool {
         let started = now()
         defer { DebugLog.write(String(format: "open %@: %.1f s", name, now() - started)) }
         try await pointer.goHome()
@@ -267,8 +301,8 @@ extension AppModel {
                 // The page in front was not recognised: it is on a page all the same, so look through them.
                 if try await openFromPages(name) { return true }
             }
-            DebugLog.write("open \(name): not on page \(target + 1) any more; the pages are read again next time")
-            AppPlaces.mapped = false
+            DebugLog.write("open \(name): not on page \(target + 1); Search from now on")
+            AppPlaces.forget(name)
             try await pointer.goHome()
         }
         return try await bySearch(name)
@@ -319,7 +353,8 @@ extension AppModel {
 
     /// To the next page, and until it has stopped sliding: a page read in mid-slide was missed (page 3, over USB 11-09).
     private func swipePage(next: Bool) async throws {
-        try await pointer.swipe(next ? 0.85 : 0.15, 0.5, next ? 0.15 : 0.85, 0.5, hold: false)
+        // From the margin: a press on an icon can open it (a swipe from an App Library tile opened Pinduoduo, 11-09).
+        try await pointer.swipe(next ? 0.97 : Pointer.leftMargin, 0.5, next ? 0.15 : 0.85, 0.5, hold: false)
         try? await Task.sleep(nanoseconds: 700_000_000)
         await feed.settled(quiet: 0.5, least: 0.1, most: 2)
     }
@@ -387,7 +422,8 @@ extension AppModel {
         }
         // The results come a moment later; a Return before them opens nothing (over USB, 11-09).
         try? await Task.sleep(nanoseconds: 1_000_000_000)
-        let rows = await freshFrame().map { CandidatePicker.rows(in: $0, top: 0.02, bottom: 0.7) } ?? []
+        var rows: [[CandidatePicker.Piece]] = []
+        if let frame = await freshFrame() { rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.7) }
         if AppPlaces.returnOpens(rows) {
             // The keyboard's own Return: the board's Enter does nothing with it up.
             if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
@@ -410,6 +446,6 @@ extension AppModel {
 
     private func homeRows(top: Double = 0.07) async -> [[CandidatePicker.Piece]]? {
         guard let frame = await freshFrame() else { return nil }
-        return CandidatePicker.rows(in: frame, top: top, bottom: 1)
+        return await CandidatePicker.rowsOffMain(in: frame, top: top, bottom: 1)
     }
 }

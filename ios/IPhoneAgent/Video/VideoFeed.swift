@@ -239,10 +239,10 @@ extension ScreenSource {
         if isNative { resetPixels(); nativeStatus = "共享已停止，请重新共享整个屏幕" }
     }
 
-    /// Whether the system's stream has gone quiet: a frame was waited for this long, nudges and all, and nothing at all
-    /// came. A still screen sends nothing until a nudge shows the pointer, so a quiet moment alone does not count.
+    /// Whether the system's stream has gone quiet: a frame was waited for, nudges and all, and nothing at all has come for
+    /// a long time. Silences of up to 20 s ended by themselves on 11-09 (the app stuck or held back, not the stream).
     nonisolated static func captureStalled(at: Double, lastEvent: Double, waitingSince: Double, lastRestart: Double) -> Bool {
-        at - waitingSince > 3 && at - lastEvent > 3 && at - lastRestart > 15
+        at - waitingSince > 3 && at - lastEvent > 30 && at - lastRestart > 120
     }
 
     /// A new stream on the sharing the user agreed to. True if one was started.
