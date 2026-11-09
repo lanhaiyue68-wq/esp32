@@ -512,6 +512,8 @@ extension Pointer: Gestures {}
     static let offlineWaitLimit = 24  // waits of 5 s for the network before the user is asked
     private var offlineWaits = 0
     private var sendBlocks = 0
+    /// Looks at where a message would go before it is sent (the fast model; nil: no look).
+    var sendChecker: ChatModel?
     /// Set for a task the cloud gave: asked before each message is sent; false stops the run with nothing sent.
     var approveSend: ((String) async -> Bool)?
     private var approvedTexts: Set<String> = []
@@ -537,7 +539,7 @@ extension Pointer: Gestures {}
 
     /// Where a message would go now, if that is not where the goal says (nil: fine, or the check could not be made).
     private func wrongPlace(frame: Data?) async -> String? {
-        guard let model = actor else { return nil }
+        guard let model = sendChecker else { return nil }
         do {
             let reply = try await model.chat(system: Self.sendCheck, text: "Goal: \(task)\n\nThe image is the screen now.",
                                              image: frame, maxTokens: 80, temperature: 0).text

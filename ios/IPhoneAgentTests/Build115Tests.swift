@@ -82,9 +82,10 @@ import XCTest
         cloud.nextTask = task
         let b = bridge(cloud)
         var stops = 0
-        b.start = { _, _ in }
-        b.running = { true }
-        b.stop = { stops += 1 }
+        var running = false
+        b.start = { _, _ in running = true }
+        b.running = { running }
+        b.stop = { stops += 1; running = false }
         await b.tick()
         cloud.cancel = ["t1"]
         await b.tick()
