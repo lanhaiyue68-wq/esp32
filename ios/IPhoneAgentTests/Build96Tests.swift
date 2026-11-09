@@ -92,7 +92,7 @@ import XCTest
             XCTAssertEqual(hit.x, spot.0, accuracy: 0.01)
             XCTAssertEqual(hit.y, spot.1, accuracy: 0.01)
         }
-        XCTAssertEqual(phone.homes, 2, "the first tap and the one after six hops start from the corner")
+        XCTAssertEqual(phone.homes, 2, "the first tap and the one at the top (build 112) start from the corner")
     }
 
     func testClickAgainOnlyInPlaceAndRecently() {

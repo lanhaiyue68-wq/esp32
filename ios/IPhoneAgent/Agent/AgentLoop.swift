@@ -39,10 +39,12 @@ struct InputNeedsVerification: LocalizedError {
     func goBack() async throws
     func reset() async throws
     func typeQuick(_ text: String) async throws
+    func answerSharingQuestion() async throws -> Bool
 }
 
 extension Gestures {
     func typeQuick(_ text: String) async throws { try await type(text) }
+    func answerSharingQuestion() async throws -> Bool { false }
 }
 
 extension Pointer: Gestures {}
@@ -504,6 +506,7 @@ extension Pointer: Gestures {}
         + "missed it). Tap the input box again (this tap is aimed) and type only once the keyboard shows."
     static let waitLimit = 3        // waits in a row that changed nothing
     static let blindLookLimit = 10  // looks of about 6 s each with sharing on before the user is asked
+    static let blindLooksBeforeCancel = 2
     static let leaveLimit = 2       // times the same way off the same screen is taken; the next is refused
 
     static let waitReason = "Refused: you waited several times and nothing changed, so more waiting will not help. Change "
@@ -705,6 +708,12 @@ extension Pointer: Gestures {}
                     if e.sharingOn, blindLooks < Self.blindLookLimit {
                         blindLooks += 1
                         DebugLog.write("run: no new frame yet with sharing on (\(blindLooks)); looking again")
+                        // The pointer answers this right after a click near the clock. Whatever else brought the question
+                        // up (Pointer.cancelSharing), it stays until answered, and frames also stop by themselves for up to 10 s.
+                        if blindLooks == Self.blindLooksBeforeCancel, (try? await phone?.answerSharingQuestion()) == true {
+                            record(nil, ["action": .str("sharing question"),
+                                         "reason": .str("frames came back after tapping Cancel on whether to stop sharing the screen")])
+                        }
                         try await Task.sleep(nanoseconds: 2_000_000_000)
                         continue
                     }
@@ -1494,8 +1503,17 @@ extension Pointer: Gestures {}
     - A value in the answer (date, number, price, name, count) differs from the notes or from what the screen shows.
     - The answer reports something from an app the steps never opened.
     - The answer says something was sent or saved, the screen is where it would show, and it does not show.
-    The screen may have moved on: what was noted earlier stands unless the screen contradicts it. Never judge style or wording.
+    The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording.
     """
+
+    /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
+    /// answer, the 18th, and the run went on to "today is 2025-06-03" and its step limit.
+    static func todayLine(_ date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd, EEEE"
+        return "Today is \(f.string(from: date))."
+    }
 
     /// Over USB 11-09, 5 of 14 "done" were wrong: a Pinduoduo price from an app never opened, a message never sent, the 17th
     /// read off a screen saying the 16th. The model's word is not the result: something else looks. What it says, or nil when
@@ -1507,10 +1525,12 @@ extension Pointer: Gestures {}
             case "open": return "opened " + (s["app"]?.str ?? "?")
             case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
+            // Over USB 11-09 a note was reopened from the list, twice, and the check said it never was: it saw no taps.
+            case "tap": return "tapped " + String((s["thought"]?.str ?? "").prefix(60))
             default: return nil
             }
         }.suffix(40).joined(separator: "\n")
-        let prompt = "Goal: \(task)\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
+        let prompt = "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
         do {
             let reply = try await model.chat(system: Self.doneCheck, text: prompt, image: frame, maxTokens: 120, temperature: 0).text
             trace?.write(kind: "done check", ["reply": .str(String(reply.prefix(300)))])
@@ -1564,7 +1584,7 @@ extension Pointer: Gestures {}
 
     func replan(stuck: Bool = false) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
-        var prompt = "Goal: \(task)"
+        var prompt = "Goal: \(task)\n\(Self.todayLine())"
         if stuck {
             let last = steps.last ?? JObject()
             prompt += "\n\nThe previous plan got stuck (last event: \(pyStr(last["action"])) \(last["reason"]?.str ?? "")):"
@@ -1622,7 +1642,7 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
+        var prompt = "Goal: \(task)\n\(Self.todayLine())\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
         let driving = (plannerLeads || takeover > 0) && planner != nil
         if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }

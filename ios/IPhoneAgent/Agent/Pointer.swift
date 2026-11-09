@@ -527,9 +527,11 @@ import Foundation
             if clicksInPlace < Self.clicksInPlaceLimit {
                 clicksInPlace += 1
                 log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
+                let clickedAt = now()
                 try await device.send("click")
                 lastClick?.time = Date().timeIntervalSince1970
                 try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+                try await answerIfAsked(x, y, clickedAt: clickedAt)
                 return
             }
             // Over USB 11-09: seven clicks here on Safari's address bar did nothing; the pointer lay at the bottom border.
@@ -537,7 +539,7 @@ import Foundation
             (lastClick, pos) = (nil, nil)
         }
         clicksInPlace = 0
-        if !aim, !stale, !beyondReach(x), let last = lastClick, let p = pos, hops < Self.nearbyHops,
+        if !aim, !stale, !beyondReach(x), y >= Self.topBand, let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
@@ -549,9 +551,11 @@ import Foundation
             (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
             log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
             try await arrive(x, y, before: before, began: began)
+            let clickedAt = now()
             try await device.send("click")
             if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+            try await answerIfAsked(x, y, clickedAt: clickedAt)
             return
         }
         lastClick = nil
@@ -570,13 +574,79 @@ import Foundation
         } else {
             try await arrive(x, y, before: before, began: began)
         }
+        let clickedAt = now()
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+        try await answerIfAsked(x, y, clickedAt: clickedAt)
     }
 
     private var clicksInPlace = 0
     static let clicksInPlaceLimit = 2
+
+    /// Thin bars sit at the top, and the corner is close to them. Landings over USB 11-08 and 11-09 with targets above this
+    /// line: a hop was off by more than 0.02 in y 45 % of the time (p90 0.065; x 0.102), from the corner 30 % (0.034; x 0.029),
+    /// and on the left half never (0.012). A hop meant for Taobao's search bar opened the channel whose icon is under it.
+    static let topBand = 0.2
+
+    /// The clock at the top left is red while the screen is shared, and a click on it asks "stop sharing the screen with
+    /// Lan Agent?". User 11-09: Cancel, never Stop. While that is up nothing is captured and nothing says so. Over USB 11-09:
+    /// frames stopped at once and stayed away (16 s and counting, sharing still "on"), no frame shows the question, and a tap
+    /// here with nothing to look at brought them back in 1.6 s. Cancel spans x 0.11-0.48, y 0.52-0.58; Stop is past the middle.
+    static let cancelSharing = (x: 0.29, y: 0.555)
+
+    static func nearClock(_ x: Double, _ y: Double) -> Bool { x < 0.4 && y < 0.12 }
+
+    /// After a click near the clock (the back button is right under it): a frame comes within moments, unless it asked.
+    private func answerIfAsked(_ x: Double, _ y: Double, clickedAt: Double) async throws {
+        guard Self.nearClock(x, y), let screen, screen.live else { return }
+        if await screen.fresh(since: clickedAt, timeout: 2) != nil { return }
+        // A click that changed nothing shows nothing new either; a small move must.
+        let nudged = now()
+        if maps != nil {
+            try await ProbeMotion.move(device, 8, 0)
+            try await ProbeMotion.move(device, -8, 0)
+        } else {
+            try await device.send("move 8 0")
+            try await device.send("move -8 0")
+        }
+        if await screen.fresh(since: nudged, timeout: 1.5) != nil { return }
+        _ = try await tapCancelSharing()
+    }
+
+    /// Whether frames came back. For whoever finds them stopped and knows nothing of a click near the clock.
+    func answerSharingQuestion() async throws -> Bool { try await oneAtATime { try await tapCancelSharing() } }
+
+    private func tapCancelSharing() async throws -> Bool {
+        for attempt in 1...2 {
+            log("frames stopped: tapping Cancel on the question whether to stop sharing the screen (try \(attempt))")
+            (lastClick, pos) = (nil, nil)  // from the corner: where the pointer really is may be how this came up
+            let tapped = now()
+            try await tapNow(Self.cancelSharing.x, Self.cancelSharing.y, aim: false)
+            if let screen, await screen.fresh(since: tapped, timeout: 2) != nil {
+                log("frames are back")
+                return true
+            }
+        }
+        log("frames did not come back after tapping Cancel")
+        return false
+    }
+
+    /// Back where the estimate said, after moves made for something that was not the pointer. Going back the way it came only
+    /// works if nothing stopped it. Over USB 11-09 three corrections went 260 units up from 100 under the top edge, the 260
+    /// back left it 160 too low, on another card, and every hop after that carried the error: Taobao Live, the order list, an
+    /// order. The corner is the one place it can be sent to for sure.
+    private func startOver(_ x: Double, _ y: Double) async throws {
+        pos = nil
+        if beyondReach(x) { try await fromRightBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
+    }
+
+    /// Told to go one way and seen going the other: what was seen is not the pointer (over USB 11-09: told up, seen from
+    /// (0.301, 0.175) to (0.179, 0.265), and the next two "corrections" of 112 units went against the top edge).
+    static func wentAgainst(from a: CGPoint, to b: CGPoint, units ux: Int, _ uy: Int) -> Bool {
+        let (mx, my) = (Double(b.x - a.x), Double(b.y - a.y))
+        return hypot(mx, my) > jumpLimit / 2 && mx * Double(ux) + my * Double(uy) < 0
+    }
 
     /// Where the last tap aimed: about where the pointer rests.
     private var lastSpot: CGPoint?
@@ -637,7 +707,7 @@ import Foundation
             log(String(format: "arrive (%.3f, %.3f): pointer not seen; clicking at the estimate", x, y))
             return .unseen
         }
-        var corrections = 0, unmoved = 0, sentX = 0, sentY = 0
+        var corrections = 0, unmoved = 0
         while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)
             let offX = abs(ex) > Self.arrivalTolerance, offY = abs(ey) > Self.arrivalTolerance
@@ -660,7 +730,6 @@ import Foundation
             let moved = now()
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             if let p = pos { pos = (p.0 + ux, p.1 + uy) }
-            (sentX, sentY) = (sentX + ux, sentY + uy)
             // Nothing on screen changed: the board held the counts back (it keeps a remainder); the same again sends them.
             guard let after = await stopped(since: moved, on: screen, wait: 0.6) else { continue }
             guard let next = Vision.arrival(before, after, near: target) else {
@@ -670,18 +739,17 @@ import Foundation
             // What was seen jumped far past the move: a key lighting up, not the pointer (over USB 11-09: (0.368, 0.544), then
             // after 4 units (0.361, 0.424) on Calculator's AC, and the next "correction" of 83 units pressed the wrong key).
             let commanded = hypot(Double(ux) * (fineX ?? 1 / Double(span.w)), Double(uy) * (fineY ?? 1 / Double(span.h)))
-            if Double(hypot(next.x - seen.x, next.y - seen.y)) > max(Self.jumpLimit, 3 * commanded) {
-                log(String(format: "arrive (%.3f, %.3f): what was seen jumped to (%.3f, %.3f); not the pointer, back to the estimate", x, y, next.x, next.y))
-                if maps != nil { try await ProbeMotion.move(device, -sentX, -sentY) } else { try await device.send("move \(-sentX) \(-sentY)") }
-                if let p = pos { pos = (p.0 - sentX, p.1 - sentY) }
+            if Double(hypot(next.x - seen.x, next.y - seen.y)) > max(Self.jumpLimit, 3 * commanded)
+                || Self.wentAgainst(from: seen, to: next, units: ux, uy) {
+                log(String(format: "arrive (%.3f, %.3f): what was seen jumped to (%.3f, %.3f); not the pointer, starting over from the corner", x, y, next.x, next.y))
+                try await startOver(x, y)
                 return .unseen
             }
             // What was seen does not follow the moves: it is not the pointer, and the moves only pulled the real one away.
             unmoved = hypot(next.x - seen.x, next.y - seen.y) < 0.002 ? unmoved + 1 : 0
             if unmoved >= 2 {
-                log(String(format: "arrive (%.3f, %.3f): what was seen at (%.3f, %.3f) does not move; back to the estimate", x, y, next.x, next.y))
-                if maps != nil { try await ProbeMotion.move(device, -sentX, -sentY) } else { try await device.send("move \(-sentX) \(-sentY)") }
-                if let p = pos { pos = (p.0 - sentX, p.1 - sentY) }
+                log(String(format: "arrive (%.3f, %.3f): what was seen at (%.3f, %.3f) does not move; starting over from the corner", x, y, next.x, next.y))
+                try await startOver(x, y)
                 return .unseen
             }
             if ux != 0 { fineX = Self.learned(fineX ?? 1 / Double(span.w), moved: Double(next.x - seen.x), units: ux) }
