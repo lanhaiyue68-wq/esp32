@@ -60,7 +60,7 @@ import Foundation
             } catch {
                 if Task.isCancelled { throw CancellationError() }  // a stopped run says nothing about Plus
                 let message = error.localizedDescription
-                let seconds = rest.failed(message)
+                let seconds = rest.failed(message, networkDown: ModelRequestFailure.isNetworkDown(error))
                 DebugLog.write("plus planner: \(message.prefix(160)); \(fallback.model) plans for \(Int(seconds / 60)) min")
             }
         }
@@ -84,8 +84,17 @@ import Foundation
     var summary: String { failures == 0 ? "ok" : "unreachable (\(failures) in a row): \(lastError.prefix(80))" }
 
     /// The seconds Plus now rests.
+    /// A network that is down for a moment says nothing about Codex: over USB 11-09 a Wi-Fi drop of a few minutes put it to
+    /// rest for 2, then 10 minutes, and the next tasks ran without it. It rests a minute, and the next real failure is still a first.
+    static let offlineRest = 60.0
+
     @discardableResult
-    func failed(_ message: String) -> Double {
+    func failed(_ message: String, networkDown: Bool = false) -> Double {
+        if networkDown {
+            lastError = message
+            until = now() + Self.offlineRest
+            return Self.offlineRest
+        }
         failures += 1
         lastError = message
         let seconds = Self.restSeconds(failures: failures, message: message)

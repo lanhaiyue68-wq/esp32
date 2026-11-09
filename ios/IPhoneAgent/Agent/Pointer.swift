@@ -247,7 +247,8 @@ import Foundation
 
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
-        if !edgeStart, beyondReach(x) { try await fromRightBorder(x, y) }
+        viaBorder = !edgeStart && beyondReach(x)
+        if viaBorder { try await fromRightBorder(x, y) }
         else { try await moveTo(dx(x), dy(y), rehome: rehome) }
         // Ordinary taps click at the calibrated map without looking for the pointer. On the dark WeChat screens the
         // pixel search found it 6 times in 31 (logs 11-06): every tap wiggled it ~5 times over 4–6 s, often walked it
@@ -485,7 +486,7 @@ import Foundation
         try await ProbeMotion.home(device)
         pos = nil
         await noteCorner(since: homing)
-        let ty = dy(y), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
+        let ty = dy(y - borderLiftY), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
         // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
         // ordinary move; after the short way back it follows a move like the calibrated ones.
         try await ProbeMotion.move(device, push, 0)
@@ -493,7 +494,7 @@ import Foundation
         try await ProbeMotion.move(device, -back, 0)
         try await Task.sleep(nanoseconds: 150_000_000)
         try await ProbeMotion.move(device, 0, ty)
-        (pos, moves, hops) = ((dx(x), ty), 1, 0)
+        (pos, moves, hops) = ((dx(x), dy(y)), 1, 0)  // where it lands, the lift taken off
         log(String(format: "point (%.3f, %.3f): past the calibrated %.3f; from the right border, %ld units back", x, y, mx.reach, back))
     }
 
@@ -579,12 +580,31 @@ import Foundation
         } else {
             try await arrive(x, y, before: before, began: began)
         }
+        if viaBorder, let first = firstSeen { learnBorderLift(missedBy: Double(first.y) - y) }
         let clickedAt = now()
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
         try await answerIfAsked(x, y, clickedAt: clickedAt)
     }
+
+    /// Where the pointer was first seen after the last move (nil: not seen).
+    private var firstSeen: CGPoint?
+    /// Whether the last move came back from the right border.
+    private var viaBorder = false
+    /// How far below the target a move back from the right border lands, learned from where it is seen. Over USB 11-09 and 11-10
+    /// all 16 such landings seen were 0.029 to 0.042 low (0.027 on 11-08), against a median 0.004 from the corner: a button at
+    /// the top right is 0.05 tall, so the half of them nobody sees clicked under it.
+    private(set) var borderLiftY = 0.0
+
+    func learnBorderLift(missedBy error: Double) {
+        guard abs(error) < Self.borderMisreading else { return }  // too far to be the same pointer
+        borderLiftY = min(max(borderLiftY + error / 2, -Self.borderLiftLimit), Self.borderLiftLimit)
+        log(String(format: "border landing %.3f off in y; lift now %.3f", error, borderLiftY))
+    }
+
+    static let borderMisreading = 0.08
+    static let borderLiftLimit = 0.06
 
     private var clicksInPlace = 0
     static let clicksInPlaceLimit = 2
@@ -703,6 +723,7 @@ import Foundation
     private func look(_ x: Double, _ y: Double, before: Data?, began: Double) async throws -> Arrival {
         // Accuracy test 11-08: after a relaunch screen sharing was off, every tap skipped this without a word and
         // 20 spots were blind. No frame is said, every time.
+        firstSeen = nil
         guard let screen, let span else { return .unseen }
         guard let before else {
             log(String(format: "arrive (%.3f, %.3f): no screen frame before the move (screen sharing off?); clicking at the estimate", x, y))
@@ -717,6 +738,7 @@ import Foundation
             log(String(format: "arrive (%.3f, %.3f): pointer not seen; clicking at the estimate", x, y))
             return .unseen
         }
+        firstSeen = seen
         var corrections = 0, unmoved = 0
         while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)

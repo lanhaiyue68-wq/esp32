@@ -62,7 +62,9 @@ enum Actions {
     /// The next label run on in one line is not part of the command: `type 1152"THINK: check the note` typed the thought
     /// into a note, and the digits in `tap 300 132 THINK: the 2nd row` would be taken for coordinates (11-09).
     static func withoutRunOn(_ text: String) -> String {
-        guard let label = text.range(of: #""?\s*(?<![A-Za-z])(THINK|DO)\s*[:：]"#, options: .regularExpression) else { return text }
+        // THINK even right after a word (over USB 11-09 "key enterTHINK: 已輸入…" went to the board as one key name);
+        // DO only on its own, so "TODO:" stays text.
+        guard let label = text.range(of: #""?\s*(THINK|(?<![A-Za-z])DO)\s*[:：]"#, options: .regularExpression) else { return text }
         return String(text[..<label.lowerBound]).trimmingCharacters(in: .whitespaces)
     }
 

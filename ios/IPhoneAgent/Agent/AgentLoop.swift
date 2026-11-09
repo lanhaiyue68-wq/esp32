@@ -509,6 +509,8 @@ extension Pointer: Gestures {}
     static let blindLookLimit = 10  // looks of about 6 s each with sharing on before the user is asked
     static let blindLooksBeforeCancel = 2
     static let refusalsInARow = 3
+    static let offlineWaitLimit = 24  // waits of 5 s for the network before the user is asked
+    private var offlineWaits = 0
     static let leaveLimit = 2       // times the same way off the same screen is taken; the next is refused
 
     static let waitReason = "Refused: you waited several times and nothing changed, so more waiting will not help. Change "
@@ -643,7 +645,7 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
-        (notes, departures, circleRefused, blindLooks, deadRefused) = ([], [], 0, 0, 0)
+        (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits) = ([], [], 0, 0, 0, 0)
         checksLeft = 2
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
@@ -682,6 +684,7 @@ extension Pointer: Gestures {}
                     }
                     failures = 0
                     blindLooks = 0
+                    offlineWaits = 0
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
@@ -729,7 +732,20 @@ extension Pointer: Gestures {}
                 } catch {  // a bad reply or a dropped link: recover, don't crash
                     record(nil, ["action": .str("hiccup"), "reason": .str(String(error.localizedDescription.prefix(300)))])
                     let linkLost = Self.isLinkLoss(error, screenLive: screen?.live)  // the next look waits for it (waitForScreen)
-                    failures += linkLost ? 0 : 1  // a lost link is not the agent's fault
+                    let offline = ModelRequestFailure.isNetworkDown(error)
+                    failures += linkLost || offline ? 0 : 1  // a lost link is not the agent's fault
+                    if offline {
+                        offlineWaits += 1
+                        if offlineWaits > Self.offlineWaitLimit {
+                            record(nil, ["action": .str("fail"), "reason": .str("the phone has had no network for \(Self.offlineWaitLimit * 5) s")])
+                            guard try await askForHelp() else { return finish() }
+                            offlineWaits = 0
+                            continue
+                        }
+                        DebugLog.write("run: no network (\(error.localizedDescription)); waiting 5 s, then the same step again (\(offlineWaits))")
+                        try await Task.sleep(nanoseconds: 5_000_000_000)
+                        continue
+                    }
                     if failures >= maxFailures {
                         record(nil, ["action": .str("fail"), "reason": .str("\(failures) errors in a row")])
                         guard try await askForHelp() else { return finish() }
@@ -744,7 +760,10 @@ extension Pointer: Gestures {}
                         try await screen?.requireFrame(after: nil)
                         try await phone?.reset()
                     }
-                    try await replan(stuck: true)
+                    do { try await replan(stuck: true) }
+                    catch let e where ModelRequestFailure.isNetworkDown(e) {
+                        DebugLog.write("run: no network for the new plan (\(e.localizedDescription)); the next step tries again")
+                    }
                 }
             }
             record(nil, ["action": .str("fail"), "reason": .str("step limit reached")])
