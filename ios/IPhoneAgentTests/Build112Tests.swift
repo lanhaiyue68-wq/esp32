@@ -45,7 +45,14 @@ import XCTest
             if !screen.frozen { screen.updated = now() }
         case "click":
             clicks.append(at)
-            if asks { screen.frozen = clicks.count == 1 }
+            if asks, clicks.count == 1 {  // the last frame comes a moment after the click that asks
+                Task { @MainActor [screen] in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    screen.frozen = true
+                }
+            } else if asks {
+                screen.frozen = false
+            }
         default: break
         }
         return ""
@@ -140,6 +147,29 @@ import XCTest
         XCTAssertTrue(Pointer.wentAgainst(from: seen, to: CGPoint(x: 0.179, y: 0.265), units: -6, -36), "the 11-09 reading")
         XCTAssertFalse(Pointer.wentAgainst(from: seen, to: CGPoint(x: 0.296, y: 0.112), units: -6, -36), "where it was sent")
         XCTAssertFalse(Pointer.wentAgainst(from: seen, to: CGPoint(x: 0.302, y: 0.177), units: -6, -36), "too small to tell")
+    }
+
+    func testTheFarRightComesBackFromTheBorderEvenWhereTheMapReaches() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let mapX: [String: Any] = ["scatter": 0, "knots": [["units": 0, "fraction": 0], ["units": 150, "fraction": 0.5], ["units": 285, "fraction": 0.95]]]
+        let mapY: [String: Any] = ["scatter": 0, "knots": [["units": 0, "fraction": 0], ["units": 650, "fraction": 1]]]
+        let saved: [String: Any] = ["w": 300, "h": 650, "quality": 0.01, "stale": false,
+            "motionVersion": ProbeMotion.version, "requiresFeedback": false, "maps": ["x": mapX, "y": mapY]]
+        try JSONSerialization.data(withJSONObject: saved).write(to: file)
+        let p = Pointer(device: FakeDevice(), calibrationFile: file)
+        XCTAssertFalse(p.beyondReach(0.85))
+        XCTAssertTrue(p.beyondReach(0.89), "Meituan's search button")
+    }
+
+    func testTheSameDeadSpotIsNotRefusedUpToTheStepLimit() async {
+        let actor = FakeModel { _ in "THINK: 點搜尋\nDO: tap 890 138" }
+        let planner = FakeModel { _ in "1. 搜尋" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: "搜尋", plan: "", steps: [], running: false)
+        await agent.run()
+        let refused = agent.steps.filter { $0["action"]?.str == "refused" }.count
+        XCTAssertLessThanOrEqual(refused, 2 * (AgentLoop.refusalsInARow - 1), "\(agent.steps.map { $0["action"]?.str ?? "?" })")
     }
 
     func testTheModelsAreToldTheDate() throws {

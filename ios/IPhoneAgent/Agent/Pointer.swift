@@ -465,8 +465,13 @@ import Foundation
     /// alarm's ✓) landed at 0.975, the pointer on the dark sheet was not found, and 14 taps there did nothing.
     func beyondReach(_ x: Double) -> Bool {
         guard let mx = maps?["x"] else { return false }
-        return x > mx.reach + 0.01
+        return x > min(mx.reach + 0.01, Self.farRight)
     }
+
+    /// The map's far end is not good enough even when it reaches there. Over USB 11-09 and 11-10, from the corner to targets
+    /// right of 0.7: a median 0.07 short (Meituan's 搜索 at 0.89, clicked at its edge and then on the box's clear button, so the
+    /// search never ran), against 0.006 to 0.039 from the right border. The border is an exact reference.
+    static let farRight = 0.85
 
     /// The right border is an exact reference: home, push the pointer against it at the target's row, then come back
     /// the short distance, which the map measured (the same move from the left border lands that far in).
@@ -597,10 +602,15 @@ import Foundation
 
     static func nearClock(_ x: Double, _ y: Double) -> Bool { x < 0.4 && y < 0.12 }
 
-    /// After a click near the clock (the back button is right under it): a frame comes within moments, unless it asked.
+    /// Frames still come for a moment after the click that asks: the last one 0.2 to 0.4 s later over USB 11-09, and build 112
+    /// took that one for "not asked" and left the question up, frames stopped for 35 s until something else tapped Cancel.
+    static let lastFrameAfterAsking = 0.8
+
+    /// After a click near the clock (the back button is right under it): frames go on coming, unless it asked.
     private func answerIfAsked(_ x: Double, _ y: Double, clickedAt: Double) async throws {
         guard Self.nearClock(x, y), let screen, screen.live else { return }
-        if await screen.fresh(since: clickedAt, timeout: 2) != nil { return }
+        let settled = clickedAt + Self.lastFrameAfterAsking
+        if await screen.fresh(since: settled, timeout: max(0, settled - now()) + 2) != nil { return }
         // A click that changed nothing shows nothing new either; a small move must.
         let nudged = now()
         if maps != nil {

@@ -110,6 +110,7 @@ extension Pointer: Gestures {}
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
+    private var deadRefused = 0
     private var blindLooks = 0
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
@@ -507,6 +508,7 @@ extension Pointer: Gestures {}
     static let waitLimit = 3        // waits in a row that changed nothing
     static let blindLookLimit = 10  // looks of about 6 s each with sharing on before the user is asked
     static let blindLooksBeforeCancel = 2
+    static let refusalsInARow = 3
     static let leaveLimit = 2       // times the same way off the same screen is taken; the next is refused
 
     static let waitReason = "Refused: you waited several times and nothing changed, so more waiting will not help. Change "
@@ -514,7 +516,8 @@ extension Pointer: Gestures {}
         + "from here: type another search site in the address bar (www.baidu.com, cn.bing.com)."
     static let circleReason = "Refused: you already left this same screen this way twice and came back to it. Leaving does "
         + "not make it go away. Deal with what is on it: a sheet or permission prompt belongs to the app, answer it with the "
-        + "smallest choice (不允許, 不分享, 稍後, 關閉, Not Now), then go on."
+        + "smallest choice (不允許, 不分享, 稍後, 關閉, Not Now), then go on. If what the goal asks for is already done or on "
+        + "this screen, finish: answer done."
     static let openFailedReason = " is not on this phone: it is not on the Home Screen and Search does not list it as an app. "
         + "Do not search the web for it and do not try again; if the goal needs it, stop with fail and say so."
 
@@ -538,7 +541,8 @@ extension Pointer: Gestures {}
     }
 
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
-        + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one."
+        + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one. "
+        + "Text you just typed is submitted with: key enter."
 
     /// The tap since the previous stroke (the try at picking a tool), if there was one.
     static func tapBeforeStroke(_ steps: [JObject]) -> JObject? {
@@ -587,7 +591,7 @@ extension Pointer: Gestures {}
     }
 
     static let loopReason = "this move starts again a back-and-forth this run already went through twice; the move that "
-        + "left was the mistake. Stay on this screen and do the task here."
+        + "left was the mistake. Stay on this screen and do the task here. If what the goal asks for is already done, answer done."
 
     /// A move that leaves the current screen: back, home, or a tap on the back arrow at the top left.
     static func leaves(_ act: JObject) -> Bool {
@@ -639,7 +643,7 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
-        (notes, departures, circleRefused, blindLooks) = ([], [], 0, 0)
+        (notes, departures, circleRefused, blindLooks, deadRefused) = ([], [], 0, 0, 0)
         checksLeft = 2
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
@@ -1079,10 +1083,18 @@ extension Pointer: Gestures {}
                     }
                     if typedBase[key] == nil { typedBase[key] = count }
                 }
-                if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0 }
+                // What a button does can change with what was typed: a search button that did nothing may be the right one now
+                // (over USB 11-09 it missed twice, the word was typed again, and it stayed refused).
+                if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0; deadTaps = []; deadRefused = 0 }
                 // The tap after one that changed nothing goes through the eye (missed: aimed), so it lands on the spot.
                 // Moving it around the spot moved it off the button (淘寶's 加入購物車, 10 clicks above it, over USB 11-09).
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
+                    // Over USB 11-09 a run was refused here 48 times in a row, one model call each, up to its step limit.
+                    deadRefused += 1
+                    if deadRefused >= Self.refusalsInARow {
+                        deadRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept tapping a spot that does nothing")
+                    }
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
@@ -1477,7 +1489,7 @@ extension Pointer: Gestures {}
     /// Something was found or finished: coming back to a screen from here is the work, not a circle. A task of several
     /// parts goes back and forth by nature, and the guard stopped runs with the first part done (e01, f02, f06 on 11-09).
     private func gotOn() {
-        (departures, circleRefused, bounceGuard, bounceRefused) = ([], 0, nil, 0)
+        (departures, circleRefused, bounceGuard, bounceRefused, deadRefused) = ([], 0, nil, 0, 0)
     }
 
     /// A list is scrolled from the screen's margin: a press that starts on a button can click it (over USB 11-09 three
