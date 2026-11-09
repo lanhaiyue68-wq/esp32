@@ -25,9 +25,9 @@ import Foundation
     init(model: String, fallback: ChatModel, tokens: @escaping () -> ChatGPTPlus.Tokens? = { ChatGPTPlus.saved },
          save: @escaping (ChatGPTPlus.Tokens) -> Void = { ChatGPTPlus.save($0) },
          ask: @escaping Ask = { try await ChatGPTPlus.ask($0, model: $1, system: $2, prompt: $3, image: $4) },
-         rest: PlusRest = PlusRest()) {
+         rest: PlusRest? = nil) {
         self.plusModel = model; self.fallback = fallback; self.tokens = tokens; self.save = save; self.askPlus = ask
-        self.rest = rest
+        self.rest = rest ?? PlusRest()
     }
 
     /// The planner for a run: Plus when it is switched on and signed in, else the given model.
