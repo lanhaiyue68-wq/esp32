@@ -281,10 +281,13 @@ extension AppModel {
         let started = now()
         defer { DebugLog.write(String(format: "open %@: %.1f s", name, now() - started)) }
         // The page goHome read to know it was home is the page in front: no second look (build 116).
-        let seen = try await pointer.goHomeRows()
-        if seen == nil { try? await Task.sleep(nanoseconds: 300_000_000) }
-        guard var rows = seen.flatMap({ AppPlaces.looksLikeHome($0) ? $0 : nil }) ?? (await homeRows(top: 0.02)) else {
-            return try await bySearch(name)
+        var rows: [[CandidatePicker.Piece]]
+        if let seen = try await pointer.goHomeRows() {
+            rows = seen
+        } else {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let read = await homeRows(top: 0.02) else { return try await bySearch(name) }
+            rows = read
         }
         if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
         if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows) {

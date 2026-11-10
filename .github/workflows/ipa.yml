@@ -39,7 +39,10 @@ jobs:
           set -o pipefail
           xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent -configuration Release \
             -destination generic/platform=iOS -derivedDataPath build-device \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build 2>&1 | tail -150
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build > build-device.log 2>&1 || {
+              # The last 150 lines were warnings only and hid the error (build 116's first run).
+              grep -E ": error:" -A4 build-device.log | head -120; tail -40 build-device.log; exit 65; }
+          tail -40 build-device.log
       - name: Package IPA
         run: |
           app=$(ls -d build-device/Build/Products/Release-iphoneos/*.app | head -1)
