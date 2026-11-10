@@ -25,6 +25,15 @@ struct WatchView: View {
     @AppStorage(WatchSettings.privateWordsKey) private var privateWords = ""
     @AppStorage(WatchSettings.blockNumbersKey) private var blockNumbers = true
     @AppStorage(WatchSettings.intervalKey) private var interval = 5
+    @AppStorage(WatchSettings.followKey) private var follow = ""
+    @AppStorage(WatchSettings.lookTasksKey) private var lookTasks = true
+    @AppStorage(WatchSettings.checkIDKey) private var checkID = false
+    @AppStorage(WatchSettings.ownerIDKey) private var ownerID = ""
+    @AppStorage(OwnerTools.reposKey) private var repos = ""
+    @AppStorage(OwnerTools.endpointsKey) private var endpoints = ""
+    @AppStorage("captureAudioV1") private var captureAudio = true
+    @State private var githubToken = OwnerTools.githubToken
+    @State private var apiToken = OwnerTools.apiToken
     @State private var ownerPIN = WatchSettings.ownerPIN
     @State private var files: [String] = []
     @State private var computerFiles: [ComputerKnowledge.File] = []
@@ -49,7 +58,9 @@ struct WatchView: View {
                     Text(onlyListed ? "这里列出的会话和群：有红色未读数字或免打扰的小红点就打开，可以回复、执行任务。其他会话有红色标记也会打开，但只读，不回复。公众号、服务通知除外。"
                                     : "所有私聊都会读、也会回复；这里列出的群可以回复、执行任务，其他群只读，不回复。公众号、服务通知除外。")
                 }
+                followSection
                 triggers
+                ownerSections
                 Section {
                     Toggle("Allow phone tasks from WeChat", isOn: $phoneTasks)
                         .disabled(serverOn && serverReplies)
@@ -127,6 +138,51 @@ struct WatchView: View {
             Text(app.feed.isNative
                  ? "监听期间保持整屏共享和手机解锁。等待本身不调用模型，只在微信变化或定期检查时请求模型。"
                  : "While watching, leave this iPhone to the agent and keep Screen Mirroring on. Waiting costs nothing; the model is asked only when WeChat changes or at the regular check.")
+        }
+    }
+
+    private var followSection: some View {
+        Section {
+            TextField("群名，一行一个", text: $follow, axis: .vertical)
+                .lineLimit(2...6)
+        } header: {
+            Text(verbatim: "自动盯着的群")
+        } footer: {
+            Text(verbatim: "这里的群有新消息就读进来存好，不回复。之后问“这个群今天聊了什么”，就从存好的记录总结。")
+        }
+    }
+
+    private var ownerSections: some View {
+        Group {
+            Section {
+                Toggle("看图、看视频、读链接、总结（只读任务）", isOn: $lookTasks)
+                Toggle("听视频的声音（口播文案）", isOn: $captureAudio)
+                Toggle("群里核对微信号", isOn: $checkID)
+                if checkID {
+                    TextField("主人的微信号", text: $ownerID)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+            } header: {
+                Text(verbatim: "主人任务")
+            } footer: {
+                Text(verbatim: "只读任务：名单里的人私聊发图片、视频、链接，或在群里@你、带暗号说要看什么，就去看、去听、去总结，不发送也不修改任何东西。名字按这台手机看到的算，给主人设一个别人看不到的备注最安全。打开“群里核对微信号”后，群里的任务会先点开对方头像核对微信号：对上了才做；再带上暗号，就和私聊带口令一样什么都能做。改了“听视频的声音”要重新共享屏幕才生效。")
+            }
+            Section {
+                SecureField("GitHub 访问令牌", text: $githubToken)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .onChange(of: githubToken) { _, value in Keychain.set(value.trimmingCharacters(in: .whitespacesAndNewlines), for: OwnerTools.githubTokenAccount) }
+                TextField("GitHub 仓库（owner/name），一行一个", text: $repos, axis: .vertical)
+                    .lineLimit(1...5).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("服务器接口，一行一个：名称 | GET 或 POST | 网址 | 说明", text: $endpoints, axis: .vertical)
+                    .lineLimit(1...6).textInputAutocapitalization(.never).autocorrectionDisabled()
+                SecureField("服务器接口的令牌（Bearer）", text: $apiToken)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .onChange(of: apiToken) { _, value in Keychain.set(value.trimmingCharacters(in: .whitespacesAndNewlines), for: OwnerTools.apiTokenAccount) }
+            } header: {
+                Text(verbatim: "工具（主人专用）")
+            } footer: {
+                Text(verbatim: "主人可以让它查这些 GitHub 仓库（搜代码、读文件、看编译和提交），或调用这里列出的服务器接口。只有证明是主人才能用：私聊带口令，或群里带暗号并通过微信号核对。不是 GET 的接口会改东西，要再回“确认”才执行。令牌只存在这台 iPhone 的钥匙串里。")
+            }
         }
     }
 

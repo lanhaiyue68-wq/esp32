@@ -15,6 +15,7 @@ enum Actions {
         "tap": ["x", "y"], "swipe": ["x1", "y1", "x2", "y2"], "circle": ["x", "y", "r"], "path": ["points"],
         "type": ["text"], "key": ["combo"], "done": ["answer"], "fail": ["reason"],
         "home": [], "back": [], "wait": [], "replan": [], "open": ["app"], "note": ["text"], "press": ["text"],
+        "listen": ["seconds"],
     ]
     static let textArgs: Set<String> = ["text", "combo", "answer", "reason", "app"]
 
@@ -49,6 +50,7 @@ enum Actions {
             if rest.lowercased().contains("smooth") { action["smooth"] = .bool(true) }  // a curve through the points
             return action
         }
+        if name == "listen" && numbers.isEmpty { return ["action": .str(name), "seconds": .int(60)] }
         guard numbers.count == keys.count else {
             throw ParseError(message: "\(name) needs \(keys.count) numbers: \(line.prefix(100))")
         }

@@ -83,6 +83,10 @@ Actions:
                              calculator, number pad, dial pad. e.g. press AC 4 0 . 7 4 − 3 2 . 9 =  A number may be
                              written whole: press 40.74. If a key cannot be read, nothing is pressed and you are told
                              which keys were read, with their spots)
+  listen SECONDS            (the video on screen keeps playing: what it says is turned into text and the subtitles it
+                             shows are read, for up to SECONDS (5-180); the text comes back in your notes. Open the
+                             video, let it play from the start and leave it on screen first. Use it for a video's
+                             spoken words (口播文案) or to sum a video up)
   note TEXT                 (keeps what you just read, a price, a title, a name, for later: your notes stay with you
                              across screens and apps. Give it with the next action as soon as you read something the
                              goal will need; never go back to read again what your notes hold)

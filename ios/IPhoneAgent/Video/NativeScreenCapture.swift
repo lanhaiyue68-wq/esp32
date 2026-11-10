@@ -25,6 +25,11 @@ enum DirectCaptureEvent {
     private var generation: UUID?
     private var stopped = false
     private var shared: SCContentFilter?
+    /// User 11-11: a video's spoken words. The stream carries the screen's audio too (to ScreenAudio, used only while a
+    /// listen runs); a stream refused with audio is started again without it, and later ones stay without.
+    private var audioRefused = false
+    private let audioOutput = ScreenAudioOutput()
+    private var withAudio: Bool { !audioRefused && (UserDefaults.standard.object(forKey: "captureAudioV1") as? Bool ?? true) }
 
     init(deliver: @escaping (DirectCaptureEvent) -> Void) { self.deliver = deliver }
 
@@ -35,7 +40,8 @@ enum DirectCaptureEvent {
     func restart() -> Bool {
         guard !stopped, let filter = shared else { return false }
         let id = UUID()
-        let next = SCStream(filter: filter, configuration: Self.configuration(filter), delegate: self)
+        let audio = withAudio
+        let next = SCStream(filter: filter, configuration: Self.configuration(filter, audio: audio), delegate: self)
         let sink = DirectScreenOutput(generation: id) { [weak self] event in
             Task { @MainActor in
                 guard let self, !self.stopped, self.generation == id else { return }
@@ -44,6 +50,7 @@ enum DirectCaptureEvent {
         }
         do {
             try next.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
+            if audio { try? next.addStreamOutput(audioOutput, type: .audio, sampleHandlerQueue: audioOutput.queue) }
         } catch {
             DebugLog.write("capture: no new stream: \(error.localizedDescription); keeping the one there is")
             return false
@@ -52,6 +59,7 @@ enum DirectCaptureEvent {
             Task { @MainActor in
                 guard let self, !self.stopped else { next.stopCapture { _ in }; return }
                 if let error {
+                    if audio { self.audioRefused = true }  // the next one goes without audio
                     DebugLog.write("capture: the new stream was refused: \(error.localizedDescription); keeping the one there is")
                     return
                 }
@@ -65,9 +73,9 @@ enum DirectCaptureEvent {
         return true
     }
 
-    private static func configuration(_ filter: SCContentFilter) -> SCStreamConfiguration {
+    private static func configuration(_ filter: SCContentFilter, audio: Bool) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
-        config.capturesAudio = false
+        config.capturesAudio = audio
         config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
         config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
         return config
@@ -108,7 +116,8 @@ enum DirectCaptureEvent {
         let id = UUID()
         generation = id
         deliver(.began(id))
-        let next = SCStream(filter: filter, configuration: Self.configuration(filter), delegate: self)
+        let audio = withAudio
+        let next = SCStream(filter: filter, configuration: Self.configuration(filter, audio: audio), delegate: self)
         let sink = DirectScreenOutput(generation: id) { [weak self] event in
             Task { @MainActor in
                 guard let self, !self.stopped, self.generation == id else { return }
@@ -117,10 +126,20 @@ enum DirectCaptureEvent {
         }
         do {
             try next.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
+            if audio { try? next.addStreamOutput(audioOutput, type: .audio, sampleHandlerQueue: audioOutput.queue) }
             stream = next; output = sink
             next.startCapture { [weak self] error in
                 guard let error else { return }
-                Task { @MainActor in self?.ended(next, reason: "取屏启动失败：\(error.localizedDescription)") }
+                Task { @MainActor in
+                    guard let self, !self.stopped else { return }
+                    if audio {  // the screen matters more than its audio: the same share again, without audio
+                        DebugLog.write("capture: refused with audio (\(error.localizedDescription)); starting without it")
+                        self.audioRefused = true
+                        self.select(filter)
+                        return
+                    }
+                    self.ended(next, reason: "取屏启动失败：\(error.localizedDescription)")
+                }
             }
         } catch {
             deliver(.stopped(id, "取屏启动失败：\(error.localizedDescription)"))
@@ -149,6 +168,15 @@ enum DirectCaptureEvent {
     private func ended(_ ended: SCStream, reason: String) {
         guard !stopped, stream === ended else { return }
         deliver(.stopped(generation, reason)); stop()
+    }
+}
+
+@available(iOS 27.0, *)
+private final class ScreenAudioOutput: NSObject, SCStreamOutput {
+    let queue = DispatchQueue(label: "LanAgent.screen-audio", qos: .userInitiated)
+    func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, CMSampleBufferIsValid(sample) else { return }
+        ScreenAudio.shared.take(sample)
     }
 }
 

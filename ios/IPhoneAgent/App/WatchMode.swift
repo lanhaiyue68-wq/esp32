@@ -24,6 +24,8 @@ enum WatchSettings {
     static let interjectKey = "watchInterjectV1", sendersKey = "watchSendersV1", passphrasesKey = "watchPassphrasesV1"
     static let myNamesKey = "watchMyNamesV1"
     static let phoneTasksKey = "watchPhoneTasksV1"
+    static let followKey = "watchFollowV1", lookTasksKey = "watchLookTasksV1"
+    static let checkIDKey = "watchCheckWeChatIDV1", ownerIDKey = "watchOwnerWeChatIDV1"
     static let ownerPINAccount = "watch-owner-pin"  // Keychain
     static let inputBoxKey = "watchInputBoxV1"
     static let serverOnKey = "watchServerOnV1", serverURLKey = "watchServerURLV1", robotKey = "watchRobotIdV1"
@@ -47,6 +49,13 @@ enum WatchSettings {
     static var interject: Bool { d.bool(forKey: interjectKey) }
     static var senders: [String] { lines(d.string(forKey: sendersKey) ?? "") }
     static var phoneTasks: Bool { d.bool(forKey: phoneTasksKey) }
+    /// User 11-11. Chats followed for the record: every new message is read and kept (for a summary later), never answered.
+    static var follow: [String] { lines(d.string(forKey: followKey) ?? "") }
+    /// Read-only tasks from a listed sender: look at an image, a video, a link; listen; sum up.
+    static var lookTasks: Bool { d.object(forKey: lookTasksKey) as? Bool ?? true }
+    /// Before a task from a group: the sender's WeChat ID, read on their profile, must be the owner's.
+    static var checkID: Bool { d.bool(forKey: checkIDKey) }
+    static var ownerID: String { (d.string(forKey: ownerIDKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
     /// Where WeChat's input box sits with the keyboard down: the same in every chat, so one good send teaches all and
     /// a reply goes out without an agent run in any chat (logs26: send runs took 15–76 s).
     static var inputBox: CGPoint? {
@@ -112,6 +121,7 @@ enum WatchSettings {
         var phoneTasks = false, ownerPIN = ""
         /// Chats that are not listed, opened a moment ago: not opened again for a while (see AppModel.restingChats).
         var resting: [String] = []
+        var follow: [String] = [], lookTasks = false, checkID = false, ownerID = ""
         /// The one chosen chat stays open between checks: its new messages show up on screen by themselves.
         var single: Bool { onlyListed && targets.count == 1 }
     }
@@ -119,7 +129,7 @@ enum WatchSettings {
     static var rules: Rules {
         Rules(targets: targets, onlyListed: onlyListed, senders: senders, passphrases: passphrases, myNames: myNames,
               interject: interject, serverReplies: serverReplies, instruction: instruction, fallback: fallback, phoneTasks: phoneTasks,
-              ownerPIN: ownerPIN)
+              ownerPIN: ownerPIN, follow: follow, lookTasks: lookTasks, checkID: checkID, ownerID: ownerID)
     }
 
     /// A separate capability from ordinary replies: every source must exactly match both lists, come from a private
@@ -215,16 +225,105 @@ enum WatchSettings {
         return mention || r.passphrases.contains { m.text.contains($0) }
     }
 
+    /// The message @s this account or carries a passphrase.
+    static func called(_ m: ReadMessage, _ r: Rules) -> Bool {
+        r.myNames.contains { m.text.contains("@" + $0) || m.text.contains("＠" + $0) } || said(m, r)
+    }
+
+    static func said(_ m: ReadMessage, _ r: Rules) -> Bool { r.passphrases.contains { m.text.contains($0) } }
+
+    /// May give read-only tasks (user 11-11): a listed sender, by the exact name this phone shows (its own remark for the
+    /// owner, which nobody in a group sees), in a listed chat; in a group only with an @ of this account or a passphrase.
+    static func lookOwner(_ m: ReadMessage, _ r: Rules) -> Bool {
+        r.lookTasks && !r.serverReplies && r.senders.contains(m.sender) && r.targets.contains(m.chat) && (!m.group || called(m, r))
+    }
+
+    /// What a message that is only an attachment asks for: an image sent to this account is described, a video's or a
+    /// link's words and numbers are read. nil: not such a message (the model reads it as talk).
+    static func lookDefault(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["[图片]", "[圖片]", "[Image]"].contains(t) { return "看我刚发的这张图片：说明图里有什么，把图上的文字抄出来。" }
+        if ["[视频]", "[視頻]", "[影片]", "[Video]"].contains(t) { return "看我刚发的这个视频：听它讲了什么，总结内容，并给出口播文案。" }
+        if t.hasPrefix("[视频号]") || t.hasPrefix("[視頻號]") {
+            return "打开我刚发的这个视频号视频：读作者、文案和点赞、转发、评论数，听它讲了什么，总结内容并给出口播文案。"
+        }
+        let link = t.hasPrefix("[链接]") || t.hasPrefix("[連結]")
+            || t.range(of: #"(douyin\.com|kuaishou\.com|xhslink\.com|xiaohongshu\.com|channels\.weixin\.qq\.com)"#, options: .regularExpression) != nil
+        // Words of the sender's own beside the link are a request: the model reads them.
+        if link, t.range(of: #"(帮我|幫我|给我|給我|总结|總結|提取|多少|什么|什麼|\?|？)"#, options: .regularExpression) == nil {
+            return "打开我刚发的这个链接：读出作者、标题或文案，以及点赞、评论、收藏、转发数；是视频就听它讲了什么，给出口播文案。"
+        }
+        return nil
+    }
+
+    /// A WeChat ID as it is compared: what reading the screen mixes up (0 and O, 1, l and I) counts as the same.
+    static func sameID(_ a: String, _ b: String) -> Bool {
+        let fold = { (s: String) in
+            String(s.lowercased().filter { !$0.isWhitespace }.map { c -> Character in c == "o" ? "0" : "li".contains(c) ? "1" : c })
+        }
+        return !fold(a).isEmpty && fold(a) == fold(b)
+    }
+
+    /// The WeChat ID on a profile page: the line "微信号：…" under the name. A line that is itself the first text of the
+    /// page is the name (anyone can call themselves "微信号：abc"), not the ID.
+    static func weChatID(rows: [[CandidatePicker.Piece]]) -> String? {
+        let lines = rows.compactMap { row -> (text: String, y: Double)? in
+            let text = row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
+            return text.isEmpty ? nil : (text, row.map { Double($0.box.midY) }.min() ?? 0)
+        }.filter { $0.y > 0.1 }.sorted { $0.y < $1.y }
+        for (i, line) in lines.enumerated() where i > 0 {
+            let t = line.text.filter { !$0.isWhitespace }
+            guard let r = t.range(of: #"^(微信号|微信號|WeChatID)[:：]"#, options: [.regularExpression, .caseInsensitive]) else { continue }
+            let id = String(t[r.upperBound...])
+            if id.range(of: #"^[A-Za-z][A-Za-z0-9_\-]{4,29}$"#, options: .regularExpression) != nil { return id }
+        }
+        return nil
+    }
+
+    /// Opens the sender's profile from their message (their WeChat ID is read there by this phone, not by a model).
+    static func profileTask(chat: String, sender: String, text: String) -> String {
+        """
+        在微信会话“\(chat)”里，找到“\(sender)”发的这条消息：“\(text.prefix(30))”。点这条消息左边他的头像（小方图），打开他的个人资料页。
+        看到资料页（显示名字、昵称、微信号，有“发消息”“音视频通话”按钮）就立刻完成，答案只写 {"profile":true}。
+        只点头像这一下：不要长按，不要点消息本身，不要点别的按钮，不要发消息。找不到这条消息或头像就失败。
+        """
+    }
+
+    /// A long text in pieces a message can carry, cut at sentence ends where it can; at most `limit` pieces.
+    static func chunks(_ text: String, size: Int = 280, limit: Int = 5) -> [String] {
+        var rest = Substring(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        var out: [String] = []
+        while !rest.isEmpty, out.count < limit {
+            if rest.count <= size { out.append(String(rest)); rest = ""; break }
+            let head = rest.prefix(size)
+            let half = head.index(head.startIndex, offsetBy: size / 2)
+            let stop = head.lastIndex(where: { "。！？；!?;".contains($0) }).map { head.index(after: $0) }
+            let cut = stop.flatMap { $0 > half ? $0 : nil } ?? head.endIndex
+            out.append(String(rest[..<cut]).trimmingCharacters(in: .whitespaces))
+            rest = rest[cut...]
+        }
+        if !rest.isEmpty, let last = out.popLast() { out.append(last + "（后面省略）") }
+        return out
+    }
+
+    /// The message without its @ of this account and its passphrases: what is left is what was asked.
+    static func bare(_ text: String, _ r: Rules) -> String {
+        var t = text
+        for name in r.myNames { for at in ["@", "＠"] { t = t.replacingOccurrences(of: at + name, with: "") } }
+        for word in r.passphrases { t = t.replacingOccurrences(of: word, with: "") }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// User 11-09: the listed chats (the owner's account, the chats and groups set here) get replies and tasks; any
     /// other chat with a red mark is opened and read only. With "only these chats" off, other private chats are
     /// answered as before; other groups are still read only.
     static func readOnly(_ chat: String, group: Bool, _ r: Rules) -> Bool {
-        !r.targets.contains(chat) && (r.onlyListed || group)
+        !r.targets.contains(chat) && (r.onlyListed || group || r.follow.contains(chat))
     }
 
     /// Step 1: open the chat to read. Never replies.
     static func openTask(_ r: Rules) -> String {
-        let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
+        let names = (r.targets + r.follow.filter { !r.targets.contains($0) }).map { "“\($0)”" }.joined(separator: "、")
         let others = "其他任何会话（公众号、订阅号、服务通知、文件传输助手除外）"
         let rest = r.resting.isEmpty ? "" : "（这些刚看过，不要打开：" + r.resting.map { "“\($0)”" }.joined(separator: "、") + "）"
         let scope = (names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)") + rest
@@ -393,8 +492,9 @@ enum WatchSettings {
         从上到下列出截图里能看清的每条消息（最多 20 条），只输出一行 JSON，不要别的文字：
         {"title":"顶部标题","group":true,"messages":[{"sender":"发言人","kind":"text","text":"消息内容","mine":false}]}
         规则：title 照抄顶部的会话名（不要括号里的人数）；这不是微信聊天界面就写 ""，messages 写 []。group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
-        左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，
-        kind 写 text、file、image、voice 或 sticker。语音写 [语音]，文件卡片必须 kind=file、text=[文件]，不要把文件名当成对方说的话，不要打开文件，也不要猜文件内容。
+        左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，视频写 [视频]，视频号卡片写 [视频号] 加卡片上的标题，
+        链接或小程序卡片（抖音、快手、小红书、公众号文章等）写 [链接] 加卡片标题；
+        kind 写 text、file、image、video、link、voice 或 sticker。语音写 [语音]，文件卡片必须 kind=file、text=[文件]，不要把文件名当成对方说的话，不要打开文件，也不要猜文件内容。
         气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
         时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
         """
@@ -414,7 +514,7 @@ enum WatchSettings {
     }
 
     static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String,
-                              owner: Bool, needsPasscode: Bool = false) -> String {
+                              owner: Bool, needsPasscode: Bool = false, look: Bool = false) -> String {
         let history = recent.suffix(20).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
         let asks = due.map { "\($0.sender)：\($0.text)" }.joined(separator: "\n")
         let phone = owner && phoneRequest(due, r) != nil
@@ -431,6 +531,15 @@ enum WatchSettings {
               说这话的是主人（白名单里的人）。主人要你在微信里查看或操作才能做到的事（例如看群成员、找出谁是群主、@某人、看群公告），\
               就给出 task：一句完整的中文操作说明，写清要找什么、最后要在这个会话里发出什么（要@人就写“@某某”，执行时会从成员列表里选人，\
               这样才是真的@）。能直接从上面的聊天或知识库回答的，只用 reply。
+              """
+            : look
+            ? """
+              说这话的是主人（名单里的人）\(group ? "，在群里@了你或带了暗号" : "")。主人要你去看、去读、去听、去查、去总结的事都可以做：\
+              看某条消息里的图片；打开视频、视频号或链接（抖音、快手、小红书、公众号文章），读作者、文案和点赞、评论、收藏、转发数；\
+              听视频讲了什么、提取口播文案、总结内容；在别的 App 里查资料；总结某个群最近在聊什么；查 GitHub 仓库或调用设置里的工具。
+              这类事就给出 task：一句完整的中文说明，写清要看的是哪一条（谁发的，是图片、视频、链接还是卡片，标题是什么）和主人要什么结果，\
+              主人的原话尽量保留；reply 写“收到”。只是聊天、能直接回答的，只用 reply。
+              只读不改：要发送、转发、发布、修改、删除、下单、付款的事不能这样做，\(needsPasscode ? "reply 写：“这件事请在私聊里带上口令再发一次。”" : "用 reply 说明做不到。")
               """
             : needsPasscode
             ? """
@@ -449,16 +558,23 @@ enum WatchSettings {
                              : "知识库（具体事实只能依据它；里面没有的，回复：“\(r.fallback)”）：\n\(knowledge)")
         \(tasks)
         规则：直接回应对方说的话，正面回答问题，像真人一样简短自然，reply 尽量不超过 20 个字，不要和上面你已经发过的话一字不差，只用汉字、数字和常见标点（，。？！），不要用表情、～、…，也不要出现 @ 符号（要@人只能用 task）；需要回应的有好几条时，按发送的先后顺序在同一条 reply 里逐条回应，不要只回其中一条；几件要在手机上做的事按先后顺序写进同一个 task；能从上面的聊天里看出答案的就直接说。reply 开头不要@人，直接说内容；只有主人明确要你@某人时才@（那用 task）。
-        不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、打开链接、发朋友圈）一律不做，用 reply 说明做不到。
-        只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在\(phone ? "手机上" : "微信里")执行的操作，不需要就留空"}
+        不编造，不透露用户的隐私，不承诺金钱和时间，不发链接。不允许的操作（付款、红包、转账、拉人踢人、改群设置、退群、加好友、发文件、\(look ? "" : "打开链接、")发朋友圈）一律不做，用 reply 说明做不到。
+        只输出一行 JSON：{"reply":"要直接发送的话，不需要就留空","task":"要在\(phone || look ? "手机上" : "微信里")执行的操作，不需要就留空"}
         """
     }
 
     /// The owner's request carried out on the phone; the agent sends the outcome itself (a real @ from the member list).
-    static func ownerTask(chat: String, task: String, phone: Bool = false) -> String {
+    static func ownerTask(chat: String, task: String, phone: Bool = false, readOnly: Bool = false) -> String {
         if phone {
+            let lookRules = readOnly ? """
+
+                这是只读任务：只查看、读取、听、总结。不发消息、不转发、不评论、不点赞、不收藏、不关注、不下单、不修改或删除任何东西。
+                主人说的图片、视频、链接或卡片在微信会话“\(chat)”里：先回到这个会话找到那条消息，点开它再看；看完把它关掉（视频号不要留小窗）。
+                要总结一个群最近在聊什么：打开那个会话，手指往下滑看上面更早的聊天（最多 4 屏），读完再总结。
+                结果写进答案：数据逐项写清；口播文案尽量完整（最多约 600 字）；总结写 3 到 5 句。
+                """ : ""
             return """
-            这是主人从微信会话“\(chat)”交给这台 iPhone 的手机任务。可以离开微信，在微信以外的 App 操作。
+            这是主人从微信会话“\(chat)”交给这台 iPhone 的手机任务。可以离开微信，在微信以外的 App 操作。\(lookRules)
             只执行下面这次主人消息里明确要求的事，按原文顺序处理；不要扩展成别的任务：
             <主人本轮指令>
             \(task)
@@ -505,7 +621,7 @@ struct WatchTaskReply: Codable, Equatable {
     private static let key = "watchPendingPhoneReplyV1"
 
     func canDeliver(_ r: WatchSettings.Rules, watching: Bool) -> Bool {
-        watching && r.phoneTasks && !r.serverReplies && r.targets.contains(chat) && r.senders.contains(sender)
+        watching && (r.phoneTasks || r.lookTasks) && !r.serverReplies && r.targets.contains(chat) && r.senders.contains(sender)
     }
 
     static func saved(in defaults: UserDefaults = .standard) -> WatchTaskReply? {
@@ -865,6 +981,25 @@ enum ReadLog {
         return text.split(separator: "\n").compactMap { try? dec.decode(ReadMessage.self, from: Data($0.utf8)) }
     }
 
+    /// What was read in `chat` (all chats when nil) in the last `hours`, oldest first.
+    static func recent(chat: String?, hours: Int, now: Date = Date(), in dir: URL? = folder) -> [ReadMessage] {
+        let since = now.addingTimeInterval(-Double(hours) * 3600)
+        var out: [ReadMessage] = []
+        for back in stride(from: hours / 24 + 1, through: 0, by: -1) {
+            out += messages(on: now.addingTimeInterval(-Double(back) * 86400), in: dir)
+        }
+        return out.filter { m in
+            (m.at ?? now) >= since && (chat.map { m.chat == $0 || m.chat.contains($0) || $0.contains(m.chat) } ?? true)
+        }
+    }
+
+    static func chatSummaryPrompt(chat: String, hours: Int) -> String {
+        """
+        你帮主人总结微信会话“\(chat)”最近 \(hours) 小时的聊天。写清：主要在聊哪几件事、谁说了什么要点、有没有需要主人亲自处理或回复的事。
+        用简体中文，不超过 300 字，只用汉字、数字、英文和常见标点，不要 Markdown，不要编造消息里没有的内容。
+        """
+    }
+
     static let summaryPrompt = """
     你帮用户总结他今天在微信里收到的消息。按会话分组，每组几句话：谁说了什么要点、有没有需要用户亲自处理的事（问价、约时间、要东西、\
     要钱等）、Agent 已经替他回复了什么。最后单列“需要你处理”的清单。用简体中文，简洁，不要编造消息里没有的内容。
@@ -948,6 +1083,10 @@ extension AppModel {
                 return String(localized: "The board or Screen Mirroring isn't ready. Connect the board and start Screen Mirroring.")
             }
         }
+        if WatchSettings.checkID && WatchSettings.ownerID.isEmpty {
+            return "填上主人的微信号，或关掉“群里核对微信号”。"
+        }
+        ScreenListener.authorize()
         if WatchSettings.onlyListed && WatchSettings.targets.isEmpty {
             return String(localized: "Add at least one chat or group to reply to, or turn off “Only these chats”.")
         }
@@ -965,6 +1104,7 @@ extension AppModel {
         watchInterjectedAt = [:]
         watchRetries = [:]
         watchRestUntil = [:]
+        watchPendingCall = nil
         watchTaskReplyFailures = 0
         agent.pinyinMisses = 0
         watchListReturn.pending = nil
@@ -1208,7 +1348,7 @@ extension AppModel {
     }
 
     private func rest(_ chat: String, _ rules: WatchSettings.Rules) {
-        guard !rules.targets.contains(chat), !chat.isEmpty else { return }
+        guard !rules.targets.contains(chat), !rules.follow.contains(chat), !chat.isEmpty else { return }  // a followed chat is read every time
         watchRestUntil[chat] = now() + Self.restMinutes * 60
         DebugLog.write("watch: \(chat) is not listed; not opened again for \(Int(Self.restMinutes)) minutes")
     }
@@ -1246,6 +1386,7 @@ extension AppModel {
 
         var reply: String?, task: String?
         var phoneMessages: [ReadMessage] = []
+        var lookMessages: [ReadMessage] = []  // the owner's read-only task (user 11-11)
         var responding: [ReadMessage] = []
         var answering: WatchReport.Line?  // the newest message being answered: the reply must show up after it
         if !rules.serverReplies && !read.isEmpty {
@@ -1258,6 +1399,18 @@ extension AppModel {
             let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
             responding = due
             if let last = due.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
+            if let waiting = watchPendingCall, waiting.chat == chat, let last = due.last, last.sender == waiting.sender,
+               now() - waiting.at < 120, OwnerTools.isConfirmation(WatchSettings.bare(last.text, rules)) {
+                // The owner said "确认" to the call that waited for it.
+                watchPendingCall = nil
+                DebugLog.write("watch: confirmed: \(OwnerTools.describe(waiting.call))")
+                let answer = await toolAnswer(waiting.call, request: waiting.request)
+                _ = await sendLong(answer, chat: chat, back: !rules.single)
+                for m in due { watchAnswered[WatchReport.answerKey(m)] = now() }
+                ReadLog.append(read)
+                watchRead += read.count
+                return (true, true)
+            }
             if !due.isEmpty {
                 let knowledge = await watchKnowledge()
                 let sources = WatchSettings.phoneSources(due, rules)
@@ -1275,15 +1428,19 @@ extension AppModel {
                     responding = sources
                     if let last = sources.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
                 }
-                DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil)")
+                // Read-only tasks: a listed sender in a listed chat (in a group with an @ or a passphrase), no passcode needed.
+                let look = !owner && original == nil && due.allSatisfy { WatchSettings.lookOwner($0, rules) }
+                DebugLog.write("watch: \(chat): owner \(owner), passcode missing \(needsPasscode), phone task \(request != nil), look \(look)")
                 let decided: (reply: String, task: String)
                 if let request {
                     decided = (WatchSettings.taskAcknowledgement, request)
                 } else if original != nil {
                     decided = (WatchSettings.missingRetryTaskReply, "")
+                } else if look, due.count == 1, let auto = WatchSettings.lookDefault(due[0].text) {
+                    decided = (WatchSettings.taskAcknowledgement, auto)  // an image, a video or a link on its own
                 } else if let answer = await decide(WatchSettings.composePrompt(chat: chat, group: screen.group, recent: screen.lines,
                                                                            due: due, r: rules, knowledge: knowledge, owner: owner,
-                                                                           needsPasscode: needsPasscode),
+                                                                           needsPasscode: needsPasscode, look: look),
                                                rollback: { self.watchLast[chat] = before }) {
                     decided = answer
                 } else {
@@ -1291,11 +1448,14 @@ extension AppModel {
                     return (false, false)
                 }
                 reply = WatchSettings.typeable(decided.reply)
-                task = owner && !decided.task.isEmpty ? decided.task : nil
+                task = (owner || look) && !decided.task.isEmpty ? decided.task : nil
                 if task != nil, let request {
                     phoneMessages = sources
                     task = request
                     watchLastTask[chat] = request
+                    if reply == nil { reply = WatchSettings.taskAcknowledgement }
+                } else if task != nil, look {
+                    lookMessages = Array(due)
                     if reply == nil { reply = WatchSettings.taskAcknowledgement }
                 }
             } else if rules.interject && screen.group && now() - (watchInterjectedAt[chat] ?? 0) >= 600 {
@@ -1323,24 +1483,52 @@ extension AppModel {
             } else { sent = false }
         }
         var taskStarted = false
-        if let task, WatchSettings.canStartTask(replySent: sent, sources: phoneMessages, rules: WatchSettings.rules) {
+        let looking = !lookMessages.isEmpty
+        if let task, looking || WatchSettings.canStartTask(replySent: sent, sources: phoneMessages, rules: WatchSettings.rules) {
             let phone = !phoneMessages.isEmpty
             guard watching, !Task.isCancelled else { return (false, false) }
             if phone && WatchSettings.phoneRequest(phoneMessages, WatchSettings.rules) == nil { return (false, false) }
             taskStarted = true
             if !sent { DebugLog.write("watch: acknowledgement unverified; executing the independently authorized owner task") }
             DebugLog.write("watch: owner task in \(chat): \(task)")
+            // How sure it is the owner: the passcode in a private chat is; a name with an @ or a passphrase may only look,
+            // unless the WeChat ID check is on and passes (and then, with a passphrase, anything).
+            let askers = phone ? phoneMessages : lookMessages
+            var full = phone, handled = false  // handled: refused, or done by a tool; nothing for the phone to do
+            if looking, screen.group, rules.checkID, let source = lookMessages.last {
+                let id = await senderWeChatID(chat: chat, message: source)
+                if let id, WatchSettings.sameID(id, rules.ownerID) {
+                    full = lookMessages.allSatisfy { WatchSettings.said($0, rules) }
+                    DebugLog.write("watch: WeChat ID checked: it is the owner's\(full ? "" : " (no passphrase: looking only)")")
+                } else {
+                    DebugLog.write("watch: WeChat ID \(id == nil ? "could not be read" : "is not the owner's"); nothing is done")
+                    let refused = "身份没有核对上，这件事我不能做。"
+                    _ = await sendReply(refused, chat: chat, back: !rules.single)
+                    if let i = answerIndex { read[i].replied += "【未执行】" + refused }
+                    handled = true
+                }
+            }
+            if !handled, phone || looking, let call = await ownerTool(task, chat: chat) {
+                let answer = await runTool(call, request: task, chat: chat, sender: askers.last?.sender ?? "", full: full)
+                _ = await sendLong(answer, chat: chat, back: !rules.single)
+                if let i = answerIndex { read[i].replied += "【工具】" + String(answer.prefix(200)) }
+                handled = true
+            }
+            let readOnly = looking && !full
             // After one requested send, the remaining steps verify its result without another send or navigation.
             // A task with several parts keeps its ordinary steps.
             agent.endAfterSend = phone && !WatchSettings.severalParts(task) ? 5 : nil
-            let done = await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: phone),
-                                      stepLimit: phone ? agent.maxSteps : 25, fastText: true,
+            let outside = phone || looking
+            let done = handled ? nil : await watchRun(WatchSettings.ownerTask(chat: chat, task: task, phone: outside, readOnly: readOnly),
+                                      stepLimit: outside ? agent.maxSteps : 25, fastText: true,
                                       // Live test 11-08 (build101): an owner task of three parts started with no
                                       // plan, so the commander (Plus) never split it and it had 40 steps for all.
-                                      directStart: phone && !WatchSettings.severalParts(task))
+                                      directStart: outside && !WatchSettings.severalParts(task), readOnly: readOnly)
             agent.endAfterSend = nil
-            afterPhoneTask = phone
-            if phone, let source = phoneMessages.last {
+            afterPhoneTask = outside && !handled
+            if handled {
+                for m in askers { watchAnswered[WatchReport.answerKey(m)] = now() }
+            } else if outside, let source = askers.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
                 // stopping this watch must not start a navigation/send run.
                 var result = WatchSettings.phoneTaskResult(action: agent.steps.last?["action"]?.str,
@@ -1350,7 +1538,7 @@ extension AppModel {
                     result = "任务已结束，结果含有受保护信息，未发送详情。"
                 }
                 watchTaskReply = WatchTaskReply(chat: chat, sender: source.sender, text: result)
-                for m in phoneMessages { watchAnswered[WatchReport.answerKey(m)] = now() }
+                for m in askers { watchAnswered[WatchReport.answerKey(m)] = now() }
                 if let i = answerIndex { read[i].replied += "【待回报】" + result }
             } else if let done, watching, !Task.isCancelled {
                 // What it found is sent from here: going back to the chat to type it, the agent forgot what it had
@@ -1415,7 +1603,15 @@ extension AppModel {
             let opened = await hopToWeChat(seesWeChat: { false })
             DebugLog.write("watch: report at start: WeChat opened by its URL: \(opened ? "yes" : "no")")
         }
-        if await sendReply(result.text, chat: result.chat, back: !WatchSettings.rules.single) {
+        // A long result (a video's words, a summary) goes out in pieces; what is left is kept, so a failed piece is tried
+        // again without the ones before it going out twice.
+        var left = WatchSettings.chunks(result.text)
+        while let part = left.first, watching, !Task.isCancelled {
+            guard await sendReply(part, chat: result.chat, back: !WatchSettings.rules.single && left.count == 1) else { break }
+            left.removeFirst()
+            watchTaskReply = left.isEmpty ? nil : WatchTaskReply(chat: result.chat, sender: result.sender, text: left.joined())
+        }
+        if left.isEmpty {
             watchTaskReply = nil
             watchTaskReplyFailures = 0
         } else if watching && !Task.isCancelled {
@@ -1764,7 +1960,7 @@ extension AppModel {
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
                           directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil,
                           inspectInput: String? = nil, replyAfter: WatchReport.Line? = nil,
-                          learnedRoutes: Bool = true, noTyping: Bool = false) async -> String? {
+                          learnedRoutes: Bool = true, noTyping: Bool = false, readOnly: Bool = false) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
@@ -1810,9 +2006,12 @@ extension AppModel {
             agent.rowTarget = { (frame: Data) -> CGPoint? in WatchChatOpen.row(of: chat, in: frame) }
         } else { agent.rowTarget = nil }
         defer { agent.inputToInspect = nil; agent.sendReceipt = nil; agent.rowTarget = nil }
+        // A read-only task sends nothing: a message about to go out is refused like a cloud task's (the draft is cleared).
+        var approve: ((String) async -> Bool)?
+        if readOnly { approve = { _ in false } }
         await run(task, reference: reference, outgoing: outgoing, plan: plan,
                   stepLimit: stepLimit, fastText: fastText, returnSends: returnSends, frameCompletion: completion,
-                  directStart: directStart, keyboardGuard: true, learnedRoutes: learnedRoutes)
+                  directStart: directStart, keyboardGuard: true, learnedRoutes: learnedRoutes, approveSend: approve)
         while agent.running || startingAgent {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -1821,6 +2020,84 @@ extension AppModel {
         guard let last = agent.steps.last, last["action"]?.str == "done" else { return nil }
         watchHandled += 1
         return last["answer"]?.str ?? ""
+    }
+
+    /// The sender's WeChat ID, read by this phone on their profile page (opened from their message), then back to the chat.
+    private func senderWeChatID(chat: String, message: ReadMessage) async -> String? {
+        guard await watchRun(WatchSettings.profileTask(chat: chat, sender: message.sender, text: message.text),
+                             stepLimit: 6, directStart: true, learnedRoutes: false) != nil else { return nil }
+        _ = try? await feed.currentFrame()
+        var id: String?
+        if let frame = feed.frame {
+            id = WatchSettings.weChatID(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.05, bottom: 0.7))
+        }
+        try? await pointer.tap(0.055, 0.087, aim: false)  // the back arrow
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        return id
+    }
+
+    /// The tool the owner's words ask for, if any (OwnerTools.wants decides whether to ask a model at all).
+    private func ownerTool(_ request: String, chat: String) async -> OwnerTools.Call? {
+        let repos = OwnerTools.githubToken.isEmpty ? [] : OwnerTools.repos, endpoints = OwnerTools.endpoints
+        guard OwnerTools.wants(request, repos: repos, endpoints: endpoints) else { return nil }
+        do {
+            let prompt = OwnerTools.choosePrompt(request: request, chat: chat, repos: repos, endpoints: endpoints)
+            let reply = try await settings.client("actor").chat(system: prompt, text: "只输出那一行 JSON。", image: nil,
+                                                                maxTokens: 200, temperature: 0)
+            var call = OwnerTools.call(from: reply.text, chat: chat, repos: repos, endpoints: endpoints)
+            // Too little kept of that chat to sum up: the phone reads the chat itself.
+            if case .summary(let name, let hours)? = call, ReadLog.recent(chat: name, hours: hours).count < 3 { call = nil }
+            DebugLog.write("watch: tool: \(call.map(OwnerTools.describe) ?? "none")")
+            return call
+        } catch {
+            DebugLog.write("watch: choosing a tool failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Runs it, or says why not: what reaches outside the phone needs the proven owner, what changes something waits for "确认".
+    private func runTool(_ call: OwnerTools.Call, request: String, chat: String, sender: String, full: Bool) async -> String {
+        if OwnerTools.needsFullOwner(call) && !full {
+            return "这件事要主人在私聊里带口令说，或者在群里带暗号并通过微信号核对。"
+        }
+        if OwnerTools.needsConfirmation(call) {
+            watchPendingCall = (chat, sender, call, request, now())
+            return "要执行：" + OwnerTools.describe(call) + "。回复“确认”才会执行，两分钟内有效。"
+        }
+        return await toolAnswer(call, request: request)
+    }
+
+    private func toolAnswer(_ call: OwnerTools.Call, request: String) async -> String {
+        let system: String, text: String
+        if case .summary(let name, let hours) = call {
+            system = ReadLog.chatSummaryPrompt(chat: name, hours: hours)
+            text = ReadLog.summaryInput(ReadLog.recent(chat: name, hours: hours))
+        } else {
+            let result = await OwnerTools.run(call, githubToken: OwnerTools.githubToken, apiToken: OwnerTools.apiToken)
+            system = OwnerTools.answerPrompt(request: request, result: result)
+            text = "直接写出回答。"
+        }
+        var answer: String
+        do {
+            answer = try await settings.client("planner").chat(system: system, text: text, image: nil, maxTokens: 700, temperature: 0.2).text
+        } catch {
+            DebugLog.write("watch: answering from the tool failed: \(error.localizedDescription)")
+            return "工具用过了，但整理结果时出了问题，请再说一次。"
+        }
+        if PrivacyGuard.check(answer, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
+            answer = "结果里有受保护的信息（号码、邮箱等），没有发出。"
+        }
+        return answer
+    }
+
+    /// A long answer as several messages (WatchSettings.chunks), each sent and seen before the next.
+    private func sendLong(_ text: String, chat: String, back: Bool) async -> Bool {
+        let parts = WatchSettings.chunks(WatchSettings.typeable(text.replacingOccurrences(of: "\n", with: " ")) ?? "")
+        guard !parts.isEmpty else { return false }
+        for (i, part) in parts.enumerated() {
+            guard await sendReply(part, chat: chat, back: back && i == parts.count - 1) else { return false }
+        }
+        return true
     }
 
     /// One stage's time and how many model requests it made (LLMClient.requests since `calls`), so a log shows

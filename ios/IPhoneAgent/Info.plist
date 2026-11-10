@@ -68,6 +68,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Lan Agent receives the mirrored screen from its board, and talks to ChatTool and your knowledge base on your computer, over your Wi-Fi.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lan Agent turns what a video says into text (spoken words, 口播文案) when you ask it to.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Lan Agent talks to its USB board over Bluetooth to see the screen and move the pointer.</string>
 	<key>NSSupportsLiveActivities</key>

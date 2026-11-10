@@ -244,6 +244,9 @@ extension Pointer: Gestures {}
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
+    /// What the video on screen says (speech to text) and the subtitles it shows, for up to so many seconds (AppModel's
+    /// listenToScreen). nil in tests and where it is not wired.
+    var listen: ((Double) async -> String)?
     /// "Needs your help": asked when the actor gives up or errors repeat; nil = end the run as before.
     var onHelp: ((String) async -> HelpChoice)?
     private var helpAsked = 0
@@ -579,9 +582,16 @@ extension Pointer: Gestures {}
     static func publishes(_ task: String) -> Bool {
         let t = task.lowercased().replacingOccurrences(
             of: #"(不要|不用|不必|別|别|勿|禁止|don't|do not|never)[^，,。.；;！!？?\n]*"#, with: " ", options: .regularExpression)
-        let verbs = ["發", "发", "傳給", "传给", "回覆", "回复", "留言", "評論", "评论", "轉發", "转发", "貼文", "帖子",
-                     "send", "reply", "post", "comment"]
-        return verbs.contains { t.contains($0) }
+        // Build 120 on the phone, 11-11: "影片是誰發的", "評論、收藏、轉發各是多少" were read as sending, and a news
+        // site typed in Safari and a search on 小紅書 were held for approval (one task cancelled). Only ways of saying
+        // "send this" count.
+        let said = ["發一", "发一", "發個", "发个", "發條", "发条", "發訊息", "发讯息", "發消息", "发消息", "發信息", "发信息",
+                    "發到", "发到", "發給", "发给", "發送", "发送", "傳給", "传给", "轉發給", "转发给", "轉發到", "转发到",
+                    "回覆", "回复", "留言", "發評論", "发评论", "寫評論", "写评论", "評論一下", "评论一下", "發表評論", "发表评论",
+                    "發帖", "发帖", "發文", "发文", "發布到", "发布到", "發朋友圈", "发朋友圈", "說一聲", "说一声",
+                    "send ", "reply ", "post a", "comment on", "leave a comment"]
+        if said.contains(where: { t.contains($0) }) { return true }
+        return t.range(of: #"(跟|对|對|和|向)(?!我)[^，,。.；;！!？?\n]{1,12}[说說]"#, options: .regularExpression) != nil
     }
 
     /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
@@ -1192,7 +1202,7 @@ extension Pointer: Gestures {}
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
                 // Home and wait do not use coordinates or the current focus. Animation cannot make their target stale.
-                if i == 0, !["home", "wait"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
+                if i == 0, !["home", "wait", "listen"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
                    Vision.changed(seen, screen?.frame, ignore: spots, caret: true) {
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
@@ -1883,6 +1893,7 @@ extension Pointer: Gestures {}
             case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
             case "press": return "pressed the keys " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
+            case "listen": return "listened to the video and read its subtitles (the text is in the notes)"
             case "key" where sends(s): return "pressed enter"
             // Over USB 11-10 拼多多 was opened by its icon on the Home Screen, and the check said it never was: that tap
             // had dropped out of the last 20 and its words were cut at 60.
@@ -2055,6 +2066,12 @@ extension Pointer: Gestures {}
             try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
+        case "listen":
+            // User 11-11: a video's spoken words (口播文案) and what it is about, from WeChat, 抖音, 视频号.
+            guard let listen else { throw DeviceError(message: "Listening is not available here.") }
+            let seconds = min(max(a["seconds"]?.double ?? 60, 5), 180)
+            let heard = await listen(seconds)
+            notes.append("听到和字幕（\(Int(seconds)) 秒）：" + String(heard.prefix(4000)))
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
             try await phone.drag(pts.map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)
