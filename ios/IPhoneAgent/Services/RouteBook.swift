@@ -133,6 +133,7 @@ import Foundation
             case "type": lines.append("type “\(s["text"]?.str ?? "")”")
             case "compose": lines.append("type “\(s["expected"]?.str ?? "")”")
             case "key": lines.append("key " + (s["combo"]?.str ?? ""))
+            case "press": lines.append("press " + (s["text"]?.str ?? ""))
             case "swipe": lines.append("swipe \(n("x1")) \(n("y1")) \(n("x2")) \(n("y2"))" + purpose(s))
             case "circle", "path": lines.append("draw (\(s["action"]?.str ?? ""))")
             case "home", "back", "wait": lines.append(s["action"]?.str ?? "")

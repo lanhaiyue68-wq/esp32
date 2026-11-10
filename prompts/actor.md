@@ -11,8 +11,11 @@ result: e.g. ticking several visible checkboxes or days, several drawing strokes
 Give ONE DO line when the next action depends on what this one opens or changes.
 After a tap, inspect the resulting screen before proposing further actions. In particular, undo, back,
 tool changes and opening documents are single-action rounds; never batch several undo taps.
+One exception saves a whole round: a tap on a text field (a search box, a chat's input bar) goes with the type and the
+key enter after it, in one reply. The typing runs only if a keyboard is up after the tap.
 Independent drawing strokes and type-then-key actions can still be batched. Buttons on a screen that stays put go
-together: a calculator's or number pad's keys, several checkboxes: give up to 6 DO lines at once (each round costs seconds).
+together: several checkboxes: give up to 6 DO lines at once (each round costs seconds). A calculator's, number pad's or
+dial pad's keys: use press with their labels, never taps.
 
 Coordinates are integers 0-1000 relative to the screenshot (x left->right, y top->bottom).
 The x and y units have different physical sizes. circle R is in WIDTH units: its vertical radius is
@@ -69,6 +72,10 @@ Actions:
                              screen: never look for the icon, never search by hand. If it says the app is not on this
                              phone, believe it: stop with fail and say so, never look on the web for it)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
+  press KEY KEY …           (taps the on-screen keys showing these labels, in order, found by reading the screen:
+                             calculator, number pad, dial pad. e.g. press AC 4 0 . 7 4 − 3 2 . 9 =  A number may be
+                             written whole: press 40.74. If a key cannot be read, nothing is pressed and you are told
+                             which keys were read, with their spots)
   note TEXT                 (keeps what you just read, a price, a title, a name, for later: your notes stay with you
                              across screens and apps. Give it with the next action as soon as you read something the
                              goal will need; never go back to read again what your notes hold)
@@ -96,4 +103,8 @@ The first time an app opens it may ask to accept its privacy terms, or show a we
 A sheet or prompt that covers an app (share contacts, network access, notifications, a welcome) is the app, not a wrong screen: answer it there with the smallest choice (不允許, 不分享, 稍後, 關閉, Not Now). Going Home and opening the app again brings it back. Never choose to share all contacts.
 A website still blank after two waits is not reachable from here: do not keep waiting; type another search site in the address bar (www.baidu.com, cn.bing.com) and search there.
 A chat sends with the keyboard's Return: once the text is in the box, key enter. Do not look for a send button.
+Words already in a search box before you typed (often grey, e.g. 保温水壶 on 淘寶) are the app's suggestion, not your
+search: tap the box, type the goal's words, then search. Only words you typed are searched for.
+Read a search result (its name, price, shop, distance, likes, author) in the results list: do not open the item.
+Open one only when the goal needs what the list does not show, and on its page never touch buy, order, 拼单 or cart.
 WeChat: an input bar reading 可按住轉成文字 is the text box: tap its middle and the keyboard comes. 按住說話 is voice mode: tap the keyboard icon at its left once.

@@ -1120,17 +1120,20 @@ import Foundation
     /// goes to the first page. "Home twice" therefore always ended in the app switcher, and whatever came next landed on
     /// a card: opening 备忘录, 美团, even 微信 failed. So the screen decides: on a Home Screen nothing is done, Search is
     /// emptied and tapped away, anything else gets the flick, and the result is looked at.
-    func goHome() async throws { try await oneAtATime { try await goHomeNow() } }
-    private func goHomeNow() async throws {
+    func goHome() async throws { _ = try await goHomeRows() }
+    /// Home, and the Home Screen's text as read to know it is there (nil when it was not read): opening an app reads
+    /// the same page next, 0.6–0.8 s more (build 116).
+    @discardableResult func goHomeRows() async throws -> [[CandidatePicker.Piece]]? { try await oneAtATime { try await goHomeNow() } }
+    private func goHomeNow() async throws -> [[CandidatePicker.Piece]]? {
         drawChain = false
-        guard let screen else { return try await flickHome() }
+        guard let screen else { try await flickHome(); return nil }
         for attempt in 0..<5 {
             let shown = screen.frame
             var rows: [[CandidatePicker.Piece]] = []
             if let shown { rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.02, bottom: 1) }
             if rows.isEmpty {  // nothing to read: the flick, as without eyes
                 if attempt == 0 { try await flickHome() }
-                return
+                return nil
             }
             if AppPlaces.inLibrary(rows) {  // past the last page: a flick here only opens the app switcher
                 log("home: on the App Library; back to the pages")
@@ -1144,7 +1147,7 @@ import Foundation
                 try await Task.sleep(nanoseconds: 700_000_000)
                 continue
             }
-            if AppPlaces.looksLikeHome(rows) { return }
+            if AppPlaces.looksLikeHome(rows) { return rows }
             if AppPlaces.inSearch(rows) {
                 log("home: Search is open; emptying it and tapping away")
                 try await key("cmd+a")
@@ -1171,6 +1174,7 @@ import Foundation
             try await Task.sleep(nanoseconds: 800_000_000)
         }
         log("home: no Home Screen seen after five tries")
+        return nil
     }
 
     private func keyboardIsUp(_ rows: [[CandidatePicker.Piece]], _ frame: Data?) async -> Bool {

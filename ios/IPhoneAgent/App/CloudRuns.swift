@@ -19,7 +19,11 @@ extension AppModel {
             return CloudBridge.outcome(of: self.agent.steps)
         }
         cloud.stop = { [weak self] in await self?.stopAgent() }
-        cloud.lastScreen = { [weak self] in self?.feed.frame }
+        // The screen the run finished on, not the Home Screen it goes back to after (11-10: half of each picture was Home).
+        cloud.lastScreen = { [weak self] in
+            guard let self else { return nil }
+            return self.agent.shots.keys.max().flatMap { self.agent.shots[$0] } ?? self.feed.frame
+        }
         // Turned on later: the app must keep living in the background to hear the cloud.
         cloudSink = cloud.$enabled.sink { [weak self] on in
             guard on, let self else { return }

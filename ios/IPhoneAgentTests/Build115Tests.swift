@@ -138,7 +138,7 @@ import XCTest
         let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
         var asked: [String] = []
         agent.approveSend = { asked.append($0); return approve }
-        agent.showMock(task: "输入你好然后按回车", plan: "", steps: [], running: false)
+        agent.showMock(task: "在测试群发一则消息：你好", plan: "", steps: [], running: false)
         await agent.run()
         return (agent, phone, asked)
     }
@@ -146,14 +146,15 @@ import XCTest
     func testARejectedMessageIsNeverSent() async {
         let (agent, phone, asked) = await sendRun(approve: false)
         XCTAssertEqual(asked, ["你好"])
-        XCTAssertFalse(phone.calls.contains("key"), "\(phone.calls)")
+        XCTAssertFalse(phone.keys.contains("enter"), "\(phone.keys)")
+        XCTAssertEqual(phone.keys, ["cmd+a", "backspace"], "the draft is cleared (build 116)")
         XCTAssertEqual(agent.steps.last?["answer"]?.str, AgentLoop.notApprovedAnswer)
     }
 
     func testAnApprovedMessageIsSent() async {
         let (_, phone, asked) = await sendRun(approve: true)
         XCTAssertEqual(asked, ["你好"])
-        XCTAssertTrue(phone.calls.contains("key"), "\(phone.calls)")
+        XCTAssertTrue(phone.keys.contains("enter"), "\(phone.keys)")
     }
 
     func testWhatSendsAMessage() {

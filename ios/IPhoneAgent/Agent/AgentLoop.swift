@@ -111,6 +111,7 @@ extension Pointer: Gestures {}
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
     private var deadRefused = 0
+    private var untypedSearches = 0  // searches refused because nothing was typed (twice at most per run)
     private var blindLooks = 0
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
@@ -514,6 +515,9 @@ extension Pointer: Gestures {}
     private var sendBlocks = 0
     /// Looks at where a message would go before it is sent (the fast model; nil: no look).
     var sendChecker: ChatModel?
+    /// Checks a finished run's answer (the fast model; nil: the planner). Over the proxy Codex took ~12 s to its first
+    /// word for a one-line OK (11-10); Doubao 1.3 s.
+    var doneChecker: ChatModel?
     /// Set for a task the cloud gave: asked before each message is sent; false stops the run with nothing sent.
     var approveSend: ((String) async -> Bool)?
     private var approvedTexts: Set<String> = []
@@ -535,6 +539,67 @@ extension Pointer: Gestures {}
         let verbs = ["發", "发", "傳給", "传给", "回覆", "回复", "send", "reply"]
         let places = ["群", "給", "给", "聊天", "訊息", "消息", "message", "chat"]
         return verbs.contains { t.contains($0) } && places.contains { t.contains($0) }
+    }
+
+    static let untypedSearchReason = "Not searched: nothing was typed in this app yet. Words already in a search box (often grey) "
+        + "are the app's own suggestion, not your search. Tap the box, type the words the goal asks for, then search."
+
+    /// A search started (Return, or a tap the model says is the search button) in a goal that searches, with nothing
+    /// typed or pressed since the app was opened (by open, or by its icon).
+    static func searchesUntyped(_ act: JObject, after steps: [JObject], task: String) -> Bool {
+        let goal = task.lowercased()
+        guard ["搜尋", "搜索", "搜寻", "search"].contains(where: { goal.contains($0) }) else { return false }
+        let submits: Bool
+        switch act["action"]?.str {
+        case "key": submits = sends(act)
+        case "tap":
+            let t = (act["thought"]?.str ?? "").lowercased()
+            submits = ["搜尋", "搜索", "搜寻", "search"].contains { t.contains($0) }
+                && ["按鈕", "按钮", "button", "執行", "执行"].contains { t.contains($0) }
+        default: submits = false
+        }
+        guard submits else { return false }
+        for step in steps.reversed() {
+            switch step["action"]?.str {
+            case "type", "press", "compose": return false
+            case "open": return true
+            default: if opensByIcon(step) { return true }
+            }
+        }
+        return true
+    }
+
+    /// The goal posts something others see (a message, a reply, a comment, a post). What it says not to do is not counted:
+    /// "不要留言" asks for no comment.
+    static func publishes(_ task: String) -> Bool {
+        let t = task.lowercased().replacingOccurrences(
+            of: #"(不要|不用|不必|別|别|勿|禁止|don't|do not|never)[^，,。.；;！!？?\n]*"#, with: " ", options: .regularExpression)
+        let verbs = ["發", "发", "傳給", "传给", "回覆", "回复", "留言", "評論", "评论", "轉發", "转发", "貼文", "帖子",
+                     "send", "reply", "post", "comment"]
+        return verbs.contains { t.contains($0) }
+    }
+
+    /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
+    static func messagePart(_ task: String) -> String? {
+        if let r = task.range(of: #"[「“"]([^」”"]+)[」”"]"#, options: .regularExpression) {
+            return String(task[r].dropFirst().dropLast())
+        }
+        guard let colon = task.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
+        let rest = task[task.index(after: colon)...].prefix { !"。；;\n".contains($0) }
+        let message = rest.trimmingCharacters(in: .whitespaces)
+        return message.isEmpty ? nil : message
+    }
+
+    /// Whether text about to go out with Return waits for the cloud's approval: a message, a reply, a post. Words the
+    /// goal itself names, searched or opened in a goal that posts nothing, are not one; nor, in a goal that gives its
+    /// message, words it names that are not that message (the chat's name searched for).
+    static func needsApproval(_ text: String, task: String) -> Bool {
+        func key(_ s: String) -> String { AppNames.hans(typedKey(s)).lowercased() }
+        let typed = key(text), goal = key(task)
+        guard !typed.isEmpty, goal.contains(typed) else { return true }
+        guard publishes(task) else { return false }
+        guard let message = messagePart(task).map(key), !message.isEmpty else { return true }
+        return message.contains(typed) || typed.contains(message)
     }
 
     /// Where a message would go now, if that is not where the goal says (nil: fine, or the check could not be made).
@@ -674,6 +739,7 @@ extension Pointer: Gestures {}
         quietSinceSend = 0
         pendingInput = inputToInspect
         pendingRefused = 0
+        untypedSearches = 0
         if let inputToInspect { unsent = inputToInspect }
         homeRecoveryTried = false
         // What this run was taught, in the exported trace: the system prompts themselves are not recorded.
@@ -1160,6 +1226,13 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
+                // Over USB 11-10 淘寶's box showed a suggestion (保温水壶, grey) and the model searched it as if it had typed
+                // 保溫杯: the price it found was for the wrong thing. A search in an app where nothing was typed is refused.
+                if untypedSearches < 2, Self.searchesUntyped(act, after: steps, task: task) {
+                    untypedSearches += 1
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.untypedSearchReason)])
+                    return false
+                }
                 // Over USB 11-10 the way into 测试群 was followed for 验证群: WeChat opened on the last chat and the message went
                 // there. Before a message goes, something looks at where it would go.
                 if unsent != nil, endAfterSend == nil, Self.sends(act) || act["learned"] == .str("send"), Self.asksToSend(task),
@@ -1173,12 +1246,18 @@ extension Pointer: Gestures {}
                     return false
                 }
                 // Customer spec 11-10 (§0.6, §13.3): a message from a task the cloud gave waits for approval before it goes.
+                // Over Wi-Fi 11-10 a search (行事曆, www.163.com, 牙刷) was held for approval too: what the goal itself
+                // names, in a goal that posts nothing, is not a message.
                 if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
-                   !approvedTexts.contains(Self.typedKey(text)) {
+                   Self.needsApproval(text, task: task), !approvedTexts.contains(Self.typedKey(text)) {
                     record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(text.prefix(120)))])
                     let approved = await approveSend(text)
                     try Task.checkCancellation()
                     guard approved else {
+                        // The draft stays in the box otherwise, and the next task found it there (x11, 11-10: 17 deletes).
+                        try? await phone?.key("cmd+a")
+                        try? await phone?.key("backspace")
+                        unsent = nil
                         record(screen?.frame, ["action": .str("done"), "answer": .str(Self.notApprovedAnswer), "approval": .str("rejected")])
                         return true
                     }
@@ -1197,6 +1276,10 @@ extension Pointer: Gestures {}
                 do { try await perform(act) }
                 catch let absent as AppNotOnPhone {
                     record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
+                    return false
+                }
+                catch let keys as KeysNotOnScreen {
+                    record(planned.shot, ["action": .str("press failed"), "reason": .str(keys.localizedDescription)])
                     return false
                 }
                 catch let input as InputNeedsVerification {
@@ -1300,6 +1383,12 @@ extension Pointer: Gestures {}
                 // is the same one (over USB 11-09: 1234 x 5678, one key per model call, 293 s and no answer).
                 if following == "tap", let was = seen.flatMap(Vision.look), let now = screen?.frame.flatMap(Vision.look),
                    Vision.sameScreen(was, now) { continue }
+                // A tap into a text field and the typing after it (build 116): Codex answered one action at a time, ~12 s
+                // a look, and the typing waited a whole look to see the keyboard (11-10). With a keyboard up, it goes on.
+                if following == "type", await keyboardNowUp() {
+                    DebugLog.write("tap then type in one reply: a keyboard is up, typing")
+                    continue
+                }
                 return false
             }
         }
@@ -1315,6 +1404,12 @@ extension Pointer: Gestures {}
         }
         noteDeadTap()
         return false
+    }
+
+    private func keyboardNowUp() async -> Bool {
+        if ourKeyboardOnScreen?() == true { return true }
+        guard let shown = screen?.frame else { return false }
+        return await CandidatePicker.keyboardUpOffMain(in: shown)
     }
 
     /// A tap that changed nothing on screen counts as dead, like one before a stroke that left no line: the same spot
@@ -1610,7 +1705,11 @@ extension Pointer: Gestures {}
     - A value in the answer (date, number, price, name, count) differs from the notes or from what the screen shows.
     - The answer reports something from an app the steps never opened.
     - The answer says something was sent or saved, the screen is where it would show, and it does not show.
+    - The goal names no city or place and the answer is for a city an app kept from before, not the phone's own location.
     The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording.
+    An app counts as opened when a step opened it, or tapped its icon (a tap that says it opens the app).
+    Simplified and traditional Chinese of the same words are the same (压力测试 = 壓力測試). A value that moves by itself (a live price, a time, a count) may differ a little from the screen now: that is not wrong.
+    A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
     """
 
     /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
@@ -1626,7 +1725,7 @@ extension Pointer: Gestures {}
     /// read off a screen saying the 16th. The model's word is not the result: something else looks. What it says, or nil when
     /// nothing is wrong or the check itself failed (a check must not stop the work).
     private func wrongClaim(_ answer: String, frame: Data?) async -> String? {
-        guard let model = planner ?? actor else { return nil }
+        guard let model = doneChecker ?? planner ?? actor else { return nil }
         let did = Self.whatItDid(steps)
         let prompt = "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
         do {
@@ -1683,12 +1782,25 @@ extension Pointer: Gestures {}
             switch s["action"]?.str {
             case "open": return "opened " + (s["app"]?.str ?? "?")
             case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
+            case "press": return "pressed the keys " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
+            case "key" where sends(s): return "pressed enter"
+            // Over USB 11-10 拼多多 was opened by its icon on the Home Screen, and the check said it never was: that tap
+            // had dropped out of the last 20 and its words were cut at 60.
+            case "tap" where opensByIcon(s): return "tapped " + String((s["thought"]?.str ?? "").prefix(120))
             // Over USB 11-09 a note was reopened from the list, twice, and the check said it never was: it saw no taps.
             case "tap" where kept.contains(i): return "tapped " + String((s["thought"]?.str ?? "").prefix(60))
             default: return nil
             }
         }.joined(separator: "\n")
+    }
+
+    /// A tap that says it opens an app by its icon (the Home Screen), in the model's own words.
+    static func opensByIcon(_ step: JObject) -> Bool {
+        guard step["action"]?.str == "tap", let t = step["thought"]?.str?.lowercased() else { return false }
+        let icon = ["圖示", "图示", "圖標", "图标", "icon", "主畫面", "主画面", "主屏", "home screen"].contains { t.contains($0) }
+        let opens = ["打開", "打开", "開啟", "开启", "啟動", "启动", "open", "launch"].contains { t.contains($0) }
+        return icon && opens
     }
 
     /// A remembered way as the plan: its steps as hints, not numbered parts.
@@ -1862,6 +1974,17 @@ extension Pointer: Gestures {}
             if ["enter", "return"].contains(combo.lowercased()), ourKeyboardOnScreen?() == true,
                let keyboardReturn, await keyboardReturn() { break }
             try await phone.key(combo)
+        case "press":
+            guard let shown = screen?.frame else { throw DeviceError(message: "no screen to find the keys on") }
+            let rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.1, bottom: 1)
+            let found = Self.keySpots(a["text"]?.str ?? "", in: rows.flatMap { $0 })
+            guard found.missing.isEmpty, !found.spots.isEmpty else {
+                throw KeysNotOnScreen(missing: found.missing, seen: Self.keysSeen(rows.flatMap { $0 }))
+            }
+            for spot in found.spots {
+                try await phone.tap(Double(spot.x), Double(spot.y), aim: false)
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()
         case "open":

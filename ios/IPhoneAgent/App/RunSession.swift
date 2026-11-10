@@ -72,6 +72,7 @@ extension AppModel {
             try checkStart()
             agent.actor = try await settings.client("actor")
             agent.sendChecker = agent.actor  // the fast model looks at where each message would go (build 115)
+            agent.doneChecker = agent.actor  // and checks the finished answer (build 116: Codex ~12 s, Doubao ~1.3 s)
             try checkStart()
             let plannerModel = try await settings.client("planner")
             agent.planner = PlusChat.planner(fallback: plannerModel)  // phase C: Plus commands, Doubao if it fails

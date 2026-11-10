@@ -280,9 +280,12 @@ extension AppModel {
     private func openAppNow(_ name: String) async throws -> Bool {
         let started = now()
         defer { DebugLog.write(String(format: "open %@: %.1f s", name, now() - started)) }
-        try await pointer.goHome()
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        guard var rows = await homeRows(top: 0.02) else { return try await bySearch(name) }
+        // The page goHome read to know it was home is the page in front: no second look (build 116).
+        let seen = try await pointer.goHomeRows()
+        if seen == nil { try? await Task.sleep(nanoseconds: 300_000_000) }
+        guard var rows = seen.flatMap({ AppPlaces.looksLikeHome($0) ? $0 : nil }) ?? (await homeRows(top: 0.02)) else {
+            return try await bySearch(name)
+        }
         if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
         if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows) {
             try await mapHomeScreen()
@@ -381,13 +384,34 @@ extension AppModel {
         DebugLog.write("open \(name): \(place)")
         let icon = AppPlaces.icon(above: label)
         for aimed in [false, true] {
+            let home = feed.frame.flatMap(Vision.look)
             try await pointer.tap(icon.x, icon.y, aim: aimed)
-            try? await Task.sleep(nanoseconds: 900_000_000)  // the app opens
+            if await Self.leftHome(home, within: 0.9, look: { [weak self] in self?.feed.frame.flatMap(Vision.look) }) {
+                // A whole new screen within the 0.9 s it used to wait: the app is coming up, no need to read the page.
+                await feed.settled(quiet: 0.8, least: 0.2, most: 4)
+                return true
+            }
             guard let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows), AppPlaces.label(name, in: rows) != nil else {
                 await feed.settled(quiet: 0.8, least: 0.2, most: 4)  // an app coming up: the model looks at it once it has
                 return true
             }
             DebugLog.write("open \(name): still on the Home Screen after the tap")
+        }
+        return false
+    }
+
+    /// Whether the screen became another one than `home` (a look of the Home Screen) within `within` s, checked every
+    /// 0.15 s. Opening an app waited 0.9 s and then read the page to see it had gone (build 115: ~2.9 s from the tap).
+    /// A pointer or a badge moves too few cells to count. Unknown (no look): false, and the page is read as before.
+    static func leftHome(_ home: [UInt8]?, within: Double, look: () -> [UInt8]?) async -> Bool {
+        guard let home else {
+            try? await Task.sleep(nanoseconds: UInt64(within * 1e9))
+            return false
+        }
+        let started = now()
+        while now() - started < within {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if let shown = look(), !Vision.sameScreen(home, shown) { return true }
         }
         return false
     }
