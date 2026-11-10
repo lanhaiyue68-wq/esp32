@@ -36,3 +36,9 @@
 1. 開發板已連線、游標已校準、整個螢幕在共享（Lan Agent 首頁會顯示）。
 2. 「要停止與 Lan Agent 共享螢幕嗎」一律點「取消」。
 3. 雲端位址與 token 在設定裡填好；Wi-Fi 能連到雲端。
+
+## 安裝檔
+
+- `Lan-Agent-build120-unsigned.ipa`，3,577,468 bytes
+- SHA256 `f804eae6cc5da68aaec80f351a9f52e72950eb289514dd82b315fcf36cb670ee`
+- 編譯：winesettbumpas609-boop/esp32-iphone-agent-build run 42883422995（lanhaile686-git 額度用完）
