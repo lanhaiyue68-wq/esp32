@@ -341,6 +341,20 @@ enum WatchSettings {
     }
     static let tapSendPlan = "1. Tap 发送 next to the input box.\n2. When the message shows as a green bubble, done."
 
+    /// Build 119 in 测试群, 11-11: the return had sent the reply, four reads could not find the chat's title, and the
+    /// follow-up was told to fix an empty box: it typed the reply again and it went out twice. After a return nothing is
+    /// typed again (the run refuses any type, see watchRun's sentAlready): the text still in the box is sent once, an
+    /// empty box means it went out.
+    static func sentCheckTask(chat: String, text: String) -> String {
+        """
+        在微信会话“\(chat)”里，程序已经输入“\(text)”并按过发送，本机还没确认发出。
+        先看当前输入框（不能把键盘候选词当成输入框文字）：
+        输入框里还有这句话，就按一次发送（key enter），不要删除、重打或粘贴。
+        输入框是空的，说明已经发出了：看会话里对方请求之后有没有这句话的绿色气泡，有就完成；没有也绝不要再输入，直接完成并说明“输入框已空，可能已发出”。
+        这一步不允许输入任何文字。
+        """
+    }
+
     static func inspectInputTask(chat: String, text: String) -> String {
         """
         在微信会话“\(chat)”里，程序已经尝试输入“\(text)”，本机文字识别尚未确认。
@@ -1513,7 +1527,20 @@ extension AppModel {
             case .sent:
                 if back { watchListReturn.pending = chat }
                 return true
-            case .inBox, .needsInspection:
+            case .returned:
+                agent.endAfterSend = 5
+                defer { agent.endAfterSend = nil }
+                let result = await watchRun(WatchSettings.sentCheckTask(chat: chat, text: text), stepLimit: 8,
+                                            directStart: true, sendTo: chat, replyAfter: after, learnedRoutes: false, noTyping: true)
+                var ok = result != nil
+                if !ok, watching, !Task.isCancelled, after != nil {
+                    ok = await sentAlready(text, chat: chat, after: after, strict: true)
+                }
+                DebugLog.write("watch: after the return: \(ok ? "sent" : "not confirmed; not typed again")")
+                if back { watchListReturn.pending = chat }
+                // Typed and returned: counted as answered either way, so the next check does not write it again.
+                return true
+            case .needsInspection:
                 agent.endAfterSend = 5
                 defer { agent.endAfterSend = nil }
                 let result = await watchRun(WatchSettings.inspectInputTask(chat: chat, text: text), stepLimit: 12,
@@ -1536,7 +1563,8 @@ extension AppModel {
         return ok
     }
 
-    enum QuickSend { case sent, inBox, needsInspection, notTried }
+    /// returned: the text went in and a return was pressed, but the reply was not seen (it may well have gone out).
+    enum QuickSend { case sent, returned, needsInspection, notTried }
 
     /// A reply without an agent run, once any send showed where the input box is (WatchSettings.inputBox), in the chat
     /// whose title is on screen. Each step is checked on the phone and any doubt hands over to the agent run: tap the box; put the text on the pasteboard (Lan Agent in
@@ -1663,8 +1691,8 @@ extension AppModel {
                 sent = await sentAlready(text, chat: chat, after: after)
             }
             guard sent else {
-                DebugLog.write("watch: quick send: not seen as sent")
-                return .inBox
+                DebugLog.write("watch: quick send: not seen as sent after a return; it is never typed again")
+                return .returned
             }
             DebugLog.write("watch: quick send: sent and seen in \(chat)")
             watchHandled += 1
@@ -1736,7 +1764,7 @@ extension AppModel {
                           returnSends: Bool = false, fastText: Bool = true, navigation: WatchSettings.Rules? = nil,
                           directStart: Bool = false, returning: Bool = false, sendTo chat: String? = nil,
                           inspectInput: String? = nil, replyAfter: WatchReport.Line? = nil,
-                          learnedRoutes: Bool = true) async -> String? {
+                          learnedRoutes: Bool = true, noTyping: Bool = false) async -> String? {
         guard watching, !Task.isCancelled else { return nil }
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming(plan.isEmpty ? "task run" : "fixed-plan run", since: began, calls: calls) }
@@ -1758,6 +1786,10 @@ extension AppModel {
         agent.steps = []  // a start that fails leaves no steps, not the previous check's
         var baseline: Int?  // how often the text showed when this send run first typed it
         let outgoing: (String) -> String? = { text in
+            if noTyping {
+                return "Refused: this reply was already typed and Return was pressed. Never type it again: if the box still "
+                    + "holds it, key enter once; if the box is empty it went out, so finish with done."
+            }
             if let why = PrivacyGuard.check(text, words: words, numbers: numbers) { return why }
             guard let chat else { return nil }
             let frame = self.feed.frame
