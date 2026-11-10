@@ -598,13 +598,24 @@ extension Pointer: Gestures {}
     /// Whether text about to go out with Return waits for the cloud's approval: a message, a reply, a post. Words the
     /// goal itself names, searched or opened in a goal that posts nothing, are not one; nor, in a goal that gives its
     /// message, words it names that are not that message (the chat's name searched for).
-    static func needsApproval(_ text: String, task: String) -> Bool {
+    /// chatApp: the app in front is one that sends messages (see inChatApp). Build 118, 11-10: 高德 searched 下水徑地鐵站, a
+    /// station it knew from before, in a goal that posts nothing; it was held as a message and the task was cancelled.
+    static func needsApproval(_ text: String, task: String, chatApp: Bool = true) -> Bool {
         func key(_ s: String) -> String { AppNames.hans(typedKey(s)).lowercased() }
         let typed = key(text), goal = key(task)
-        guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return true }
+        guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
         guard let message = messagePart(task).map(key), !message.isEmpty else { return true }
         return message.contains(typed) || typed.contains(message)
+    }
+
+    static let chatApps = ["微信", "wechat", "qq", "企业微信", "钉钉", "飞书", "信息", "messages", "短信", "telegram", "whatsapp", "line"]
+
+    /// Whether the app opened last in this run sends messages; true when no app was opened by name (it may be one).
+    static func inChatApp(_ steps: [JObject]) -> Bool {
+        guard let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str else { return true }
+        let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
+        return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
     }
 
     /// The goal's own words, a little shortened or reworded: its characters in the goal's order, with one in ten (at least
@@ -663,6 +674,21 @@ extension Pointer: Gestures {}
     static func waitedEnough(_ steps: [JObject]) -> Bool {
         let recent = steps.filter { !["refused", "stale plan"].contains($0["action"]?.str ?? "") }.suffix(waitLimit)
         return recent.count == waitLimit && recent.allSatisfy { $0["action"]?.str == "wait" && $0["changed"] == .bool(false) }
+    }
+
+    /// Build 118 without Codex, 11-10: Weather opened at the bottom of the page, the forecast was above, and the models
+    /// swiped "up to bring the forecast in" 25 times: at the end of a page that way nothing moves.
+    static let endReachedReason = "Refused: the last two swipes this way moved nothing: the page is at its end that way. "
+        + "What you look for is the other way. To see what is above (the top of the page, earlier rows) move the finger down: "
+        + "swipe 500 300 500 750. To see what is below, move it up: swipe 500 750 500 300. Or it is on another tab or page."
+
+    static func swipedToTheEnd(_ act: JObject, after steps: [JObject]) -> Bool {
+        guard let y1 = act["y1"]?.double, let y2 = act["y2"]?.double, abs(y2 - y1) > 100 else { return false }
+        let last = steps.filter { !["refused", "stale plan", "loop"].contains($0["action"]?.str ?? "") }.suffix(2)
+        return last.count == 2 && last.allSatisfy { s in
+            guard s["action"]?.str == "swipe", let a = s["y1"]?.double, let b = s["y2"]?.double else { return false }
+            return (b - a) * (y2 - y1) > 0 && (s["changed"] == .bool(false) || s["scrolled"] == .bool(false))
+        }
     }
 
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
@@ -1250,6 +1276,15 @@ extension Pointer: Gestures {}
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0; deadTaps = []; deadRefused = 0 }
                 // The tap after one that changed nothing goes through the eye (missed: aimed), so it lands on the spot.
                 // Moving it around the spot moved it off the button (淘寶's 加入購物車, 10 clicks above it, over USB 11-09).
+                if name == "swipe", Self.swipedToTheEnd(act, after: steps) {
+                    deadRefused += 1
+                    if deadRefused >= Self.refusalsInARow {
+                        deadRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept swiping a way that moves nothing")
+                    }
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.endReachedReason)])
+                    return false
+                }
                 if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
                     // Over USB 11-09 a run was refused here 48 times in a row, one model call each, up to its step limit.
                     deadRefused += 1
@@ -1283,7 +1318,7 @@ extension Pointer: Gestures {}
                 // Over Wi-Fi 11-10 a search (行事曆, www.163.com, 牙刷) was held for approval too: what the goal itself
                 // names, in a goal that posts nothing, is not a message.
                 if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
-                   Self.needsApproval(text, task: task), !approvedTexts.contains(Self.typedKey(text)) {
+                   Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps)), !approvedTexts.contains(Self.typedKey(text)) {
                     record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(text.prefix(120)))])
                     let approved = await approveSend(text)
                     try Task.checkCancellation()
@@ -1696,6 +1731,10 @@ extension Pointer: Gestures {}
         circleRefused = 0
         record(shot, ["action": .str("loop"), "reason": .str(why)])
         try await replan(stuck: true)
+        // The new plan starts clean. Build 118, 11-11: Weather's map was opened twice by mistake, Codex planned "close the
+        // map, open the list on the right", and its first move, closing the map, was refused as the old circle; the run
+        // failed. A second circle under the new plan still fails (rescued).
+        gotOn()
         return false
     }
 

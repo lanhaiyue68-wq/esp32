@@ -64,6 +64,12 @@ extension AppModel {
             }
             return .json(["watching": .bool(watching)])
 
+        case ("POST", "/hot"):
+            // Test only: the phone counts as critical-hot, so the cloud's next task is put off (retry_pending, device_hot).
+            if body["on"] as? Bool == true { cloud.hot = { true } } else { cloud.hot = { ProcessInfo.processInfo.thermalState == .critical } }
+            DebugLog.write("test channel: hot \(body["on"] as? Bool == true ? "on" : "off")")
+            return .json(["hot": .bool(cloud.hot())])
+
         case ("POST", "/release"):
             keepAwake.hold = false
             if !agent.running, !startingAgent, !watching { keepAwake.stop() }

@@ -120,12 +120,27 @@ import Foundation
         return cut != n && cut.count >= 2 && t.hasPrefix(cut)
     }
 
+    /// The screen when an open could not be confirmed (build 118: the title read fine over USB, and the cause is open),
+    /// kept in Documents/diagnostics, the last ten.
+    static func keepFrame(_ frame: Data?) {
+        guard let frame, let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let dir = docs.appendingPathComponent("diagnostics", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        try? frame.write(to: dir.appendingPathComponent("watch-unverified-\(f.string(from: Date())).jpg"))
+        let kept = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasPrefix("watch-unverified-") }.sorted()
+        for old in kept.dropLast(10) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(old)) }
+    }
+
     /// One tap on the marked row of the list, verified by the destination's title on a fresh frame. Already in a
     /// listed chat: inChat, and the caller goes back to the list first (or reads it, if this watch just opened it).
     /// `title`: the listed chat on screen; `anyTitle`: any chat's title on screen (never the list's).
     static func open(phone: Gestures, screen: ScreenSource, rules: WatchSettings.Rules, canAct: () -> Bool,
                      inspectList: ((Data) -> Unread)? = nil, title: ((Data) -> String?)? = nil,
-                     anyTitle: ((Data) -> String?)? = nil) async -> Outcome {
+                     anyTitle: ((Data) -> String?)? = nil, tapped: ((String) -> Void)? = nil) async -> Outcome {
         guard !rules.targets.isEmpty else { return .fallback }
         let title = title ?? { WatchReport.navigationChat(in: $0, targets: rules.targets) }
         let anyTitle = anyTitle ?? { WatchReport.navigationTitle(in: $0) }
@@ -144,6 +159,7 @@ import Foundation
             case .row(let chat, let p):
                 point = p
                 landed = { title($0) == chat ? chat : nil }
+                tapped?(chat)
             case .other(let name, let p):
                 point = p
                 landed = { anyTitle($0).flatMap { sameChat($0, listName: name) ? $0 : nil } }
@@ -164,6 +180,7 @@ import Foundation
                 if let chat = landed(later) { return .opened(chat) }
                 try? await Task.sleep(nanoseconds: 600_000_000)
             }
+            keepFrame(screen.frame)
             return .unverified
         } catch {
             if !allowed() { return .deferred }

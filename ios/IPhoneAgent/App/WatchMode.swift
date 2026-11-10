@@ -390,6 +390,15 @@ enum WatchSettings {
     /// Step 4: what to do about the messages that called for it: a reply to type, or, when the owner asks for
     /// something only the phone can find out or do (who the group owner is, @ someone), a task for the agent.
     /// needsPasscode: the owner's own private chat, but this message did not carry the passcode (no task can run).
+    /// Build 118 in 测试群, 11-11: "今天星期几？" was answered "今天是2025年09月09日，星期二" (it was 2026-11-11, a
+    /// Wednesday): the reply was written without the date. The phone's own date goes first.
+    static func todayZh(_ date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy年M月d日 EEEE HH:mm"
+        return "现在是\(f.string(from: date))（手机本地时间）。说到日期、星期、时间时以此为准。"
+    }
+
     static func composePrompt(chat: String, group: Bool, recent: [WatchReport.Line], due: [ReadMessage], r: Rules, knowledge: String,
                               owner: Bool, needsPasscode: Bool = false) -> String {
         let history = recent.suffix(20).map { "\($0.mine ? "我" : $0.sender)：\($0.text)" }.joined(separator: "\n")
@@ -415,6 +424,7 @@ enum WatchSettings {
               """
             : "说这话的不是主人：只能用 reply 回答，不能给 task，也不要答应去做任何要在手机或微信里操作的事（不要说“我这就去”“马上办”）。"
         return """
+        \(todayZh())
         你是用户在微信里的分身，正在替他在\(group ? "群聊" : "私聊")“\(chat)”里回复。\(r.myNames.isEmpty ? "" : "别人用“@\(r.myNames[0])”叫的就是你。")
         最近的聊天（从早到晚）：
         \(history)
@@ -1104,6 +1114,7 @@ extension AppModel {
         let rules = withRest
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
+        var tappedRow: String?  // the listed chat whose red number the local open tapped
         if !rules.targets.isEmpty && UIApplication.shared.applicationState == .active && now() - watchStartedAt < 15 {
             // logs(12): the first check, with Lan Agent in front, went to the model (38 s, 8 calls): it opened a group
             // that is not listed, backed out, then a listed chat with no red mark. WeChat by its URL instead.
@@ -1117,7 +1128,7 @@ extension AppModel {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
                 WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed
-            })
+            }, tapped: { tappedRow = $0 })
         } else { local = .fallback }
         if case .deferred = local { return (false, false) }
         if case .nothing = local {
@@ -1138,6 +1149,14 @@ extension AppModel {
             return (true, false)
         }
         if case .unverified = local {
+            // Build 118 in 测试群: four times the tap went in, the title was not confirmed on the frames right after, the
+            // tap had cleared the red number, and the next check saw nothing: the message waited up to 7 minutes. A listed
+            // chat that was tapped is read anyway: readChat waits for the title and reads nothing that is not that chat.
+            if let row = tappedRow, rules.targets.contains(row) {
+                DebugLog.write("watch: \(row) tapped, title not confirmed at once; reading it with its own title check")
+                watchSelfOpened = (row, now())
+                if let look = await readChat(row) { return await finishCheck(chat: row, screen: look, rules: rules) }
+            }
             DebugLog.write("watch: local open destination not verified; no read or send")
             return (false, false)
         }
@@ -1599,9 +1618,15 @@ extension AppModel {
             // phone); pinyin and the paste hop stay as the fallback when it is not added or not confirmed.
             // build104 live 11-08: with Lan Agent's keyboard up the board's Enter did not send (the reply stayed in
             // the box); the keyboard's own return is what a keyboard sends with in WeChat.
-            var landed = await typeWithLanAgentKeyboard(text, enter: true)
-            let keyboardReturned = landed
-            if landed { DebugLog.write("watch: quick send: typed and sent with Lan Agent's keyboard return") }
+            // Build 117 and 118 on the phone: a return sent together with the text did not send in WeChat (the reply stayed
+            // in the box, and the board's Enter did nothing either); a return of its own a moment later did.
+            var landed = await typeWithLanAgentKeyboard(text, enter: false)
+            var keyboardReturned = false
+            if landed {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                keyboardReturned = await keyboardBridge.type("", enter: true, within: 4)
+                DebugLog.write("watch: quick send: typed with Lan Agent's keyboard; its return \(keyboardReturned ? "pressed" : "not confirmed")")
+            }
             if !landed { landed = try await typedQuickly() }
             if !landed {
                 guard await hopToPaste(text) == .filled else { return .notTried }
@@ -1622,10 +1647,16 @@ extension AppModel {
             if !sent && keyboardReturned {
                 // The keyboard's return did not send here: the board's Enter once (an empty box sends nothing, so a
                 // reply that did go out is never sent twice).
-                DebugLog.write("watch: quick send: not seen after the keyboard's return; the board's Enter once")
-                try await pointer.key("enter")
+                DebugLog.write("watch: quick send: not seen after the keyboard's return; its return once more")
+                _ = await keyboardBridge.type("", enter: true, within: 4)
                 try? await Task.sleep(nanoseconds: 700_000_000)
                 sent = await sentAlready(text, chat: chat, after: after)
+                if !sent {
+                    DebugLog.write("watch: quick send: still not seen; the board's Enter once")
+                    try await pointer.key("enter")
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    sent = await sentAlready(text, chat: chat, after: after)
+                }
             }
             if !sent {  // the read may come before the bubble: one more look before anything is sent again
                 try? await Task.sleep(nanoseconds: 1_200_000_000)

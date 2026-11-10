@@ -62,9 +62,10 @@ Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)
   swipe X1 Y1 X2 Y2         (finger moves from X1,Y1 to X2,Y2: "swipe down" means Y2 > Y1. A list moves about as far
-                             as the finger: for the next part of a list swipe from about 750 to 300. A swipe whose step
-                             says scrolled false or changed false moved nothing: that end of the list is reached, so what
-                             you look for is the other way, or on another tab)
+                             as the finger. What is BELOW (later rows): move the finger up, swipe 500 750 500 300. What
+                             is ABOVE (the top of the page, earlier rows): move the finger down, swipe 500 300 500 750.
+                             A swipe whose step says scrolled false or changed false moved nothing: that end of the page
+                             is reached, so what you look for is the other way, or on another tab)
   path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing; joins are straight)
   path smooth X1 Y1 X2 Y2 X3 Y3 …  (the same stroke as a smooth curve through the points)
   circle X Y R              (draw a circle centered at X Y; R is the radius in x units)
