@@ -589,9 +589,11 @@ extension Pointer: Gestures {}
                     "發到", "发到", "發給", "发给", "發送", "发送", "傳給", "传给", "轉發給", "转发给", "轉發到", "转发到",
                     "回覆", "回复", "留言", "發評論", "发评论", "寫評論", "写评论", "評論一下", "评论一下", "發表評論", "发表评论",
                     "發帖", "发帖", "發文", "发文", "發布到", "发布到", "發朋友圈", "发朋友圈", "說一聲", "说一声",
+                    "說一句", "说一句", "傳送", "传送",
                     "send ", "reply ", "post a", "comment on", "leave a comment"]
         if said.contains(where: { t.contains($0) }) { return true }
-        return t.range(of: #"(跟|对|對|和|向)(?!我)[^，,。.；;！!？?\n]{1,12}[说說]"#, options: .regularExpression) != nil
+        // "跟我說一下天氣" and "告訴我" ask this phone, they send nothing; "跟他說", "告訴大家" send.
+        return t.range(of: #"(跟|对|對|和|向)(?!我)[^，,。.；;！!？?\n]{1,12}[说說]|告[訴诉](?!我)"#, options: .regularExpression) != nil
     }
 
     /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
