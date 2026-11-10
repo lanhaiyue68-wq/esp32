@@ -116,6 +116,7 @@ import UIKit
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var watchSelfOpened: (chat: String, at: Double)?  // a chat this watch opened from its red number (its badge is gone now)
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
+    var watchRestUntil: [String: Double] = [:]  // chats that are not listed, opened a moment ago: left alone until then
     var watchTaskReply = WatchTaskReply.saved() { didSet { WatchTaskReply.save(watchTaskReply) } }
     var watchTaskReplyFailures = 0
     var watchLastTask: [String: String] = [:]  // per chat: the owner's last phone task, for "再去做一遍"

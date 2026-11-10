@@ -175,7 +175,7 @@ import XCTest
     func testTheModelsAreToldTheDate() throws {
         let parts = DateComponents(year: 2026, month: 11, day: 9, hour: 12)
         let date = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: parts))
-        XCTAssertEqual(AgentLoop.todayLine(date), "Today is 2026-11-09, Monday.")
+        XCTAssertEqual(AgentLoop.todayLine(date), "Today is 2026-11-09, Monday. Tomorrow is 2026-11-10, Tuesday; the day after is 2026-11-11, Wednesday.")
     }
 
     func testTheCheckSeesTheDateAndTheTaps() async {

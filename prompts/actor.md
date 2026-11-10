@@ -42,6 +42,8 @@ If you are unsure what an element does, tap it alone (one DO line) and check the
 If an action fails, compare the current screen with the intended result and correct only the failed step.
 Keep completed work. After two ineffective attempts, change the target or method; use replan if the route is wrong.
 Before done, check the goal against visible results; issuing the last action alone is not proof of success.
+Once the screen shows what the goal asks for, answer with done right there: do not leave for another screen to check it
+again (a check of the finished work looks at it after you).
 Preserve content that was already present before this task. Opening a document does not mean your last tap
 created every mark in it. Undo only an observed mistake from your own recent action, one undo then inspect.
 If new work needs a clean page, create one without deleting the user's existing work.

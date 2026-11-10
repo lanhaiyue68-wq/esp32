@@ -19,21 +19,33 @@ enum ShotPrivacy {
         return t.filter(\.isNumber).count >= 6
     }
 
-    /// The boxes to black out (0-1 of the screen, origin top-left).
+    /// The boxes to black out (0-1 of the screen, origin top-left). The recognizer gives a label and its value as
+    /// separate pieces, often in separate rows (build 117 on the phone, 11-10: 序號 and its value were two rows and the
+    /// serial went out in full): a value is what stands on the label's line, right of it, whatever row it came in.
     static func boxes(_ rows: [[CandidatePicker.Piece]]) -> [CGRect] {
-        var out: [CGRect] = []
-        for row in rows {
-            let labelled = row.first { piece in
-                let t = piece.text.uppercased().trimmingCharacters(in: .whitespaces)
-                return labels.contains { t == $0 || t.hasPrefix($0 + " ") }
+        let pieces = rows.flatMap { $0 }
+        var hide = Set<Int>()
+        var extra: [CGRect] = []
+        for (i, piece) in pieces.enumerated() where isNumber(piece.text) { hide.insert(i) }
+        for label in pieces {
+            let text = label.text.uppercased().trimmingCharacters(in: .whitespaces)
+            guard let word = labels.first(where: { text == $0 || text.hasPrefix($0 + " ") || text.hasPrefix($0 + ":") }) else { continue }
+            let bluetooth = ["藍牙", "蓝牙"].contains(word)
+            // One piece holding both ("序號 H9…"): the part after the label.
+            let rest = text.dropFirst(word.count).trimmingCharacters(in: CharacterSet(charactersIn: " :："))
+            if !rest.isEmpty, !bluetooth || isNumber(rest) {
+                let share = Double(text.count - rest.count) / Double(max(1, text.count))
+                extra.append(CGRect(x: label.box.minX + label.box.width * share, y: label.box.minY,
+                                    width: label.box.width * (1 - share), height: label.box.height))
             }
-            for piece in row where isNumber(piece.text) || (labelled.map { piece != $0 && piece.box.minX > $0.box.minX } ?? false) {
-                // Bluetooth's row only when it carries an address, not the word 開啟/On.
-                if let label = labelled, ["藍牙", "蓝牙"].contains(label.text.trimmingCharacters(in: .whitespaces)), !isNumber(piece.text) { continue }
-                out.append(piece.box.insetBy(dx: -0.01, dy: -0.006))
+            for (i, piece) in pieces.enumerated() where piece != label && piece.box.minX > label.box.midX
+                && abs(piece.box.midY - label.box.midY) < max(label.box.height, piece.box.height) * 0.6 {
+                if bluetooth && !isNumber(piece.text) { continue }  // Bluetooth's On/Off is no number
+                hide.insert(i)
             }
         }
-        return out
+        return hide.sorted().map { pieces[$0].box.insetBy(dx: -0.01, dy: -0.006) }
+            + extra.map { $0.insetBy(dx: -0.01, dy: -0.006) }
     }
 
     static func masked(_ jpeg: Data) async -> Data {

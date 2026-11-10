@@ -110,6 +110,8 @@ enum WatchSettings {
         var targets: [String] = [], onlyListed = true, senders: [String] = [], passphrases: [String] = []
         var myNames: [String] = [], interject = false, serverReplies = false, instruction = "", fallback = ""
         var phoneTasks = false, ownerPIN = ""
+        /// Chats that are not listed, opened a moment ago: not opened again for a while (see AppModel.restingChats).
+        var resting: [String] = []
         /// The one chosen chat stays open between checks: its new messages show up on screen by themselves.
         var single: Bool { onlyListed && targets.count == 1 }
     }
@@ -224,7 +226,8 @@ enum WatchSettings {
     static func openTask(_ r: Rules) -> String {
         let names = r.targets.map { "“\($0)”" }.joined(separator: "、")
         let others = "其他任何会话（公众号、订阅号、服务通知、文件传输助手除外）"
-        let scope = names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)"
+        let rest = r.resting.isEmpty ? "" : "（这些刚看过，不要打开：" + r.resting.map { "“\($0)”" }.joined(separator: "、") + "）"
+        let scope = (names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)") + rest
         return """
         打开微信，回到聊天列表（底部“微信”标签页）；如果现在停在某个会话里，先点左上角返回按钮回到列表，返回按钮旁边的数字是全部未读总数，不是这个会话的。只在列表里，\(scope)，打开最上面一个头像右上角带红色标记的会话：红色未读数字，或开了免打扰的会话的小红点。已经打开过、头像上没有红色标记的会话不要打开。
         一旦进入目标会话就完成，不要返回列表；打开会话会清掉红点，不能因此当成没有新消息。
@@ -554,8 +557,9 @@ enum WatchReport {
         return out
     }
 
-    private static func fullTitle(_ text: String) -> String {
-        text.replacingOccurrences(of: #"\s*[（(]\s*\d+\s*[）)]\s*$"#, with: "", options: .regularExpression)
+    /// Build 117 over Wi-Fi 11-10: WeChat titles a group "测试群（3人）" now, the 人 stayed, and 测试群 was never read.
+    static func fullTitle(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\s*[（(]\s*\d+\s*人?\s*[）)]\s*$"#, with: "", options: .regularExpression)
             .filter { !$0.isWhitespace }
     }
 
@@ -936,6 +940,7 @@ extension AppModel {
         watchAnswered = [:]
         watchInterjectedAt = [:]
         watchRetries = [:]
+        watchRestUntil = [:]
         watchTaskReplyFailures = 0
         agent.pinyinMisses = 0
         watchListReturn.pending = nil
@@ -1094,7 +1099,9 @@ extension AppModel {
     private func watchCheck() async -> (ok: Bool, scannedChat: Bool) {
         let began = now(), calls = LLMClient.requests
         defer { logWatchTiming("check", since: began, calls: calls) }
-        let rules = WatchSettings.rules
+        var withRest = WatchSettings.rules
+        withRest.resting = restingChats()
+        let rules = withRest
         let chat: String, screen: WatchReport.Screen
         let local: WatchChatOpen.Outcome
         if !rules.targets.isEmpty && UIApplication.shared.applicationState == .active && now() - watchStartedAt < 15 {
@@ -1137,6 +1144,7 @@ extension AppModel {
         if case .opened(let opened) = local {
             DebugLog.write("watch: local open verified\(rules.targets.contains(opened) ? "" : " (\(opened) is not listed: read only)"); navigation model skipped")
             watchSelfOpened = (opened, now())
+            rest(opened, rules)
             guard let look = await readChat(opened) else { return skipUnread(opened, rules) }
             (chat, screen) = (opened, look)
         } else {
@@ -1148,10 +1156,28 @@ extension AppModel {
             guard let open = WatchReport.openedChat(opened).map({ WatchReport.listed($0, rules.targets) }), !open.isEmpty
             else { return (true, false) }  // nothing unread
             watchSelfOpened = (open, now())
+            rest(open, rules)
             guard let look = await readChat(open) else { return skipUnread(open, rules) }
             (chat, screen) = (open, look)
         }
         return await finishCheck(chat: chat, screen: screen, rules: rules)
+    }
+
+    /// A chat that is not listed is only read, never answered. Build 117 over Wi-Fi 11-10: a busy group nobody listed
+    /// (虾笔刀陪跑学员元群) had new messages at every check and was opened every time, 1-2 minutes each, its title too
+    /// long to read, so nothing came of it. Once opened it rests restMinutes: its red mark is not looked at meanwhile.
+    static let restMinutes = 20.0
+
+    func restingChats() -> [String] {
+        let t = now()
+        watchRestUntil = watchRestUntil.filter { $0.value > t }
+        return watchRestUntil.keys.sorted()
+    }
+
+    private func rest(_ chat: String, _ rules: WatchSettings.Rules) {
+        guard !rules.targets.contains(chat), !chat.isEmpty else { return }
+        watchRestUntil[chat] = now() + Self.restMinutes * 60
+        DebugLog.write("watch: \(chat) is not listed; not opened again for \(Int(Self.restMinutes)) minutes")
     }
 
     /// A chat that is not listed could not be read: skip it and go back to the list, instead of counting a failed

@@ -1147,7 +1147,11 @@ extension Pointer: Gestures {}
             }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
-                    if let wrong = await wrongClaim(act["answer"]?.str ?? "", frame: screen?.frame ?? planned.shot) {
+                    let answer = act["answer"]?.str ?? "", frame = screen?.frame ?? planned.shot
+                    let wrong = await wrongClaim(answer, frame: frame)
+                    var stands = false  // no await inside && (the build 116 CI error was one inside ??)
+                    if wrong != nil, answer == rejectedAnswer { stands = await confirmedBySecondModel(answer, frame: frame) }
+                    if let wrong, !stands {
                         checksLeft -= 1
                         rejectedAnswer = act["answer"]?.str
                         record(planned.shot, ["action": .str("done rejected"), "reason": .str(wrong)])
@@ -1752,7 +1756,9 @@ extension Pointer: Gestures {}
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd, EEEE"
-        return "Today is \(f.string(from: date))."
+        // Build 117 on the phone: the check worked a weekday out wrong from a forecast. The next two days are given too.
+        let day = { (n: Int) in f.string(from: Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: date) ?? date) }
+        return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))."
     }
 
     /// Over USB 11-09, 5 of 14 "done" were wrong: a Pinduoduo price from an app never opened, a message never sent, the 17th
@@ -1760,8 +1766,7 @@ extension Pointer: Gestures {}
     /// nothing is wrong or the check itself failed (a check must not stop the work).
     private func wrongClaim(_ answer: String, frame: Data?) async -> String? {
         guard let model = doneChecker ?? planner ?? actor else { return nil }
-        let did = Self.whatItDid(steps)
-        let prompt = "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)\n\nThe image is the screen now."
+        let prompt = checkPrompt(answer)
         do {
             let reply = try await model.chat(system: Self.doneCheck, text: prompt, image: frame, maxTokens: 120, temperature: 0).text
             trace?.write(kind: "done check", ["reply": .str(String(reply.prefix(300)))])
@@ -1770,6 +1775,27 @@ extension Pointer: Gestures {}
         } catch {
             DebugLog.write("done check failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    private func checkPrompt(_ answer: String) -> String {
+        "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(Self.whatItDid(steps))\n\nThe image is the screen now."
+    }
+
+    /// The same answer again after the quick check refused it: the check may be the one that is wrong. Build 117 on the
+    /// phone, 11-10: it worked out today as Monday from a forecast, and once took the second headline for the first; right
+    /// answers were reported "not checked" or cost a round. The planner (Codex) looks once; only its OK counts, so a
+    /// failed call changes nothing.
+    private func confirmedBySecondModel(_ answer: String, frame: Data?) async -> Bool {
+        guard let second = planner, second !== (doneChecker ?? planner ?? actor) else { return false }
+        do {
+            let reply = try await second.chat(system: Self.doneCheck, text: checkPrompt(answer), image: frame, maxTokens: 120, temperature: 0).text
+            trace?.write(kind: "done check (second)", ["reply": .str(String(reply.prefix(300)))])
+            DebugLog.write("done check (second model): \(reply.prefix(160))")
+            return Self.wrongness(reply) == nil
+        } catch {
+            DebugLog.write("done check (second model) failed: \(error.localizedDescription)")
+            return false
         }
     }
 

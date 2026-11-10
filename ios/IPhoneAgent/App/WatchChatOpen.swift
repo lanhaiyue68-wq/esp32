@@ -89,7 +89,8 @@ import Foundation
         if let top = hits.min(by: { $0.box.midY < $1.box.midY }) { return .row(top.chat, CGPoint(x: 0.5, y: top.box.midY)) }
         let listed = rules.targets.map { $0.filter { !$0.isWhitespace } }
         let others = listTitles(rows).filter { row in
-            !listed.contains { WatchReport.sameName(row.text, $0) } && !notChats.contains(row.text) && badge(row.box)
+            !listed.contains { WatchReport.sameName(row.text, $0) } && !notChats.contains(row.text)
+                && !rules.resting.contains { sameChat($0, listName: row.text) } && badge(row.box)
         }
         if let top = others.min(by: { $0.box.midY < $1.box.midY }) { return .other(top.text, CGPoint(x: 0.5, y: top.box.midY)) }
         return .none
