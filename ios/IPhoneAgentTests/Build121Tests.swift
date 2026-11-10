@@ -15,6 +15,20 @@ import XCTest
         XCTAssertFalse(AgentLoop.publishes("給我看這個視頻的點讚評論收藏轉發數據"))
         XCTAssertFalse(AgentLoop.publishes("跟我說一下今天深圳的天氣"))
         XCTAssertFalse(AgentLoop.publishes("用 Safari 打開 www.163.com，告訴我第一條新聞標題"))
+        XCTAssertFalse(AgentLoop.publishes("打開 Safari 進新浪網和網易，告訴我兩邊的頭條，再打開抖音告訴我首頁第一個影片是誰發的"), "s04")
+        XCTAssertFalse(AgentLoop.publishes("告訴我這篇筆記的發布時間"))
+        XCTAssertFalse(AgentLoop.publishes("在淘寶查發票怎麼開"))
+        XCTAssertFalse(AgentLoop.publishes("跟我說：今天幾號"))
+    }
+
+    /// Found reviewing 121 before it went out: with only the listed phrasings, a cloud task "在测试群发你好" would have sent
+    /// without approval (customer spec §0.6). A bare 发 counts again, outside the words that only read.
+    func testABareFaWithItsMessageStillSends() {
+        XCTAssertTrue(AgentLoop.publishes("去测试群发这不是简简单单吗"))
+        XCTAssertTrue(AgentLoop.publishes("在测试群发你好"))
+        XCTAssertTrue(AgentLoop.needsApproval("你好", task: "在测试群发你好"))
+        XCTAssertTrue(AgentLoop.publishes("在第一篇筆記下評論：好看"))
+        XCTAssertTrue(AgentLoop.publishes("把這條轉發給張三"))
     }
 
     func testWaysOfSayingSendStillCount() {

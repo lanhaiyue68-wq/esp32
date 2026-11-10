@@ -583,17 +583,27 @@ extension Pointer: Gestures {}
         let t = task.lowercased().replacingOccurrences(
             of: #"(不要|不用|不必|別|别|勿|禁止|don't|do not|never)[^，,。.；;！!？?\n]*"#, with: " ", options: .regularExpression)
         // Build 120 on the phone, 11-11: "影片是誰發的", "評論、收藏、轉發各是多少" were read as sending, and a news
-        // site typed in Safari and a search on 小紅書 were held for approval (one task cancelled). Only ways of saying
-        // "send this" count.
+        // site typed in Safari and a search on 小紅書 were held for approval (one task cancelled). But "在测试群发你好"
+        // sends: a 发 still counts, except inside words that only read or name something.
         let said = ["發一", "发一", "發個", "发个", "發條", "发条", "發訊息", "发讯息", "發消息", "发消息", "發信息", "发信息",
                     "發到", "发到", "發給", "发给", "發送", "发送", "傳給", "传给", "轉發給", "转发给", "轉發到", "转发到",
-                    "回覆", "回复", "留言", "發評論", "发评论", "寫評論", "写评论", "評論一下", "评论一下", "發表評論", "发表评论",
+                    "回覆", "回复", "留言", "發評論", "发评论", "寫評論", "写评论", "評論一", "评论一", "發表評論", "发表评论",
                     "發帖", "发帖", "發文", "发文", "發布到", "发布到", "發朋友圈", "发朋友圈", "說一聲", "说一声",
                     "說一句", "说一句", "傳送", "传送",
                     "send ", "reply ", "post a", "comment on", "leave a comment"]
         if said.contains(where: { t.contains($0) }) { return true }
-        // "跟我說一下天氣" and "告訴我" ask this phone, they send nothing; "跟他說", "告訴大家" send.
-        return t.range(of: #"(跟|对|對|和|向)(?!我)[^，,。.；;！!？?\n]{1,12}[说說]|告[訴诉](?!我)"#, options: .regularExpression) != nil
+        // "跟我說一下天氣" and "告訴我" ask this phone, they send nothing; "跟他說", "告訴大家", "評論：好看" send.
+        if t.range(of: #"(跟|对|對|和|向)(?!我)[^，,。.；;！!？?\n]{1,12}[说說]|告[訴诉](?!我)|(評論|评论|(?<!我)[說说])[：:「“"]"#,
+                   options: .regularExpression) != nil { return true }
+        var rest = t
+        for word in [#"[誰谁]?[發发]的"#,  // who posted it, what they posted
+                     #"[轉转][發发](?![給给到這这一那該该])"#,  // the share count, not "转发给/转发这条"
+                     #"[發发][布佈表](?![到一這这])"#,  // 发布时间, 发表于
+                     #"(開|开|出|批|沙|爆|自|激|研|散|揮|挥|蒸|奮|奋|頒|颁|引|啟|启|收|头)[發发]"#,
+                     #"[發发](現|现|生|票|貨|货|展|音|燒|烧|型|揮|挥|明|光|行|起|射|電|电|財|财|胖|呆|愁|抖|麻|熱|热|炎|病|作|育|芽|酵|達|达|覺|觉|放|售|件)"#] {
+            rest = rest.replacingOccurrences(of: word, with: " ", options: .regularExpression)
+        }
+        return rest.contains("發") || rest.contains("发")
     }
 
     /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
