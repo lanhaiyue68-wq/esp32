@@ -1128,7 +1128,7 @@ extension AppModel {
             local = await WatchChatOpen.open(phone: pointer, screen: feed, rules: rules, canAct: {
                 self.watching && UIApplication.shared.applicationState != .active &&
                 WatchSettings.rules.targets == rules.targets && WatchSettings.rules.onlyListed == rules.onlyListed
-            }, tapped: { tappedRow = $0 })
+            }, onTap: { tappedRow = $0 })
         } else { local = .fallback }
         if case .deferred = local { return (false, false) }
         if case .nothing = local {

@@ -140,7 +140,7 @@ import Foundation
     /// `title`: the listed chat on screen; `anyTitle`: any chat's title on screen (never the list's).
     static func open(phone: Gestures, screen: ScreenSource, rules: WatchSettings.Rules, canAct: () -> Bool,
                      inspectList: ((Data) -> Unread)? = nil, title: ((Data) -> String?)? = nil,
-                     anyTitle: ((Data) -> String?)? = nil, tapped: ((String) -> Void)? = nil) async -> Outcome {
+                     anyTitle: ((Data) -> String?)? = nil, onTap: ((String) -> Void)? = nil) async -> Outcome {
         guard !rules.targets.isEmpty else { return .fallback }
         let title = title ?? { WatchReport.navigationChat(in: $0, targets: rules.targets) }
         let anyTitle = anyTitle ?? { WatchReport.navigationTitle(in: $0) }
@@ -159,7 +159,7 @@ import Foundation
             case .row(let chat, let p):
                 point = p
                 landed = { title($0) == chat ? chat : nil }
-                tapped?(chat)
+                onTap?(chat)
             case .other(let name, let p):
                 point = p
                 landed = { anyTitle($0).flatMap { sameChat($0, listName: name) ? $0 : nil } }

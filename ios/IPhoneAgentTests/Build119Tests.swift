@@ -26,7 +26,7 @@ import XCTest
         var tapped: String?
         let result = await WatchChatOpen.open(phone: FakeGestures(), screen: TapScreen(), rules: WatchSettings.Rules(targets: ["测试群"]),
                                               canAct: { true }, inspectList: { _ in .row("测试群", CGPoint(x: 0.5, y: 0.21)) },
-                                              title: { _ in nil }, tapped: { tapped = $0 })
+                                              title: { _ in nil }, onTap: { tapped = $0 })
         XCTAssertEqual(result, .unverified)
         XCTAssertEqual(tapped, "测试群", "the caller reads it with readChat's own title check")
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("diagnostics")
