@@ -1,6 +1,7 @@
 # 当前进度
 
 ## 2026-11-11 build 120（已交付：監看只發一則，驗證通過）
+- 使用者要求再壓力測試：6 道「一句話 3–5 件事」組合題，5 道完成且正確（條件分支、計算、發测试群各一則都對），s04 因題目有「誰發的」被當成發訊息題、輸入網址被要求批准而取消；第一次做的組合題由 Codex 帶路較慢（s01 701 s）。報告 docs/stress-2026-11-11-build120-compound.md。
 - lanhaile 額度用完，改用使用者給的 winesettbumpas609-boop/esp32-iphone-agent-build（remote build75，11 月沒用過）。run 42875915106 的單元測試有一項（TapAccuracyTests.testAnActorThatKeepsTappingAfterSendingCannotActOrClaimSuccess）在這台機器卡住 2 分鐘，重跑也一樣（lanhaile 機器上 2.8 s 通過），IPA 因而沒上傳；ci 改成打包後先上傳 IPA（75f38a9），run 42883422995 拿到 IPA。桌面 Lan-Agent-build120-unsigned.ipa，SHA256 f804eae6…cb670ee；119 備用，118 回收。
 - 真機：测试群「@蓝 现在几点了」回「现在是凌晨三点二十四分。」，只一則，3 秒確認送出。交付說明 docs/delivery-build120.md。USB 測試通道已 release＋disarm，模擬雲端已停。
 - 使用者要求修好重複發送再交付。120 只改這一項：按過 return 但沒確認到就是「returned」，後續流程只准在輸入框還有字時按一次 enter，任何 type 都拒絕（noTyping）；回覆算已答覆，下一輪不再寫。提交 3a91dcd（新增 Build120Tests 2 項）。交付說明 docs/delivery-build120.md（SHA 待補）。
