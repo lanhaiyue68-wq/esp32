@@ -158,7 +158,7 @@ import XCTest
             "motionVersion": ProbeMotion.version, "requiresFeedback": false, "maps": ["x": mapX, "y": mapY]]
         try JSONSerialization.data(withJSONObject: saved).write(to: file)
         let p = Pointer(device: FakeDevice(), calibrationFile: file)
-        XCTAssertFalse(p.beyondReach(0.85))
+        XCTAssertFalse(p.beyondReach(0.74))  // build 117: from 0.75 (WeChat's icon at 0.848 was missed from the corner)
         XCTAssertTrue(p.beyondReach(0.89), "Meituan's search button")
     }
 

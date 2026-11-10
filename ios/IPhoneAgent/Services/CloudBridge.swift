@@ -103,11 +103,32 @@ import Foundation
         }
     }
 
+    /// Build 116 over the cloud 11-10: after about 34 minutes of tasks back to back, on the charger, the phone reached
+    /// "critical": iOS held the app 14 times for 5-16 s, sharing broke once, and a 93-second task took 226. A task that
+    /// comes then is put off (retry_pending, device_hot) until the phone is cooler, at most coolingLimit for each task.
+    var hot: () -> Bool = { ProcessInfo.processInfo.thermalState == .critical }
+    /// Device numbers blacked out of the picture before it leaves the phone (ShotPrivacy); as is in tests.
+    var mask: (Data) async -> Data = { $0 }
+    private var hotSince: [String: Double] = [:]
+    static let coolingLimit = 300.0
+
     private func take(_ task: CloudTask) async {
         if let last = finished[task.id] {  // §9.4 idempotency: done before, say so again
             await report(task.id, last)
             return
         }
+        if hot() {
+            let first = hotSince[task.id] == nil
+            let since = hotSince[task.id] ?? now()
+            hotSince[task.id] = since
+            if now() - since < Self.coolingLimit {
+                if first { DebugLog.write("cloud: the phone is hot (critical); task \(task.id) waits to cool down") }
+                await report(task.id, ["status": "retry_pending", "error_code": "device_hot", "detail": "the phone is too hot; it takes the task once it is cooler"])
+                return
+            }
+            DebugLog.write("cloud: still hot after \(Int(Self.coolingLimit)) s; task \(task.id) runs all the same")
+        }
+        hotSince[task.id] = nil
         let missing = capabilities().filter { ["screen_capture", "hid_board", "pointer"].contains($0.key) && $0.value != "available" }
         if running() || !missing.isEmpty {
             let why = running() ? "busy" : "unavailable: " + missing.keys.sorted().joined(separator: ", ")
@@ -136,7 +157,7 @@ import Foundation
         let result = outcome(task)
         var event: [String: Any] = ["status": result.status, "result": ["answer": result.answer, "steps": result.steps]]
         if let error = result.error { event["error_code"] = error }
-        if task.screenshot, let jpeg = lastScreen() { event["screenshot_jpeg_base64"] = jpeg.base64EncodedString() }
+        if task.screenshot, let jpeg = lastScreen() { event["screenshot_jpeg_base64"] = await mask(jpeg).base64EncodedString() }
         await finish(task, event)
     }
 

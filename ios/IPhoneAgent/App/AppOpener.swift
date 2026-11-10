@@ -28,6 +28,23 @@ enum AppPlaces {
     }
 
     static func place(for name: String) -> AppPlace? { all[normalized(name)] }
+
+    /// Misses in a row on the remembered page. Build 116 over the cloud 11-10: the user had the phone in hand while Meituan
+    /// was opened, its page did not show it that once, and it was forgotten for good: every open after went through Search
+    /// (13 s). Now the page goes after the second miss in a row; an open there clears the count.
+    private static let missKey = "appPlaceMissesV1"
+    static func missed(_ name: String) -> Int {
+        var misses = (UserDefaults.standard.dictionary(forKey: missKey) as? [String: Int]) ?? [:]
+        let n = (misses[normalized(name)] ?? 0) + 1
+        misses[normalized(name)] = n
+        UserDefaults.standard.set(misses, forKey: missKey)
+        return n
+    }
+    static func found(_ name: String) {
+        var misses = (UserDefaults.standard.dictionary(forKey: missKey) as? [String: Int]) ?? [:]
+        guard misses.removeValue(forKey: normalized(name)) != nil else { return }
+        UserDefaults.standard.set(misses, forKey: missKey)
+    }
     static var count: Int { all.count }
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
@@ -302,13 +319,21 @@ extension AppModel {
                     try await swipePage(next: target > current)
                 }
                 if let now = await homeRows(top: 0.02), let spot = AppPlaces.label(name, in: now),
-                   try await tapIcon(spot, name: name, on: "page \(target + 1), as remembered") { return true }
+                   try await tapIcon(spot, name: name, on: "page \(target + 1), as remembered") {
+                    AppPlaces.found(name)
+                    return true
+                }
             } else if AppPlaces.page(showing: rows) == nil {
                 // The page in front was not recognised: it is on a page all the same, so look through them.
                 if try await openFromPages(name) { return true }
             }
-            DebugLog.write("open \(name): not on page \(target + 1); Search from now on")
-            AppPlaces.forget(name)
+            if AppPlaces.missed(name) >= 2 {
+                DebugLog.write("open \(name): not on page \(target + 1) twice in a row; Search from now on")
+                AppPlaces.forget(name)
+                AppPlaces.found(name)
+            } else {
+                DebugLog.write("open \(name): not on page \(target + 1) this time; Search this time, the page is kept")
+            }
             try await pointer.goHome()
         }
         return try await bySearch(name)

@@ -112,6 +112,11 @@ class Handler(BaseHTTPRequestHandler):
                         task['status'] = body.get('status', task['status'])
                     if 'result' in body:
                         task['result'] = body['result']
+                    if body.get('status') == 'retry_pending' and task['status'] != 'cancelled':  # the phone did not take it: queue it again
+                        task['status'] = 'queued'
+                        task.pop('assigned_to', None)
+                        if tid not in queue:
+                            queue.append(tid)
                     if body.get('status') == 'waiting_approval':
                         task['approval'] = 'pending'
                         task['approval_request'] = body.get('approval_request')

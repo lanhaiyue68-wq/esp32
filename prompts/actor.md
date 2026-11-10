@@ -59,7 +59,10 @@ live screen every time; preserve explicit user corrections and avoid previously 
 Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)
-  swipe X1 Y1 X2 Y2         (finger moves from X1,Y1 to X2,Y2: "swipe down" means Y2 > Y1)
+  swipe X1 Y1 X2 Y2         (finger moves from X1,Y1 to X2,Y2: "swipe down" means Y2 > Y1. A list moves about as far
+                             as the finger: for the next part of a list swipe from about 750 to 300. A swipe whose step
+                             says scrolled false or changed false moved nothing: that end of the list is reached, so what
+                             you look for is the other way, or on another tab)
   path X1 Y1 X2 Y2 X3 Y3 …  (one continuous stroke through 2-20 points, for drawing; joins are straight)
   path smooth X1 Y1 X2 Y2 X3 Y3 …  (the same stroke as a smooth curve through the points)
   circle X Y R              (draw a circle centered at X Y; R is the radius in x units)
@@ -72,7 +75,8 @@ Actions:
                              screen: never look for the icon, never search by hand. If it says the app is not on this
                              phone, believe it: stop with fail and say so, never look on the web for it)
   key COMBO                 (enter, backspace, esc, cmd+a, ...)
-  press KEY KEY …           (taps the on-screen keys showing these labels, in order, found by reading the screen:
+  press KEY KEY …           (enters these keys in order: typed on the keyboard where the app takes it (Calculator does),
+                             otherwise the on-screen keys showing these labels are found by reading the screen and tapped:
                              calculator, number pad, dial pad. e.g. press AC 4 0 . 7 4 − 3 2 . 9 =  A number may be
                              written whole: press 40.74. If a key cannot be read, nothing is pressed and you are told
                              which keys were read, with their spots)
@@ -81,7 +85,8 @@ Actions:
                              goal will need; never go back to read again what your notes hold)
   home | back | wait
   replan                    (the plan no longer fits the screen)
-  done ANSWER               (the goal is reached; ANSWER is the result for the user)
+  done ANSWER               (the goal is reached; ANSWER is the result for the user, in the goal's language: a goal in
+                             Chinese gets its answer in Chinese. All of it on this one DO line, several items separated by ；)
   fail REASON
 
 Example:

@@ -68,10 +68,33 @@ enum Actions {
         return String(text[..<label.lowerBound]).trimmingCharacters(in: .whitespaces)
     }
 
+    /// A done whose answer runs on over several lines (a forecast, a list): the lines under it that start no label are
+    /// part of it. Build 116 over the cloud 11-10: "我的位置（龙岗区）的預報：" reached the cloud alone, the three days under
+    /// it were dropped. They are joined into the one DO line, after a colon by a space, otherwise by "；".
+    static func joinedAnswers(_ text: String) -> String {
+        var out: [String] = []
+        var inDone = false
+        for line in text.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.range(of: #"^(THINK|ZH|DO)\s*[:：]"#, options: .regularExpression) != nil {
+                inDone = t.range(of: #"^DO\s*[:：]\s*done(\s|$)"#, options: [.regularExpression, .caseInsensitive]) != nil
+                out.append(line)
+            } else if inDone, !t.isEmpty, !t.hasPrefix("```"), let last = out.last {
+                let head = last.trimmingCharacters(in: .whitespaces)
+                let glue = head.hasSuffix("：") || head.hasSuffix(":") || head.lowercased().hasSuffix("done") ? " " : "；"
+                out[out.count - 1] = head + glue + t
+            } else {
+                inDone = false
+                out.append(line)
+            }
+        }
+        return out.joined(separator: "\n")
+    }
+
     static func parseActions(_ text: String) throws -> [JObject] {
         // Some models join THINK and DO on one line (log24). Accept only that explicit labelled form.
-        let normalized = text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
-                                                   with: "$1\n$2", options: .regularExpression)
+        let normalized = joinedAnswers(text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
+                                                                 with: "$1\n$2", options: .regularExpression))
         let thought = firstGroup(#"^\s*THINK\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
         let zh = firstGroup(#"^\s*ZH\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
         var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: normalized).map(parseCommand).prefix(6).map { $0 }

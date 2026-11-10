@@ -247,6 +247,11 @@ extension Pointer: Gestures {}
     /// "Needs your help": asked when the actor gives up or errors repeat; nil = end the run as before.
     var onHelp: ((String) async -> HelpChoice)?
     private var helpAsked = 0
+    /// A task from the cloud: nobody is at the phone to answer "needs your help". Build 116 over the cloud 11-10: six tasks
+    /// asked, and each stood "running" until the cloud gave up on it (up to 9 minutes). It fails at once, saying why.
+    var noHelp = false
+    /// The answer the done check last refused, for a run that then gives up (see the fail below).
+    private var rejectedAnswer: String?
     enum HelpChoice { case resume, skip, stop }
 
     init(phone: Gestures?, screen: ScreenSource?, actor: ChatModel?, planner: ChatModel?, trace: TraceStore?,
@@ -596,10 +601,23 @@ extension Pointer: Gestures {}
     static func needsApproval(_ text: String, task: String) -> Bool {
         func key(_ s: String) -> String { AppNames.hans(typedKey(s)).lowercased() }
         let typed = key(text), goal = key(task)
-        guard !typed.isEmpty, goal.contains(typed) else { return true }
+        guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return true }
         guard publishes(task) else { return false }
         guard let message = messagePart(task).map(key), !message.isEmpty else { return true }
         return message.contains(typed) || typed.contains(message)
+    }
+
+    /// The goal's own words, a little shortened or reworded: its characters in the goal's order, with one in ten (at least
+    /// one, none in a word under four) left out or added. Build 116 over the cloud 11-10: 深圳灣公園附近停車場, the goal's 深圳灣公園附近的停車場 without
+    /// its 的, was held as a message, refused, and the search task ended "not approved".
+    static func takenFrom(_ typed: String, _ goal: String) -> Bool {
+        let t = Array(typed), g = Array(goal)
+        guard t.count >= 2 else { return false }
+        var at = 0, strays = 0
+        for c in t {
+            if let i = g[at...].firstIndex(of: c) { at = i + 1 } else { strays += 1 }
+        }
+        return strays <= (t.count >= 4 ? max(1, t.count / 10) : 0)
     }
 
     /// Where a message would go now, if that is not where the goal says (nil: fine, or the check could not be made).
@@ -754,6 +772,7 @@ extension Pointer: Gestures {}
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         approvedTexts = []
         checksLeft = 2
+        rejectedAnswer = nil
         recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
         plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
         if plannerLeads { DebugLog.write("run: not done before; the planner does it and it is remembered") }
@@ -886,7 +905,7 @@ extension Pointer: Gestures {}
 
     /// Pauses for the user (at most twice a run). True = go on from the current screen with a new plan.
     private func askForHelp() async throws -> Bool {
-        guard let onHelp, helpAsked < 2, stepLimit == nil else { return false }
+        guard let onHelp, helpAsked < 2, stepLimit == nil, !noHelp else { return false }
         helpAsked += 1
         let reason = steps.last?["reason"]?.str ?? ""
         record(nil, ["action": .str("help"), "reason": .str(reason)])
@@ -1050,6 +1069,16 @@ extension Pointer: Gestures {}
                     use(hit, "send")
                 }
             }
+            // Out of checks, it gave up instead of answering again: over the cloud 11-10 the check twice took a note's first
+            // line, its title in Notes, for "only its body", and the run waited for help until it timed out. What it read
+            // goes out marked as not checked, as a third done would.
+            if act["action"]?.str == "fail", checksLeft == 0, let answer = rejectedAnswer, endAfterSend == nil, presetPlan.isEmpty,
+               parts.count < 2 || partIndex >= parts.count - 1 {
+                DebugLog.write("done check: it gave up after two refusals; its answer goes out as not checked")
+                act["action"] = .str("done")
+                act["answer"] = .str(answer)
+                act["reason"] = nil
+            }
             let name = act["action"]?.str ?? ""
             var justSent: String?
             if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil, !["wait", "done", "fail"].contains(name) {
@@ -1120,6 +1149,7 @@ extension Pointer: Gestures {}
                 if checksLeft > 0 {
                     if let wrong = await wrongClaim(act["answer"]?.str ?? "", frame: screen?.frame ?? planned.shot) {
                         checksLeft -= 1
+                        rejectedAnswer = act["answer"]?.str
                         record(planned.shot, ["action": .str("done rejected"), "reason": .str(wrong)])
                         return false
                     }
@@ -1258,7 +1288,9 @@ extension Pointer: Gestures {}
                         try? await phone?.key("cmd+a")
                         try? await phone?.key("backspace")
                         unsent = nil
-                        record(screen?.frame, ["action": .str("done"), "answer": .str(Self.notApprovedAnswer), "approval": .str("rejected")])
+                        // The picture the cloud gets is this step's: the box once it is empty, not the draft still in it (11-10).
+                        let cleared = await freshFrame()
+                        record(cleared ?? screen?.frame, ["action": .str("done"), "answer": .str(Self.notApprovedAnswer), "approval": .str("rejected")])
                         return true
                     }
                     approvedTexts.insert(Self.typedKey(text))
@@ -1706,7 +1738,9 @@ extension Pointer: Gestures {}
     - The answer reports something from an app the steps never opened.
     - The answer says something was sent or saved, the screen is where it would show, and it does not show.
     - The goal names no city or place and the answer is for a city an app kept from before, not the phone's own location.
-    The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording.
+    The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording, nor the answer's language.
+    A note, memo or document has no separate title field: its first line is its title.
+    In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
     An app counts as opened when a step opened it, or tapped its icon (a tap that says it opens the app).
     Simplified and traditional Chinese of the same words are the same (压力测试 = 壓力測試). A value that moves by itself (a live price, a time, a count) may differ a little from the screen now: that is not wrong.
     A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
@@ -1976,6 +2010,18 @@ extension Pointer: Gestures {}
             try await phone.key(combo)
         case "press":
             guard let shown = screen?.frame else { throw DeviceError(message: "no screen to find the keys on") }
+            // Over USB 11-10 Calculator took typed sums at once (128*0.85= gave 108.8, esc cleared it), while reading its
+            // keys found 9 of 19 labels and three cloud tasks gave up there. Typed first; the read keys only if nothing changed.
+            if let typed = Self.typedKeys(Self.keyTokens(a["text"]?.str ?? "")) {
+                for piece in typed {
+                    if piece == "esc" { try await phone.key("esc") } else { try await phone.type(piece) }
+                }
+                if let after = await freshFrame(), Vision.changed(shown, after) {
+                    DebugLog.write("press: typed \(typed.joined(separator: " ")) on the keyboard")
+                    break
+                }
+                DebugLog.write("press: typing changed nothing; tapping the keys")
+            }
             let rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.1, bottom: 1)
             let found = Self.keySpots(a["text"]?.str ?? "", in: rows.flatMap { $0 })
             guard found.missing.isEmpty, !found.spots.isEmpty else {

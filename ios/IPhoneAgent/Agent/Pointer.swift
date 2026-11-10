@@ -247,8 +247,9 @@ import Foundation
 
     func point(_ x: Double, _ y: Double, aim: Bool = false, rehome: Bool = true, edgeStart: Bool = false) async throws {
         guard calibrated else { throw DeviceError(message: "pointer not calibrated") }
-        viaBorder = !edgeStart && beyondReach(x)
-        if viaBorder { try await fromRightBorder(x, y) }
+        let border = !edgeStart && viaBorders(x, y)
+        viaBorder = border && !belowReach(y)  // the lift learned is the right border's
+        if border { try await fromBorder(x, y) }
         else { try await moveTo(dx(x), dy(y), rehome: rehome) }
         // Ordinary taps click at the calibrated map without looking for the pointer. On the dark WeChat screens the
         // pixel search found it 6 times in 31 (logs 11-06): every tap wiggled it ~5 times over 4–6 s, often walked it
@@ -283,7 +284,7 @@ import Foundation
             pos = nil
             guard !unseenClicks else {
                 log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
-                if beyondReach(x) { try await fromRightBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
+                if viaBorders(x, y) { try await fromBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
                 return
             }
             throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
@@ -472,12 +473,23 @@ import Foundation
     /// The map's far end is not good enough even when it reaches there. Over USB 11-09 and 11-10, from the corner to targets
     /// right of 0.7: a median 0.07 short (Meituan's 搜索 at 0.89, clicked at its edge and then on the box's clear button, so the
     /// search never ran), against 0.006 to 0.039 from the right border. The border is an exact reference.
-    static let farRight = 0.85
+    /// Build 116 over the cloud, 11-10: WeChat's icon at x 0.848, just inside the old 0.85, was missed twice on every open.
+    static let farRight = 0.75
+
+    /// The bottom rows (tab bars, Safari's address bar, toolbars) come back from the bottom border the same way. Build 116
+    /// over the cloud, 11-10: moves from the corner landed on the bottom border (0.994 for 0.937), the bar's button lit up in
+    /// place of the pointer, and Clock's 鬧鐘 tab, Safari's address bar and Notes' toolbar were clicked under, time after time
+    /// (three tasks timed out). Over USB the same day, pushed against the bottom and brought back 20, 40 and 60 units, the
+    /// pointer stood at 0.97, 0.94 and 0.91: on the tab.
+    static let farBottom = 0.9
+
+    func belowReach(_ y: Double) -> Bool { maps?["y"] != nil && y > Self.farBottom }
+    func viaBorders(_ x: Double, _ y: Double) -> Bool { beyondReach(x) || belowReach(y) }
 
     /// The right border is an exact reference: home, push the pointer against it at the target's row, then come back
     /// the short distance, which the map measured (the same move from the left border lands that far in).
-    private func fromRightBorder(_ x: Double, _ y: Double) async throws {
-        guard let mx = maps?["x"] else { return try await moveTo(dx(x), dy(y)) }
+    private func fromBorder(_ x: Double, _ y: Double) async throws {
+        guard let mx = maps?["x"], let my = maps?["y"] else { return try await moveTo(dx(x), dy(y)) }
         if link != device.links {  // new link: a dropped gesture may have left the button down
             try await device.send("release")
             (pos, link) = (nil, device.links)
@@ -486,16 +498,29 @@ import Foundation
         try await ProbeMotion.home(device)
         pos = nil
         await noteCorner(since: homing)
-        let ty = dy(y - borderLiftY), back = mx.units(for: 1 - x), push = max(mx.units(for: 1) * 3 / 2, 400)
-        // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
-        // ordinary move; after the short way back it follows a move like the calibrated ones.
-        try await ProbeMotion.move(device, push, 0)
-        try await Task.sleep(nanoseconds: 150_000_000)
-        try await ProbeMotion.move(device, -back, 0)
-        try await Task.sleep(nanoseconds: 150_000_000)
-        try await ProbeMotion.move(device, 0, ty)
+        let right = beyondReach(x), bottom = belowReach(y)
+        let back = right ? mx.units(for: 1 - x) : 0
+        if right {
+            // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
+            // ordinary move; after the short way back it follows a move like the calibrated ones.
+            try await ProbeMotion.move(device, max(mx.units(for: 1) * 3 / 2, 400), 0)
+            try await Task.sleep(nanoseconds: 150_000_000)
+            try await ProbeMotion.move(device, -back, 0)
+            try await Task.sleep(nanoseconds: 150_000_000)
+        } else {
+            try await ProbeMotion.move(device, dx(x), 0)
+        }
+        if bottom {
+            let up = my.units(for: 1 - y)
+            try await ProbeMotion.move(device, 0, max(my.units(for: 1) * 3 / 2, 600))
+            try await Task.sleep(nanoseconds: 150_000_000)
+            try await ProbeMotion.move(device, 0, -up)
+            log(String(format: "point (%.3f, %.3f): a bottom row; from the bottom border, %ld units up", x, y, up))
+        } else {
+            try await ProbeMotion.move(device, 0, dy(y - borderLiftY))
+        }
         (pos, moves, hops) = ((dx(x), dy(y)), 1, 0)  // where it lands, the lift taken off
-        log(String(format: "point (%.3f, %.3f): past the calibrated %.3f; from the right border, %ld units back", x, y, mx.reach, back))
+        if right { log(String(format: "point (%.3f, %.3f): past the calibrated %.3f; from the right border, %ld units back", x, y, mx.reach, back)) }
     }
 
     /// Let go of the button and re-home the pointer, whatever state a gesture left.
@@ -545,7 +570,7 @@ import Foundation
             (lastClick, pos) = (nil, nil)
         }
         clicksInPlace = 0
-        if !aim, !stale, !beyondReach(x), y >= Self.topBand, let last = lastClick, let p = pos, hops < Self.nearbyHops,
+        if !aim, !stale, !viaBorders(x, y), y >= Self.topBand, let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
@@ -668,7 +693,7 @@ import Foundation
     /// order. The corner is the one place it can be sent to for sure.
     private func startOver(_ x: Double, _ y: Double) async throws {
         pos = nil
-        if beyondReach(x) { try await fromRightBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
+        if viaBorders(x, y) { try await fromBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
     }
 
     /// Told to go one way and seen going the other: what was seen is not the pointer (over USB 11-09: told up, seen from
@@ -928,7 +953,10 @@ import Foundation
                     strokeCommand = false  // older firmware: move point by point below
                 }
             }
-            if strokeCommand != true || points.count <= 2 {
+            // A list scrolls by the stroke only when it goes slowly; a sideways page turn still needs the quick flick.
+            if points.count == 2 && hold && abs(points[1].y - points[0].y) > abs(points[1].x - points[0].x) {
+                try await pacedMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
+            } else if strokeCommand != true || points.count <= 2 {
                 for p in points.dropFirst() {
                     try await moveTo(dx(Double(p.x)), dy(Double(p.y)), rehome: false, positioning: false)  // preserve the drag trajectory
                 }
@@ -955,6 +983,26 @@ import Foundation
         } else {
             pos = nil
         }
+    }
+
+    /// A list moves about as far as the finger only when the finger moves slowly. Over USB 11-10 in Weather a 335-unit
+    /// stroke in one command (about 0.27 s) threw the page two to three screens on, past the 10-day forecast to the bottom,
+    /// where the next swipes changed nothing (25 of 29 in one run); a rest at the end did not stop it. 20 units a command
+    /// (the round trip spaces them about 0.12 s) moved it about as far as the stroke, 40 twice as far, 10 the same.
+    static let swipeStep = 20
+
+    private func pacedMove(to tx: Int, _ ty: Int) async throws {
+        guard let (x, y) = pos else { throw DeviceError(message: "pointer position lost; no move was sent") }
+        let (ux, uy) = (tx - x, ty - y)
+        let n = max(1, Int((Double(max(abs(ux), abs(uy))) / Double(Self.swipeStep)).rounded(.up)))
+        var (sx, sy) = (0, 0)
+        for i in 1...n {
+            let (nx, ny) = (ux * i / n, uy * i / n)
+            try await device.send("move \(nx - sx) \(ny - sy)")
+            (sx, sy) = (nx, ny)
+            pos = (x + sx, y + sy)
+        }
+        moves += 1
     }
 
     func scroll(_ x: Double, _ y: Double, lines: Int) async throws { try await oneAtATime { try await scrollNow(x, y, lines: lines) } }

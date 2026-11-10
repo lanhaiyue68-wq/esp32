@@ -130,7 +130,7 @@ import UIKit
             "motionVersion": ProbeMotion.version, "requiresFeedback": false, "maps": ["x": mapX, "y": mapY]]
         try JSONSerialization.data(withJSONObject: saved).write(to: file)
         let p = Pointer(device: phone, calibrationFile: file)
-        XCTAssertTrue(p.beyondReach(0.899)); XCTAssertFalse(p.beyondReach(0.85))
+        XCTAssertTrue(p.beyondReach(0.899)); XCTAssertFalse(p.beyondReach(0.7))
         try await p.tap(0.899, 0.111)  // the alarm's ✓
         try await p.tap(0.899, 0.111)  // again, in place
         try await p.tap(0.5, 0.5)      // a hop back into the measured range

@@ -54,6 +54,29 @@ extension AgentLoop {
         return (spots, missing)
     }
 
+    /// What a keypad's keys type on the keyboard (digits, . + - × ÷ = %, AC/C as esc), in runs; nil when a key has no
+    /// key of its own (a word, ±, a letter), and the keys are then tapped.
+    static func typedKeys(_ tokens: [String]) -> [String]? {
+        var out: [String] = []
+        var run = ""
+        for token in tokens {
+            let key = keyLabel(token)
+            switch key {
+            case "AC", "C", "CE":
+                if !run.isEmpty { out.append(run); run = "" }
+                out.append("esc")
+            case "×": run += "*"
+            case "÷": run += "/"
+            case "-", "+", "=", ".", "%": run += key
+            default:
+                guard key.count == 1, let c = key.first, c.isASCII, c.isNumber else { return nil }
+                run += key
+            }
+        }
+        if !run.isEmpty { out.append(run) }
+        return out.isEmpty ? nil : out
+    }
+
     /// The short labels read on screen, with their spots in 0-1000, for a press that could not find all its keys.
     static func keysSeen(_ pieces: [CandidatePicker.Piece]) -> String {
         pieces.filter { (1...3).contains($0.text.count) }

@@ -10,7 +10,7 @@ extension AppModel {
         cloud.running = { [weak self] in (self?.agent.running ?? false) || (self?.startingAgent ?? false) }
         cloud.start = { [weak self] task, approve in
             guard let self else { return }
-            Task { await self.run(task.instruction, approveSend: task.approval ? approve : nil) }
+            Task { await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false) }
         }
         cloud.outcome = { [weak self] task in
             guard let self, self.agent.task == task.instruction else {
@@ -19,6 +19,7 @@ extension AppModel {
             return CloudBridge.outcome(of: self.agent.steps)
         }
         cloud.stop = { [weak self] in await self?.stopAgent() }
+        cloud.mask = { await ShotPrivacy.masked($0) }
         // The screen the run finished on, not the Home Screen it goes back to after (11-10: half of each picture was Home).
         cloud.lastScreen = { [weak self] in
             guard let self else { return nil }
@@ -44,6 +45,7 @@ extension AppModel {
             "model": say(settings.isConfigured),
             "app_foreground": say(UIApplication.shared.applicationState == .active),
             "agent": agent.running || startingAgent ? "busy" : "idle",
+            "thermal": ["nominal", "fair", "serious", "critical"][min(3, ProcessInfo.processInfo.thermalState.rawValue)],
         ]
     }
 }
