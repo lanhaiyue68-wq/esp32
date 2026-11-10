@@ -60,6 +60,14 @@ jobs:
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
           (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
           shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256
+      - name: Upload the IPA (before the tests, so a runner-only test hang does not lose the build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPhoneAgent-unsigned-ipa
+          path: |
+            ios/IPhoneAgent-build*-unsigned.ipa
+            ios/ipa.sha256
+          retention-days: 7
       - name: Unit tests (simulator, unsigned)
         run: |
           set -o pipefail
@@ -74,13 +82,6 @@ jobs:
           echo "---- failures (assertion lines kept even when the log is long)"
           grep -E "error: |Test Case .* failed|Failing tests:|^\s+[A-Za-z0-9]+Tests\.test" test.log | head -80 || true
           exit $status
-      - uses: actions/upload-artifact@v4
-        with:
-          name: IPhoneAgent-unsigned-ipa
-          path: |
-            ios/IPhoneAgent-build*-unsigned.ipa
-            ios/ipa.sha256
-          retention-days: 7
       - name: Keep the debug symbols
         if: success()
         uses: actions/upload-artifact@v4
