@@ -124,6 +124,23 @@ import XCTest
         XCTAssertTrue(one.hasSuffix("The image is the screen now."))
     }
 
+    /// User 11-11: "不論成功失敗都要反饋，告訴我成功還是失敗". 121's failed cloud tasks came back with an empty answer.
+    func testEveryResultSaysWhetherItWorked() {
+        let done: [JObject] = [["action": .str("tap")], ["action": .str("done"), "answer": .str("深圳明天 28°C")]]
+        XCTAssertEqual(CloudBridge.outcome(of: done).answer, "成功：深圳明天 28°C")
+        let failed: [JObject] = [["action": .str("fail"), "reason": .str("kept going back and forth between two screens")]]
+        XCTAssertEqual(CloudBridge.outcome(of: failed).status, "failed")
+        XCTAssertEqual(CloudBridge.outcome(of: failed).answer, "失败：在几个画面之间来回打转，没能做完")
+        XCTAssertEqual(CloudBridge.outcome(of: failed).error, "kept going back and forth between two screens")
+        let chinese: [JObject] = [["action": .str("fail"), "reason": .str("請先繫結手機號，之後才能留言。")]]
+        XCTAssertEqual(CloudBridge.outcome(of: chinese).answer, "失败：請先繫結手機號，之後才能留言。")
+        XCTAssertEqual(CloudBridge.outcome(of: [["action": .str("stopped")]]).answer, "失败：任务被停止了")
+        XCTAssertEqual(CloudBridge.said(true, "成功：已发出"), "成功：已发出", "not twice")
+        XCTAssertTrue(WatchSettings.phoneTaskResult(action: "fail", answer: nil, attempted: [], reason: "step limit reached")
+            .hasPrefix("失败：这次任务未能确认完成（步骤用完了还没做完）"))
+        XCTAssertTrue(WatchSettings.taskFailedReply.hasPrefix("失败："))
+    }
+
     func testTheQuotaIsKept() throws {
         let saved = UserDefaults.standard.data(forKey: PlusQuota.key)
         defer { UserDefaults.standard.set(saved, forKey: PlusQuota.key) }

@@ -39,7 +39,7 @@ import XCTest
 @MainActor final class WatchTaskOutcomeTests: XCTestCase {
     func testOnlyAnExplicitDoneWithAUsefulAnswerReportsTheResult() {
         XCTAssertEqual(WatchSettings.phoneTaskResult(action: "done", answer: #"{"send":"已在 Claude 收到回复"}"#,
-                                                     attempted: ["你好"]), "已在 Claude 收到回复")
+                                                     attempted: ["你好"]), "成功：已在 Claude 收到回复")
     }
 
     func testFailOrStopCannotTurnASendGestureIntoDeliveryConfirmation() {

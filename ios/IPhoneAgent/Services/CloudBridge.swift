@@ -225,16 +225,43 @@ import Foundation
     /// The run's end, for the cloud: the agent's last record.
     static func outcome(of steps: [JObject], rejected: Bool = false) -> Outcome {
         let moves = steps.filter { $0["action"]?.str != "plan" }.count
-        guard let last = steps.last else { return Outcome(status: "failed", answer: "", error: "no_steps", steps: 0) }
+        guard let last = steps.last else { return Outcome(status: "failed", answer: said(false, "没有做任何一步"), error: "no_steps", steps: 0) }
         switch last["action"]?.str {
         case "done":
-            if last["approval"]?.str == "rejected" { return Outcome(status: "cancelled", answer: last["answer"]?.str ?? "", error: "not_approved", steps: moves) }
-            return Outcome(status: "succeeded", answer: last["answer"]?.str ?? "", error: nil, steps: moves)
-        case "stopped": return Outcome(status: "cancelled", answer: "", error: "stopped", steps: moves)
+            let answer = last["answer"]?.str ?? ""
+            if last["approval"]?.str == "rejected" {
+                return Outcome(status: "cancelled", answer: said(false, answer.isEmpty ? "消息没有获批准，没有发送" : answer),
+                               error: "not_approved", steps: moves)
+            }
+            return Outcome(status: "succeeded", answer: said(true, answer.isEmpty ? "已完成" : answer), error: nil, steps: moves)
+        case "stopped": return Outcome(status: "cancelled", answer: said(false, "任务被停止了"), error: "stopped", steps: moves)
         default:
             let reason = last["reason"]?.str ?? last["action"]?.str ?? "unknown"
-            return Outcome(status: "failed", answer: "", error: String(reason.prefix(300)), steps: moves)
+            return Outcome(status: "failed", answer: said(false, failureWords(reason)), error: String(reason.prefix(300)), steps: moves)
         }
+    }
+
+    /// User 11-11: "不論成功失敗都要反饋，告訴我成功還是失敗". A failed task came back with an empty answer and its reason
+    /// in English in another field (121 over the cloud: "kept going back and forth between two screens").
+    static func said(_ ok: Bool, _ text: String) -> String {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("失敗") { return t }
+        return (ok ? "成功：" : "失败：") + t
+    }
+
+    /// Why a run stopped, in words for the user: the loop's own reasons in Chinese, a model's Chinese reason as it is.
+    static func failureWords(_ reason: String?) -> String {
+        let r = (reason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let known: [(String, String)] = [
+            ("back and forth", "在几个画面之间来回打转，没能做完"), ("leaving the same screen", "在几个画面之间来回打转，没能做完"),
+            ("step limit", "步骤用完了还没做完"), ("errors in a row", "连续出错，停下了"),
+            ("claimed done", "几次说做完了，其实没做到"), ("lost the phone screen", "看不到手机画面（屏幕共享断了）"),
+            ("is not on this phone", "这台手机没有装这个 App"), ("not_approved", "消息没有获批准，没有发送"),
+            ("stopped", "任务被停止了"), ("timed out", "超时了还没做完"),
+        ]
+        if let hit = known.first(where: { r.lowercased().contains($0.0) }) { return hit.1 }
+        if r.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) { return r }
+        return r.isEmpty ? "没能做完" : "没能做完（\(r.prefix(80))）"
     }
 
     static func stamp() -> String { ISO8601DateFormatter().string(from: Date()) }

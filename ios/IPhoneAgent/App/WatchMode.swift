@@ -342,7 +342,7 @@ enum WatchSettings {
 
     /// Step 5 (and ChatTool's replies): type the text in the chat and send it.
     /// Sent when the owner's phone task got stuck or ran out of steps.
-    static let taskFailedReply = "这个我没弄成，你再说具体点？"
+    static let taskFailedReply = "失败：这个我没弄成（卡住了或步骤用完了），你再说具体点？"
 
     /// Only a retry with no new destination or action may inherit a previous task. The log's "重新去做" was not in
     /// the old list; failure feedback and references such as "刚才没做好" also describe the same task, not a new one.
@@ -375,17 +375,19 @@ enum WatchSettings {
     /// `attempted` records accepted send gestures, not proof of delivery. Only a done action with a useful result
     /// can report success; a failure or stop must leave the result uncertain without inviting another send.
     static func phoneTaskResult(action: String?, answer: String?, attempted: [String], reason: String? = nil) -> String {
+        // User 11-11: every result says whether it worked (成功：/失败：), and why it did not.
         if action == "done", let answer, let result = WatchReport.sendAnswer(answer).flatMap(typeable) {
-            return result
+            return CloudBridge.said(true, result)
         }
         let words = attempted.compactMap(typeable).map { "“\($0)”" }.joined(separator: "、")
         if !words.isEmpty {
-            return "已尝试发送\(words)，但未能确认任务完成，请先查看目标应用里的结果。"
+            return "失败：已尝试发送\(words)，但未能确认任务完成，请先查看目标应用里的结果。"
         }
         if action == "paused", reason == "paste target could not be verified after switching apps; no text was pasted" {
-            return "任务停在输入阶段，切换后无法确认粘贴目标，已停止操作，没有执行发送。"
+            return "失败：任务停在输入阶段，切换后无法确认粘贴目标，已停止操作，没有执行发送。"
         }
-        return "这次任务未能确认完成，请先查看目标应用里的结果。"
+        let why = action == "done" || reason == nil ? "" : "（" + CloudBridge.failureWords(reason) + "）"
+        return "失败：这次任务未能确认完成\(why)，请先查看目标应用里的结果。"
     }
 
     /// A task with more than one thing to do in order (再/然后…): no early end after its first send. Bringing
@@ -1525,7 +1527,7 @@ extension AppModel {
                     DebugLog.write("watch: WeChat ID checked: it is the owner's\(full ? "" : " (no passphrase: looking only)")")
                 } else {
                     DebugLog.write("watch: WeChat ID \(id == nil ? "could not be read" : "is not the owner's"); nothing is done")
-                    let refused = "身份没有核对上，这件事我不能做。"
+                    let refused = "失败：身份没有核对上，这件事我不能做。"
                     _ = await sendReply(refused, chat: chat, back: !rules.single)
                     if let i = answerIndex { read[i].replied += "【未执行】" + refused }
                     handled = true
@@ -1570,7 +1572,7 @@ extension AppModel {
                 // What it found is sent from here: going back to the chat to type it, the agent forgot what it had
                 // found and went to look again until it ran out of steps (logs(14)).
                 if let answer = WatchReport.sendAnswer(done).flatMap(WatchSettings.typeable), !answer.isEmpty {
-                    _ = await sendReply(answer, chat: chat, back: !rules.single)
+                    _ = await sendReply(CloudBridge.said(true, answer), chat: chat, back: !rules.single)
                 }
                 if let i = answerIndex { read[i].replied += "【已执行】" + (done.isEmpty ? task : done) }
             } else if watching && !Task.isCancelled {  // stuck or out of steps: say so once instead of trying again and again
@@ -2084,7 +2086,7 @@ extension AppModel {
     /// Runs it, or says why not: what reaches outside the phone needs the proven owner, what changes something waits for "确认".
     private func runTool(_ call: OwnerTools.Call, request: String, chat: String, sender: String, full: Bool) async -> String {
         if OwnerTools.needsFullOwner(call) && !full {
-            return "这件事要主人在私聊里带口令说，或者在群里带暗号并通过微信号核对。"
+            return "失败：这件事要主人在私聊里带口令说，或者在群里带暗号并通过微信号核对。"
         }
         if OwnerTools.needsConfirmation(call) {
             watchPendingCall = (chat, sender, call, request, now())
@@ -2108,10 +2110,10 @@ extension AppModel {
             answer = try await settings.client("planner").chat(system: system, text: text, image: nil, maxTokens: 700, temperature: 0.2).text
         } catch {
             DebugLog.write("watch: answering from the tool failed: \(error.localizedDescription)")
-            return "工具用过了，但整理结果时出了问题，请再说一次。"
+            return "失败：工具用过了，但整理结果时出了问题，请再说一次。"
         }
         if PrivacyGuard.check(answer, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
-            answer = "结果里有受保护的信息（号码、邮箱等），没有发出。"
+            answer = "失败：结果里有受保护的信息（号码、邮箱等），没有发出。"
         }
         return answer
     }
