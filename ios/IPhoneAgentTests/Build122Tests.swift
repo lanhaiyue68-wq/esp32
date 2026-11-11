@@ -140,6 +140,8 @@ import XCTest
         XCTAssertEqual(CloudBridge.outcome(of: traditional).answer, "成功：深圳明天（11/12 周四）最高温 28°")
         XCTAssertEqual(CloudBridge.outcome(of: [["action": .str("stopped")]]).answer, "失败：任务被停止了")
         XCTAssertEqual(CloudBridge.said(true, "成功：已发出"), "成功：已发出", "not twice")
+        // 122 q12: a part not found is not a success.
+        XCTAssertEqual(CloudBridge.said(true, "Wi-Fi 是 HUAWEI-510；電池電量百分比未能核實。"), "部分失败：Wi-Fi 是 HUAWEI-510；电池电量百分比未能核实。")
         XCTAssertTrue(WatchSettings.phoneTaskResult(action: "fail", answer: nil, attempted: [], reason: "step limit reached")
             .hasPrefix("失败：这次任务未能确认完成（步骤用完了还没做完）"))
         XCTAssertTrue(WatchSettings.taskFailedReply.hasPrefix("失败："))

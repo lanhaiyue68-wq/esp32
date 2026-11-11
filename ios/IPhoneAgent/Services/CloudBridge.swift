@@ -252,7 +252,11 @@ import Foundation
     /// written in Traditional made answers like "深圳明天（11/12 週四）最高溫 28°").
     nonisolated static func said(_ ok: Bool, _ text: String) -> String {
         let t = AppNames.hans(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("失敗") { return t }
+        if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("部分失败") { return t }
+        // 122 over the cloud: a goal of seven parts was "成功" with "电池电量百分比未能核实" in it. An answer that says a
+        // part was not found or not checked is not a success.
+        let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到"]
+        if ok, unsure.contains(where: { t.contains($0) }) { return "部分失败：" + t }
         return (ok ? "成功：" : "失败：") + t
     }
 
