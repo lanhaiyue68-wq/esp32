@@ -95,7 +95,8 @@ Actions:
   home | back | wait
   replan                    (the plan no longer fits the screen)
   done ANSWER               (the goal is reached; ANSWER is the result for the user, in the goal's language: a goal in
-                             Chinese gets its answer in Chinese. All of it on this one DO line, several items separated by ；)
+                             Chinese gets its answer in Simplified Chinese (简体中文), even when the goal or the screen is in
+                             Traditional. All of it on this one DO line, several items separated by ；)
   fail REASON
 
 Example:

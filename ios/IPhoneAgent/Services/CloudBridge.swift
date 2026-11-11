@@ -248,8 +248,10 @@ import Foundation
 
     /// User 11-11: "不論成功失敗都要反饋，告訴我成功還是失敗". A failed task came back with an empty answer and its reason
     /// in English in another field (121 over the cloud: "kept going back and forth between two screens").
+    /// User 11-11: the customers are on the mainland: what goes back is Simplified (the phone's own screens and a goal
+    /// written in Traditional made answers like "深圳明天（11/12 週四）最高溫 28°").
     nonisolated static func said(_ ok: Bool, _ text: String) -> String {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = AppNames.hans(text.trimmingCharacters(in: .whitespacesAndNewlines))
         if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("失敗") { return t }
         return (ok ? "成功：" : "失败：") + t
     }
