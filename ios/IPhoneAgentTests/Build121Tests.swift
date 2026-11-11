@@ -47,6 +47,17 @@ import XCTest
                       "a goal that sends")
     }
 
+    /// 121 regression over the cloud, 11-11 (kd09): a learned route opened 高德 by its icon, so no app was opened by
+    /// name; 下水径 typed in its search was held as a message and the task cancelled.
+    func testAnAppOpenedByItsIconIsTheOneTheGoalNames() {
+        let metro = "打開高德地圖，查從現在位置走路到最近的地鐵站要多久。不要開始導航"
+        XCTAssertFalse(AgentLoop.inChatApp([], task: metro))
+        XCTAssertFalse(AgentLoop.needsApproval("下水径", task: metro, chatApp: AgentLoop.inChatApp([], task: metro)))
+        XCTAssertTrue(AgentLoop.inChatApp([], task: "在微信打開测试群，告訴我最後一則訊息"))
+        XCTAssertTrue(AgentLoop.inChatApp([], task: "幫我問一下張三明天幾點"), "no app named: it may be a chat")
+        XCTAssertTrue(AgentLoop.inChatApp([["action": .str("open"), "app": .str("微信")]], task: metro), "what was opened decides")
+    }
+
     func testWaysOfSayingSendStillCount() {
         XCTAssertTrue(AgentLoop.publishes("在微信打開测试群，發一則訊息：你好"))
         XCTAssertTrue(AgentLoop.publishes("在小紅書第一篇筆記下留言：好看"))

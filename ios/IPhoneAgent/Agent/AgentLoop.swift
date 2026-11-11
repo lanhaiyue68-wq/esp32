@@ -642,9 +642,21 @@ extension Pointer: Gestures {}
 
     static let chatApps = ["微信", "wechat", "qq", "企业微信", "钉钉", "飞书", "信息", "messages", "短信", "telegram", "whatsapp", "line"]
 
-    /// Whether the app opened last in this run sends messages; true when no app was opened by name (it may be one).
-    static func inChatApp(_ steps: [JObject]) -> Bool {
-        guard let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str else { return true }
+    /// Apps a goal names that send no messages (Simplified, as AppNames.hans writes them).
+    static let namedApps = ["高德", "地图", "天气", "计算器", "计算机", "股市", "safari", "浏览器", "淘宝", "拼多多", "美团",
+                            "抖音", "小红书", "快手", "备忘录", "日历", "行事历", "时钟", "设置", "设定", "京东", "百度"]
+
+    /// Whether the app opened last in this run sends messages. No app opened by name: the goal's own apps decide (build
+    /// 121 over the cloud 11-11: a learned route opens its app by the icon, and 下水径 typed in 高德 and an address
+    /// typed in Safari were held as messages); a goal that names none, or names a chat app, may be in one.
+    static func inChatApp(_ steps: [JObject], task: String = "") -> Bool {
+        guard let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str else {
+            let goal = AppNames.hans(task).lowercased()
+            if ["微信", "wechat", "企业微信", "钉钉", "飞书", "短信", "imessage", "telegram", "whatsapp"].contains(where: { goal.contains($0) }) {
+                return true
+            }
+            return !namedApps.contains { goal.contains($0) }
+        }
         let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
         return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
     }
@@ -1349,7 +1361,7 @@ extension Pointer: Gestures {}
                 // Over Wi-Fi 11-10 a search (行事曆, www.163.com, 牙刷) was held for approval too: what the goal itself
                 // names, in a goal that posts nothing, is not a message.
                 if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
-                   Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps)), !approvedTexts.contains(Self.typedKey(text)) {
+                   Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps, task: task)), !approvedTexts.contains(Self.typedKey(text)) {
                     record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(text.prefix(120)))])
                     let approved = await approveSend(text)
                     try Task.checkCancellation()
