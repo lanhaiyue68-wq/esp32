@@ -248,14 +248,14 @@ import Foundation
 
     /// User 11-11: "不論成功失敗都要反饋，告訴我成功還是失敗". A failed task came back with an empty answer and its reason
     /// in English in another field (121 over the cloud: "kept going back and forth between two screens").
-    static func said(_ ok: Bool, _ text: String) -> String {
+    nonisolated static func said(_ ok: Bool, _ text: String) -> String {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("失敗") { return t }
         return (ok ? "成功：" : "失败：") + t
     }
 
     /// Why a run stopped, in words for the user: the loop's own reasons in Chinese, a model's Chinese reason as it is.
-    static func failureWords(_ reason: String?) -> String {
+    nonisolated static func failureWords(_ reason: String?) -> String {
         let r = (reason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let known: [(String, String)] = [
             ("back and forth", "在几个画面之间来回打转，没能做完"), ("leaving the same screen", "在几个画面之间来回打转，没能做完"),
