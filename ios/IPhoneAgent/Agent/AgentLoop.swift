@@ -1431,7 +1431,7 @@ extension Pointer: Gestures {}
                 let sending = unsent != nil && (Self.sends(act) || act["learned"] == .str("send"))
                 let isMessage = sending && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
                 let sendFrame = screen?.frame ?? planned.shot
-                let seenTitle = isMessage ? sendFrame.flatMap { WatchSettings.navigationTitle(in: $0) } : nil
+                let seenTitle = isMessage ? sendFrame.flatMap { WatchReport.navigationTitle(in: $0) } : nil
                 approvalPlace = seenTitle
                 var wrongSpot: String?
                 if isMessage, endAfterSend == nil, Self.asksToSend(task) {
