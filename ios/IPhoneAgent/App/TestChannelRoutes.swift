@@ -64,6 +64,13 @@ extension AppModel {
             }
             return .json(["watching": .bool(watching)])
 
+        case ("POST", "/tapfast"):
+            // Test 11-12: the first stop inside the target is clicked without correcting (Pointer.aimLoosely), on or off,
+            // so one build can be compared with itself.
+            let on = body["on"] as? Bool ?? true
+            UserDefaults.standard.set(on, forKey: "tapTargetToleranceV1")
+            return .json(["tapfast": .bool(on)])
+
         case ("POST", "/hot"):
             // Test only: the phone counts as critical-hot, so the cloud's next task is put off (retry_pending, device_hot).
             if body["on"] as? Bool == true { cloud.hot = { true } } else { cloud.hot = { ProcessInfo.processInfo.thermalState == .critical } }

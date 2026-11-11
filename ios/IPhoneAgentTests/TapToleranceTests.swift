@@ -11,6 +11,7 @@ import XCTest
         XCTAssertEqual(half.x, 0.12, accuracy: 0.0001)
         XCTAssertEqual(half.y, 0.016, accuracy: 0.0001)
         XCTAssertNil(AgentLoop.textHalf(at: CGPoint(x: 0.9, y: 0.9), in: [row]), "no text there: corrected as before")
+        XCTAssertNotNil(AgentLoop.textHalf(at: CGPoint(x: 0.51, y: 0.4), in: [row]), "just outside the label: the button around it")
         let tiny = [CandidatePicker.Piece(text: "×", box: CGRect(x: 0.5, y: 0.5, width: 0.01, height: 0.01))]
         XCTAssertNil(AgentLoop.textHalf(at: CGPoint(x: 0.505, y: 0.505), in: [tiny]), "a small mark keeps the strict check")
     }

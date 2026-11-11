@@ -2213,8 +2213,10 @@ extension Pointer: Gestures {}
     }
 
     /// Half the size of the text a tap lands on (a little smaller than its box): the tap is surely on it inside that.
+    /// 122.1 on the phone: only 10 of 60 taps used it; the model aims at a button's middle, its label's box is smaller,
+    /// so a tap up to 1.2% outside the text counts as on it (122.2).
     static func textHalf(at p: CGPoint, in rows: [[CandidatePicker.Piece]]) -> (x: Double, y: Double)? {
-        for piece in rows.joined() where piece.box.insetBy(dx: -0.004, dy: -0.004).contains(p) {
+        for piece in rows.joined() where piece.box.insetBy(dx: -0.012, dy: -0.012).contains(p) {
             let hx = Double(piece.box.width) / 2 * 0.8, hy = Double(piece.box.height) / 2 * 0.8
             return hx > 0.008 || hy > 0.008 ? (hx, hy) : nil
         }
