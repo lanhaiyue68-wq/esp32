@@ -8092,12 +8092,12 @@
         }
       }
     },
-    "Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; group messages never start one, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks." : {
+    "Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; a group message starts one only with “群里核对微信号” on, the sender's WeChat ID matching and a passphrase in the message, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只有同时写在会话范围和发言人白名单里的私聊可以下手机任务，而且消息里必须带口令；群聊消息一律不执行手机任务，因为群里任何人都能改成同样的昵称。口令只存在这台 iPhone 的钥匙串里，读取和回复前都会去掉。建议在微信里给主人设一个独一无二的备注。ChatTool 负责回复时不执行手机任务。"
+            "value" : "只有同时写在会话范围和发言人白名单里的私聊可以下手机任务，而且消息里必须带口令；群聊消息要打开“群里核对微信号”、对方微信号对上、消息里还带暗号才执行，因为群里任何人都能改成同样的昵称。口令只存在这台 iPhone 的钥匙串里，读取和回复前都会去掉。建议在微信里给主人设一个独一无二的备注。ChatTool 负责回复时不执行手机任务。"
           }
         }
       }

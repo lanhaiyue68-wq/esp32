@@ -234,6 +234,7 @@ import UIKit
             guard let self else { return "" }
             return await ScreenListener.listen(seconds: seconds, frame: { self.feed.frame })
         }
+        agent.pasteboard = { UIPasteboard.general.string }
         agent.readsScreenText = !MockMode.on
         agent.plannerLeadsUnknown = !MockMode.on
         AgentControl.handle = { [weak self] command in await self?.control(command) }

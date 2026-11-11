@@ -15,15 +15,19 @@ enum Actions {
         "tap": ["x", "y"], "swipe": ["x1", "y1", "x2", "y2"], "circle": ["x", "y", "r"], "path": ["points"],
         "type": ["text"], "key": ["combo"], "done": ["answer"], "fail": ["reason"],
         "home": [], "back": [], "wait": [], "replan": [], "open": ["app"], "note": ["text"], "press": ["text"],
-        "listen": ["seconds"],
+        "listen": ["seconds"], "hold": ["x", "y"],
     ]
+    /// Build 121 over the cloud 11-11: asked to copy a WeChat message, both models wrote a long press their own way
+    /// (touch_and_hold, a swipe that stays put) and the run failed on "no valid action" three times.
+    static let aliases = ["touch_and_hold": "hold", "long_press": "hold", "longpress": "hold", "long-press": "hold",
+                          "press_and_hold": "hold", "hold_press": "hold"]
     static let textArgs: Set<String> = ["text", "combo", "answer", "reason", "app"]
 
     /// One DO line, e.g. "tap 152 362" -> {"action": "tap", "x": 152, "y": 362}.
     static func parseCommand(_ line: String) throws -> JObject {
         let (head, whole) = partition(line.trimmingCharacters(in: .whitespacesAndNewlines))
         let rest = withoutRunOn(whole)
-        let name = head.lowercased()
+        let name = aliases[head.lowercased()] ?? head.lowercased()
         guard let keys = actions[name] else { throw ParseError(message: "unknown action: \(line.prefix(100))") }
         if let first = keys.first, textArgs.contains(first) {
             let raw = rest.trimmingCharacters(in: .whitespacesAndNewlines)

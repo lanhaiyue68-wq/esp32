@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreMedia
 import Foundation
 import Speech
@@ -9,6 +10,14 @@ final class ScreenAudio: @unchecked Sendable {
     private let lock = NSLock()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var samples = 0
+    // Build 121 on the phone, 11-11: 8816 samples in 180 s of a news video and not one word recognized. What came in
+    // and how loud it was are kept for the log, and every sample goes in in the recognizer's own format. Touched only
+    // on the capture's audio queue (take) or under the lock (report).
+    private var converter: AVAudioConverter?
+    private var converterInput: AVAudioFormat?
+    private var format = ""
+    private var peak: Float = 0
+    private var converted = 0, passedRaw = 0
 
     func attach(_ request: SFSpeechAudioBufferRecognitionRequest?) {
         lock.lock(); self.request = request; lock.unlock()
@@ -20,21 +29,104 @@ final class ScreenAudio: @unchecked Sendable {
         return samples
     }
 
+    /// What came in since the last report: its format, the loudest sample (0 is silence), how it went in.
+    func report() -> (text: String, silent: Bool) {
+        lock.lock(); defer { format = ""; peak = 0; converted = 0; passedRaw = 0; lock.unlock() }
+        let text = (format.isEmpty ? "no audio format" : format) + String(format: ", peak %.4f", peak)
+            + ", \(converted) converted, \(passedRaw) as they came"
+        return (text, !format.isEmpty && peak < 0.0005)
+    }
+
     func take(_ sample: CMSampleBuffer) {
         lock.lock()
         let request = self.request
         if request != nil { samples += 1 }
         lock.unlock()
-        request?.appendAudioSampleBuffer(sample)
+        guard let request else { return }
+        guard let pcm = Self.pcm(sample) else {
+            lock.lock(); passedRaw += 1; lock.unlock()
+            request.appendAudioSampleBuffer(sample)
+            return
+        }
+        let loudest = Self.loudness(pcm)
+        let target = request.nativeAudioFormat
+        let out = convert(pcm, to: target)
+        lock.lock()
+        if format.isEmpty {
+            let f = pcm.format
+            format = "\(Int(f.sampleRate)) Hz, \(f.channelCount) ch, \(f.commonFormat.rawValue)/\(f.isInterleaved ? "interleaved" : "planar")"
+                + " -> \(Int(target.sampleRate)) Hz, \(target.channelCount) ch, \(target.commonFormat.rawValue)"
+        }
+        peak = max(peak, loudest)
+        if out != nil { converted += 1 } else { passedRaw += 1 }
+        lock.unlock()
+        if let out { request.append(out) } else { request.appendAudioSampleBuffer(sample) }
+    }
+
+    /// The sample as a PCM buffer, in the format it came in.
+    static func pcm(_ sample: CMSampleBuffer) -> AVAudioPCMBuffer? {
+        guard let description = CMSampleBufferGetFormatDescription(sample),
+              let basic = CMAudioFormatDescriptionGetStreamBasicDescription(description) else { return nil }
+        var stream = basic.pointee
+        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sample))
+        guard frames > 0, let format = AVAudioFormat(streamDescription: &stream),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        buffer.frameLength = frames
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(frames),
+                                                                  into: buffer.mutableAudioBufferList)
+        return status == noErr ? buffer : nil
+    }
+
+    /// The loudest sample, 0-1, of the first channel.
+    static func loudness(_ buffer: AVAudioPCMBuffer) -> Float {
+        let n = Int(buffer.frameLength)
+        if let data = buffer.floatChannelData?[0] {
+            var m: Float = 0
+            for i in 0..<n { m = max(m, abs(data[i])) }
+            return m
+        }
+        if let data = buffer.int16ChannelData?[0] {
+            var m: Int32 = 0
+            for i in 0..<n { m = max(m, abs(Int32(data[i]))) }
+            return Float(m) / 32768
+        }
+        return 0
+    }
+
+    private func convert(_ pcm: AVAudioPCMBuffer, to target: AVAudioFormat) -> AVAudioPCMBuffer? {
+        if pcm.format == target { return pcm }
+        if converter == nil || converterInput != pcm.format {
+            converter = AVAudioConverter(from: pcm.format, to: target)
+            converterInput = pcm.format
+        }
+        guard let converter else { return nil }
+        let capacity = AVAudioFrameCount(Double(pcm.frameLength) * target.sampleRate / pcm.format.sampleRate) + 32
+        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return nil }
+        // The input block may be @Sendable in newer SDKs: what it changes lives in an object, not a captured var.
+        final class Once: @unchecked Sendable { var given = false }
+        let once = Once()
+        var error: NSError?
+        let status = converter.convert(to: out, error: &error) { _, inputStatus in
+            if once.given { inputStatus.pointee = .noDataNow; return nil }
+            once.given = true
+            inputStatus.pointee = .haveData
+            return pcm
+        }
+        return status == .error || out.frameLength == 0 ? nil : out
     }
 }
 
 /// What the latest recognition said, set from the recognizer's queue.
 private final class Transcript: @unchecked Sendable {
     private let lock = NSLock()
-    private var value = ""
+    private var value = "", failure = ""
     func set(_ text: String) { lock.lock(); value = text; lock.unlock() }
+    func fail(_ error: Error) {
+        let e = error as NSError
+        lock.lock(); failure = "\(e.domain) \(e.code): \(e.localizedDescription)"; lock.unlock()
+    }
     var text: String { lock.lock(); defer { lock.unlock() }; return value }
+    var error: String { lock.lock(); defer { lock.unlock() }; return failure }
 }
 
 @MainActor enum ScreenListener {
@@ -69,6 +161,8 @@ private final class Transcript: @unchecked Sendable {
         var spoken: [String] = []
         var subtitles: [String] = []
         var heard = 0
+        var failures: [String] = []
+        _ = ScreenAudio.shared.report()  // what came in before this listen is not this one's
         // Build 121 on the phone, 11-11: with speech recognition denied, 视频号 was listened to twice for 180 s each
         // (6 minutes for subtitles alone), then left and opened again until the run failed. Without speech, 20 s of
         // subtitles is what a listen can give.
@@ -84,8 +178,9 @@ private final class Transcript: @unchecked Sendable {
                 r.shouldReportPartialResults = true
                 r.addsPunctuation = true
                 if recognizer.supportsOnDeviceRecognition { r.requiresOnDeviceRecognition = true }
-                task = recognizer.recognitionTask(with: r) { @Sendable result, _ in
+                task = recognizer.recognitionTask(with: r) { @Sendable result, error in
                     if let result { transcript.set(result.bestTranscription.formattedString) }
+                    if let error { transcript.fail(error) }
                 }
                 request = r
                 _ = ScreenAudio.shared.takeCount()
@@ -107,6 +202,7 @@ private final class Transcript: @unchecked Sendable {
                 task?.finish()
                 let text = transcript.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty { spoken.append(text) }
+                if !transcript.error.isEmpty { failures.append(transcript.error) }
             }
         }
         var note = ""
@@ -115,6 +211,11 @@ private final class Transcript: @unchecked Sendable {
         if !authorized { note = "这台手机没有允许语音识别，听不到说的话。" + after }
         else if !canSpeak { note = "语音识别暂时不可用。" + after }
         else if heard == 0 { note = "没有收到声音：这个 App 可能不让录音，或者没有在播放" }
+        let audio = ScreenAudio.shared.report()
+        if note.isEmpty, heard > 0, spoken.isEmpty {
+            note = audio.silent ? "收到的声音是静音（手机音量为 0，或这个 App 不让录音）" : "收到了声音，但没有认出说的话（可能只有音乐）"
+        }
+        DebugLog.write("listen: audio \(audio.text)" + (failures.isEmpty ? "" : "; recognition: " + Set(failures).joined(separator: " | ")))
         DebugLog.write("listen: \(Int(seconds)) s, \(heard) audio sample(s), \(spoken.joined().count) character(s) heard, \(subtitles.count) subtitle line(s)")
         return "【语音转文字】" + (spoken.isEmpty ? "（没有）" : spoken.joined(separator: " "))
             + "\n【画面字幕】" + (subtitles.isEmpty ? "（没有）" : subtitles.joined(separator: "／"))

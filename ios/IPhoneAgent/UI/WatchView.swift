@@ -81,7 +81,7 @@ struct WatchView: View {
                 } header: {
                     Text("Phone Tasks")
                 } footer: {
-                    Text("Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; group messages never start one, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks.")
+                    Text("Only a private chat listed in both lists can give phone tasks, and the message must contain the passcode; a group message starts one only with “群里核对微信号” on, the sender's WeChat ID matching and a passphrase in the message, because anyone can copy a nickname there. The passcode stays in this iPhone's Keychain and is removed before anything is read or replied. Give the owner a unique remark in WeChat. ChatTool reply mode does not run phone tasks.")
                 }
                 Section("How to Reply") {
                     TextField("How replies should sound", text: $instruction, axis: .vertical)

@@ -36,6 +36,8 @@ struct InputNeedsVerification: LocalizedError {
     func type(_ text: String) async throws
     func key(_ combo: String) async throws
     func goHome() async throws
+    /// Press and hold (Pointer.longPress): WeChat's message menu (复制, 转发), an icon's menu.
+    func longPress(_ x: Double, _ y: Double, seconds: Double) async throws
     func goBack() async throws
     func reset() async throws
     func typeQuick(_ text: String) async throws
@@ -45,6 +47,8 @@ struct InputNeedsVerification: LocalizedError {
 extension Gestures {
     func typeQuick(_ text: String) async throws { try await type(text) }
     func answerSharingQuestion() async throws -> Bool { false }
+    /// Fakes in tests: a long press is recorded as a tap there.
+    func longPress(_ x: Double, _ y: Double, seconds: Double) async throws { try await tap(x, y, aim: false) }
 }
 
 extension Pointer: Gestures {}
@@ -197,6 +201,8 @@ extension Pointer: Gestures {}
     var fastText = false
     /// Puts a reply on the pasteboard with Lan Agent in front for a moment (AppModel.hopToPaste); nil in tests.
     var pasteHop: ((String) async -> PasteHopResult)?
+    /// What a paste would put in (UIPasteboard, set by AppModel): it is held for approval like typed text.
+    var pasteboard: () -> String? = { nil }
     private var pasteHopOff = false  // a hop got lost once in this run: the rest of it types
     private var lastTap: CGPoint?    // the last tap (0-1), the input box when a type follows
     /// WeChat watch send: the target chat's row (0-1) when this frame is the chat list showing it once; nil otherwise.
@@ -504,6 +510,18 @@ extension Pointer: Gestures {}
     }
 
     /// Return, or a tap where 发送 sits (next to the box, or the keyboard's bottom-right key).
+    /// cmd+v and the like: something goes into the box that was not typed.
+    static func pastes(_ act: JObject) -> Bool {
+        guard act["action"]?.str == "key" else { return false }
+        return ["cmd+v", "command+v", "ctrl+v", "control+v"].contains((act["combo"]?.str ?? "").lowercased().filter { !$0.isWhitespace })
+    }
+
+    /// What a paste puts in, as approval is asked for it (unreadable: said so, and still asked).
+    static func pastedText(_ board: String?) -> String {
+        let text = (board ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "（粘贴的内容）" : String(text.prefix(300))
+    }
+
     static func sends(_ act: JObject) -> Bool {
         switch act["action"]?.str {
         case "key": return ["enter", "return"].contains(act["combo"]?.str?.lowercased() ?? "")
@@ -1317,6 +1335,9 @@ extension Pointer: Gestures {}
                 // What a button does can change with what was typed: a search button that did nothing may be the right one now
                 // (over USB 11-09 it missed twice, the word was typed again, and it stayed refused).
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0; deadTaps = []; deadRefused = 0 }
+                // Build 121 over the cloud 11-11: a 抖音 share link was pasted into 测试群 (cmd+v) and sent with Return with
+                // no approval asked: only typed text was held. What is pasted counts as typed.
+                if Self.pastes(act) { unsent = Self.pastedText(pasteboard()); quietSinceSend = 0 }
                 // The tap after one that changed nothing goes through the eye (missed: aimed), so it lands on the spot.
                 // Moving it around the spot moved it off the button (淘寶's 加入購物車, 10 clicks above it, over USB 11-09).
                 if name == "swipe", Self.swipedToTheEnd(act, after: steps) {
@@ -1927,6 +1948,7 @@ extension Pointer: Gestures {}
             case "press": return "pressed the keys " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
             case "listen": return "listened to the video and read its subtitles (the text is in the notes)"
+            case "hold": return "long-pressed at (\(s["x"]?.int ?? 0), \(s["y"]?.int ?? 0))"
             case "key" where sends(s): return "pressed enter"
             // Over USB 11-10 拼多多 was opened by its icon on the Home Screen, and the check said it never was: that tap
             // had dropped out of the last 20 and its words were cut at 60.
@@ -2099,6 +2121,7 @@ extension Pointer: Gestures {}
             try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
+        case "hold": try await phone.longPress(p("x"), p("y"), seconds: 0.8)
         case "listen":
             // User 11-11: a video's spoken words (口播文案) and what it is about, from WeChat, 抖音, 视频号.
             guard let listen else { throw DeviceError(message: "Listening is not available here.") }
