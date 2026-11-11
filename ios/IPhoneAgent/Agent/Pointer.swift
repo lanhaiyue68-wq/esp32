@@ -551,6 +551,8 @@ import Foundation
     /// always moves, since it follows a tap that changed nothing.
     func tap(_ x: Double, _ y: Double, aim: Bool = false) async throws { try await oneAtATime { try await tapNow(x, y, aim: aim) } }
     private func tapNow(_ x: Double, _ y: Double, aim: Bool) async throws {
+        defer { targetHalf = nil }  // for one tap only
+        if aim { targetHalf = nil }  // an aimed tap (after one that changed nothing) lands on the spot
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
         var before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
         defer { lastSpot = CGPoint(x: x, y: y) }
@@ -772,6 +774,13 @@ import Foundation
                 log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f) after %ld correction(s)", x, y, seen.x, seen.y, corrections))
                 return .onTarget
             }
+            // Test build 11-12: 476 taps on the phone, 95% corrected at 2.0 s each, though 88% of first stops were already
+            // inside a target the size of an input box. Inside the target's own bounds is close enough.
+            if let half = targetHalf, abs(ex) <= half.x, abs(ey) <= half.y {
+                log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), inside the target (±%.3f, ±%.3f): no correction",
+                           x, y, seen.x, seen.y, half.x, half.y))
+                return .onTarget
+            }
             guard max(abs(ex), abs(ey)) <= 0.15 else {
                 log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), too far to trust; clicking at the estimate", x, y, seen.x, seen.y))
                 return .offTarget
@@ -846,6 +855,12 @@ import Foundation
 
     /// A tap within this of its target needs no correction (fraction of the screen; a WeChat list row is ~0.09 high).
     static let arrivalTolerance = 0.008
+    /// Half the width and height (0-1) of what the next tap is for, when known: a first stop inside it is clicked as it is.
+    var targetHalf: (x: Double, y: Double)?
+    func aimLoosely(_ halfX: Double, _ halfY: Double) {
+        guard UserDefaults.standard.object(forKey: "tapTargetToleranceV1") as? Bool ?? true else { return }
+        targetHalf = (min(max(halfX, 0), 0.2), min(max(halfY, 0), 0.035))
+    }
     static let maxCorrections = 3
     static let jumpLimit = 0.04       // a reading that moved more than this, and over 3 times the correction, is not the pointer
     static let leftMargin = 0.03      // a swipe from here presses no button (measured in Settings and on the Home Screen, 11-09)

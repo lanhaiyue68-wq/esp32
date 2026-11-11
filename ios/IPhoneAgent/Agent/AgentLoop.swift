@@ -38,6 +38,8 @@ struct InputNeedsVerification: LocalizedError {
     func goHome() async throws
     /// Press and hold (Pointer.longPress): WeChat's message menu (复制, 转发), an icon's menu.
     func longPress(_ x: Double, _ y: Double, seconds: Double) async throws
+    /// The next tap is for something this big (half width and height, 0-1): Pointer clicks a first stop inside it.
+    func aimLoosely(_ halfX: Double, _ halfY: Double)
     func goBack() async throws
     func reset() async throws
     func typeQuick(_ text: String) async throws
@@ -49,6 +51,7 @@ extension Gestures {
     func answerSharingQuestion() async throws -> Bool { false }
     /// Fakes in tests: a long press is recorded as a tap there.
     func longPress(_ x: Double, _ y: Double, seconds: Double) async throws { try await tap(x, y, aim: false) }
+    func aimLoosely(_ halfX: Double, _ halfY: Double) {}
 }
 
 extension Pointer: Gestures {}
@@ -111,6 +114,8 @@ extension Pointer: Gestures {}
     /// What the agent read and wrote down in this run (a price, a title, a name). A task across apps forgot what it had
     /// read in the last one and went back for it, ten times over (over USB 11-09): this goes with every look.
     private(set) var notes: [String] = []
+    /// The text read on the screen the last reply was made on (with where it is): what a tap lands on, and how big it is.
+    private var readRows: [[CandidatePicker.Piece]] = []
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -2144,8 +2149,12 @@ extension Pointer: Gestures {}
         }
         // Phase B (specs/004): the text read on this phone with where it is, so a labelled control is tapped where it
         // really is instead of where the model estimates it from the picture.
-        if readsScreenText, let shown = screen?.frame,
-           let list = Self.screenText(await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)) {
+        if readsScreenText, let shown = screen?.frame {
+            readRows = await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)
+        } else {
+            readRows = []
+        }
+        if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }
         if ourKeyboardOnScreen?() == true {
@@ -2203,12 +2212,22 @@ extension Pointer: Gestures {}
         throw Actions.ParseError(message: "actor gave no valid action: \(reply.prefix(200))")
     }
 
+    /// Half the size of the text a tap lands on (a little smaller than its box): the tap is surely on it inside that.
+    static func textHalf(at p: CGPoint, in rows: [[CandidatePicker.Piece]]) -> (x: Double, y: Double)? {
+        for piece in rows.joined() where piece.box.insetBy(dx: -0.004, dy: -0.004).contains(p) {
+            let hx = Double(piece.box.width) / 2 * 0.8, hy = Double(piece.box.height) / 2 * 0.8
+            return hx > 0.008 || hy > 0.008 ? (hx, hy) : nil
+        }
+        return nil
+    }
+
     private func perform(_ a: JObject) async throws {
         guard let phone else { throw DeviceError(message: "no phone") }
         func p(_ k: String) -> Double { (a[k]?.double ?? 0) / 1000 }
         switch a["action"]?.str {
         case "tap":
             lastTap = CGPoint(x: p("x"), y: p("y"))
+            if let half = Self.textHalf(at: CGPoint(x: p("x"), y: p("y")), in: readRows) { phone.aimLoosely(half.x, half.y) }
             try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)

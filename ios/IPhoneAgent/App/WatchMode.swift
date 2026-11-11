@@ -1812,6 +1812,7 @@ extension AppModel {
         func focusBox() async throws {
             if keyboardBridge.onScreen() { return }
             if let now = await look(), CandidatePicker.keyboardUp(in: now) || keyboardBridge.onScreen() { return }
+            pointer.aimLoosely(0.2, 0.015)  // WeChat's input box: wide, about 0.04 high
             try await pointer.tap(box.x, box.y)
         }
         // Pinyin, first candidate per chunk, one look: ~1 s where the paste's trip through Lan Agent took ~5 s.
@@ -2059,6 +2060,7 @@ extension AppModel {
         if let frame = feed.frame {
             id = WatchSettings.weChatID(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.05, bottom: 0.7))
         }
+        pointer.aimLoosely(0.03, 0.02)
         try? await pointer.tap(0.055, 0.087, aim: false)  // the back arrow
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         return id

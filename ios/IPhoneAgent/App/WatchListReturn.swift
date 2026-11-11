@@ -69,7 +69,10 @@ import Foundation
             var view = current
             for attempt in 0..<2 {
                 guard case .chat(let chevron) = view, allowed() else { break }
-                if attempt == 0 { try await phone.tap(chevron.x, chevron.y, aim: false) } else { try await phone.goBack() }
+                if attempt == 0 {
+                    phone.aimLoosely(0.03, 0.02)  // the back arrow and the count beside it
+                    try await phone.tap(chevron.x, chevron.y, aim: false)
+                } else { try await phone.goBack() }
                 let ended = now()
                 await screen.afterAction(since: ended)
                 view = try await look(after: ended)

@@ -165,6 +165,7 @@ import Foundation
                 landed = { anyTitle($0).flatMap { sameChat($0, listName: name) ? $0 : nil } }
             }
             tapped = true
+            phone.aimLoosely(0.3, 0.03)  // a chat list row: wide, about 0.088 high
             try await phone.tap(point.x, point.y, aim: false)  // firmware v33 lands plain taps; aiming jiggled ~3 s
             let ended = now()
             await screen.afterAction(since: ended)
