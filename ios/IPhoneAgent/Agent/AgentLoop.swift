@@ -624,6 +624,16 @@ extension Pointer: Gestures {}
         return rest.contains("發") || rest.contains("发")
     }
 
+    /// Every message a goal gives: each part in quotes, or else the words after a colon. 121 over the cloud 11-11:
+    /// "先發「k02第一句」，再發「k02第二句」" asked approval for the first only; the second, read as words the goal names
+    /// that are not its message (like a chat's name), went out unasked.
+    static func messageParts(_ task: String) -> [String] {
+        let quoted = (try? NSRegularExpression(pattern: #"[「“"]([^」”"]+)[」”"]"#))?
+            .matches(in: task, range: NSRange(task.startIndex..., in: task))
+            .compactMap { Range($0.range(at: 1), in: task).map { String(task[$0]) } } ?? []
+        return quoted.isEmpty ? messagePart(task).map { [$0] } ?? [] : quoted
+    }
+
     /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
     static func messagePart(_ task: String) -> String? {
         if let r = task.range(of: #"[「“"]([^」”"]+)[」”"]"#, options: .regularExpression) {
@@ -654,8 +664,9 @@ extension Pointer: Gestures {}
            !publishes(task) { return false }
         guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
-        guard let message = messagePart(task).map(key), !message.isEmpty else { return true }
-        return message.contains(typed) || typed.contains(message)
+        let messages = messageParts(task).map(key).filter { !$0.isEmpty }
+        guard !messages.isEmpty else { return true }
+        return messages.contains { $0.contains(typed) || typed.contains($0) }
     }
 
     static let chatApps = ["微信", "wechat", "qq", "企业微信", "钉钉", "飞书", "信息", "messages", "短信", "telegram", "whatsapp", "line"]

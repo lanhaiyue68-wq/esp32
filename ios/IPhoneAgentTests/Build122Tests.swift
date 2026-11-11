@@ -56,6 +56,17 @@ import XCTest
         XCTAssertFalse(phone.keys.contains("enter"), "\(phone.keys)")
     }
 
+    /// k02: "先發「k02第一句」，再發「k02第二句」": the second went out with no approval asked.
+    func testEveryQuotedMessageWaitsForApproval() {
+        let task = "在测试群先發「k02第一句」，再發「k02第二句」"
+        XCTAssertEqual(AgentLoop.messageParts(task), ["k02第一句", "k02第二句"])
+        XCTAssertTrue(AgentLoop.needsApproval("k02第一句", task: task))
+        XCTAssertTrue(AgentLoop.needsApproval("k02第二句", task: task))
+        XCTAssertFalse(AgentLoop.needsApproval("测试群", task: task), "the chat's name, searched for")
+        XCTAssertEqual(AgentLoop.messageParts("在测试群發：122前測試早安"), ["122前測試早安"])
+        XCTAssertEqual(AgentLoop.messageParts("打開天氣"), [])
+    }
+
     /// h01: asked to copy a WeChat message, both models wrote a long press their own way and the run failed.
     func testALongPressIsAnAction() throws {
         XCTAssertEqual(try Actions.parseCommand("hold 669 849"), ["action": .str("hold"), "x": .int(669), "y": .int(849)])
