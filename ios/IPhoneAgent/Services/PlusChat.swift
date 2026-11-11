@@ -52,7 +52,7 @@ import Foundation
                 }
                 lastUsedPlus = true
                 rest.succeeded()
-                DebugLog.write("plus planner: \(plusModel) first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms")
+                DebugLog.write("plus planner: \(plusModel) first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms, effort \(ChatGPTPlus.reasoningEffort ?? "default")")
                 return ChatResult(text: answer.text, firstToken: answer.firstTokenMs.map { Double($0) / 1000 },
                                   total: Double(answer.totalMs) / 1000, finishReason: "stop")
             } catch is CancellationError {

@@ -75,6 +75,19 @@ import XCTest
         XCTAssertFalse(ScreenAudio.shared.report().silent, "nothing came in: not called silence")
     }
 
+    /// i06 (121, 11-11): Codex drove a settings read in 12 steps at 14-20 s each; it is asked to reason low now.
+    func testCodexIsAskedToReasonLow() {
+        let saved = UserDefaults.standard.string(forKey: ChatGPTPlus.effortKey)
+        defer { UserDefaults.standard.set(saved, forKey: ChatGPTPlus.effortKey); ChatGPTPlus.effortRefused = false }
+        UserDefaults.standard.removeObject(forKey: ChatGPTPlus.effortKey)
+        XCTAssertEqual(ChatGPTPlus.reasoningEffort, "low")
+        UserDefaults.standard.set("", forKey: ChatGPTPlus.effortKey)
+        XCTAssertNil(ChatGPTPlus.reasoningEffort, "switched off")
+        UserDefaults.standard.removeObject(forKey: ChatGPTPlus.effortKey)
+        ChatGPTPlus.effortRefused = true
+        XCTAssertNil(ChatGPTPlus.reasoningEffort, "refused by the backend once: not sent again")
+    }
+
     func testTheQuotaIsKept() throws {
         let saved = UserDefaults.standard.data(forKey: PlusQuota.key)
         defer { UserDefaults.standard.set(saved, forKey: PlusQuota.key) }

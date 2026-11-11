@@ -169,8 +169,24 @@ enum ChatGPTPlus {
 
     /// One question with an optional screenshot, streamed; refreshes the sign-in once when it has expired.
     /// `system`: the developer instructions (the planner's prompt); nil for the phase A test's short one.
+    /// Build 121 on the phone, 11-11: every step Codex drove took 14-20 s to its first word (a settings read: 12 steps,
+    /// 167 s of 223 s); no reasoning effort was given, so the model thought at its default. Low is asked for ("" in
+    /// plusReasoningEffortV1: none); a backend that refuses the field is asked again without it, and not again until
+    /// the app restarts.
+    static let effortKey = "plusReasoningEffortV1"
+    nonisolated(unsafe) static var effortRefused = false
+    static var reasoningEffort: String? {
+        let set = UserDefaults.standard.string(forKey: effortKey) ?? "low"
+        return set.isEmpty || effortRefused ? nil : set
+    }
+
     static func ask(_ tokens: Tokens, model: String, system: String? = nil, prompt: String, image: Data?) async throws -> (Answer, Tokens) {
         do {
+            return (try await askOnce(tokens, model: model, system: system, prompt: prompt, image: image), tokens)
+        } catch let failure as Failure where failure.message.hasPrefix("HTTP 400") && failure.message.contains("reasoning")
+                    && reasoningEffort != nil {
+            effortRefused = true
+            DebugLog.write("plus: the reasoning effort was refused; asking without it from now on")
             return (try await askOnce(tokens, model: model, system: system, prompt: prompt, image: image), tokens)
         } catch let failure as Failure where failure.message.hasPrefix("HTTP 401") {
             let fresh = try await refresh(tokens)
@@ -189,7 +205,7 @@ enum ChatGPTPlus {
     private static func askOnce(_ tokens: Tokens, model: String, system: String?, prompt: String, image: Data?) async throws -> Answer {
         var content: [[String: Any]] = [["type": "input_text", "text": prompt]]
         if let image { content.append(["type": "input_image", "image_url": "data:image/jpeg;base64,\(image.base64EncodedString())"]) }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model, "stream": true,
             "input": [
                 ["type": "message", "role": "developer",
@@ -198,6 +214,7 @@ enum ChatGPTPlus {
             ],
             "tool_choice": "auto", "parallel_tool_calls": false, "store": false, "include": [String](),
         ]
+        if let effort = reasoningEffort { body["reasoning"] = ["effort": effort] }
         var request = authorized(URLRequest(url: URL(string: "\(codexBase)/responses")!), tokens)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
