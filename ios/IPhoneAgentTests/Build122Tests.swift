@@ -99,6 +99,31 @@ import XCTest
         XCTAssertNil(ChatGPTPlus.reasoningEffort, "refused by the backend once: not sent again")
     }
 
+    /// n01: "幫我做這六件事：1. 查深圳明天的最高溫；…6. 把以上結果整理成一段話發到测试群": the list after the colon was taken
+    /// for the message, and 深圳 typed in Weather's search was held for approval.
+    func testAListAfterAColonIsNotTheMessage() {
+        let task = "幫我做這六件事：1. 查深圳明天的最高溫；2. 查上海明天的最高溫；6. 把以上結果整理成一段話發到测试群。不要購買"
+        XCTAssertEqual(AgentLoop.messageParts(task), [])
+        XCTAssertFalse(AgentLoop.needsApproval("深圳", task: task, chatApp: false), "a search in Weather")
+        XCTAssertTrue(AgentLoop.needsApproval("深圳", task: task, chatApp: true), "typed in a chat app it may be the message")
+        XCTAssertTrue(AgentLoop.needsApproval("明天深圳28°C，上海19°C", task: task, chatApp: false), "the summary is a message")
+        XCTAssertEqual(AgentLoop.messagePart("在微信打開测试群，發一則訊息：壓力測試 115。發完告訴我"), "壓力測試 115")
+        XCTAssertEqual(AgentLoop.messagePart("在小紅書第一篇筆記下留言：好看"), "好看")
+        XCTAssertEqual(AgentLoop.messagePart("回覆張三：好的"), "好的")
+    }
+
+    /// n02, n04: right answers to goals of 7 and 8 parts reported "（未能核實）": the check saw only the last screen.
+    func testTheCheckOfASeveralPartGoalKnowsWhatEarlierPartsFound() {
+        let prompt = AgentLoop.checkPrompt(goal: "幫我做這七件事：…", today: "Today is 2026-11-11.", answer: "電池 98%",
+                                           did: "1. opened 设置", notes: ["電池 98%"], sent: ["122多任務測試開始"], parts: 7)
+        XCTAssertTrue(prompt.contains("- 電池 98%"), prompt)
+        XCTAssertTrue(prompt.contains("122多任務測試開始"), prompt)
+        XCTAssertTrue(prompt.contains("only where the last one ended"), prompt)
+        let one = AgentLoop.checkPrompt(goal: "看電量", today: "", answer: "98%", did: "", notes: [], sent: [], parts: 1)
+        XCTAssertFalse(one.contains("parts done one after another"))
+        XCTAssertTrue(one.hasSuffix("The image is the screen now."))
+    }
+
     func testTheQuotaIsKept() throws {
         let saved = UserDefaults.standard.data(forKey: PlusQuota.key)
         defer { UserDefaults.standard.set(saved, forKey: PlusQuota.key) }

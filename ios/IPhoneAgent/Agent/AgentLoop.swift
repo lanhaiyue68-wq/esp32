@@ -639,10 +639,18 @@ extension Pointer: Gestures {}
         if let r = task.range(of: #"[「“"]([^」”"]+)[」”"]"#, options: .regularExpression) {
             return String(task[r].dropFirst().dropLast())
         }
-        guard let colon = task.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
-        let rest = task[task.index(after: colon)...].prefix { !"。；;\n".contains($0) }
-        let message = rest.trimmingCharacters(in: .whitespaces)
-        return message.isEmpty ? nil : message
+        // Only a colon after a way of saying "send" gives the message (發一則訊息：…, 留言：…): 121 over the cloud 11-11,
+        // "幫我做這六件事：1. 查深圳明天的最高溫；…" made the list's first item the message, and 深圳 typed in Weather's search
+        // was held for approval.
+        let said = ["发", "發", "说", "說", "回复", "回覆", "留言", "评论", "評論", "写", "寫", "讯息", "訊息", "消息", "内容", "內容", "话", "話"]
+        for colon in task.indices where task[colon] == "：" || task[colon] == ":" {
+            let before = String(task[..<colon].suffix(8))
+            guard said.contains(where: { before.contains($0) }) else { continue }
+            let rest = task[task.index(after: colon)...].prefix { !"。；;\n".contains($0) }
+            let message = rest.trimmingCharacters(in: .whitespaces)
+            return message.isEmpty ? nil : message
+        }
+        return nil
     }
 
     /// Whether text about to go out with Return waits for the cloud's approval: a message, a reply, a post. Words the
@@ -665,7 +673,9 @@ extension Pointer: Gestures {}
         guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
         let messages = messageParts(task).map(key).filter { !$0.isEmpty }
-        guard !messages.isEmpty else { return true }
+        // A goal that posts but gives no message ("整理成一段話發到测试群"): its own words typed in a chat app may be the
+        // message; typed in 天气 or 淘宝 they are searches.
+        guard !messages.isEmpty else { return chatApp }
         return messages.contains { $0.contains(typed) || typed.contains($0) }
     }
 
@@ -1893,7 +1903,26 @@ extension Pointer: Gestures {}
     }
 
     private func checkPrompt(_ answer: String) -> String {
-        "Goal: \(task)\n\(Self.todayLine())\n\nIts answer: \(answer)\n\nWhat it did:\n\(Self.whatItDid(steps))\n\nThe image is the screen now."
+        Self.checkPrompt(goal: task, today: Self.todayLine(), answer: answer, did: Self.whatItDid(steps), notes: notes,
+                         sent: sent, parts: parts.count)
+    }
+
+    /// Build 121 over the cloud 11-11: goals of 7 and 8 parts were answered right and reported "（未能核實）": the check saw
+    /// only the last screen (高德, 验证群), so the battery read in Settings and the message sent to 测试群 earlier were "not
+    /// on screen", twice. What it wrote down and what it sent go with the check now, and why the screen cannot show them.
+    static func checkPrompt(goal: String, today: String, answer: String, did: String, notes: [String], sent: [String],
+                            parts: Int) -> String {
+        var text = "Goal: \(goal)\n\(today)\n\nIts answer: \(answer)\n\nWhat it did:\n\(did)"
+        if !notes.isEmpty {
+            text += "\n\nWhat it wrote down while it worked (read off earlier screens):\n" + notes.map { "- " + $0 }.joined(separator: "\n")
+        }
+        if !sent.isEmpty { text += "\n\nMessages it sent in this run and saw go out: " + sent.joined(separator: "、") }
+        if parts > 1 {
+            text += "\n\nThis goal has \(parts) parts done one after another, and the screen shows only where the last one ended. "
+                + "A value or a send from an earlier part is checked against what it did and wrote down above, not against this "
+                + "screen: call it wrong only when this screen or those lines contradict it."
+        }
+        return text + "\n\nThe image is the screen now."
     }
 
     /// The same answer again after the quick check refused it: the check may be the one that is wrong. Build 117 on the
