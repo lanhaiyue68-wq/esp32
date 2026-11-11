@@ -1,5 +1,12 @@
 # 当前进度
 
+## 2026-11-11 build 122（已編譯，IPA 已放桌面，等使用者安裝後重測）
+- 內容：121 真機自測 127 題找到的 28 個問題（第 17 項點讚／關注不擋留到 123），加使用者要的 Codex 剩餘額度與「成功：／失败：原因」回報。交付說明 docs/delivery-build122.md，問題經過見 docs/device-2026-11-11-build121-report.md。
+- 編譯：第一次 run 43011686829 失敗（navigationTitle 屬於 WatchReport，寫成 WatchSettings）；修後 run 43012108153 成功，提交 f4cb9ac，IPA build 122，SHA256 3b37e0a6775b…。Build122Tests 12／12；Build121Tests 一項期望過時已改測試（未重編）。
+- 推之前：CloudBridge 的 said／failureWords 改 nonisolated（WatchSettings 同步呼叫），AgentLoop／CloudRuns 被 Python 文字模式寫成 CRLF，已改回 LF。
+- 桌面：Lan-Agent-build122-unsigned.ipa；121 保留，120 移到資源回收筒。
+- 下一步：使用者安裝後重測 g01（分享要批准）、g02/g03（抖音口令路線）、g04（listen: audio 日誌）、i06（Codex effort low 的回應時間）、j03（淘寶第五個）、r05/r09（發錯群、驗證碼）、新浪／高德，再跑 32 題回歸和幾輪 6 個 App；主人號監看功能等使用者測。
+
 ## 2026-11-11 build 121（真機自測完：雲端 51 題＋資料頁；7 個問題的修法已提交未編譯，等使用者決定 122）
 - 夜裡自測（使用者去睡）：a/b/c 三批 19 題＋32 題回歸（30／32，平均 77 s）＋主人資料頁。報告 docs/device-2026-11-11-build121-report.md。
 - 問題與修法（提交 9b52221、3b3c4dc，只推 private，**沒編譯**）：開始監看時監看自己把語音權限點成「不允許」（改成先問、答完再開始）；只用雲端不會問權限；沒權限時聽太久還重聽（最多 20 秒、提示別重聽）；Safari 網址被當訊息（去 https/www 比對、題目提瀏覽器且不發訊息時不批准）；點圖示打開的 App 被當聊天 App（看題目點名的 App）；繁體微信資料頁寫「微信ID」導致核對永遠失敗；暱稱或簽名仿造 ID 可冒充（兩行以上不算）。
