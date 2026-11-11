@@ -14,11 +14,12 @@ extension AppModel {
         }
         cloud.outcome = { [weak self] task in
             guard let self, self.agent.task == task.instruction else {
-                return CloudBridge.Outcome(status: "failed", answer: "", error: "did_not_start", steps: 0)
+                return CloudBridge.Outcome(status: "failed", answer: CloudBridge.said(false, "任务没有开始"), error: "did_not_start", steps: 0)
             }
             return CloudBridge.outcome(of: self.agent.steps)
         }
         cloud.stop = { [weak self] in await self?.stopAgent() }
+        cloud.destination = { [weak self] in self?.agent.approvalPlace }
         cloud.mask = { await ShotPrivacy.masked($0) }
         // The screen the run finished on, not the Home Screen it goes back to after (11-10: half of each picture was Home).
         cloud.lastScreen = { [weak self] in

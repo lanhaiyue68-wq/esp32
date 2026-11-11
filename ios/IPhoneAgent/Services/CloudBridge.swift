@@ -181,9 +181,14 @@ import Foundation
     }
 
     /// Before a message goes: say what would be sent, then wait for the cloud's answer (rejected after 10 minutes).
+    /// Where the message would go (AgentLoop.approvalPlace), sent with the approval request.
+    var destination: (() -> String?)?
+
     func approve(_ text: String, for id: String) async -> Bool {
         guard current?.approval ?? true else { return true }
-        await report(id, ["status": "waiting_approval", "approval_request": ["action": "send_message", "text": text]])
+        var request: [String: Any] = ["action": "send_message", "text": text]
+        if let place = destination?(), !place.isEmpty { request["destination"] = place }  // the chat title on screen
+        await report(id, ["status": "waiting_approval", "approval_request": request])
         let until = now() + Self.approvalWait
         while now() < until, !Task.isCancelled {
             if let reply = try? await send("GET", "/api/v1/tasks/\(Self.escaped(id))", nil), (200..<300).contains(reply.0),

@@ -141,6 +141,23 @@ import XCTest
         XCTAssertTrue(WatchSettings.taskFailedReply.hasPrefix("失败："))
     }
 
+    /// r05 (121, 11-11): the model's look let a summary for 测试群 go into 小红书's comment box and into 验证群; r09: it
+    /// blocked a search's Return in 拼多多. When the goal names a group, the title at the top decides.
+    func testWhereAMessageGoesIsReadOffTheTitle() {
+        let task = "幫我做這八件事：1. 在淘寶搜尋充電寶；7. 把以上結果整理成一段話發到测试群；8. 告訴我發出去了沒有"
+        XCTAssertTrue(AgentLoop.namedGroups(task).contains { $0.hasSuffix("测试群") }, "\(AgentLoop.namedGroups(task))")
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "测试群", task: task, steps: []), .right)
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "测试群（3人）", task: task, steps: []), .right)
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "測試群", task: "在测试群發：早安", steps: []), .right, "Traditional title")
+        if case .wrong = AgentLoop.chatCheck(seen: "验证群", task: task, steps: []) {} else { XCTFail("验证群 is not 测试群") }
+        let xhs: [JObject] = [["action": .str("open"), "app": .str("小紅書")]]
+        if case .wrong = AgentLoop.chatCheck(seen: nil, task: task, steps: xhs) {} else { XCTFail("小红书's comment box") }
+        XCTAssertEqual(AgentLoop.chatCheck(seen: nil, task: task, steps: [["action": .str("open"), "app": .str("微信")]]), .unknown)
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "张三", task: "回覆張三：好的", steps: []), .unknown, "no group named")
+        XCTAssertEqual(AgentLoop.namedGroups("拉到微信群里"), [], "a word, not a group's name")
+        XCTAssertFalse(AgentLoop.needsApproval("充電寶", task: task, chatApp: false), "a search in 淘宝 is not a message")
+    }
+
     func testTheQuotaIsKept() throws {
         let saved = UserDefaults.standard.data(forKey: PlusQuota.key)
         defer { UserDefaults.standard.set(saved, forKey: PlusQuota.key) }

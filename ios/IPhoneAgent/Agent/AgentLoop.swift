@@ -546,6 +546,9 @@ extension Pointer: Gestures {}
     var doneChecker: ChatModel?
     /// Set for a task the cloud gave: asked before each message is sent; false stops the run with nothing sent.
     var approveSend: ((String) async -> Bool)?
+    /// The chat title read at the top when approval was asked (shown with it: 121 r05's message was approved for 测试群
+    /// while it sat in 验证群).
+    private(set) var approvalPlace: String?
     private var approvedTexts: Set<String> = []
     static let notApprovedAnswer = "没有发送：这条消息未获批准。"
 
@@ -714,6 +717,39 @@ extension Pointer: Gestures {}
     }
 
     /// Where a message would go now, if that is not where the goal says (nil: fine, or the check could not be made).
+    /// Where a message would go, as far as the screen says it without a model.
+    enum ChatCheck: Equatable { case right, wrong(String), unknown }
+
+    /// The groups a goal names, each with the words before it (测试群 in "在微信打開测试群", "發到测试群"): the title at
+    /// the top must end one of them.
+    static func namedGroups(_ task: String) -> [String] {
+        let pattern = #"[\p{Han}A-Za-z0-9]{1,10}群"#
+        let all = (try? NSRegularExpression(pattern: pattern))?
+            .matches(in: task, range: NSRange(task.startIndex..., in: task))
+            .compactMap { Range($0.range, in: task).map { String(task[$0]) } } ?? []
+        let generic = ["微信群", "这个群", "這個群", "那个群", "那個群", "一个群", "一個群", "两个群", "兩個群", "各个群", "各個群"]
+        return all.filter { name in !generic.contains { name.hasSuffix($0) } }
+    }
+
+    static func chatCheck(seen: String?, task: String, steps: [JObject]) -> ChatCheck {
+        let groups = namedGroups(task)
+        guard !groups.isEmpty else { return .unknown }
+        func key(_ s: String) -> String {
+            AppNames.hans(s.replacingOccurrences(of: #"[（(][^)）]*[)）]"#, with: "", options: .regularExpression))
+                .lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        if let seen {
+            let t = key(seen)
+            if t.count >= 2, groups.contains(where: { key($0).hasSuffix(t) }) { return .right }
+            return .wrong("the chat at the top is “\(seen)”, not the group the goal names")
+        }
+        if let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str,
+           !inChatApp([["action": .str("open"), "app": .str(app)]]) {
+            return .wrong("this is \(app), not a chat: no chat title at the top")
+        }
+        return .unknown
+    }
+
     private func wrongPlace(frame: Data?) async -> String? {
         guard let model = sendChecker else { return nil }
         do {
@@ -1389,8 +1425,23 @@ extension Pointer: Gestures {}
                 }
                 // Over USB 11-10 the way into 测试群 was followed for 验证群: WeChat opened on the last chat and the message went
                 // there. Before a message goes, something looks at where it would go.
-                if unsent != nil, endAfterSend == nil, Self.sends(act) || act["learned"] == .str("send"), Self.asksToSend(task),
-                   let wrong = await wrongPlace(frame: screen?.frame ?? planned.shot) {
+                // 121 over the cloud 11-11: the model's look said OK to 小红书's comment box and to 验证群 for a goal that named
+                // 测试群, then NO, then OK again for the same screen; and it blocked a search's Return in 拼多多. Only a message
+                // is checked, and when the goal names a group the title at the top decides, read off the screen.
+                let sending = unsent != nil && (Self.sends(act) || act["learned"] == .str("send"))
+                let isMessage = sending && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
+                let sendFrame = screen?.frame ?? planned.shot
+                let seenTitle = isMessage ? sendFrame.flatMap { WatchSettings.navigationTitle(in: $0) } : nil
+                approvalPlace = seenTitle
+                var wrongSpot: String?
+                if isMessage, endAfterSend == nil, Self.asksToSend(task) {
+                    switch Self.chatCheck(seen: seenTitle, task: task, steps: steps) {
+                    case .right: wrongSpot = nil
+                    case .wrong(let why): wrongSpot = why
+                    case .unknown: wrongSpot = await wrongPlace(frame: sendFrame)
+                    }
+                }
+                if let wrong = wrongSpot {
                     sendBlocks += 1
                     if sendBlocks >= 2 {
                         sendBlocks = 0
