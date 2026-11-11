@@ -8,6 +8,7 @@ struct SettingsView: View {
     @ObservedObject var board: BoardLink
     @AppStorage(MockMode.key) private var demoData = false
     @AppStorage(DebugLog.computerKey) private var toComputer = false
+    @State private var quota = PlusQuota.saved
 
     var body: some View {
         NavigationStack {
@@ -35,6 +36,19 @@ struct SettingsView: View {
                 } footer: {
                     Text("Lan Agent follows your iPhone's language. To change it just for this app, open Settings › Lan Agent › Language.")
                 }
+                // User 11-11: how much of Codex is left, from its last answer.
+                Section {
+                    if let quota {
+                        ForEach(quota.lines(), id: \.self) { Text(verbatim: $0) }
+                    } else {
+                        Text(verbatim: "还没有用过 Codex：用过一次就会显示").foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(verbatim: "Codex 剩余额度")
+                } footer: {
+                    Text(verbatim: "每次用到 Codex（新任务带路、卡住时接手）都会更新。额度用完时只剩豆包，难题会慢一些。")
+                }
+                .onAppear { quota = PlusQuota.saved }
                 Section {
                     Button { UIApplication.shared.open(URL(string: UIApplication.openNotificationSettingsURLString)!) } label: {
                         HStack {

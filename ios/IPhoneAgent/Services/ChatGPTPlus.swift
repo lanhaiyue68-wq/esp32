@@ -209,14 +209,16 @@ enum ChatGPTPlus {
         let (bytes, response) = try await answers.bytes(for: request)
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 0
+        var quota: [String: String] = [:]
+        for (key, value) in http?.allHeaderFields ?? [:] {
+            if let k = key as? String, k.lowercased().hasPrefix("x-codex") { quota[k.lowercased()] = "\(value)" }
+        }
+        // User 11-11: what is left of Codex, shown in Settings; a refusal (429) says it too.
+        if let left = PlusQuota(headers: quota) { PlusQuota.save(left) }
         guard status == 200 else {
             var raw = Data()
             for try await byte in bytes { raw.append(byte); if raw.count > 1500 { break } }
             throw Failure(message: "HTTP \(status)：\(String(data: raw, encoding: .utf8) ?? "")")
-        }
-        var quota: [String: String] = [:]
-        for (key, value) in http?.allHeaderFields ?? [:] {
-            if let k = key as? String, k.lowercased().hasPrefix("x-codex") { quota[k.lowercased()] = "\(value)" }
         }
         var stream = SSE()
         var firstTokenMs: Int?
