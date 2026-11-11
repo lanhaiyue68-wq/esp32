@@ -31,6 +31,22 @@ import XCTest
         XCTAssertTrue(AgentLoop.publishes("把這條轉發給張三"))
     }
 
+    /// 121 over the cloud, 11-11 (c03): Safari opened by its icon, https://www.sina.com.cn typed for a goal that said
+    /// www.sina.com.cn, held as a message and the task cancelled.
+    func testAnAddressTheGoalNamesIsNotAMessage() {
+        let task = "用 Safari 打開 www.sina.com.cn，告訴我頭條新聞的標題，再打開抖音告訴我首頁第一個影片是誰發的"
+        XCTAssertFalse(AgentLoop.needsApproval("https://www.sina.com.cn", task: task))
+        XCTAssertFalse(AgentLoop.needsApproval("sina.com.cn/", task: task))
+        XCTAssertTrue(AgentLoop.needsApproval("https://www.example.com", task: task), "an address the goal never named")
+        XCTAssertTrue(AgentLoop.needsApproval("你好", task: "在测试群发你好"))
+        let named = "打開 Safari，進新浪網，告訴我頭條新聞的標題；再打開抖音，告訴我首頁第一個影片是誰發的"
+        XCTAssertFalse(AgentLoop.needsApproval("https://www.sina.com.cn", task: named), "r01: no address in the goal")
+        XCTAssertTrue(AgentLoop.needsApproval("https://www.sina.com.cn", task: "在微信打開测试群，告訴我最後一則訊息"),
+                      "an address in a goal with no browser may be a message")
+        XCTAssertTrue(AgentLoop.needsApproval("https://www.sina.com.cn", task: "用 Safari 打開新浪，把網址發到测试群"),
+                      "a goal that sends")
+    }
+
     func testWaysOfSayingSendStillCount() {
         XCTAssertTrue(AgentLoop.publishes("在微信打開测试群，發一則訊息：你好"))
         XCTAssertTrue(AgentLoop.publishes("在小紅書第一篇筆記下留言：好看"))
@@ -78,6 +94,15 @@ import XCTest
     func testTheAppSaysWhyItAsksForSpeechRecognition() {
         let text = Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") as? String
         XCTAssertFalse((text ?? "").isEmpty)
+    }
+
+    /// 121 on the phone, 11-11 (b02): with speech denied, 视频号 was listened to twice for 180 s, then reopened until
+    /// the run failed. Without speech a listen is short and says not to listen again.
+    func testWithoutSpeechAListenIsShortAndSaysNotToListenAgain() async {
+        let started = Date()
+        let heard = await ScreenListener.listen(seconds: 180, frame: { nil })
+        XCTAssertLessThan(Date().timeIntervalSince(started), 40)
+        XCTAssertTrue(heard.contains("不要再听"), heard)
     }
 
     func testSubtitlesAreWordsKeptOnce() {
@@ -132,6 +157,13 @@ import XCTest
                        "lanhaile_686")
         XCTAssertNil(WatchSettings.weChatID(rows: [row("微信号：lanhaile_686", 0.15)]), "a name that looks like an ID")
         XCTAssertNil(WatchSettings.weChatID(rows: [row("蓝海乐", 0.15), row("微信号：12", 0.2)]))
+        // 121 on the phone, 11-11: WeChat in Traditional Chinese labels it 微信ID, under 暱稱, below an overlay line.
+        XCTAssertEqual(WatchSettings.weChatID(rows: [row("6步・48秒", 0.12), row("主人蓝海乐", 0.2), row("暱稱：蓝海乐", 0.26),
+                                                     row("微信ID：abc_12345", 0.29), row("地區：廣東 深圳", 0.32)]), "abc_12345")
+        XCTAssertNil(WatchSettings.weChatID(rows: [row("6步・48秒", 0.12), row("微信ID：abc_12345", 0.2),
+                                                   row("微信ID：zzz_99999", 0.29)]), "a name written like the owner's ID")
+        XCTAssertNil(WatchSettings.weChatID(rows: [row("张三", 0.15), row("微信ID：zzz_99999", 0.2), row("微信ID：abc_12345", 0.4)]),
+                     "a signature written like the owner's ID")
         XCTAssertTrue(WatchSettings.sameID("lanhaiLe_686", "1anhaile_686"), "l and 1 read alike")
         XCTAssertTrue(WatchSettings.sameID("abcO12", "abc012"))
         XCTAssertFalse(WatchSettings.sameID("abc123x", "abc124x"))

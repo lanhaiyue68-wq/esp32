@@ -30,6 +30,9 @@ extension AppModel {
             guard on, let self else { return }
             self.keepAwake.hold = true
             self.keepAwake.start()
+            // Build 121, 11-11: speech recognition was asked for only when a watch started, so a phone that only takes
+            // cloud tasks never heard a video's words (listen gave subtitles alone). Asked here too, with the app in front.
+            Task { @MainActor in ScreenListener.authorize() }
         }
         Task { [weak self] in await self?.cloud.loop() }
     }

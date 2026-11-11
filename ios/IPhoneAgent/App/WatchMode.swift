@@ -264,20 +264,24 @@ enum WatchSettings {
         return !fold(a).isEmpty && fold(a) == fold(b)
     }
 
-    /// The WeChat ID on a profile page: the line "微信号：…" under the name. A line that is itself the first text of the
-    /// page is the name (anyone can call themselves "微信号：abc"), not the ID.
+    /// The WeChat ID on a profile page: the line "微信号：…" under the name (WeChat in Traditional Chinese says
+    /// "微信ID：", seen on the phone 11-11). Anyone can call themselves "微信ID：abc", so the page must show exactly one
+    /// such line: the real one is always there, and a name or signature written like it makes two (nil: not proven).
     static func weChatID(rows: [[CandidatePicker.Piece]]) -> String? {
         let lines = rows.compactMap { row -> (text: String, y: Double)? in
             let text = row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
             return text.isEmpty ? nil : (text, row.map { Double($0.box.midY) }.min() ?? 0)
         }.filter { $0.y > 0.1 }.sorted { $0.y < $1.y }
+        var ids: [String] = []
         for (i, line) in lines.enumerated() where i > 0 {
             let t = line.text.filter { !$0.isWhitespace }
-            guard let r = t.range(of: #"^(微信号|微信號|WeChatID)[:：]"#, options: [.regularExpression, .caseInsensitive]) else { continue }
-            let id = String(t[r.upperBound...])
-            if id.range(of: #"^[A-Za-z][A-Za-z0-9_\-]{4,29}$"#, options: .regularExpression) != nil { return id }
+            guard let r = t.range(of: #"^(微信号|微信號|微信ID|WeChatID)[:：]"#, options: [.regularExpression, .caseInsensitive])
+            else { continue }
+            ids.append(String(t[r.upperBound...]))
         }
-        return nil
+        guard ids.count == 1, let id = ids.first,
+              id.range(of: #"^[A-Za-z][A-Za-z0-9_\-]{4,29}$"#, options: .regularExpression) != nil else { return nil }
+        return id
     }
 
     /// Opens the sender's profile from their message (their WeChat ID is read there by this phone, not by a model).
@@ -1097,7 +1101,13 @@ extension AppModel {
         if WatchSettings.checkID && WatchSettings.ownerID.isEmpty {
             return "填上主人的微信号，或关掉“群里核对微信号”。"
         }
-        ScreenListener.authorize()
+        // Build 121 on the phone, 11-11: asked as the watch started, the system's question was still up when the watch's
+        // first step ran, and the model tapped 不允许 (denied for good: only Settings can change it). Asked first; the
+        // watch starts on the next tap, once it is answered.
+        if ScreenListener.undecided, UserDefaults.standard.object(forKey: "captureAudioV1") as? Bool ?? true {
+            ScreenListener.authorize()
+            return "先回答语音识别的问题（允许后才能听视频的声音），再点开始。"
+        }
         if WatchSettings.onlyListed && WatchSettings.targets.isEmpty {
             return String(localized: "Add at least one chat or group to reply to, or turn off “Only these chats”.")
         }

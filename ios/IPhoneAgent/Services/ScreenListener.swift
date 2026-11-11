@@ -45,6 +45,7 @@ private final class Transcript: @unchecked Sendable {
     }
 
     static var authorized: Bool { SFSpeechRecognizer.authorizationStatus() == .authorized }
+    static var undecided: Bool { SFSpeechRecognizer.authorizationStatus() == .notDetermined }
 
     /// A line worth keeping as a subtitle: words (Han), not a count, a button or a handle.
     static func subtitle(_ line: String) -> Bool {
@@ -68,7 +69,10 @@ private final class Transcript: @unchecked Sendable {
         var spoken: [String] = []
         var subtitles: [String] = []
         var heard = 0
-        let end = Date().addingTimeInterval(seconds)
+        // Build 121 on the phone, 11-11: with speech recognition denied, 视频号 was listened to twice for 180 s each
+        // (6 minutes for subtitles alone), then left and opened again until the run failed. Without speech, 20 s of
+        // subtitles is what a listen can give.
+        let end = Date().addingTimeInterval(canSpeak ? seconds : min(seconds, 20))
         while Date() < end, !Task.isCancelled {
             // One segment: a request of its own (a recognition off the phone stops at about a minute).
             let segmentEnd = min(end, Date().addingTimeInterval(55))
@@ -106,8 +110,10 @@ private final class Transcript: @unchecked Sendable {
             }
         }
         var note = ""
-        if !authorized { note = "没有语音识别权限：在 Lan Agent 打开守候微信设置，允许语音识别" }
-        else if !canSpeak { note = "语音识别暂时不可用" }
+        // What the model does next is said too: listening again cannot help, and going to fix it is not its job.
+        let after = "再听一次也一样：不要再听，用画面字幕和看到的内容直接回答，并说明口播拿不到"
+        if !authorized { note = "这台手机没有允许语音识别，听不到说的话。" + after }
+        else if !canSpeak { note = "语音识别暂时不可用。" + after }
         else if heard == 0 { note = "没有收到声音：这个 App 可能不让录音，或者没有在播放" }
         DebugLog.write("listen: \(Int(seconds)) s, \(heard) audio sample(s), \(spoken.joined().count) character(s) heard, \(subtitles.count) subtitle line(s)")
         return "【语音转文字】" + (spoken.isEmpty ? "（没有）" : spoken.joined(separator: " "))

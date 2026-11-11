@@ -624,7 +624,16 @@ extension Pointer: Gestures {}
     /// station it knew from before, in a goal that posts nothing; it was held as a message and the task was cancelled.
     static func needsApproval(_ text: String, task: String, chatApp: Bool = true) -> Bool {
         func key(_ s: String) -> String { AppNames.hans(typedKey(s)).lowercased() }
-        let typed = key(text), goal = key(task)
+        // Build 121 over the cloud 11-11: the goal said www.sina.com.cn, Codex typed https://www.sina.com.cn in Safari
+        // (opened by its icon, so the app was unknown), and the address was held as a message. An address is compared
+        // without its scheme, www. and closing slash.
+        let typed = key(text).replacingOccurrences(of: #"^(https?://)?(www\.)?|/$"#, with: "", options: .regularExpression)
+        let goal = key(task)
+        // The same day: "進新浪網" without an address; a learned route opened Safari by its icon again. A web address
+        // typed for a goal that names a browser and posts nothing goes to the address bar, not to a chat.
+        if key(text).range(of: #"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(/\S*)?$"#, options: .regularExpression) != nil,
+           goal.range(of: #"safari|chrome|浏览器|瀏覽器|网址|網址|网站|網站|网页|網頁"#, options: .regularExpression) != nil,
+           !publishes(task) { return false }
         guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
         guard let message = messagePart(task).map(key), !message.isEmpty else { return true }
