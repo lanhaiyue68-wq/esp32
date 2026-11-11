@@ -52,6 +52,9 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: Lan Agent talks to its USB board over Bluetooth to see the screen and move the pointer.
         NSLocalNetworkUsageDescription: Lan Agent receives the mirrored screen from its board, and talks to ChatTool and your knowledge base on your computer, over your Wi-Fi.
+        # Build 121: a video's spoken words. XcodeGen writes Info.plist from here: a key added only there is lost, and
+        # asking for speech recognition without it ends the app.
+        NSSpeechRecognitionUsageDescription: Lan Agent turns what a video says into text (spoken words, 口播文案) when you ask it to.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true  # plain HTTP / WS to ChatTool and the knowledge server on the LAN
         UIBackgroundModes: [bluetooth-central, audio, screen-capture]

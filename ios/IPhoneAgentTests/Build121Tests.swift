@@ -73,6 +73,13 @@ import XCTest
         XCTAssertTrue(agent.notes.contains { $0.hasPrefix("听到和字幕（10 秒）：【语音转文字】你好") }, "\(agent.notes)")
     }
 
+    /// The first 121 IPA had no speech usage text (it went into Info.plist only, which XcodeGen rewrites from
+    /// project.yml): asking for speech recognition would have ended the app when the watch started.
+    func testTheAppSaysWhyItAsksForSpeechRecognition() {
+        let text = Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") as? String
+        XCTAssertFalse((text ?? "").isEmpty)
+    }
+
     func testSubtitlesAreWordsKeptOnce() {
         XCTAssertTrue(ScreenListener.subtitle("今天我们来聊一聊怎么做饭"))
         XCTAssertFalse(ScreenListener.subtitle("1.2万"), "a count")
