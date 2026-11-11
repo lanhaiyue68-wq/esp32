@@ -1,5 +1,16 @@
 # 当前进度
 
+## 2026-11-11 build 121（微信助理一次做完；IPA 已放桌面，等安裝後真機自測）
+- run 42928633232（ac4779d）：IPA build 121，SHA256 4975ce9a6da0…，語音辨識說明在包裡；Build121Tests 21／21 過。測試步驟這次換 TitleCheckTests 卡住（卡的永遠是跑到那個時間點的那一項），確定是 build75 機器問題。桌面 Lan-Agent-build121-unsigned.ipa，120 保留，119 移到資源回收筒。
+- 使用者要求一次做好：看圖、看影片、讀抖音／快手／小紅書／視頻號連結的作者和數據、口播文案（listen：螢幕錄音＋語音辨識＋畫面字幕）、影片內容總結、群聊總結、自動盯著的群、主人身份（名字＋暗號＋微信號，微信號核對是開關）、主人工具（GitHub 倉庫、伺服器接口，非 GET 要回「確認」）。需求與決定見 docs/plan-2026-11-11-wechat-assistant.md。
+- 審批只認「發一則／發到／回覆／留言／傳送／跟某人說／告訴某人」等真的要發的說法；「誰發的」「評論數」「轉發數」不再算。
+- 只讀任務有自己的說明文字（不含 @ 和發送做法），否則在抖音搜尋會被當成要發訊息而清掉。
+- 審 diff 修掉一個編譯錯（`await` 在 `?:` 裡）。新增 Build121Tests 19 項；build75 那台機器跳過已知只在它上面卡死的一項測試。
+- 提交 a353127，推 build75 main（run 42922510878）：編譯、打包、上傳都過；單元測試只有 TapAccuracyTests 另一項在這台機器卡住（它沒設審批，和 121 的改動無關），Build121Tests 19／19 過。
+- 查卡住那項時發現真正的退步：只認列出的說法，雲端任務「在测试群发你好」會**不經批准就發出**（違反客戶規格 §0.6）。改回「发」照算，只排除只讀或名詞用法（誰發的、轉發數、發布時間、發票等）；用 Python 照同規則模擬 32 題全對（含 s04 原題）。只讀任務說明的「发回」改成「交回」。提交 6a8e7f1，run 42925503559。build75 上跳過 TapAccuracyTests 兩項只在它上面卡的測試。
+- run 42925503559：Build121Tests 20／20 過；TapAccuracyTests 又換一項卡住（第三項，跳過一項就換下一項，重啟後其餘都過），build75 上整組不跑。下載的 IPA 是 121，但**沒有語音辨識權限說明**：Info.plist 由 XcodeGen 依 project.yml 重寫，直接加在 Info.plist 的那行被蓋掉；開始監看時要權限就會閃退。改加在 project.yml，打包步驟和單元測試都檢查。提交 ac4779d，run 42928633232。
+- 測試清單 docs/test-checklist-build121.md。
+
 ## 2026-11-11 build 120（已交付：監看只發一則，驗證通過）
 - 使用者要求再壓力測試：6 道「一句話 3–5 件事」組合題，5 道完成且正確（條件分支、計算、發测试群各一則都對），s04 因題目有「誰發的」被當成發訊息題、輸入網址被要求批准而取消；第一次做的組合題由 Codex 帶路較慢（s01 701 s）。報告 docs/stress-2026-11-11-build120-compound.md。
 - lanhaile 額度用完，改用使用者給的 winesettbumpas609-boop/esp32-iphone-agent-build（remote build75，11 月沒用過）。run 42875915106 的單元測試有一項（TapAccuracyTests.testAnActorThatKeepsTappingAfterSendingCannotActOrClaimSuccess）在這台機器卡住 2 分鐘，重跑也一樣（lanhaile 機器上 2.8 s 通過），IPA 因而沒上傳；ci 改成打包後先上傳 IPA（75f38a9），run 42883422995 拿到 IPA。桌面 Lan-Agent-build120-unsigned.ipa，SHA256 f804eae6…cb670ee；119 備用，118 回收。
