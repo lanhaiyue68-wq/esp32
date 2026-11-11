@@ -255,9 +255,13 @@ import Foundation
         if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("部分失败") { return t }
         // 122 over the cloud: a goal of seven parts was "成功" with "电池电量百分比未能核实" in it. An answer that says a
         // part was not found or not checked is not a success.
+        // "（未能核实）" in front only says the check could not confirm it: reported as such, not as a failure.
+        let marker = "（未能核实）"
+        let checked = !t.hasPrefix(marker)
+        let body = checked ? t : String(t.dropFirst(marker.count))
         let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到"]
-        if ok, unsure.contains(where: { t.contains($0) }) { return "部分失败：" + t }
-        return (ok ? "成功：" : "失败：") + t
+        if ok, unsure.contains(where: { body.contains($0) }) { return "部分失败：" + body }
+        return (ok ? (checked ? "成功：" : "成功（未经核实）：") : "失败：") + body
     }
 
     /// Why a run stopped, in words for the user: the loop's own reasons in Chinese, a model's Chinese reason as it is.
