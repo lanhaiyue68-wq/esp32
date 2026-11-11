@@ -37,7 +37,9 @@ import XCTest
         let task = "用 Safari 打開 www.sina.com.cn，告訴我頭條新聞的標題，再打開抖音告訴我首頁第一個影片是誰發的"
         XCTAssertFalse(AgentLoop.needsApproval("https://www.sina.com.cn", task: task))
         XCTAssertFalse(AgentLoop.needsApproval("sina.com.cn/", task: task))
-        XCTAssertTrue(AgentLoop.needsApproval("https://www.example.com", task: task), "an address the goal never named")
+        // r01 (the same day) made any address typed for a goal that names a browser and posts nothing an address, not
+        // a message; in a goal with no browser it is still held (below).
+        XCTAssertFalse(AgentLoop.needsApproval("https://www.example.com", task: task), "typed in Safari for a goal that posts nothing")
         XCTAssertTrue(AgentLoop.needsApproval("你好", task: "在测试群发你好"))
         let named = "打開 Safari，進新浪網，告訴我頭條新聞的標題；再打開抖音，告訴我首頁第一個影片是誰發的"
         XCTAssertFalse(AgentLoop.needsApproval("https://www.sina.com.cn", task: named), "r01: no address in the goal")
