@@ -328,7 +328,9 @@ enum WatchSettings {
     /// Step 1: open the chat to read. Never replies.
     static func openTask(_ r: Rules) -> String {
         let names = (r.targets + r.follow.filter { !r.targets.contains($0) }).map { "“\($0)”" }.joined(separator: "、")
-        let others = "其他任何会话（公众号、订阅号、服务通知、文件传输助手除外）"
+        // 121 on the phone 11-11: WeChat in Traditional Chinese calls 公众号 官方賬號; the model opened that folder twice and
+        // came back (67 s, 10 model calls for a list with nothing to open). The names WatchChatOpen.notChats skips.
+        let others = "其他任何会话（公众号／官方账号（官方賬號）、订阅号、服务号、服务通知、文件传输助手、微信团队、微信支付、折叠的群聊除外）"
         let rest = r.resting.isEmpty ? "" : "（这些刚看过，不要打开：" + r.resting.map { "“\($0)”" }.joined(separator: "、") + "）"
         let scope = (names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)") + rest
         return """
