@@ -98,10 +98,11 @@ enum Actions {
     }
 
     /// 123 over the cloud 11-12: "note 广州今天最高温26°; tap 857 938" on one DO line kept the tap in the note (the answer
-    /// read "广州今天最高温26°; tap 857 938") and the tap never happened. An action run on after a note is its own.
+    /// read "广州今天最高温26°; tap 857 938") and the tap never happened. An action run on after a note is its own; so is
+    /// a done after its full stop ("…体感11°。done 已完成九项…", the same day).
     static func splitNote(_ line: String) -> [String] {
         guard line.range(of: #"^\s*note\s"#, options: [.regularExpression, .caseInsensitive]) != nil,
-              let cut = line.range(of: #"\s*[;；]\s*(?=(tap|swipe|type|open|key|press|hold|back|home|wait|listen|done|fail|replan|path|circle)\b)"#,
+              let cut = line.range(of: #"\s*[;；。]\s*(?=(tap|swipe|type|open|key|press|hold|back|home|wait|listen|done|fail|replan|path|circle)\b)"#,
                                    options: [.regularExpression, .caseInsensitive]) else { return [line] }
         return [String(line[..<cut.lowerBound]), String(line[cut.upperBound...])]
     }

@@ -32,6 +32,24 @@ import XCTest
         XCTAssertEqual(try Actions.parseActions("DO: note 价格¥13.5；已拼128万件").count, 1, "a note's own ；stays")
     }
 
+    /// 123 regression: nine parts, only the weather done, eight results made up and passed.
+    func testAResultFromAnAppNeverOpenedIsNotDone() {
+        let goal = "帮我做这九件事：1. 在拼多多搜索数据线；2. 在淘宝搜索电动牙刷；8. 在天气查北京现在的温度。不要打开美团"
+        let steps: [JObject] = [
+            ["action": .str("plan"), "plan": .str("1. 拼多多 2. 淘宝 3. 天气")],
+            ["action": .str("tap"), "x": .int(341), "y": .int(938), "thought": .str("Open the Weather app")],
+            ["action": .str("type"), "text": .str("北京")],
+            ["action": .str("note"), "text": .str("北京现在温度7°")],
+        ]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: steps), ["拼多多", "淘宝"], "美团 is not to be opened")
+        XCTAssertNotNil(AgentLoop.unvisitedReason(task: goal, steps: steps))
+        let all = steps + [["action": .str("open"), "app": .str("拼多多")], ["action": .str("note"), "text": .str("淘宝第一个商品19.9元")]]
+        XCTAssertNil(AgentLoop.unvisitedReason(task: goal, steps: all))
+        let notDone = try? Actions.parseActions("DO: note 北京现在温度7°。done 已完成九项查询")
+        XCTAssertEqual(notDone?.count, 2)
+        XCTAssertEqual(CloudBridge.said(true, "口播语音转写无法获取，以下是画面文字"), "部分失败：口播语音转写无法获取，以下是画面文字")
+    }
+
     /// 123 regression: the same text went into 验证群 twice.
     func testTheSameTextIsNotSentTwiceToOneChat() {
         XCTAssertTrue(AgentLoop.samePlace(["验证群(3)"], "验证群"))

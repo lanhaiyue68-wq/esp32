@@ -469,6 +469,46 @@ extension Pointer: Gestures {}
         return nil
     }
 
+    /// Apps a goal may name to go into, with the words a model's thought uses for them.
+    static let goalApps: [(name: String, also: [String])] = [
+        ("拼多多", ["pinduoduo", "pdd"]), ("淘宝", ["taobao"]), ("京东", ["jd.com", "jingdong"]), ("美团", ["meituan"]),
+        ("抖音", ["douyin", "tiktok"]), ("小红书", ["xiaohongshu", "rednote"]), ("快手", ["kuaishou"]),
+        ("微信", ["wechat", "weixin"]), ("备忘录", ["notes"]), ("日历", ["calendar"]), ("设置", ["settings"]),
+        ("天气", ["weather"]), ("股市", ["stocks"]), ("计算器", ["calculator"]), ("时钟", ["clock", "alarm"]),
+        ("提醒事项", ["reminders"]), ("高德", ["amap", "gaode"]), ("safari", ["浏览器"]),
+    ]
+
+    /// 123 over the cloud 11-12: a goal of nine parts in seven apps followed a remembered way, did only the weather, and
+    /// finished with made-up results for the other eight (拼多多 ¥3.9, a 验证群 message nobody sent); the check said OK.
+    /// An app the goal names that this run never went into cannot have given a result. nil = may finish.
+    static func unvisitedReason(task: String, steps: [JObject]) -> String? {
+        let missing = unvisitedApps(task: task, steps: steps)
+        guard !missing.isEmpty else { return nil }
+        return "This run never went into " + missing.joined(separator: "、") + ": whatever the answer says about them is not "
+            + "from this run. Open each of them now and read it there, or answer that those parts were not done."
+    }
+
+    static func unvisitedApps(task: String, steps: [JObject]) -> [String] {
+        if steps.contains(where: { $0["action"]?.str == "takeover" }) { return [] }  // the user did part of it by hand
+        let goal = AppNames.hans(task).lowercased().replacingOccurrences(
+            of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ", options: .regularExpression)
+        // Only what the model did and said while doing it: not the plan, nor this check's own words.
+        let acted: Set<String> = ["open", "tap", "type", "note", "swipe", "key", "hold", "listen", "press", "back", "home", "wait", "path"]
+        var said: [String] = []
+        for s in steps where acted.contains(s["action"]?.str ?? "") {
+            for key in ["thought", "thought_zh", "app", "text"] { if let v = s[key]?.str { said.append(v) } }
+        }
+        let seen = AppNames.hans(said.joined(separator: "\n")).lowercased()
+        var missing: [String] = []
+        for app in goalApps where goal.contains(app.name) {
+            var words: [String] = [app.name]
+            words += app.also
+            words += AppNames.variants(app.name).map { AppNames.hans($0).lowercased() }
+            if !words.contains(where: { !$0.isEmpty && seen.contains($0) }) { missing.append(app.name) }
+        }
+        return missing
+    }
+
     /// Actions that move the screen somewhere (a back-and-forth is made of these).
     private static let moving: Set<String> = ["tap", "swipe", "back", "home", "key"]
 
@@ -1330,7 +1370,9 @@ extension Pointer: Gestures {}
             // The task's own checks (drawn, sent) are for the done that ends it: build104 live 11-08, part 1 (the alarm)
             // was done three times and refused each time as "nothing has been drawn" (that was part 2), and the run stopped.
             let endsTask = parts.count < 2 || partIndex >= parts.count - 1
-            if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) {
+            var unvisited: String?  // only for a task given in words (not the watch's fixed ways)
+            if name == "done", endsTask, presetPlan.isEmpty, !keyboardGuard { unvisited = Self.unvisitedReason(task: task, steps: steps) }
+            if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) ?? unvisited {
                 doneRejected += 1
                 if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
                     record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])

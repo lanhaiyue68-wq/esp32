@@ -266,7 +266,9 @@ import Foundation
         let marker = "（未能核实）"
         let checked = !t.hasPrefix(marker)
         let body = checked ? t : String(t.dropFirst(marker.count))
-        let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到"]
+        // 123 over the cloud 11-12: "成功：口播语音转写无法获取：两次 listen 均未识别到…" was a success.
+        let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到",
+                      "无法获取", "未能获取", "获取不到", "无法识别", "未识别到", "没有识别出", "无法提取", "拿不到"]
         if ok, unsure.contains(where: { body.contains($0) }) { return "部分失败：" + body }
         return (ok ? (checked ? "成功：" : "成功（未经核实）：") : "失败：") + body
     }
