@@ -74,6 +74,15 @@ class Handler(BaseHTTPRequestHandler):
         parts = self.path.strip('/').split('/')
         body = self.body()
         with lock:
+            if parts[:3] == ['api', 'v1', 'knowledge'] and len(parts) == 3:  # 群收录: a day's knowledge (protocol §6)
+                items = body.get('items')
+                if not isinstance(items, list) or not body.get('date'):
+                    return self.reply(400, {'error': 'date and items are required'})
+                path = os.path.join(os.path.dirname(os.path.abspath(LOG)), f"knowledge-{body['date']}.json")
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(body, f, ensure_ascii=False, indent=1)
+                log('knowledge', {'date': body['date'], 'device_id': body.get('device_id'), 'items': len(items)})
+                return self.reply(200, {'ok': True, 'stored': len(items)})
             if parts[:3] == ['api', 'v1', 'tasks'] and len(parts) == 3:  # create
                 tid = body.get('task_id') or str(uuid.uuid4())
                 task = {'task_id': tid, 'type': 'phone_task', 'input': body.get('input', {}),

@@ -393,7 +393,9 @@ enum WatchSettings {
     /// 上海's, in an earlier message; 深圳's is 27–28°). What changes by the hour is looked up on the phone, not answered
     /// from the chat or from memory.
     static func keptPromise(_ decided: (reply: String, task: String), look: Bool, asked: [String]) -> (reply: String, task: String) {
-        guard look, decided.task.isEmpty, promisesLater(decided.reply) || asksLive(asked.joined(separator: " ")) else { return decided }
+        // A reply left empty is the owner's chatter (a voice not meant for it, user 11-12: "如果不是的話，就靜默"): kept so.
+        guard look, decided.task.isEmpty, !decided.reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              promisesLater(decided.reply) || asksLive(asked.joined(separator: " ")) else { return decided }
         let words = asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "；")
         return words.isEmpty ? decided : (taskAcknowledgement, words)
     }
@@ -588,7 +590,8 @@ enum WatchSettings {
               看某条消息里的图片；打开视频、视频号或链接（抖音、快手、小红书、公众号文章），读作者、文案和点赞、评论、收藏、转发数；\
               听视频讲了什么、提取口播文案、总结内容；在别的 App 里查资料；总结某个群最近在聊什么；查 GitHub 仓库或调用设置里的工具。
               这类事就给出 task：一句完整的中文说明，写清要看的是哪一条（谁发的，是图片、视频、链接还是卡片，标题是什么）和主人要什么结果，\
-              主人的原话尽量保留；reply 写“收到”。只是聊天、能直接回答的，只用 reply。
+              主人的原话尽量保留；reply 写“收到”。只是聊天、能直接回答的，只用 reply。\
+              主人发的语音（以 [语音] 开头）：只有明确叫你做事或问你问题时才回应；只是在群里和别人聊天，reply 和 task 都留空，什么都不发。
               只读不改：要发送、转发、发布、修改、删除、下单、付款的事不能这样做，\(needsPasscode ? "reply 写：“这件事请在私聊里带上口令再发一次。”" : "用 reply 说明做不到。")
               """
             : needsPasscode
@@ -1373,6 +1376,11 @@ extension AppModel {
                         quietUntil = 0
                         continue
                     }
+                } else if t >= quietUntil, t - lastCheck >= 20, changedAt == nil, await archiveWhileIdle() {
+                    // 群收录: one item opened, or the day's knowledge distilled and sent; back to the list, then as before.
+                    guard watching else { break }
+                    (baseline, changedAt, quietUntil, lastCheck) = (nil, nil, 0, now())
+                    continue
                 }
                 if changedAt == nil { watchStatus = watchIdleLine }
             }
@@ -1509,6 +1517,9 @@ extension AppModel {
             DebugLog.write("watch: \(chat) (not listed): \(read.count) new message(s), read only")
             return (true, true)
         }
+        // 群收录 (user 11-12): pictures, videos, links, files and cards in a listed chat are opened later, when idle.
+        let queued = WatchArchive.enqueue(read, owners: rules.senders)
+        if queued > 0 { DebugLog.write("watch: \(chat): \(queued) item(s) to open when idle (群收录)") }
 
         var reply: String?, task: String?
         var phoneMessages: [ReadMessage] = []
@@ -1803,6 +1814,94 @@ extension AppModel {
         } catch {
             DebugLog.write("watch: reading \(chat) failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    /// 群收录 while nothing else waits: the day's distilling and sending (at most hourly), else one item opened.
+    /// False: nothing to do.
+    private func archiveWhileIdle() async -> Bool {
+        guard watching, !agent.running, !startingAgent, help == nil, watchTaskReply == nil, watchListReturn.pending == nil else { return false }
+        if now() - WatchArchive.dailyTriedAt > 3600, !WatchArchive.daysToDistill().isEmpty || !WatchArchive.knowledgeDays().isEmpty {
+            WatchArchive.dailyTriedAt = now()
+            await distillArchive()
+            return true
+        }
+        guard WatchArchive.openedToday() < WatchArchive.dailyLimit, let item = WatchArchive.next() else { return false }
+        await openArchived(item)
+        return true
+    }
+
+    /// One picture, video, link, file or card opened read-only and what was seen kept; nothing is sent.
+    private func openArchived(_ item: ArchiveItem) async {
+        var item = item
+        watchStatus = "群收录：查看 \(item.chat) 里的\(WatchArchive.name(item.kind))…"
+        DebugLog.write("watch: 群收录: opening a \(item.kind) from \(item.sender) in \(item.chat)")
+        let calls = LLMClient.requests
+        let done = await watchRun(WatchArchive.openTask(item), stepLimit: 25, fastText: true, directStart: true, readOnly: true)
+        let summary = done.map { WatchReport.sendAnswer($0) ?? $0 }
+        item.summary = summary
+        item.ok = summary.map { !$0.isEmpty && !$0.contains("需要人工") } ?? false
+        item.calls = LLMClient.requests - calls
+        WatchArchive.record(item)
+        watchListReturn.pending = item.chat
+        DebugLog.write("watch: 群收录: \(item.ok == true ? "kept" : "not opened"), \(item.calls ?? 0) model call(s), "
+                       + "\(WatchArchive.openedToday())/\(WatchArchive.dailyLimit) today")
+    }
+
+    /// The days not yet distilled: the listed chats' messages and what was opened go to the planner, which keeps the
+    /// knowledge worth having; then every distilled day goes to the server, and what it took leaves the phone.
+    private func distillArchive() async {
+        let targets = WatchSettings.rules.targets
+        for day in WatchArchive.daysToDistill() {
+            guard watching, !Task.isCancelled else { return }
+            let messages = (WatchArchive.date(day).map { ReadLog.messages(on: $0) } ?? []).filter { targets.contains($0.chat) }
+            let opened = WatchArchive.opened(on: day)
+            var items: [[String: Any]] = []
+            if !messages.isEmpty || !opened.isEmpty {
+                do {
+                    let reply = try await settings.client("planner").chat(
+                        system: WatchArchive.distillPrompt,
+                        text: WatchArchive.distillInput(day: day, messages: messages, opened: opened),
+                        image: nil, maxTokens: 3000, temperature: 0.2)
+                    guard let list = WatchArchive.knowledge(reply.text) else {
+                        DebugLog.write("watch: 群收录 \(day): the planner's answer was not a list; tried again later")
+                        return
+                    }
+                    items = list
+                } catch {
+                    DebugLog.write("watch: 群收录 \(day): distilling failed (\(error.localizedDescription)); tried again later")
+                    return
+                }
+            }
+            if let url = WatchArchive.knowledgeFile(day),
+               let data = try? JSONSerialization.data(withJSONObject: items, options: [.prettyPrinted]) {
+                try? data.write(to: url, options: .atomic)
+            }
+            UserDefaults.standard.set(day, forKey: WatchArchive.lastDistillKey)
+            DebugLog.write("watch: 群收录 \(day): \(items.count) piece(s) of knowledge from \(messages.count) message(s) and \(opened.count) opened")
+        }
+        await uploadKnowledge()
+        WatchArchive.prune()
+    }
+
+    /// Each distilled day to the customer's server (the cloud's address and token); a day it took is deleted here.
+    private func uploadKnowledge() async {
+        guard cloud.enabled, !cloud.server.isEmpty else { return }
+        for day in WatchArchive.knowledgeDays() {
+            guard let url = WatchArchive.knowledgeFile(day), let data = try? Data(contentsOf: url),
+                  let items = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { continue }
+            do {
+                let (code, _) = try await cloud.send("POST", "/api/v1/knowledge", WatchArchive.uploadBody(day: day, device: cloud.device, items: items))
+                guard (200..<300).contains(code) else {
+                    DebugLog.write("watch: 群收录 \(day): the server answered HTTP \(code); kept on the phone")
+                    return
+                }
+                WatchArchive.forget(day: day)
+                DebugLog.write("watch: 群收录 \(day): \(items.count) piece(s) sent to the server; the day is deleted from the phone")
+            } catch {
+                DebugLog.write("watch: 群收录 \(day): sending failed (\(error.localizedDescription)); kept on the phone")
+                return
+            }
         }
     }
 

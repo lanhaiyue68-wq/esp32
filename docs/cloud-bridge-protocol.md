@@ -99,7 +99,29 @@
 - 手機鎖屏、App 被系統關掉、或螢幕共享中斷時，收不到任務；心跳裡的 `capabilities` 會如實反映，伺服器應該排隊或降級處理。
 - App 只在前台或背景還活著時送心跳。伺服器超過約 30 秒沒收到心跳，就當成離線。
 
-## 6. 模擬伺服器用法
+## 6. 群收錄：上傳每日知識（build 125 起）
+
+手機守候白名單裡的群時，會把群裡的圖片、影片、連結、檔案、轉發卡片在空閒時點開看，每天整理一次「乾貨」（行業經驗、資源連結、使用心得），用同一個伺服器位址和設備金鑰上傳：
+
+`POST /api/v1/knowledge`
+
+```json
+{
+  "date": "2026-11-12",
+  "device_id": "home_iphone_01",
+  "source": "wechat_group_archive",
+  "items": [
+    {"title": "一句話標題", "content": "要點（誰的經驗、什麼情況、怎麼做、結果）", "links": ["https://…"], "source": "测试群·张三"}
+  ]
+}
+```
+
+- 回 2xx 表示伺服器已收下，手機就刪掉那一天的原始紀錄和整理結果（手機只當暫存）。
+- 回其他狀態碼或連不上：手機保留，約一小時後再傳。
+- `items` 可能是空陣列（那天沒有乾貨），也請回 2xx。
+- 伺服器收下後要存到它的知識庫、GitHub 或 Obsidian，由客戶自己決定。
+
+## 7. 模擬伺服器用法
 
 ```
 set MOCK_TOKEN=<一串夠長的隨機字>
@@ -108,6 +130,8 @@ py -3 tools/cloud-mock/mock_cloud.py --add "打开天气，告诉我现在的气
 py -3 tools/cloud-mock/mock_cloud.py --approve <task_id>
 py -3 tools/cloud-mock/mock_cloud.py --show <task_id>
 ```
+
+模擬伺服器收到上傳時，會把那一天存成 `tools/cloud-mock/knowledge-<日期>.json`。
 
 App 端：伺服器網址填 `http://<電腦的區網 IP>:8787`，設備金鑰填同一串 `MOCK_TOKEN`。手機和電腦要連同一個 Wi-Fi。iOS 對區網的 http 連線有限制，見下方「注意」。
 
