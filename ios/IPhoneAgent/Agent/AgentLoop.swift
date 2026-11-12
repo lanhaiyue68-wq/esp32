@@ -129,6 +129,11 @@ extension Pointer: Gestures {}
     /// them; at stallLimit the run ends with what it found.
     private var stallsNoProgress = 0
     static let stallLimit = 3
+    /// 125 stress test 11-12 (t06): typing was refused 110 times while Codex drove and new plans came 40 times, none of
+    /// them through the executor's stall count. Refusals since the last note, part done or message sent; at refusalLimit
+    /// the run ends with what it found.
+    private var refusalsNoProgress = 0
+    static let refusalLimit = 25
     /// 124 over the cloud 11-12 (e02): 行事曆 did not open, the model gave up, and 视频号, Bluetooth and Weather were never
     /// tried. In a goal of three parts or more, this many single things may fail and be written down; the run goes on.
     private var itemFailsLeft = 2
@@ -136,6 +141,26 @@ extension Pointer: Gestures {}
         + "other parts, then done, saying which part failed and why. Fail only if none of the rest can be done."
     /// The texts sent as messages into a chat (not a search's Return): only these are never typed again.
     private var messageSent: Set<String> = []
+    /// Times the "added to the cart" toast came up in this run, and whether it showed on the last screen read.
+    private var cartAdds = 0, cartToastShown = false
+    static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let text = AppNames.hans(rows.joined().map(\.text).joined())
+        return ["加购成功", "已加入购物车", "成功加入购物车", "加入购物车成功", "已加购", "已添加到购物车"].contains { text.contains($0) }
+    }
+    static func cartNote(_ n: Int) -> String {
+        "购物车：第\(n)次看到加购成功的提示，这一件已经加进去了（这次任务一共加了\(n)次）。同一件不要再点加入购物车，每点一次就多一件；目标要几件就只加几次。"
+    }
+
+    /// A text already sent that this one is: the same, or (4 characters or more) inside it or holding it.
+    static func sameMessage(_ typed: String, in sent: Set<String>) -> String? {
+        guard !typed.isEmpty else { return nil }
+        if sent.contains(typed) { return typed }
+        return sent.first { s in min(s.count, typed.count) >= 4 && (s.contains(typed) || typed.contains(s)) }
+    }
+
+    static func sentNote(_ text: String, to place: String?) -> String {
+        "已在" + (place.map { "“\($0)”" } ?? "聊天里") + "发出：" + String(text.prefix(80))
+    }
     private var sendIsMessage = false
     /// How many notes there were when the current part began, and the last part whose "done" was sent back once for
     /// having nothing written down (B8).
@@ -355,6 +380,7 @@ extension Pointer: Gestures {}
     }
 
     private func record(_ shot: Data? = nil, _ step: JObject) {
+        if ["blocked", "refused", "loop"].contains(step["action"]?.str ?? "") { refusalsNoProgress += 1 }
         if let shot { shots[steps.count] = shot }
         steps.append(JObject([("t", .num(now())), ("shot", .bool(shot != nil))]).merging(step))
         trace?.write(kind: "step", step)
@@ -616,6 +642,17 @@ extension Pointer: Gestures {}
 
     /// The app in front by what this run did: the last one it opened, unless it went Home or opened one by its icon
     /// since; with no open at all, the one it started in. nil: not known.
+    /// Apps that send nothing to anyone: what is typed there stays on the phone.
+    static let localApps = ["备忘录", "notes", "提醒事项", "reminders", "日历", "行事历", "calendar", "计算器", "calculator",
+                            "时钟", "clock", "天气", "weather", "设置", "设定", "settings", "文件", "档案", "files", "股市", "stocks",
+                            "计算机"]
+
+    static func inLocalApp(_ steps: [JObject]) -> Bool {
+        guard let app = appInFront(steps, startedIn: nil) else { return false }
+        let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
+        return localApps.contains { name == $0 || name.hasPrefix($0) }
+    }
+
     static func appInFront(_ steps: [JObject], startedIn: String?) -> String? {
         for s in steps.reversed() {
             switch s["action"]?.str {
@@ -629,10 +666,10 @@ extension Pointer: Gestures {}
     }
 
     static func stillInAppReason(_ app: String) -> String {
-        "Refused: this run is still in \(app); it has not left it (no other app opened, no Home), so there is nothing to "
-            + "open. In WeChat a picture or a video opened from a chat shows full screen in WeChat's own viewer, and a "
-            + "screenshot of another app is still only a picture: read what is on the screen now. One tap in the middle of "
-            + "a picture closes it and you are back in the chat."
+        // 125 in 测试群 11-12: the model sees a step's first 300 characters (recentActions), and how to close the picture
+        // came after them. Short, the way out first.
+        "Refused: still in \(app), never left it: nothing to open. This is a picture or video \(app) shows full screen "
+            + "(a screenshot of another app is only a picture). Note what you need from it, then drag it down to close it."
     }
 
     /// Whether a text sent before would go where it went already: the title read now among those it was sent to. No
@@ -788,11 +825,22 @@ extension Pointer: Gestures {}
     /// "先發「k02第一句」，再發「k02第二句」" asked approval for the first only; the second, read as words the goal names
     /// that are not its message (like a chat's name), went out unasked.
     static func messageParts(_ task: String) -> [String] {
-        let quoted = (try? NSRegularExpression(pattern: #"[「“"]([^」”"]+)[」”"]"#))?
-            .matches(in: task, range: NSRange(task.startIndex..., in: task))
-            .compactMap { Range($0.range(at: 1), in: task).map { String(task[$0]) } } ?? []
-        return quoted.isEmpty ? messagePart(task).map { [$0] } ?? [] : quoted
+        guard let re = try? NSRegularExpression(pattern: #"[「“"]([^」”"]+)[」”"]"#) else { return [] }
+        let ns = task as NSString
+        let matches = re.matches(in: task, range: NSRange(location: 0, length: ns.length))
+        if matches.isEmpty { return messagePart(task).map { [$0] } ?? [] }
+        // 125 stress test 11-12 (t06): every quoted part was a message, so “蓝牙耳机” searched in 淘宝 asked for approval
+        // as one, and then could not be typed into 拼多多's search, 110 times. A quoted part is a message only when a way
+        // of saying "send" comes right before it (发“…”, 内容是“…”, 回复“…”), not 搜索“…”.
+        return matches.filter { m in
+            let start = max(0, m.range.location - 6)
+            let before = ns.substring(with: NSRange(location: start, length: m.range.location - start))
+            return sayWords.contains { before.contains($0) }
+        }.map { ns.substring(with: $0.range(at: 1)) }
     }
+
+    static let sayWords = ["发", "發", "说", "說", "回复", "回覆", "留言", "评论", "評論", "写", "寫", "讯息", "訊息", "消息",
+                           "内容", "內容", "话", "話"]
 
     /// The words a goal gives as the message: after a colon, or in quotes (nil: none given).
     static func messagePart(_ task: String) -> String? {
@@ -1070,7 +1118,8 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
-        (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft) = (0, [], false, 2)
+        (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft, refusalsNoProgress) = (0, [], false, 2, 0)
+        (cartAdds, cartToastShown) = (0, false)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -1115,6 +1164,11 @@ extension Pointer: Gestures {}
                     failures = 0
                     blindLooks = 0
                     offlineWaits = 0
+                    if refusalsNoProgress >= Self.refusalLimit {
+                        record(nil, ["action": .str("fail"),
+                                     "reason": .str("stuck: refused \(refusalsNoProgress) times and nothing got on")])
+                        return finish()
+                    }
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
@@ -1323,7 +1377,7 @@ extension Pointer: Gestures {}
         for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
             if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) {
                 notes.append(text)
-                stallsNoProgress = 0
+                (stallsNoProgress, refusalsNoProgress) = (0, 0)
                 gotOn()
             }
             record(planned.shot, planned.act)
@@ -1356,9 +1410,12 @@ extension Pointer: Gestures {}
                 let reopens = what == "open"
                     && AppNames.variants(pic).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? ""))
                 if what == "home" || reopens {
-                    DebugLog.write("picture: \(what) right after the still-in-\(pic) refusal; tapping the picture's middle instead")
-                    act = ["action": .str("tap"), "x": .num(500), "y": .num(500), "picture_close": .bool(true),
-                           "thought": .str("A picture shown full screen in \(pic): one tap in its middle closes it.")]
+                    // 125 in 测试群 11-12: a tap in the middle came after the model had closed the picture itself, landed
+                    // on another screenshot in the chat and opened it. A drag down closes a picture and only scrolls a chat.
+                    DebugLog.write("picture: \(what) right after the still-in-\(pic) refusal; dragging the picture down instead")
+                    act = ["action": .str("swipe"), "x1": .num(500), "y1": .num(350), "x2": .num(500), "y2": .num(800),
+                           "picture_close": .bool(true),
+                           "thought": .str("A picture shown full screen in \(pic): dragging it down closes it.")]
                 }
             }
             if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
@@ -1589,11 +1646,13 @@ extension Pointer: Gestures {}
                 // another chat, read off the title (not read: refused).
                 // 124 over the cloud 11-12 (g05): 雨伞 searched in 淘宝 was "sent" by its Return, and typing it into 拼多多's
                 // search box was refused ~290 times. Only a message sent into a chat is never typed again.
+                // 125 stress test 11-12 (u05): "125压力测试艾特" went out, then "@蓝海乐 125压力测试艾特" was typed and went
+                // out too: the same message with more around it is the same message.
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
-                let sentAsMessage = messageSent.contains(typedNow)
-                    || (sentTexts.contains(typedNow) && Self.inChatApp(steps, task: task))
-                if name == "type", sentAsMessage,
-                   keyboardGuard || Self.samePlace(sentPlaces[typedNow] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
+                let sentMatch = Self.sameMessage(typedNow, in: messageSent)
+                    ?? (Self.inChatApp(steps, task: task) ? Self.sameMessage(typedNow, in: sentTexts) : nil)
+                if name == "type", let sent = sentMatch,
+                   keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
                     return false
                 }
@@ -1654,7 +1713,12 @@ extension Pointer: Gestures {}
                 // 测试群, then NO, then OK again for the same screen; and it blocked a search's Return in 拼多多. Only a message
                 // is checked, and when the goal names a group the title at the top decides, read off the screen.
                 let sending = unsent != nil && (Self.sends(act) || act["learned"] == .str("send"))
-                let isMessage = sending && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
+                // 125 stress test 11-12 (s03): a new note's first line "压力测试比价" (part of the goal's message
+                // "125压力测试比价完成") and then its body were each taken for that message by their Return in 備忘錄,
+                // "about to send into the wrong place", and the run failed. In an app that sends nothing to anyone,
+                // Return is a new line or a search.
+                let isMessage = sending && !Self.inLocalApp(steps)
+                    && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
                 let sendFrame = screen?.frame ?? planned.shot
                 var seenTitle = isMessage ? sendFrame.flatMap { WatchReport.navigationTitle(in: $0) } : nil
                 if isMessage, seenTitle == nil {
@@ -1765,7 +1829,18 @@ extension Pointer: Gestures {}
                         sendTap = (CGPoint(x: x / 1000, y: y / 1000), before)  // learned at the end if the run is done
                     }
                     sentTexts.insert(Self.typedKey(text)); unsent = nil; pendingInput = nil; quietSinceSend = 0
-                    if sendIsMessage { messageSent.insert(Self.typedKey(text)) }
+                    if sendIsMessage {
+                        messageSent.insert(Self.typedKey(text))
+                        // 125 over the cloud 11-12 (k03): both messages went out, then "look at both groups once more"
+                        // went back and forth with nothing written down, the loop guard ended it, and what it found
+                        // said nothing of the sends. A message sent is written down, where it went and what it said.
+                        let line = Self.sentNote(text, to: approvalPlace)
+                        if !notes.contains(line) {
+                            notes.append(line)
+                            (stallsNoProgress, refusalsNoProgress) = (0, 0)
+                            gotOn()
+                        }
+                    }
                     sendIsMessage = false
                     if let place = approvalPlace { sentPlaces[Self.typedKey(text), default: []].insert(place) }
                     justSent = text
@@ -2254,6 +2329,7 @@ extension Pointer: Gestures {}
     - The answer reports something from an app the steps never opened.
     - The answer says something was sent or saved, the screen is where it would show, and it does not show.
     - The goal names no city or place and the answer is for a city an app kept from before, not the phone's own location.
+    - A cart or order on the screen holds more of an item than the goal asked for (×3 for one cup), or the answer leaves out how many.
     The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording, nor the answer's language.
     A note, memo or document has no separate title field: its first line is its title.
     In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
@@ -2355,7 +2431,7 @@ extension Pointer: Gestures {}
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
         gotOn()
-        stallsNoProgress = 0
+        (stallsNoProgress, refusalsNoProgress) = (0, 0)
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
@@ -2494,6 +2570,17 @@ extension Pointer: Gestures {}
         } else {
             readRows = []
         }
+        // 125 stress test 11-12 (s01): 加入购物车 was tapped again and again and the cart held ×5 of a cup the goal asked
+        // for once. Each time the "added" toast comes up it is written down, and the model is told at once.
+        let cartToast = Self.addedToCart(readRows)
+        if cartToast, !cartToastShown {
+            cartAdds += 1
+            let line = Self.cartNote(cartAdds)
+            notes.append(line)
+            gotOn()
+            prompt += "\n\n" + line
+        }
+        cartToastShown = cartToast
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }

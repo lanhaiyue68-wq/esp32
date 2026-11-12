@@ -114,4 +114,71 @@ import XCTest
         XCTAssertTrue(WatchSettings.openTask(r).contains("不要凭位置记忆去点"))
         XCTAssertTrue(WatchSettings.openTask(r).contains("不要再点同一个位置"))
     }
+    /// k03 on 125: both messages went out, then the run went back and forth between the groups with nothing written down.
+    func testAMessageSentIsWrittenDown() {
+        XCTAssertEqual(AgentLoop.sentNote("125多任务开始", to: "测试群"), "已在“测试群”发出：125多任务开始")
+        XCTAssertEqual(AgentLoop.sentNote("好的", to: nil), "已在聊天里发出：好的")
+    }
+    /// k07 on 125 (and 124's h07): "推荐页第一个视频" took the way of "搜索“早啊新闻”" and typed 早啊新闻.
+    func testAWayThatTypedTheOldGoalsWordsIsNotFollowedWithoutThem() {
+        let routes = RouteBook(file: nil)
+        routes.storeRecipe(task: "在抖音搜索“早啊新闻”，打开第一个视频，从头播放，用 listen 听它讲了什么，给我完整的口播文案。不要点赞，不要评论",
+                           lines: ["open 抖音", "tap 927 87", "type “早啊新闻”", "tap “搜索”", "listen"])
+        XCTAssertNil(routes.recipe(for: "在抖音推荐页打开第一个视频，从头播放，用 listen 听它讲了什么，给我口播文案。不要点赞，不要评论，不要关注"))
+        let other = routes.recipe(for: "在抖音搜索“新闻联播”，打开第一个视频，从头播放，用 listen 听它讲了什么，给我完整的口播文案。不要点赞，不要评论")
+        XCTAssertEqual(other?.lines[2], "type “\(RouteBook.otherText)”")
+        XCTAssertEqual(RouteBook.typedTexts(in: ["open 抖音", "type “早啊新闻”"]), ["早啊新闻"])
+    }
+    /// User 11-12 on 125: "不能是別人發的語音…必須是白名單裡我發的".
+    func testOnlyTheOwnersVoiceIsAnswered() {
+        var r = WatchSettings.Rules()
+        r.senders = ["主人蓝海乐"]
+        r.myNames = ["蓝"]
+        r.passphrases = ["天王盖地虎"]
+        func voice(_ sender: String, group: Bool = true, _ words: String = "帮我查一下北京现在几度") -> ReadMessage {
+            ReadMessage(chat: group ? "测试群" : sender, group: group, sender: sender, text: "[语音] " + words)
+        }
+        XCTAssertTrue(WatchSettings.fires(voice("主人蓝海乐"), r))
+        XCTAssertFalse(WatchSettings.fires(voice("张三"), r), "someone else's voice in the group")
+        XCTAssertFalse(WatchSettings.fires(voice("张三", "天王盖地虎 帮我查一下"), r), "a passphrase spoken by someone else")
+        XCTAssertFalse(WatchSettings.fires(voice("主人蓝海乐的朋友"), r), "a name that only holds the owner's")
+        XCTAssertFalse(WatchSettings.fires(voice("张三", group: false), r), "a private chat with someone else")
+        r.senders = []
+        XCTAssertFalse(WatchSettings.fires(voice("主人蓝海乐"), r), "no whitelist: nobody's voice")
+    }
+    /// Stress test on 125 (s03): a new note's first line, part of the goal's message, was taken for that message.
+    func testReturnInAnAppThatSendsNothingIsNotAMessage() {
+        XCTAssertTrue(AgentLoop.inLocalApp([["action": .str("open"), "app": .str("備忘錄")]]))
+        XCTAssertTrue(AgentLoop.inLocalApp([["action": .str("open"), "app": .str("设置")]]))
+        XCTAssertFalse(AgentLoop.inLocalApp([["action": .str("open"), "app": .str("微信")]]))
+        XCTAssertFalse(AgentLoop.inLocalApp([["action": .str("open"), "app": .str("小红书")]]), "a comment there goes out")
+        XCTAssertFalse(AgentLoop.inLocalApp([["action": .str("open"), "app": .str("備忘錄")], ["action": .str("home")]]))
+    }
+
+    /// Stress test on 125 (s01): 加入购物车 again and again, ×5 in the cart.
+    func testTheAddedToCartToastIsSeen() {
+        func row(_ t: String) -> [CandidatePicker.Piece] { [CandidatePicker.Piece(text: t, box: CGRect(x: 0.3, y: 0.5, width: 0.4, height: 0.03))] }
+        XCTAssertTrue(AgentLoop.addedToCart([row("加購成功")]))
+        XCTAssertTrue(AgentLoop.addedToCart([row("已加入购物车")]))
+        XCTAssertFalse(AgentLoop.addedToCart([row("加入购物车")]), "the button itself")
+        XCTAssertTrue(AgentLoop.cartNote(2).contains("一共加了2次"))
+    }
+    /// Stress test on 125 (t06): “蓝牙耳机” searched in 淘宝 was taken for the goal's message.
+    func testOnlyAQuoteAfterSendIsAMessage() {
+        let task = "1. 在淘宝搜索“蓝牙耳机”；2. 新建一条备忘录，第一行写“第二轮压力测试”；3. 在测试群发“125压力测试第二轮完成”"
+        XCTAssertEqual(AgentLoop.messageParts(task), ["第二轮压力测试", "125压力测试第二轮完成"])
+        XCTAssertFalse(AgentLoop.needsApproval("蓝牙耳机", task: task, chatApp: false))
+        XCTAssertTrue(AgentLoop.needsApproval("125压力测试第二轮完成", task: task, chatApp: true))
+        XCTAssertEqual(AgentLoop.messageParts("在测试群先發「k02第一句」，再發「k02第二句」"), ["k02第一句", "k02第二句"])
+        XCTAssertEqual(AgentLoop.messageParts("在抖音搜索“深圳美食”"), [], "a search only")
+        XCTAssertEqual(AgentLoop.refusalLimit, 25)
+    }
+    /// Stress test on 125 (u05): "@蓝海乐 125压力测试艾特" went out twice.
+    func testTheSameMessageWithMoreAroundItIsTheSame() {
+        let sent: Set<String> = ["125压力测试艾特"]
+        XCTAssertEqual(AgentLoop.sameMessage("@蓝海乐 125压力测试艾特", in: sent), "125压力测试艾特")
+        XCTAssertEqual(AgentLoop.sameMessage("125压力测试艾特", in: sent), "125压力测试艾特")
+        XCTAssertNil(AgentLoop.sameMessage("第三轮丙", in: ["第三轮甲"]))
+        XCTAssertNil(AgentLoop.sameMessage("好的，明天见", in: ["好的"]), "too short to tell")
+    }
 }

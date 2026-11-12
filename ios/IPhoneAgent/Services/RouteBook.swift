@@ -75,10 +75,18 @@ import Foundation
             let apps = recipe.lines.filter { $0.hasPrefix("open ") }.map { String($0.dropFirst(5)).lowercased() }
             guard apps.allSatisfy({ !named.contains($0) || wanted.contains($0) }) else { continue }
             let elsewhere = Self.names(in: recipe.lines).filter { !apps.contains($0) && named.contains($0) && !wanted.contains($0) }
-            guard !elsewhere.isEmpty else { return recipe }
+            // 125 over the cloud 11-12 (k07, and 124's h07): "在抖音推荐页打开第一个视频…" took the way of "在抖音搜索
+            // “早啊新闻”…" and typed 早啊新闻: a 9-minute newscast instead of the first video. A text the old goal gave
+            // and this one does not is the old task's own: a goal with nothing to type is not done that way; another
+            // one types what it gives itself.
+            let stale = Self.typedTexts(in: recipe.lines).filter { named.contains($0) && !wanted.contains($0) }
+            if !stale.isEmpty, !Self.typingWords.contains(where: { wanted.contains($0) }) { continue }
+            guard !elsewhere.isEmpty || !stale.isEmpty else { return recipe }
             var adapted = recipe
             adapted.lines = recipe.lines.map { line in
-                elsewhere.reduce(line) { $0.replacingOccurrences(of: $1, with: Self.otherPlace, options: .caseInsensitive) }
+                let moved = elsewhere.reduce(line) { $0.replacingOccurrences(of: $1, with: Self.otherPlace, options: .caseInsensitive) }
+                guard moved.hasPrefix("type ") else { return moved }
+                return stale.reduce(moved) { $0.replacingOccurrences(of: $1, with: Self.otherText, options: .caseInsensitive) }
             }
             return adapted
         }
@@ -86,6 +94,15 @@ import Foundation
     }
 
     static let otherPlace = "[the one this goal names]"
+    static let otherText = "[the text this goal gives]"
+    static let typingWords = ["搜索", "搜尋", "搜", "输入", "輸入", "发", "發", "打字", "search", "type"]
+
+    /// The texts a recipe types ("type “早啊新闻”"), lowercased, without their quotes.
+    nonisolated static func typedTexts(in lines: [String]) -> [String] {
+        lines.filter { $0.hasPrefix("type ") }.map {
+            String($0.dropFirst(5)).trimmingCharacters(in: CharacterSet(charactersIn: " “”\"'「」")).lowercased()
+        }.filter { !$0.isEmpty }
+    }
 
     func storeRecipe(task: String, lines: [String]) {
         guard enabled, !lines.isEmpty else { return }

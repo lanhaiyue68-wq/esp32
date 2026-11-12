@@ -183,7 +183,8 @@ import XCTest
         XCTAssertNil(AgentLoop.appInFront([tap, ["action": .str("home")]], startedIn: "微信"))
         XCTAssertEqual(AgentLoop.appInFront([["action": .str("open"), "app": .str("天气")], tap], startedIn: "微信"), "天气")
         XCTAssertNil(AgentLoop.appInFront([tap], startedIn: nil))
-        XCTAssertTrue(AgentLoop.stillInAppReason("微信").contains("One tap in the middle"))
+        XCTAssertTrue(AgentLoop.stillInAppReason("微信").contains("drag it down"))
+        XCTAssertLessThan(AgentLoop.stillInAppReason("微信").count, 220, "the model sees 300 characters of a step")
     }
 
     /// User 11-12: a voice message is written out, read only.
