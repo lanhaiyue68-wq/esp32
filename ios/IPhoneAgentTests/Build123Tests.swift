@@ -13,6 +13,34 @@ import XCTest
         XCTAssertEqual(AgentLoop.stepBudget(plan: fifteen, base: 40), 240, "at most 240")
     }
 
+    /// 123 regression: a goal of nine parts on its remembered way (no numbered plan) had the base steps.
+    func testTheGoalsOwnPartsCountToo() {
+        let goal = "帮我做这九件事：1. 在拼多多搜索数据线，记下第一个商品的价格¥13.5；2. 在淘宝搜索电动牙刷；3. 看视频号；"
+            + "4. 看验证群；5. 搜备忘录；6. 看日历；7. 看蓝牙；8. 查北京温度；9. 整理成一段话告诉我"
+        XCTAssertEqual(AgentLoop.goalParts(goal), 9)
+        XCTAssertEqual(AgentLoop.stepBudget(plan: "Work from the CURRENT screen", base: 55, goal: goal), 180)
+        XCTAssertEqual(AgentLoop.goalParts("价格 13.5 元，3. 不是第一件"), 0, "numbered from 1 only")
+    }
+
+    /// 123 regression: a note with a tap run on in one DO line.
+    func testANoteWithAnActionRunOnIsTwoActions() throws {
+        let acts = try Actions.parseActions("THINK: 记下。\nDO: note 广州今天最高温26°; tap 857 938")
+        XCTAssertEqual(acts.count, 2)
+        XCTAssertEqual(acts[0]["text"]?.str, "广州今天最高温26°")
+        XCTAssertEqual(acts[1]["action"]?.str, "tap")
+        XCTAssertEqual(acts[1]["x"]?.int, 857)
+        XCTAssertEqual(try Actions.parseActions("DO: note 价格¥13.5；已拼128万件").count, 1, "a note's own ；stays")
+    }
+
+    /// 123 regression: the same text went into 验证群 twice.
+    func testTheSameTextIsNotSentTwiceToOneChat() {
+        XCTAssertTrue(AgentLoop.samePlace(["验证群(3)"], "验证群"))
+        XCTAssertFalse(AgentLoop.samePlace(["验证群(3)"], "测试群"), "another chat may get it")
+        XCTAssertTrue(AgentLoop.samePlace(["验证群"], nil), "title not read: refused")
+        XCTAssertTrue(AgentLoop.samePlace([], "测试群"), "where it went not read: refused")
+        XCTAssertEqual(CloudBridge.failureWords("LLM HTTP 403: {\"error\":{\"code\":\"AccountOverdueError\"}}"), "模型服务账户欠费，请先充值再试")
+    }
+
     /// B7: what was written down goes back with a failure.
     func testAFailureCarriesWhatWasFound() {
         let steps: [JObject] = [

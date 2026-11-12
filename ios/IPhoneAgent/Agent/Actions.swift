@@ -97,13 +97,22 @@ enum Actions {
         return out.joined(separator: "\n")
     }
 
+    /// 123 over the cloud 11-12: "note 广州今天最高温26°; tap 857 938" on one DO line kept the tap in the note (the answer
+    /// read "广州今天最高温26°; tap 857 938") and the tap never happened. An action run on after a note is its own.
+    static func splitNote(_ line: String) -> [String] {
+        guard line.range(of: #"^\s*note\s"#, options: [.regularExpression, .caseInsensitive]) != nil,
+              let cut = line.range(of: #"\s*[;；]\s*(?=(tap|swipe|type|open|key|press|hold|back|home|wait|listen|done|fail|replan|path|circle)\b)"#,
+                                   options: [.regularExpression, .caseInsensitive]) else { return [line] }
+        return [String(line[..<cut.lowerBound]), String(line[cut.upperBound...])]
+    }
+
     static func parseActions(_ text: String) throws -> [JObject] {
         // Some models join THINK and DO on one line (log24). Accept only that explicit labelled form.
         let normalized = joinedAnswers(text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
                                                                  with: "$1\n$2", options: .regularExpression))
         let thought = firstGroup(#"^\s*THINK\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
         let zh = firstGroup(#"^\s*ZH\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
-        var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: normalized).map(parseCommand).prefix(6).map { $0 }
+        var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: normalized).flatMap(splitNote).map(parseCommand).prefix(6).map { $0 }
         guard !acts.isEmpty else { throw ParseError(message: "no DO line in reply: \(text.prefix(200))") }
         acts[0] = JObject([("thought", .str(thought ?? "")), ("thought_zh", .str(zh ?? ""))]).merging(acts[0])
         return acts

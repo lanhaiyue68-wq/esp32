@@ -290,6 +290,8 @@ import Foundation
             ("claimed done", "几次说做完了，其实没做到"), ("lost the phone screen", "看不到手机画面（屏幕共享断了）"),
             ("is not on this phone", "这台手机没有装这个 App"), ("not_approved", "消息没有获批准，没有发送"),
             ("stopped", "任务被停止了"), ("timed out", "超时了还没做完"),
+            // 123 over the cloud 11-12: Doubao's account ran out ("LLM HTTP 403: AccountOverdueError").
+            ("accountoverdue", "模型服务账户欠费，请先充值再试"),
         ]
         if let hit = known.first(where: { r.lowercased().contains($0.0) }) { return hit.1 }
         if r.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) { return r }

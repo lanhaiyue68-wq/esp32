@@ -233,6 +233,8 @@ extension Pointer: Gestures {}
     /// WeChat watch: text this run typed and then sent (Return, or a tap on 发送 at the bottom right). Typing it again
     /// is refused: logs28's phone task sent "你好" to 测试群 twice and was typing it a third time.
     private var sentTexts: Set<String> = []
+    /// The chat titles each sent text went to (read at the send; none when the title did not read).
+    private var sentPlaces: [String: Set<String>] = [:]
     private var sendCorrections = 0
     /// What this run sent, for a run that ended without "done" (build 67: an @ went out, the model kept looking until
     /// the step limit, and the owner was told "这个我没弄成").
@@ -533,6 +535,26 @@ extension Pointer: Gestures {}
     }
 
     static let pastePlaceholder = "（粘贴的内容）"
+
+    /// Whether a text sent before would go where it went already: the title read now among those it was sent to. No
+    /// title now, or none read at those sends: taken as the same chat (refused rather than sent twice).
+    static func samePlace(_ places: Set<String>, _ title: String?) -> Bool {
+        guard let title, !places.isEmpty else { return true }
+        return places.contains { WatchReport.sameChatTitle($0, title) }
+    }
+
+    /// How many numbered parts a goal written on one line has ("1. …；2. …；3. …"), counted 1, 2, 3… in order (a price
+    /// "13.5" or a time is not a part). 123 over the cloud 11-12: a goal of nine parts started on its remembered way, a
+    /// plan with no numbered lines, and had the base 55 steps instead of 180.
+    static func goalParts(_ goal: String) -> Int {
+        guard let re = try? NSRegularExpression(pattern: #"(?:^|[：:；;，,。\n])\s*(\d{1,2})\s*[.)、．]"#) else { return 0 }
+        let ns = goal as NSString
+        let numbers = re.matches(in: goal, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
+        var n = 0
+        for k in numbers where k == n + 1 { n = k }
+        return n
+    }
 
     /// B4 (122 over the cloud 11-11): the clipboard cannot be read from the background, and the approval showed only
     /// "（粘贴的内容）". What the paste put in is read off the screen: the words after it that were nowhere before it
@@ -941,6 +963,7 @@ extension Pointer: Gestures {}
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame) = (0, -1, nil)
+        sentPlaces = [:]
         approvedTexts = []
         checksLeft = 2
         rejectedAnswer = nil
@@ -969,7 +992,7 @@ extension Pointer: Gestures {}
             } else {
                 try await replan()
             }
-            let budget = Self.stepBudget(plan: plan, base: stepLimit ?? maxSteps)
+            let budget = Self.stepBudget(plan: plan, base: stepLimit ?? maxSteps, goal: presetPlan.isEmpty ? task : "")
             if budget > (stepLimit ?? maxSteps) { DebugLog.write("run: \(budget) steps for a plan of several parts") }
             for _ in 0..<budget {
                 do {
@@ -1404,7 +1427,12 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])  // never typed
                     return false
                 }
-                if name == "type", keyboardGuard, sentTexts.contains(Self.typedKey(act["text"]?.str ?? "")) {
+                // 123 over the cloud 11-12: the sorted temperatures went into 验证群 twice; this check was the watch's
+                // only, and the text, approved once, was not asked about again. Every run: the same text again only into
+                // another chat, read off the title (not read: refused).
+                let typedNow = Self.typedKey(act["text"]?.str ?? "")
+                if name == "type", sentTexts.contains(typedNow),
+                   keyboardGuard || Self.samePlace(sentPlaces[typedNow] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
                     return false
                 }
@@ -1575,6 +1603,7 @@ extension Pointer: Gestures {}
                         sendTap = (CGPoint(x: x / 1000, y: y / 1000), before)  // learned at the end if the run is done
                     }
                     sentTexts.insert(Self.typedKey(text)); unsent = nil; pendingInput = nil; quietSinceSend = 0
+                    if let place = approvalPlace { sentPlaces[Self.typedKey(text), default: []].insert(place) }
                     justSent = text
                 }
                 lastActed = now()
@@ -1892,8 +1921,8 @@ extension Pointer: Gestures {}
     /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
     /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 240: 122 over the cloud 11-12, goals
     /// of 9 to 15 parts ran out at 100 (4 of 5 failures of the big ones), each part taking 10 to 15 steps.
-    static func stepBudget(plan: String, base: Int) -> Int {
-        let parts = Self.parts(of: plan).count
+    static func stepBudget(plan: String, base: Int, goal: String = "") -> Int {
+        let parts = max(Self.parts(of: plan).count, goalParts(goal))
         guard parts >= 2 else { return base }
         return max(base, min(parts * 20, 240))
     }
