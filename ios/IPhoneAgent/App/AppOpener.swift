@@ -46,6 +46,13 @@ enum AppPlaces {
         UserDefaults.standard.set(misses, forKey: missKey)
     }
     static var count: Int { all.count }
+
+    /// When the pages were last read again for an app no page knew (see AppOpener.openAppNow).
+    private static let readAgainKey = "appPlacesReadAgainAtV1"
+    static func mayReadAgain(now: Date = Date()) -> Bool {
+        now.timeIntervalSince1970 - UserDefaults.standard.double(forKey: readAgainKey) >= 3 * 86_400
+    }
+    static func readAgainNow(now: Date = Date()) { UserDefaults.standard.set(now.timeIntervalSince1970, forKey: readAgainKey) }
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: mappedKey)
@@ -335,6 +342,16 @@ extension AppModel {
                 DebugLog.write("open \(name): not on page \(target + 1) this time; Search this time, the page is kept")
             }
             try await pointer.goHome()
+        }
+        // User 11-12: "爲什麽現在打開抖音還是搜索，爲什麽不是點桌面". The pages were read once (11-09); 抖音 was on none read
+        // then and went through Search every time (13–26 s, against ~6 s by its icon), though it was on a page. An app
+        // Search opens and no page knows makes the pages be read again, at most once in three days.
+        if AppPlaces.page(of: name) == nil, AppPlaces.mapped, AppPlaces.looksLikeHome(rows), AppPlaces.mayReadAgain() {
+            AppPlaces.readAgainNow()
+            DebugLog.write("open \(name): on no page read so far; reading the Home Screen pages again")
+            try await mapHomeScreen()
+            try await pointer.goHome()
+            if AppPlaces.page(of: name) != nil { return try await openAppNow(name) }
         }
         return try await bySearch(name)
     }
