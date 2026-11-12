@@ -129,6 +129,10 @@ extension Pointer: Gestures {}
     private var notesAtPart = 0, emptyPartRefused = -1
     /// The screen just before the last paste (B4: what the paste put in is read against it).
     private var pasteFrame: Data?
+    /// Opens of the app the run is already in, refused (once a run).
+    private var sameAppRefused = 0
+    /// The app a run is in when it starts without opening one: a task the WeChat watch gives starts in WeChat.
+    private var startApp: String? { task.contains("微信会话") ? "微信" : nil }
     /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
     /// by the planner from the start and its way remembered; from then on the executor follows that way, and the planner
     /// comes only when it stalls. Fixed plans (watching WeChat) are not tasks of this kind.
@@ -576,6 +580,27 @@ extension Pointer: Gestures {}
 
     static let pastePlaceholder = "（粘贴的内容）"
 
+    /// The app in front by what this run did: the last one it opened, unless it went Home or opened one by its icon
+    /// since; with no open at all, the one it started in. nil: not known.
+    static func appInFront(_ steps: [JObject], startedIn: String?) -> String? {
+        for s in steps.reversed() {
+            switch s["action"]?.str {
+            case "open": return s["app"]?.str
+            case "home": return nil
+            case "tap" where opensByIcon(s): return nil
+            default: continue
+            }
+        }
+        return startedIn
+    }
+
+    static func stillInAppReason(_ app: String) -> String {
+        "Refused: this run is still in \(app); it has not left it (no other app opened, no Home), so there is nothing to "
+            + "open. In WeChat a picture or a video opened from a chat shows full screen in WeChat's own viewer, and a "
+            + "screenshot of another app is still only a picture: read what is on the screen now. One tap in the middle of "
+            + "a picture closes it and you are back in the chat."
+    }
+
     /// Whether a text sent before would go where it went already: the title read now among those it was sent to. No
     /// title now, or none read at those sends: taken as the same chat (refused rather than sent twice).
     static func samePlace(_ places: Set<String>, _ title: String?) -> Bool {
@@ -1002,7 +1027,7 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
-        (notesAtPart, emptyPartRefused, pasteFrame) = (0, -1, nil)
+        (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused) = (0, -1, nil, 0)
         sentPlaces = [:]
         approvedTexts = []
         checksLeft = 2
@@ -1265,6 +1290,15 @@ extension Pointer: Gestures {}
             if act["action"]?.str == "swipe" { act = Self.safeSwipe(act, after: steps) }
             // Over USB 11-10 one reply opened WeChat twice, 18 s each.
             if i > 0, act["action"]?.str == "open", acts[i - 1].act["action"]?.str == "open", acts[i - 1].act["app"] == act["app"] { continue }
+            // 123 on the phone 11-12 (W2 again): a Weather screenshot opened full screen from 测试群 was taken for the
+            // Weather app, and WeChat was "opened" twice through Search (13 s, 19 s), then the run went round in circles.
+            // A run that has not left the app it is in has nothing to open: refused once, saying what it looks at.
+            if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
+               AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")) {
+                sameAppRefused += 1
+                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.stillInAppReason(inApp))])
+                return false
+            }
             let ourKeyboard = ourKeyboardOnScreen?() == true
             if ourKeyboard ? Self.onOurReturnKey(act) : (Self.onReturnKey(act) && screen?.frame.map({ CandidatePicker.keyboardUp(in: $0) }) == true) {
                 // The keyboard's bottom-right key (发送 / 换行 / 前往) is Return, which the board's keyboard presses

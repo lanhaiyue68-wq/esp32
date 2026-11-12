@@ -176,6 +176,16 @@ import XCTest
         XCTAssertEqual(WatchSettings.keptPromise((reply: "你好呀", task: ""), look: true, asked: ["在吗"]).task, "")
     }
 
+    /// 123 watch test (W2 again): a screenshot opened in WeChat was taken for the app, WeChat opened twice by Search.
+    func testAPictureInWeChatIsNotAnotherApp() {
+        let tap: JObject = ["action": .str("tap"), "x": .int(311), "y": .int(284)]
+        XCTAssertEqual(AgentLoop.appInFront([tap], startedIn: "微信"), "微信")
+        XCTAssertNil(AgentLoop.appInFront([tap, ["action": .str("home")]], startedIn: "微信"))
+        XCTAssertEqual(AgentLoop.appInFront([["action": .str("open"), "app": .str("天气")], tap], startedIn: "微信"), "天气")
+        XCTAssertNil(AgentLoop.appInFront([tap], startedIn: nil))
+        XCTAssertTrue(AgentLoop.stillInAppReason("微信").contains("One tap in the middle"))
+    }
+
     /// User 11-12: a voice message is written out, read only.
     func testAVoiceMessageIsWrittenOut() throws {
         let task = try XCTUnwrap(WatchSettings.lookDefault("[语音] 5\""))
