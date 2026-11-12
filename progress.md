@@ -604,3 +604,9 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 - Results on build107: note, brightness, web, timer each twice, all done; AMap 174 s, WeChat to the test group 259 s (bubble seen in the frame); Xiaohongshu cut by the limit, Meituan needs identity verification, Douyin failed on Home (fixed here).
 - Added: every Home Screen page read once and every app's page and spot kept (user's idea), opened by page; Search only for apps on no page; recipes say each gesture's purpose; /ocr route.
 - CI lanhaiyue-web 42507304259: 568 tests 0 failures. Desktop Lan-Agent-build108-unsigned.ipa (SHA256 5ea739181c069bd73840caa144f2c135d4d30ed694e5efb2c33162028f0b32f8); build107 to the Recycle Bin.
+
+## 2026-11-12 builds 123, 124 (and 125 local)
+- 123 (build75 run 43127228524) and 124 (run 43137255019) built first time, ~4-6 min each: unit tests now run only with [tests] in the commit message (GitHub quota ~10%).
+- 123 on the phone: tap tolerance confirmed (2.06 -> 1.15 s a tap, 0 misses); regressions found and fixed in 124: a second send of one text into one chat, made-up results from apps never opened, steps not widened on remembered ways, a note swallowing the next action, a time label read into the chat title (the watch stopped itself), weather answered off the chat, a picture in WeChat taken for an app; voice messages are written out by WeChat (the owner's are commands, others' kept).
+- 125 (local, not pushed by the user's word): 群收录 (docs/spec-group-archive-125.md, protocol section 6).
+- Desktop: Lan-Agent-build124-unsigned.ipa (SHA256 4c3c9e14214a62eda62eae1559ab810bca9dc361bd8d8e779a02c2af2db63eab). Next: install 124 and run the regression in E:\AgentStorage\agent-handoff\lan-agent-2026-11-12-handoff.md. Device test scripts: tools/device-test/.
