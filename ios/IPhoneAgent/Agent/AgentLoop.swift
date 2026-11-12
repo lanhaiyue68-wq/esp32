@@ -498,18 +498,20 @@ extension Pointer: Gestures {}
         }
     }
 
+    /// pinned: the frame the prompt's text was read from (nextActions), sent as the picture so both are one screen.
     private func ask(_ role: String, _ llm: ChatModel, _ system: String, _ prompt: String,
-                     temperature: Double = 0, retryTimeout: Bool = true) async throws -> (String, Double, Data?) {
+                     temperature: Double = 0, retryTimeout: Bool = true, pinned: Data? = nil) async throws -> (String, Double, Data?) {
         try await gate?()
         var prompt = prompt
-        if let lost = try await waitForScreen() {
+        let lost = try await waitForScreen()
+        if let lost {
             record(nil, ["action": .str("reconnected"), "reason": .str(String(format: "connection lost for %.0f s and restored", lost))])
             prompt += "\n\nNote: the connection was lost and restored; re-check the screen before acting."
             try await gate?()  // the user may have opened this app while it was paused
         }
         guard let screen, screen.live else { throw BlindError() }  // never let the model act blind
         try await screen.requireFrame(after: nil)
-        let frame = screen.frame, started = now()
+        let frame = (lost == nil ? pinned : nil) ?? screen.frame, started = now()
         if role == "actor", let frame, let answer = frameCompletion?(frame) {
             DebugLog.write("agent: navigation title found locally; handing off to message verification")
             return ("THINK: The navigation destination is visible; read and verify it next.\nDO: done \(answer)", 0, frame)
@@ -707,9 +709,13 @@ extension Pointer: Gestures {}
     /// The app in front by what this run did: the last one it opened, unless it went Home or opened one by its icon
     /// since; with no open at all, the one it started in. nil: not known.
     /// Apps that send nothing to anyone: what is typed there stays on the phone.
+    /// 127 over the cloud 11-12 (g2): 深圳宝安国际机场 typed in 高德 for "开车到深圳宝安机场" was held as a message (the
+    /// goal also posted to 测试群), then a search in 淘宝, and the run failed. Where one only searches, Return searches:
+    /// maps, browsers and shops. Apps with comments (抖音, 小红书) are not here: a comment goes out.
     static let localApps = ["备忘录", "notes", "提醒事项", "reminders", "日历", "行事历", "calendar", "计算器", "calculator",
                             "时钟", "clock", "天气", "weather", "设置", "设定", "settings", "文件", "档案", "files", "股市", "stocks",
-                            "计算机"]
+                            "计算机", "高德", "百度地图", "地图", "maps", "safari", "浏览器", "chrome", "淘宝", "拼多多", "京东",
+                            "美团", "饿了么", "大众点评", "百度"]
 
     static func inLocalApp(_ steps: [JObject]) -> Bool {
         guard let app = appInFront(steps, startedIn: nil) else { return false }
@@ -1047,6 +1053,16 @@ extension Pointer: Gestures {}
         + "not make it go away. Deal with what is on it: a sheet or permission prompt belongs to the app, answer it with the "
         + "smallest choice (不允許, 不分享, 稍後, 關閉, Not Now), then go on. If what the goal asks for is already done or on "
         + "this screen, finish: answer done."
+    /// The app a name for a part of it stands for (美团外卖 → 美团, 视频号 → 微信); nil when it is no such part.
+    static func hostApp(_ name: String) -> String? {
+        let n = AppNames.hans(name).filter { !$0.isWhitespace }
+        let parts = ["美团外卖": "美团", "淘宝闪购": "淘宝", "饿了么外卖": "饿了么", "京东外卖": "京东", "高德打车": "高德地图",
+                     "抖音商城": "抖音", "视频号": "微信", "朋友圈": "微信", "微信支付": "微信"]
+        if let host = parts[n] { return host }
+        if n.hasSuffix("外卖"), n.count > 2 { return String(n.dropLast(2)) }
+        return nil
+    }
+
     static let openFailedReason = " is not on this phone: it is not on the Home Screen and Search does not list it as an app. "
         + "Do not search the web for it and do not try again; if the goal needs it, stop with fail and say so."
 
@@ -1087,6 +1103,9 @@ extension Pointer: Gestures {}
     static let deadTapReason = "Refused: tapping this spot already did nothing twice (the screen did not change, or the next "
         + "stroke still left no line). It is not the control you want: look at what else is on screen and try a different one. "
         + "Text you just typed is submitted with: key enter."
+
+    static let tabPageHint = " Here the top left is no back button: this is one of the app's tab pages (购物车, 我的, 消息). "
+        + "Tap a tab in the bar at the bottom (首页, 我的淘宝, 我的) to go elsewhere; reopening the app comes back here."
 
     /// The tap since the previous stroke (the try at picking a tool), if there was one.
     static func tapBeforeStroke(_ steps: [JObject]) -> JObject? {
@@ -1148,6 +1167,36 @@ extension Pointer: Gestures {}
 
     /// Two plans aim at the same place: the same action landing within 3% of the screen of each other (a model
     /// rarely names the exact same pixel twice), or the same text or key for actions without a place.
+    /// The taps since the last other move, with `next`, close a round already gone through: the same spots in the same
+    /// order, twice over (three times for a round of two, which can be a real back and forth). 127 over the cloud 11-12
+    /// (g8): 购物车 → ×2 → "−" (which opened the item again), ten times over, 30 steps; each tap changed the screen, so no
+    /// dead tap was seen.
+    static func repeatsRound(_ steps: [JObject], next: JObject) -> Bool {
+        var taps: [JObject] = []
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "tap" { taps.insert(s, at: 0) } else if observedActions.contains(a) { break }
+            if taps.count >= 12 { break }
+        }
+        taps.append(next)
+        for k in 2...4 {
+            let rounds = k == 2 ? 3 : 2
+            guard taps.count >= k * rounds else { continue }
+            let last = Array(taps.suffix(k * rounds))
+            let first = Array(last.prefix(k))
+            if (1..<rounds).allSatisfy({ r in (0..<k).allSatisfy { sameSpot(first[$0], last[r * k + $0]) } }),
+               Set(first.map { "\(Int(($0["x"]?.double ?? 0) / 30)),\(Int(($0["y"]?.double ?? 0) / 30))" }).count == k {
+                return true
+            }
+        }
+        return false
+    }
+
+    static let roundReason = "Refused: these taps, the same spots in the same order, already came back to where they began "
+        + "twice. One of them does not do what you think (a − or ✕ that opens the item instead). Do not go round again: "
+        + "look closely for the right control (read its label), try another way, or leave it and say in the answer what "
+        + "could not be done."
+
     static func sameSpot(_ a: JObject, _ b: JObject) -> Bool {
         guard a["action"] == b["action"] else { return false }
         let (pa, pb) = (pointerPath(a), pointerPath(b))
@@ -1249,7 +1298,8 @@ extension Pointer: Gestures {}
                         let gestures = steps.suffix(Self.swipesInARow + 2).filter { $0["action"]?.str != "stale plan" }
                         let swiping = gestures.count >= Self.swipesInARow
                             && gestures.suffix(Self.swipesInARow).allSatisfy { $0["action"]?.str == "swipe" }
-                        if stepsInPart >= Self.partSteps || troubles >= Self.troubleLimit || swiping {
+                        let partLimit = Self.partSteps(for: parts.count >= 2 && partIndex < parts.count ? parts[partIndex] : task)
+                        if stepsInPart >= partLimit || troubles >= Self.troubleLimit || swiping {
                             record(nil, ["action": .str("part stalled"),
                                          "reason": .str((parts.count >= 2 ? "part \(partIndex + 1)" : "the task")
                                                         + " not getting on: \(stepsInPart) steps, \(troubles) failed, swiping \(swiping)")])
@@ -1785,7 +1835,14 @@ extension Pointer: Gestures {}
                         deadRefused = 0
                         return try await changeOfPlan(planned.shot, "kept tapping a spot that does nothing")
                     }
-                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
+                    // 127 over the cloud 11-12 (g4): the back arrow of 淘宝's 购物车 tapped six times, the app reopened on it
+                    // twice: 25 steps. A top-left spot that does nothing is no back button: this is a tab page.
+                    let topLeft = (act["x"]?.double ?? 999) < 150 && (act["y"]?.double ?? 999) < 140
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason + (topLeft ? Self.tabPageHint : ""))])
+                    return false
+                }
+                if name == "tap", Self.repeatsRound(steps, next: act) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.roundReason)])
                     return false
                 }
                 if name == "tap", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {
@@ -1903,8 +1960,16 @@ extension Pointer: Gestures {}
                 actFrame = screen?.frame
                 do { try await perform(act) }
                 catch let absent as AppNotOnPhone {
-                    record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
-                    return false
+                    // 127 over the cloud 11-12 (g4): "美团外卖" is a part of 美团, not an app; the item was skipped as "not
+                    // installed". A name for a part of an app opens that app.
+                    if name == "open", let host = Self.hostApp(absent.name),
+                       (try? await perform(["action": .str("open"), "app": .str(host)])) != nil {
+                        DebugLog.write("open \(absent.name): a part of \(host); \(host) opened")
+                        act["app"] = .str(host)
+                    } else {
+                        record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
+                        return false
+                    }
                 }
                 catch let keys as KeysNotOnScreen {
                     record(planned.shot, ["action": .str("press failed"), "reason": .str(keys.localizedDescription)])
@@ -2351,6 +2416,16 @@ extension Pointer: Gestures {}
     }
 
     static let partSteps = 20       // steps on one part before Codex looks and drives
+
+    /// The steps a part may take before Codex looks: 20, and 10 more for each further numbered thing it holds, at most
+    /// 80. 127 over the cloud 11-12 (g1): a part with five of twenty things was "not getting on" at 20 steps with
+    /// nothing failed, and Codex drove it at about twice the time a step.
+    static func partSteps(for part: String) -> Int {
+        let ns = part as NSString
+        let items = (try? NSRegularExpression(pattern: #"(?<![\d.])\d{1,2}[.、．](?!\d)"#))?
+            .numberOfMatches(in: part, range: NSRange(location: 0, length: ns.length)) ?? 0
+        return min(partSteps + 10 * max(0, items - 1), 80)
+    }
     static let troubleLimit = 3     // or this many steps that plainly failed
     static let swipesInARow = 5     // or this many swipes in a row (a wheel: 14 wrong swipes, then one tap by Codex)
 
@@ -2434,6 +2509,7 @@ extension Pointer: Gestures {}
     - The goal names no city or place and the answer is for a city an app kept from before, not the phone's own location.
     - A cart or order on the screen holds more of an item than the goal asked for (×3 for one cup), or the answer leaves out how many.
     The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording, nor the answer's language.
+    What the run itself changed after reading it is no contradiction: it read a chat's latest messages and then sent more there, or counted a cart and then added to it. The answer stands as read at the time.
     A note, memo or document has no separate title field: its first line is its title.
     In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
     An app counts as opened when a step opened it, or tapped its icon (a tap that says it opens the app).
@@ -2668,7 +2744,15 @@ extension Pointer: Gestures {}
         }
         // Phase B (specs/004): the text read on this phone with where it is, so a labelled control is tapped where it
         // really is instead of where the model estimates it from the picture.
-        if readsScreenText, let shown = screen?.frame {
+        // 127 over the cloud 11-12 (g3): the text read came from the frame cached before the look (the page before the
+        // search), the picture from a fresh one (the results): "今天油价"'s first result was answered as 中国银行, the old
+        // page's. The frame is made fresh first, read, and the same one is sent as the picture.
+        var readFrame: Data?
+        if readsScreenText, screen?.live == true {
+            try? await screen?.requireFrame(after: nil)
+            readFrame = screen?.frame
+        }
+        if let shown = readFrame {
             readRows = await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)
         } else {
             readRows = []
@@ -2693,7 +2777,7 @@ extension Pointer: Gestures {}
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", driving ? planner ?? actor : actor, actorPrompt, prompt,
-                                                       temperature: 0.4 * Double(attempt))
+                                                       temperature: 0.4 * Double(attempt), pinned: readFrame)
             reply = text
             var acts: [JObject]
             do { acts = try Actions.parseActions(text) } catch {

@@ -35,6 +35,9 @@ private struct LearningContent: View {
                 LabeledContent("Learned routes", value: "\(app.agent.routes?.count ?? 0)")
                 LabeledContent("Learned buttons", value: "\(app.agent.controls?.count ?? 0)")
                 LabeledContent("Learned app places", value: "\(appPlaces)")
+                // User 11-13: apps moved to the first pages for speed. A wrong place is only forgotten one app at a time,
+                // and the pages are read again at most every three days: moved apps went through Search until then.
+                Button("重新記 App 位置（移動過 App 後按）") { AppPlaces.clear(); appPlaces = 0 }
             } footer: {
                 Text(LocalizedStringKey(enabled
                      ? "Related lessons are included in later task requests. This is local experience memory, not model-weight training. A reference does not prove success."
