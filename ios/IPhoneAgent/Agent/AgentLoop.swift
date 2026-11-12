@@ -124,6 +124,9 @@ extension Pointer: Gestures {}
     private var blindLooks = 0
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
+    /// How many notes there were when the current part began, and the last part whose "done" was sent back once for
+    /// having nothing written down (B8).
+    private var notesAtPart = 0, emptyPartRefused = -1
     /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
     /// by the planner from the start and its way remembered; from then on the executor follows that way, and the planner
     /// comes only when it stalls. Fixed plans (watching WeChat) are not tasks of this kind.
@@ -919,6 +922,7 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
+        (notesAtPart, emptyPartRefused) = (0, -1)
         approvedTexts = []
         checksLeft = 2
         rejectedAnswer = nil
@@ -1421,6 +1425,15 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadTapReason)])
                     return false
                 }
+                if name == "tap", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {
+                    deadRefused += 1
+                    if deadRefused >= Self.refusalsInARow {
+                        deadRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept tapping a spot that does nothing")
+                    }
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.sameTapReason)])
+                    return false
+                }
                 // Over USB 11-10 淘寶's box showed a suggestion (保温水壶, grey) and the model searched it as if it had typed
                 // 保溫杯: the price it found was for the wrong thing. A search in an app where nothing was typed is refused.
                 if untypedSearches < 2, Self.searchesUntyped(act, after: steps, task: task) {
@@ -1474,6 +1487,25 @@ extension Pointer: Gestures {}
                         return true
                     }
                     approvedTexts.insert(Self.typedKey(text))
+                }
+                // #17 (122, 11-11): a like, a follow or a 收藏 shows to others like a message, and went unasked. A tap the
+                // model says does one is refused in a goal that says not to, and waits for approval in a task from the cloud.
+                if name == "tap", let what = Self.publicTap(act) {
+                    if Self.forbids(task, what) {
+                        record(planned.shot, ["action": .str("refused"),
+                                              "reason": .str("Refused: the goal says not to \(what). Do not tap it; go on with the rest of the goal.")])
+                        return false
+                    }
+                    if let approveSend, !approvedTexts.contains("tap:" + what) {
+                        record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to tap: " + what)])
+                        let approved = await approveSend("（\(what)）")
+                        try Task.checkCancellation()
+                        guard approved else {
+                            record(planned.shot, ["action": .str("done"), "answer": .str("没有\(what)：未获批准。"), "approval": .str("rejected")])
+                            return true
+                        }
+                        approvedTexts.insert("tap:" + what)
+                    }
                 }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
@@ -1827,11 +1859,87 @@ extension Pointer: Gestures {}
     }
 
     /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
-    /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 100.
+    /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 240: 122 over the cloud 11-12, goals
+    /// of 9 to 15 parts ran out at 100 (4 of 5 failures of the big ones), each part taking 10 to 15 steps.
     static func stepBudget(plan: String, base: Int) -> Int {
         let parts = Self.parts(of: plan).count
         guard parts >= 2 else { return base }
-        return max(base, min(parts * 20, 100))
+        return max(base, min(parts * 20, 240))
+    }
+
+    /// A part that asks to find something out (记下, 查, 看, 是什么, 多少…), as against one that does something (send,
+    /// open, sum up what was found).
+    static func readsSomething(_ part: String) -> Bool {
+        let p = AppNames.hans(part)
+        let words = ["记下", "记录", "查", "看", "读", "多少", "几", "是什么", "是不是", "是否", "星期", "温度", "价格", "作者",
+                     "标题", "名称", "名字", "点赞数", "版本", "电量"]
+        return words.contains { p.contains($0) }
+    }
+
+    /// What a tap does that others see (点赞, 关注, 收藏), by the model's own words for it, or nil. What it says it will
+    /// not do, and counts or tabs it only reads (点赞数, 已关注, Douyin's 关注 tab), are not the tap.
+    static func publicTap(_ act: JObject) -> String? {
+        guard act["action"]?.str == "tap" else { return nil }
+        var t = AppNames.hans(((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased())
+        t = t.replacingOccurrences(of: #"(不要|不用|避免|别|勿|以免|而不是|don't|do not|avoid|not |without|instead of)[^，,。.；;]*"#,
+                                   with: " ", options: .regularExpression)
+        let like = #"点赞按钮|点个赞|给[^，,。]{0,8}点赞|点赞(这|该|视频|笔记|一下)|点击点赞|tap (the )?(heart|like)\b|like button|\blike (it|this|the video|the post|the note)"#
+        let follow = #"加关注|点关注|关注按钮|点击关注(?!页|栏|tab)|关注(他|她|作者|博主|这个|该)|follow button|\bfollow (him|her|the author|this|the account)"#
+        let keep = #"收藏按钮|点击收藏|收藏(这|该|一下|视频|笔记)|加入收藏|bookmark (it|this|the)|save (it|this) to"#
+        for (pattern, what) in [(like, "点赞"), (follow, "关注"), (keep, "收藏")]
+        where t.range(of: pattern, options: .regularExpression) != nil { return what }
+        return nil
+    }
+
+    /// The goal says not to do this (不要点赞, 别关注…).
+    static func forbids(_ task: String, _ what: String) -> Bool {
+        AppNames.hans(task).range(of: #"(不要|不用|不必|别|勿|禁止|不能)[^，,。；;！!？?\n]{0,30}"# + what, options: .regularExpression) != nil
+    }
+
+    static let emptyPartReason = "This part asks to find something out, but nothing was written down for it. Write what you "
+        + "found with note (or note that it could not be found and why), then finish the part."
+
+    /// 122.2 over the cloud 11-12: Weather's city row was tapped 11 times in a row (13 steps, 43 s): the pointer was not
+    /// seen over its moving sky and no tap counted as one that did nothing. The same spot three times in a row, with
+    /// nothing else between, is enough: the next is refused.
+    static let sameTapLimit = 3
+    static let sameTapReason = "Refused: this spot was just tapped 3 times in a row and the task did not get on. It is not "
+        + "the control you want: look at what else is on the screen, scroll, or go another way."
+
+    /// How many taps in a row, up to now, aimed at the same spot as `act` (notes, stale plans and refusals between
+    /// them do not count as something else).
+    static func tapsInARow(_ steps: [JObject], like act: JObject) -> Int {
+        var n = 0
+        for s in steps.reversed() {
+            let name = s["action"]?.str ?? ""
+            if ["stale plan", "note", "refused"].contains(name) { continue }
+            guard name == "tap", sameSpot(s, act) else { break }
+            n += 1
+        }
+        return n
+    }
+
+    /// 122 on the phone 11-12: "2027 年 1 月 1 日是星期几" was answered 星期三; it is a Friday. A date the goal names gets
+    /// its weekday worked out here, not by the model.
+    static func dateFacts(in goal: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"(\d{4})\s*(?:年|-|/|\.)\s*(\d{1,2})\s*(?:月|-|/|\.)\s*(\d{1,2})"#) else { return "" }
+        let calendar = Calendar(identifier: .gregorian)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = calendar
+        f.dateFormat = "yyyy-MM-dd, EEEE"
+        let zh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+        let ns = goal as NSString
+        var said: [String] = []
+        for m in re.matches(in: goal, range: NSRange(location: 0, length: ns.length)) {
+            guard let y = Int(ns.substring(with: m.range(at: 1))), let mo = Int(ns.substring(with: m.range(at: 2))),
+                  let d = Int(ns.substring(with: m.range(at: 3))), (1...12).contains(mo), (1...31).contains(d),
+                  let date = calendar.date(from: DateComponents(year: y, month: mo, day: d)),
+                  calendar.component(.day, from: date) == d else { continue }
+            let line = "\(f.string(from: date)) (\(zh[calendar.component(.weekday, from: date) - 1]))"
+            if !said.contains(line) { said.append(line) }
+        }
+        return said.isEmpty ? "" : " Dates in the goal: " + said.joined(separator: "; ") + "."
     }
 
     /// The numbered lines of a plan ("1. ...", "2) ...", "3、..."), trimmed.
@@ -1932,13 +2040,13 @@ extension Pointer: Gestures {}
 
     /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
     /// answer, the 18th, and the run went on to "today is 2025-06-03" and its step limit.
-    static func todayLine(_ date: Date = Date()) -> String {
+    static func todayLine(_ date: Date = Date(), goal: String = "") -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd, EEEE"
         // Build 117 on the phone: the check worked a weekday out wrong from a forecast. The next two days are given too.
         let day = { (n: Int) in f.string(from: Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: date) ?? date) }
-        return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))."
+        return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))." + dateFacts(in: goal)
     }
 
     /// Over USB 11-09, 5 of 14 "done" were wrong: a Pinduoduo price from an app never opened, a message never sent, the 17th
@@ -1959,7 +2067,7 @@ extension Pointer: Gestures {}
     }
 
     private func checkPrompt(_ answer: String) -> String {
-        Self.checkPrompt(goal: task, today: Self.todayLine(), answer: answer, did: Self.whatItDid(steps), notes: notes,
+        Self.checkPrompt(goal: task, today: Self.todayLine(goal: task), answer: answer, did: Self.whatItDid(steps), notes: notes,
                          sent: sent, parts: parts.count)
     }
 
@@ -2013,10 +2121,17 @@ extension Pointer: Gestures {}
         let n = partIndex + 1
         // What a part found is what the next one needs: a price read in one app goes into a message in another.
         let found = String((act["answer"]?.str ?? "").prefix(300))
+        // B8, 122 over the cloud 11-12: the 视频号 part of an 11-part goal was finished with nothing found or written
+        // down, and its result was simply missing. A part that asks to find something out is sent back once.
+        if found.isEmpty, notes.count == notesAtPart, emptyPartRefused != partIndex, Self.readsSomething(parts[partIndex]) {
+            emptyPartRefused = partIndex
+            record(shot, ["action": .str("part not done"), "part": .int(n), "reason": .str(Self.emptyPartReason)])
+            return true
+        }
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
         gotOn()
-        (partIndex, stepsInPart) = (partIndex + 1, 0)
+        (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
     }
@@ -2075,7 +2190,7 @@ extension Pointer: Gestures {}
 
     func replan(stuck: Bool = false) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
-        var prompt = "Goal: \(task)\n\(Self.todayLine())"
+        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))"
         if stuck {
             let last = steps.last ?? JObject()
             prompt += "\n\nThe previous plan got stuck (last event: \(pyStr(last["action"])) \(last["reason"]?.str ?? "")):"
@@ -2133,7 +2248,7 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\(Self.todayLine())\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
+        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
         let driving = (plannerLeads || takeover > 0) && planner != nil
         if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }

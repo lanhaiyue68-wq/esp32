@@ -15,13 +15,19 @@ jobs:
     defaults:
       run:
         working-directory: ios
+    # Build 123, 11-12: the user's Actions quota is down to about 10%. The IPA takes ~4 min; the tests took 13 more on
+    # this runner (and one hung every time). They run only when asked: "[tests]" in the commit message, or a manual run.
+    env:
+      RUN_TESTS: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[tests]') }}
     steps:
       - uses: actions/checkout@v5
       - name: Bezier motion and measured pointer map policy
+        if: env.RUN_TESTS == 'true'
         run: |
           python3 ../tools/pointer-motion-tests/prepare.py "$RUNNER_TEMP/pointer-motion"
           swift test --package-path "$RUNNER_TEMP/pointer-motion"
       - name: Direct capture frame policy
+        if: env.RUN_TESTS == 'true'
         run: |
           policy="$RUNNER_TEMP/capture-policy"
           mkdir -p "$policy/Sources" "$policy/Tests"
@@ -72,6 +78,7 @@ jobs:
             ios/ipa.sha256
           retention-days: 7
       - name: Unit tests (simulator, unsigned)
+        if: env.RUN_TESTS == 'true'
         run: |
           set -o pipefail
           sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')

@@ -242,6 +242,13 @@ import Foundation
         case "stopped": return Outcome(status: "cancelled", answer: said(false, "任务被停止了"), error: "stopped", steps: moves)
         default:
             let reason = last["reason"]?.str ?? last["action"]?.str ?? "unknown"
+            // B7, 122 over the cloud 11-12: 9 of 11 parts were found and written down when the steps ran out, and the
+            // answer was only "失败：步骤用完了还没做完". What was found goes back with the failure.
+            let found = foundNotes(steps)
+            if !found.isEmpty {
+                return Outcome(status: "failed", answer: said(false, "部分失败：" + failureWords(reason) + "。已查到：" + found.joined(separator: "；")),
+                               error: String(reason.prefix(300)), steps: moves)
+            }
             return Outcome(status: "failed", answer: said(false, failureWords(reason)), error: String(reason.prefix(300)), steps: moves)
         }
     }
@@ -262,6 +269,16 @@ import Foundation
         let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到"]
         if ok, unsure.contains(where: { body.contains($0) }) { return "部分失败：" + body }
         return (ok ? (checked ? "成功：" : "成功（未经核实）：") : "失败：") + body
+    }
+
+    /// What a run wrote down with note, in order, each once.
+    nonisolated static func foundNotes(_ steps: [JObject]) -> [String] {
+        var found: [String] = []
+        for s in steps where s["action"]?.str == "note" {
+            let text = (s["text"]?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty, !found.contains(text) { found.append(text) }
+        }
+        return found
     }
 
     /// Why a run stopped, in words for the user: the loop's own reasons in Chinese, a model's Chinese reason as it is.

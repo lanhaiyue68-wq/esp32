@@ -111,6 +111,13 @@ import Foundation
                       badge: { Vision.redShare(image, in: badgeArea($0)) >= badgeShare })
     }
 
+    /// The same, with the words read off the main thread: the watch looks every few seconds (W4).
+    static func unreadOffMain(in frame: Data, rules: WatchSettings.Rules) async -> Unread {
+        guard let image = Vision.image(frame) else { return .unknown }
+        let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.055, bottom: 1)
+        return unread(rows: rows, rules: rules, badge: { Vision.redShare(image, in: badgeArea($0)) >= badgeShare })
+    }
+
     /// The list name (maybe cut short with "…") belongs to the chat titled `title`.
     static func sameChat(_ title: String, listName: String) -> Bool {
         let t = title.filter { !$0.isWhitespace }, n = listName.filter { !$0.isWhitespace }

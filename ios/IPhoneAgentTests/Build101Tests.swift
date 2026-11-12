@@ -67,7 +67,7 @@ import XCTest
         XCTAssertEqual(AgentLoop.stepBudget(plan: three, base: 40), 60)
         XCTAssertEqual(AgentLoop.stepBudget(plan: "1. 打开时钟\n2) 新建\n3、保存\n4．回报", base: 40), 80)
         XCTAssertEqual(AgentLoop.stepBudget(plan: "1. Open Clock and add an 8:00 alarm.", base: 40), 40, "one part: as before")
-        XCTAssertEqual(AgentLoop.stepBudget(plan: (1...8).map { "\($0). step" }.joined(separator: "\n"), base: 40), 100)
+        XCTAssertEqual(AgentLoop.stepBudget(plan: (1...8).map { "\($0). step" }.joined(separator: "\n"), base: 40), 160)
         XCTAssertEqual(AgentLoop.stepBudget(plan: "Work from the CURRENT screen", base: 15), 15)
     }
 
