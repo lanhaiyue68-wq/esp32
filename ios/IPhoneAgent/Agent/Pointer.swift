@@ -564,7 +564,7 @@ import Foundation
                 try await device.send("click")
                 lastClick?.time = Date().timeIntervalSince1970
                 try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
-                try await answerIfAsked(x, y, clickedAt: clickedAt)
+                try await answerIfAsked(x, y, clickedAt: clickedAt, before: before)
                 return
             }
             // Over USB 11-09: seven clicks here on Safari's address bar did nothing; the pointer lay at the bottom border.
@@ -588,7 +588,7 @@ import Foundation
             try await device.send("click")
             if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
             try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
-            try await answerIfAsked(x, y, clickedAt: clickedAt)
+            try await answerIfAsked(x, y, clickedAt: clickedAt, before: before)
             return
         }
         lastClick = nil
@@ -612,7 +612,7 @@ import Foundation
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
-        try await answerIfAsked(x, y, clickedAt: clickedAt)
+        try await answerIfAsked(x, y, clickedAt: clickedAt, before: before)
     }
 
     /// Where the pointer was first seen after the last move (nil: not seen).
@@ -654,10 +654,18 @@ import Foundation
     static let lastFrameAfterAsking = 0.8
 
     /// After a click near the clock (the back button is right under it): frames go on coming, unless it asked.
-    private func answerIfAsked(_ x: Double, _ y: Double, clickedAt: Double) async throws {
+    private func answerIfAsked(_ x: Double, _ y: Double, clickedAt: Double, before: Data? = nil) async throws {
         guard Self.nearClock(x, y), let screen, screen.live else { return }
         let settled = clickedAt + Self.lastFrameAfterAsking
-        if await screen.fresh(since: settled, timeout: max(0, settled - now()) + 2) != nil { return }
+        if let fresh = await screen.fresh(since: settled, timeout: max(0, settled - now()) + 2) {
+            // B6, 122 on the phone 11-11: in Settings › Keyboard frames went on coming, the whole screen darker, and
+            // the back button, Home and the next app did nothing: the question was up, its dimming captured, itself not.
+            if let before, Vision.dimmed(before, fresh) {
+                log("the screen dimmed after a click near the clock: the question whether to stop sharing; tapping Cancel")
+                _ = try await tapCancelSharing()
+            }
+            return
+        }
         // A click that changed nothing shows nothing new either; a small move must.
         let nudged = now()
         if maps != nil {

@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import IPhoneAgent
 
@@ -80,6 +81,40 @@ import XCTest
         XCTAssertEqual(plain.task, "", "talk stays talk")
         let stranger = WatchSettings.keptPromise((reply: "稍后告诉你", task: ""), look: false, asked: ["深圳明天几度"])
         XCTAssertEqual(stranger.task, "", "only for someone who may give look-ups")
+    }
+
+    /// B4: what a paste put in, read off the screen.
+    func testWhatAPastePutInIsReadOffTheScreen() {
+        let p = { (t: String, y: Double) in CandidatePicker.Piece(text: t, box: CGRect(x: 0.2, y: y, width: 0.5, height: 0.03)) }
+        let before = [[p("测试群(3)", 0.07)], [p("你好", 0.5)], [p("发送", 0.9)]]
+        let after = [[p("测试群(3)", 0.07)], [p("你好", 0.4)], [p("复制打开抖音，看看【作品】", 0.8)], [p("发送", 0.9)]]
+        XCTAssertEqual(AgentLoop.newWords(before: before, after: after), "复制打开抖音，看看【作品】")
+        XCTAssertEqual(AgentLoop.newWords(before: before, after: before), "")
+    }
+
+    /// B5: a title read as two pieces at slightly different heights.
+    func testATitleInTwoPiecesIsOneTitle() {
+        let piece = { (t: String, x: Double, w: Double, y: Double) in CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: 0.02)) }
+        let split = [[piece("虾笔刀陪跑", 0.25, 0.25, 0.075)], [piece("学员元群(25)", 0.5, 0.27, 0.08)]]
+        XCTAssertEqual(WatchReport.navigationTitle(rows: split), "虾笔刀陪跑学员元群")
+        let banner = [[piece("主人蓝海乐", 0.2, 0.17, 0.058)], [piece("9527 去给我画个太阳", 0.2, 0.44, 0.08)]]
+        XCTAssertNil(WatchReport.navigationTitle(rows: banner), "a banner still is not a title")
+    }
+
+    /// B6: the screen dimmed evenly under the question whether to stop sharing; a new page is not that.
+    func testADimmedScreenIsTellableFromANewPage() {
+        func jpeg(_ bg: CGFloat, _ bar: CGFloat, barY: CGFloat) -> Data {
+            UIGraphicsImageRenderer(size: CGSize(width: 120, height: 260)).jpegData(withCompressionQuality: 0.9) { ctx in
+                ctx.cgContext.setFillColor(UIColor(white: bg, alpha: 1).cgColor)
+                ctx.cgContext.fill(CGRect(x: 0, y: 0, width: 120, height: 260))
+                ctx.cgContext.setFillColor(UIColor(white: bar, alpha: 1).cgColor)
+                ctx.cgContext.fill(CGRect(x: 10, y: barY, width: 100, height: 40))
+            }
+        }
+        let page = jpeg(1.0, 0.3, barY: 60)
+        XCTAssertTrue(Vision.dimmed(page, jpeg(0.6, 0.18, barY: 60)))
+        XCTAssertFalse(Vision.dimmed(page, page))
+        XCTAssertFalse(Vision.dimmed(page, jpeg(0.6, 0.0, barY: 180)), "another page")
     }
 
     /// User 11-12: a voice message is written out, read only.

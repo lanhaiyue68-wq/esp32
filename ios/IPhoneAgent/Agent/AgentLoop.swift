@@ -127,6 +127,8 @@ extension Pointer: Gestures {}
     /// How many notes there were when the current part began, and the last part whose "done" was sent back once for
     /// having nothing written down (B8).
     private var notesAtPart = 0, emptyPartRefused = -1
+    /// The screen just before the last paste (B4: what the paste put in is read against it).
+    private var pasteFrame: Data?
     /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
     /// by the planner from the start and its way remembered; from then on the executor follows that way, and the planner
     /// comes only when it stalls. Fixed plans (watching WeChat) are not tasks of this kind.
@@ -527,7 +529,23 @@ extension Pointer: Gestures {}
     /// What a paste puts in, as approval is asked for it (unreadable: said so, and still asked).
     static func pastedText(_ board: String?) -> String {
         let text = (board ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? "（粘贴的内容）" : String(text.prefix(300))
+        return text.isEmpty ? pastePlaceholder : String(text.prefix(300))
+    }
+
+    static let pastePlaceholder = "（粘贴的内容）"
+
+    /// B4 (122 over the cloud 11-11): the clipboard cannot be read from the background, and the approval showed only
+    /// "（粘贴的内容）". What the paste put in is read off the screen: the words after it that were nowhere before it
+    /// (the input box grows and the chat moves up, but its words stay the same), keys and short marks left out.
+    static func newWords(before: [[CandidatePicker.Piece]], after: [[CandidatePicker.Piece]]) -> String {
+        let key = { (s: String) in AppPlaces.normalized(s) }
+        let old = Set(before.joined().map { key($0.text) })
+        let fresh = after.joined().filter { piece in
+            let k = key(piece.text)
+            return piece.box.midY > 0.12 && k.count >= 2 && !old.contains(k) && !CandidatePicker.keyLabels.contains(piece.text)
+                && !["發送", "send", "return", "換行"].contains(k)
+        }.sorted { abs($0.box.midY - $1.box.midY) > 0.01 ? $0.box.midY < $1.box.midY : $0.box.minX < $1.box.minX }
+        return String(fresh.map(\.text).joined(separator: " ").prefix(300))
     }
 
     static func sends(_ act: JObject) -> Bool {
@@ -922,7 +940,7 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
-        (notesAtPart, emptyPartRefused) = (0, -1)
+        (notesAtPart, emptyPartRefused, pasteFrame) = (0, -1, nil)
         approvedTexts = []
         checksLeft = 2
         rejectedAnswer = nil
@@ -1403,7 +1421,7 @@ extension Pointer: Gestures {}
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0; deadTaps = []; deadRefused = 0 }
                 // Build 121 over the cloud 11-11: a 抖音 share link was pasted into 测试群 (cmd+v) and sent with Return with
                 // no approval asked: only typed text was held. What is pasted counts as typed.
-                if Self.pastes(act) { unsent = Self.pastedText(pasteboard()); quietSinceSend = 0 }
+                if Self.pastes(act) { unsent = Self.pastedText(pasteboard()); quietSinceSend = 0; pasteFrame = screen?.frame ?? planned.shot }
                 // The tap after one that changed nothing goes through the eye (missed: aimed), so it lands on the spot.
                 // Moving it around the spot moved it off the button (淘寶's 加入購物車, 10 clicks above it, over USB 11-09).
                 if name == "swipe", Self.swipedToTheEnd(act, after: steps) {
@@ -1449,7 +1467,13 @@ extension Pointer: Gestures {}
                 let sending = unsent != nil && (Self.sends(act) || act["learned"] == .str("send"))
                 let isMessage = sending && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
                 let sendFrame = screen?.frame ?? planned.shot
-                let seenTitle = isMessage ? sendFrame.flatMap { WatchReport.navigationTitle(in: $0) } : nil
+                var seenTitle = isMessage ? sendFrame.flatMap { WatchReport.navigationTitle(in: $0) } : nil
+                if isMessage, seenTitle == nil {
+                    // B5, 122 over the cloud 11-11: the approval went out with no destination twice (q08, q11). A banner
+                    // or a frame caught mid-change: one more look, a moment later.
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    seenTitle = screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }
+                }
                 approvalPlace = seenTitle
                 var wrongSpot: String?
                 if isMessage, endAfterSend == nil, Self.asksToSend(task) {
@@ -1473,8 +1497,15 @@ extension Pointer: Gestures {}
                 // names, in a goal that posts nothing, is not a message.
                 if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
                    Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps, task: task)), !approvedTexts.contains(Self.typedKey(text)) {
-                    record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(text.prefix(120)))])
-                    let approved = await approveSend(text)
+                    var shown = text  // what the approval shows: a paste, as read off the screen (B4)
+                    if text == Self.pastePlaceholder, let before = pasteFrame, let current = screen?.frame ?? planned.shot {
+                        let beforeRows = await CandidatePicker.rowsOffMain(in: before, top: 0.05, bottom: 1)
+                        let afterRows = await CandidatePicker.rowsOffMain(in: current, top: 0.05, bottom: 1)
+                        let words = Self.newWords(before: beforeRows, after: afterRows)
+                        if !words.isEmpty { shown = "（粘贴）" + words }
+                    }
+                    record(planned.shot, ["action": .str("waiting approval"), "reason": .str("about to send: " + String(shown.prefix(120)))])
+                    let approved = await approveSend(shown)
                     try Task.checkCancellation()
                     guard approved else {
                         // The draft stays in the box otherwise, and the next task found it there (x11, 11-10: 17 deletes).

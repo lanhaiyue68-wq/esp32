@@ -783,7 +783,7 @@ enum WatchReport {
     static func titleText(_ row: [CandidatePicker.Piece]) -> String? {
         let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
         guard let left = header.map(\.box.minX).min(), let right = header.map(\.box.maxX).max(),
-              left >= 0.22, right <= 0.78, abs((left + right) / 2 - 0.5) <= 0.07 else { return nil }
+              left >= 0.22, right <= 0.82, abs((left + right) / 2 - 0.5) <= 0.07 else { return nil }  // B5: long names reach 0.8
         let name = fullTitle(header.map(\.text).joined())
         return name.isEmpty ? nil : name
     }
@@ -796,7 +796,10 @@ enum WatchReport {
     }
 
     static func navigationTitle(rows: [[CandidatePicker.Piece]]) -> String? {
-        let titles = rows.compactMap { titleText($0) }
+        var titles = rows.compactMap { titleText($0) }
+        // B5 (122, 11-11): a title read as two rows (the name and its "(3)" a little apart in height) made two titles,
+        // and none was taken. The header's pieces together, left to right, are one title when they pass the same test.
+        if titles.count != 1, let one = titleText(rows.joined().sorted { $0.box.minX < $1.box.minX }) { titles = [one] }
         guard titles.count == 1, !["微信", "WeChat", "Chats", "聊天"].contains(titles[0]) else { return nil }
         return titles[0]
     }

@@ -167,6 +167,9 @@ private final class Transcript: @unchecked Sendable {
         // (6 minutes for subtitles alone), then left and opened again until the run failed. Without speech, 20 s of
         // subtitles is what a listen can give.
         let end = Date().addingTimeInterval(canSpeak ? seconds : min(seconds, 20))
+        // 122 on the phone 11-11/12: all 17 listens failed at once with "kLSRErrorDomain 201: Siri and Dictation are
+        // disabled": recognition on the phone itself needs Siri on. Then the rest is heard through Apple's server.
+        var onPhone = true
         while Date() < end, !Task.isCancelled {
             // One segment: a request of its own (a recognition off the phone stops at about a minute).
             let segmentEnd = min(end, Date().addingTimeInterval(55))
@@ -177,7 +180,7 @@ private final class Transcript: @unchecked Sendable {
                 let r = SFSpeechAudioBufferRecognitionRequest()
                 r.shouldReportPartialResults = true
                 r.addsPunctuation = true
-                if recognizer.supportsOnDeviceRecognition { r.requiresOnDeviceRecognition = true }
+                if onPhone, recognizer.supportsOnDeviceRecognition { r.requiresOnDeviceRecognition = true }
                 task = recognizer.recognitionTask(with: r) { @Sendable result, error in
                     if let result { transcript.set(result.bestTranscription.formattedString) }
                     if let error { transcript.fail(error) }
@@ -193,6 +196,11 @@ private final class Transcript: @unchecked Sendable {
                     }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if onPhone, request != nil, transcript.error.hasPrefix("kLSRErrorDomain 201") {
+                    onPhone = false
+                    DebugLog.write("listen: recognition on the phone is off (Siri); hearing the rest through the server")
+                    break
+                }
             }
             if let request {
                 ScreenAudio.shared.attach(nil)
@@ -212,6 +220,9 @@ private final class Transcript: @unchecked Sendable {
         else if !canSpeak { note = "语音识别暂时不可用。" + after }
         else if heard == 0 { note = "没有收到声音：这个 App 可能不让录音，或者没有在播放" }
         let audio = ScreenAudio.shared.report()
+        if note.isEmpty, heard > 0, spoken.isEmpty, !failures.isEmpty {
+            note = "语音识别出错，没有认出说的话。" + after  // not "only music": 122 said so for every listen that errored
+        }
         if note.isEmpty, heard > 0, spoken.isEmpty {
             note = audio.silent ? "收到的声音是静音（手机音量为 0，或这个 App 不让录音）" : "收到了声音，但没有认出说的话（可能只有音乐）"
         }

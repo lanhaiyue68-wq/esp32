@@ -180,6 +180,19 @@ enum Vision {
         return different <= 64
     }
 
+    /// B6 (122 on the phone 11-11): the same screen, darker all over by about one factor, as under a system question's
+    /// dimming. A new page differs part by part; a question's own box may cover up to a quarter of the screen.
+    static func dimmed(_ before: Data, _ after: Data) -> Bool {
+        guard let a = look(before), let b = look(after), a.count == b.count, a.count == 24 * 48 else { return false }
+        let cells = Array((3 * 24)..<a.count)
+        let ma = cells.reduce(0.0) { $0 + Double(a[$1]) }, mb = cells.reduce(0.0) { $0 + Double(b[$1]) }
+        guard ma >= Double(cells.count) * 60 else { return false }  // a dark screen does not show it
+        let k = mb / ma
+        guard (0.3...0.8).contains(k) else { return false }
+        let fits = cells.filter { abs(Double(b[$0]) - k * Double(a[$0])) <= 14 }.count
+        return Double(fits) >= 0.75 * Double(cells.count)
+    }
+
     /// True when the screen changed near `points` (fractions): where an action would land. Changes elsewhere (a
     /// clock, an animation, a banner) do not count; a missing frame does.
     static func changedNear(_ before: Data?, _ after: Data?, around points: [CGPoint], radius: Double = 0.08) -> Bool {
