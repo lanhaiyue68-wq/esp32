@@ -120,7 +120,7 @@ import XCTest
 
     func testTheOutcomeOfARun() {
         let done: [JObject] = [["action": .str("plan")], ["action": .str("tap")], ["action": .str("done"), "answer": .str("好了")]]
-        XCTAssertEqual(CloudBridge.outcome(of: done), .init(status: "succeeded", answer: "成功：好了", error: nil, steps: 2))
+        XCTAssertEqual(CloudBridge.outcome(of: done), .init(status: "succeeded", answer: "好了", error: nil, steps: 2))
         let rejected: [JObject] = [["action": .str("done"), "answer": .str(AgentLoop.notApprovedAnswer), "approval": .str("rejected")]]
         XCTAssertEqual(CloudBridge.outcome(of: rejected).status, "cancelled")
         XCTAssertEqual(CloudBridge.outcome(of: [["action": .str("stopped")]]).status, "cancelled")

@@ -257,9 +257,15 @@ import Foundation
     /// in English in another field (121 over the cloud: "kept going back and forth between two screens").
     /// User 11-11: the customers are on the mainland: what goes back is Simplified (the phone's own screens and a goal
     /// written in Traditional made answers like "深圳明天（11/12 週四）最高溫 28°").
+    /// User 11-12 (124 in 测试群): a success says no "成功", it is just the result; only a failure is labeled
+    /// ("失败：…", "部分失败：…"). A "成功：" the model wrote itself is taken off too.
     nonisolated static func said(_ ok: Bool, _ text: String) -> String {
-        let t = AppNames.hans(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        if t.hasPrefix("成功") || t.hasPrefix("失败") || t.hasPrefix("部分失败") { return t }
+        var t = AppNames.hans(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        if t.hasPrefix("失败") || t.hasPrefix("部分失败") { return t }
+        for label in ["成功（未经核实）：", "成功：", "成功:", "成功，"] where t.hasPrefix(label) {
+            t = String(t.dropFirst(label.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            break
+        }
         // 122 over the cloud: a goal of seven parts was "成功" with "电池电量百分比未能核实" in it. An answer that says a
         // part was not found or not checked is not a success.
         // "（未能核实）" in front only says the check could not confirm it: reported as such, not as a failure.
@@ -268,9 +274,12 @@ import Foundation
         let body = checked ? t : String(t.dropFirst(marker.count))
         // 123 over the cloud 11-12: "成功：口播语音转写无法获取：两次 listen 均未识别到…" was a success.
         let unsure = ["未能核实", "未能确认", "无法确认", "未能读到", "没能", "待确认", "未能查到", "查不到",
-                      "无法获取", "未能获取", "获取不到", "无法识别", "未识别到", "没有识别出", "无法提取", "拿不到"]
+                      "无法获取", "未能获取", "获取不到", "无法识别", "未识别到", "没有识别出", "无法提取", "拿不到",
+                      "未能完成", "没有完成", "打不开", "找不到"]
         if ok, unsure.contains(where: { body.contains($0) }) { return "部分失败：" + body }
-        return (ok ? (checked ? "成功：" : "成功（未经核实）：") : "失败：") + body
+        if !ok { return "失败：" + body }
+        if body.isEmpty { return "已完成" }
+        return checked ? body : "（未经核实）" + body
     }
 
     /// What a run wrote down with note, in order, each once.
@@ -292,6 +301,7 @@ import Foundation
             ("claimed done", "几次说做完了，其实没做到"), ("lost the phone screen", "看不到手机画面（屏幕共享断了）"),
             ("is not on this phone", "这台手机没有装这个 App"), ("not_approved", "消息没有获批准，没有发送"),
             ("stopped", "任务被停止了"), ("timed out", "超时了还没做完"),
+            ("nothing got on", "卡住了，换了几种做法都没有进展"),
             // 123 over the cloud 11-12: Doubao's account ran out ("LLM HTTP 403: AccountOverdueError").
             ("accountoverdue", "模型服务账户欠费，请先充值再试"),
         ]

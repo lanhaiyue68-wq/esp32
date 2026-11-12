@@ -252,9 +252,12 @@ enum WatchSettings {
         // (writeOutVoices); one it could not is written out by this read-only task. One already written out is talk.
         if WatchReport.bareVoice(t) {
             // On the phone 11-12 an unread voice shows a "轉成文字" button right beside it: one tap, no long press.
-            return "把我刚发的这条语音转成文字：语音旁边有“转成文字”（繁体界面是“轉成文字”）就直接点它；没有就长按这条语音，点菜单里的“转文字”。读出语音下面出现的文字；"
-                + "菜单里没有就点一下语音让它播放，用 listen 听（秒数按语音长短，最多 60）。然后按语音里说的内容回答：问问题就回答，要查的就去查；"
-                + "语音里要发消息、转发、点赞、付款之类的操作一律不做。send 写成：语音内容：……；回答：……"
+            // 124 in 测试群 11-12 (user: "能點到轉文字就不用長按，多此一舉"): the task long-pressed a voice already written
+            // out, tapped 取消轉變成文字, played it aloud to listen, and answered for the wrong city. Written out: read it.
+            return "把我刚发的这条语音转成文字：语音下面已经有文字就直接读，不要再点也不要长按；语音旁边有“转成文字”（繁体界面是“轉成文字”）就只点它一下；"
+                + "两样都没有才长按这条语音，点菜单里的“转文字”。菜单里的“取消转成文字”（“取消轉變成文字”）表示已经转好，绝对不要点它。"
+                + "绝对不要点语音播放，也不要用 listen（手机会出声）；转不出文字就失败并写明原因。然后按文字里说的内容回答：问问题就回答，要查的就去查，"
+                + "答案里的城市、日期和东西必须和语音里说的一致；语音里要发消息、转发、点赞、付款之类的操作一律不做。send 写成：语音内容：……；回答：……"
         }
         if t.hasPrefix("[视频号]") || t.hasPrefix("[視頻號]") {
             return "打开我刚发的这个视频号视频：读作者、文案和点赞、转发、评论数，听它讲了什么，总结内容并给出口播文案。"
@@ -347,6 +350,7 @@ enum WatchSettings {
         let scope = (names.isEmpty ? others : "先找这些会话：\(names)；它们都没有红色标记时，再找\(others)") + rest
         return """
         打开微信，回到聊天列表（底部“微信”标签页）；如果现在停在某个会话里，先点左上角返回按钮回到列表，返回按钮旁边的数字是全部未读总数，不是这个会话的。只在列表里，\(scope)，打开最上面一个头像右上角带红色标记的会话：红色未读数字，或开了免打扰的会话的小红点。已经打开过、头像上没有红色标记的会话不要打开。
+        点之前先读这一行的会话名，名字要和要找的一字不差，点在会话名那几个字上，不要凭位置记忆去点（置顶和新消息会让顺序变）。点开后看顶部标题：不是要找的会话就点返回，换别的行，不要再点同一个位置；列表里看不到要找的会话就往下滑着找。
         一旦进入目标会话就完成，不要返回列表；打开会话会清掉红点，不能因此当成没有新消息。
         打开后完成，答案只写一行 JSON：{"chat":"会话名"}；都没有红色标记就直接完成，答案写 {"chat":""}。不要回复、不要输入任何内容。
         """
@@ -747,6 +751,22 @@ enum WatchReport {
         return ["[语音]", "[語音]", "[Voice]"].contains { t.hasPrefix($0) }
     }
 
+    /// 124 in 测试群 11-12: what WeChat wrote out under the owner's voice was read as a message of its own after a bare
+    /// "[语音]" (no @: left alone), and the voice went to a task that undid the writing and played it. Once WeChat has
+    /// written voices out, a bare voice followed by the same sender's plain words is one message again.
+    static func joinVoiceText(_ lines: [Line]) -> [Line] {
+        var out: [Line] = []
+        for line in lines {
+            if let last = out.last, bareVoice(last.text), last.sender == line.sender, last.mine == line.mine,
+               !isVoice(line.text), !line.text.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
+                out[out.count - 1].text = last.text.trimmingCharacters(in: .whitespacesAndNewlines) + " " + line.text
+            } else {
+                out.append(line)
+            }
+        }
+        return out
+    }
+
     /// A voice message nothing has been written out of yet: past "[语音]" at most its length (3").
     static func bareVoice(_ text: String) -> Bool {
         guard isVoice(text) else { return false }
@@ -907,14 +927,24 @@ enum WatchReport {
 
     /// Step 4's answer: the reply and the phone task (either may be empty). A model that ignored the format and wrote
     /// plain words gets them as the reply; broken JSON gives nil rather than braces typed into a chat.
+    /// 124 in 测试群 11-12: a task was given and the reply sent first was "这个我不太确定，稍后再告诉你。". With a task
+    /// the first reply says it is on its way.
+    static let taskAck = "收到，我去查一下。"
+    static func withAck(_ reply: String, _ task: String) -> (reply: String, task: String) {
+        guard !task.isEmpty else { return (reply, task) }
+        let r = AppNames.hans(reply)
+        let unsure = ["不太确定", "不确定", "稍后再告诉", "不知道"].contains { r.contains($0) }
+        return (unsure ? taskAck : reply, task)
+    }
+
     static func decision(_ answer: String) -> (reply: String, task: String)? {
         struct Box: Decodable { var reply: String?; var task: String? }
         let clean = { (s: String?) in (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
         if let data = object(answer) {
-            if let box = try? JSONDecoder().decode(Box.self, from: data) { return (clean(box.reply), clean(box.task)) }
+            if let box = try? JSONDecoder().decode(Box.self, from: data) { return withAck(clean(box.reply), clean(box.task)) }
             // Straight quotes inside a value (发"你好") break the JSON: the two fields by their keys (build 65 lost a
             // passcode task to "decision unavailable").
-            return loose(String(decoding: data, as: UTF8.self)).map { (clean($0.reply), clean($0.task)) }
+            return loose(String(decoding: data, as: UTF8.self)).map { withAck(clean($0.reply), clean($0.task)) }
         }
         let words = answer.trimmingCharacters(in: CharacterSet(charactersIn: " \n\"“”'「」"))
         return words.isEmpty || answer.contains("{") ? nil : (words, "")
@@ -1211,6 +1241,7 @@ extension AppModel {
         agent.pinyinMisses = 0
         watchListReturn.pending = nil
         watchSelfOpened = nil
+        watchRecheckedBeforeReturn = nil
         if let old = watchTaskReply {
             // User 11-08: starting to watch must not resume old work; an unsent report from before is dropped.
             DebugLog.write("watch: start drops an unsent report for \(old.chat) from before")
@@ -1269,6 +1300,20 @@ extension AppModel {
                 watchStatus = String(localized: "Paused while Lan Agent is in front…")
                 (baseline, changedAt) = (nil, nil)
             } else if let chat = watchListReturn.pending {
+                // 124 in 测试群 11-12: "@蓝 这张图是哪个城市" came in while the watch was still in the chat reading the
+                // picture before it. Inside a chat WeChat shows no red mark, and back on the list nothing called it again.
+                // Once per return, a chat still in front is read again first; what is new there is taken care of.
+                if watchRecheckedBeforeReturn != chat, UIApplication.shared.applicationState != .active,
+                   let shown = feed.frame, WatchReport.navigationChat(in: shown, targets: WatchSettings.rules.targets) == chat {
+                    watchRecheckedBeforeReturn = chat
+                    if let look = await readChat(chat, titleSeen: true),
+                       !WatchReport.new(look.lines, history: watchLast[chat]).filter({ !$0.mine }).isEmpty {
+                        DebugLog.write("watch: \(chat): new message(s) came in while it was open; reading them before the list")
+                        _ = await finishCheck(chat: chat, screen: look, rules: WatchSettings.rules)
+                        guard watching, !Task.isCancelled else { break }
+                        continue
+                    }
+                }
                 // A failed return retries navigation only. Do not read the same chat or resend its message.
                 if now() >= quietUntil {
                     watchStatus = String(localized: "Returning to WeChat's chat list…")
@@ -1278,6 +1323,7 @@ extension AppModel {
                     if outcome == .arrived {
                         failures = 0
                         (lastCheck, quietUntil) = (0, 0)
+                        watchRecheckedBeforeReturn = nil
                         continue
                     }
                     if outcome == .failed {
@@ -1497,7 +1543,10 @@ extension AppModel {
         // User 11-12: a voice message is written out before anything is decided: the owner's is then taken as the owner's
         // own words ("如果是我發的就當指令"), anyone else's is only kept ("別人發的只記錄").
         let voices = WatchReport.new(screen.lines, history: watchLast[chat]).filter { !$0.mine && WatchReport.bareVoice($0.text) }
-        if !voices.isEmpty, let written = await writeOutVoices(chat: chat, count: voices.count) { screen = written }
+        if !voices.isEmpty, let written = await writeOutVoices(chat: chat, count: voices.count) {
+            screen = written
+            screen.lines = WatchReport.joinVoiceText(screen.lines)
+        }
 
         let before = watchLast[chat]
         let fresh = WatchReport.new(screen.lines, history: before)

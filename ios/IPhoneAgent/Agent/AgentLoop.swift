@@ -124,6 +124,19 @@ extension Pointer: Gestures {}
     private var blindLooks = 0
     private(set) var takeover = 0
     private var stepsInPart = 0, rescued = false, troubles = 0
+    /// 124 over the cloud 11-12 (g05): every type was refused, the part stalled, a new plan was made, and again, for ten
+    /// minutes and ~290 steps with nothing on the screen moving. New plans in a row with nothing noted or finished between
+    /// them; at stallLimit the run ends with what it found.
+    private var stallsNoProgress = 0
+    static let stallLimit = 3
+    /// 124 over the cloud 11-12 (e02): 行事曆 did not open, the model gave up, and 视频号, Bluetooth and Weather were never
+    /// tried. In a goal of three parts or more, this many single things may fail and be written down; the run goes on.
+    private var itemFailsLeft = 2
+    static let oneThingFailedReason = "Not ended: one part could not be done; it is noted as 未能完成. Go on with the "
+        + "other parts, then done, saying which part failed and why. Fail only if none of the rest can be done."
+    /// The texts sent as messages into a chat (not a search's Return): only these are never typed again.
+    private var messageSent: Set<String> = []
+    private var sendIsMessage = false
     /// How many notes there were when the current part began, and the last part whose "done" was sent back once for
     /// having nothing written down (B8).
     private var notesAtPart = 0, emptyPartRefused = -1
@@ -131,6 +144,27 @@ extension Pointer: Gestures {}
     private var pasteFrame: Data?
     /// Opens of the app the run is already in, refused (once a run).
     private var sameAppRefused = 0
+    /// The app a picture is shown full screen in, after that refusal: the next Home or open of it taps the picture's
+    /// middle instead. 124 over the cloud 11-12 (g06) and in the watch: after the refusal the model went Home and opened
+    /// WeChat again, WeChat came back on the same Seoul screenshot, and both models took it for Weather until the run failed.
+    private var pictureIn: String?
+    /// A listen heard what an earlier one did: the video started over, and listening again is refused.
+    private var listenedAll = false
+    static let videoLoopedNote = "（视频已经从头重播：这次听到的和前面基本相同，口播已经听全。不要再 listen，直接用上面听到的内容作答。）"
+
+    static func repeatsHeard(_ new: String, before: [String]) -> Bool {
+        func grams(_ s: String) -> Set<String> {
+            let c = Array(s.filter { !$0.isWhitespace && !$0.isPunctuation })
+            guard c.count > 1 else { return [] }
+            return Set((0..<(c.count - 1)).map { String(c[$0...($0 + 1)]) })
+        }
+        let now = grams(new)
+        guard now.count >= 20 else { return false }
+        return before.contains { old in
+            let was = grams(old)
+            return !was.isEmpty && Double(now.intersection(was).count) / Double(now.count) >= 0.6
+        }
+    }
     /// The app a run is in when it starts without opening one: a task the WeChat watch gives starts in WeChat.
     private var startApp: String? { task.contains("微信会话") ? "微信" : nil }
     /// User 11-09: "未知的内容由codex先去完整走一遍并学会，然后后面交给豆包干". A task the phone has not done before is driven
@@ -608,6 +642,16 @@ extension Pointer: Gestures {}
         return places.contains { WatchReport.sameChatTitle($0, title) }
     }
 
+    /// A "done" of a goal in numbered parts that answers it all: numbered as far as the goal's last part or the one
+    /// before it (the last is often "整理成一段话告诉我"), or "全部" with at least half of them numbered.
+    static func answersWholeGoal(_ answer: String, task: String) -> Bool {
+        let want = goalParts(task)
+        guard want >= 2 else { return false }
+        let text = AppNames.hans(answer)
+        let got = goalParts(text)
+        return got >= want - 1 || (text.contains("全部") && got * 2 >= want)
+    }
+
     /// How many numbered parts a goal written on one line has ("1. …；2. …；3. …"), counted 1, 2, 3… in order (a price
     /// "13.5" or a time is not a part). 123 over the cloud 11-12: a goal of nine parts started on its remembered way, a
     /// plan with no numbered lines, and had the base 55 steps instead of 180.
@@ -1026,8 +1070,9 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
+        (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft) = (0, [], false, 2)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
-        (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused) = (0, -1, nil, 0)
+        (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
         approvedTexts = []
         checksLeft = 2
@@ -1084,6 +1129,12 @@ extension Pointer: Gestures {}
                                          "reason": .str((parts.count >= 2 ? "part \(partIndex + 1)" : "the task")
                                                         + " not getting on: \(stepsInPart) steps, \(troubles) failed, swiping \(swiping)")])
                             troubles = 0
+                            stallsNoProgress += 1
+                            if stallsNoProgress >= Self.stallLimit {
+                                record(nil, ["action": .str("fail"),
+                                             "reason": .str("stuck: \(stallsNoProgress) new plans in a row and nothing got on")])
+                                return finish()
+                            }
                             try await replan(stuck: true)
                         }
                     }
@@ -1272,6 +1323,7 @@ extension Pointer: Gestures {}
         for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
             if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) {
                 notes.append(text)
+                stallsNoProgress = 0
                 gotOn()
             }
             record(planned.shot, planned.act)
@@ -1293,9 +1345,26 @@ extension Pointer: Gestures {}
             // 123 on the phone 11-12 (W2 again): a Weather screenshot opened full screen from 测试群 was taken for the
             // Weather app, and WeChat was "opened" twice through Search (13 s, 19 s), then the run went round in circles.
             // A run that has not left the app it is in has nothing to open: refused once, saying what it looks at.
+            if act["action"]?.str == "listen", listenedAll {
+                record(planned.shot, ["action": .str("refused"), "reason": .str("Refused: the video has started over and "
+                    + "all it says is in the notes. Answer now with done.")])
+                return false
+            }
+            if let pic = pictureIn {
+                pictureIn = nil
+                let what = act["action"]?.str ?? ""
+                let reopens = what == "open"
+                    && AppNames.variants(pic).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? ""))
+                if what == "home" || reopens {
+                    DebugLog.write("picture: \(what) right after the still-in-\(pic) refusal; tapping the picture's middle instead")
+                    act = ["action": .str("tap"), "x": .num(500), "y": .num(500), "picture_close": .bool(true),
+                           "thought": .str("A picture shown full screen in \(pic): one tap in its middle closes it.")]
+                }
+            }
             if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
                AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")) {
                 sameAppRefused += 1
+                pictureIn = inApp
                 record(planned.shot, ["action": .str("refused"), "reason": .str(Self.stillInAppReason(inApp))])
                 return false
             }
@@ -1403,7 +1472,12 @@ extension Pointer: Gestures {}
                 : nil
             // The task's own checks (drawn, sent) are for the done that ends it: build104 live 11-08, part 1 (the alarm)
             // was done three times and refused each time as "nothing has been drawn" (that was part 2), and the run stopped.
-            let endsTask = parts.count < 2 || partIndex >= parts.count - 1
+            // 124 over the cloud 11-12 (e03): Codex drove through parts 2-4 and answered all nine things in its "done";
+            // it was taken as part 2 only, part 3 (send to 验证群, already sent) began, and the run went round in circles
+            // and failed with the answer lost. A done that answers the whole goal is checked as the end of the task.
+            let coversGoal = name == "done" && parts.count >= 2 && partIndex < parts.count - 1
+                && Self.answersWholeGoal(act["answer"]?.str ?? "", task: task)
+            let endsTask = parts.count < 2 || partIndex >= parts.count - 1 || coversGoal
             var unvisited: String?  // only for a task given in words (not the watch's fixed ways)
             if name == "done", endsTask, presetPlan.isEmpty, !keyboardGuard { unvisited = Self.unvisitedReason(task: task, steps: steps) }
             if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) ?? unvisited {
@@ -1431,7 +1505,14 @@ extension Pointer: Gestures {}
                     act["answer"] = .str("（未能核實）" + answer)
                 }
             }
-            if name == "done", partFinished(act, shot: planned.shot) { return false }
+            if name == "done", !coversGoal, partFinished(act, shot: planned.shot) { return false }
+            if name == "fail", itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 {
+                itemFailsLeft -= 1
+                let line = "未能完成：" + String((act["reason"]?.str ?? "").prefix(120))
+                if !notes.contains(line) { notes.append(line) }
+                record(planned.shot, ["action": .str("fail refused"), "reason": .str(Self.oneThingFailedReason)])
+                return false
+            }
             if name != "done" && name != "fail" {
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
@@ -1506,8 +1587,12 @@ extension Pointer: Gestures {}
                 // 123 over the cloud 11-12: the sorted temperatures went into 验证群 twice; this check was the watch's
                 // only, and the text, approved once, was not asked about again. Every run: the same text again only into
                 // another chat, read off the title (not read: refused).
+                // 124 over the cloud 11-12 (g05): 雨伞 searched in 淘宝 was "sent" by its Return, and typing it into 拼多多's
+                // search box was refused ~290 times. Only a message sent into a chat is never typed again.
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
-                if name == "type", sentTexts.contains(typedNow),
+                let sentAsMessage = messageSent.contains(typedNow)
+                    || (sentTexts.contains(typedNow) && Self.inChatApp(steps, task: task))
+                if name == "type", sentAsMessage,
                    keyboardGuard || Self.samePlace(sentPlaces[typedNow] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
                     return false
@@ -1579,6 +1664,7 @@ extension Pointer: Gestures {}
                     seenTitle = screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }
                 }
                 approvalPlace = seenTitle
+                if sending { sendIsMessage = isMessage }
                 var wrongSpot: String?
                 if isMessage, endAfterSend == nil, Self.asksToSend(task) {
                     switch Self.chatCheck(seen: seenTitle, task: task, steps: steps) {
@@ -1679,6 +1765,8 @@ extension Pointer: Gestures {}
                         sendTap = (CGPoint(x: x / 1000, y: y / 1000), before)  // learned at the end if the run is done
                     }
                     sentTexts.insert(Self.typedKey(text)); unsent = nil; pendingInput = nil; quietSinceSend = 0
+                    if sendIsMessage { messageSent.insert(Self.typedKey(text)) }
+                    sendIsMessage = false
                     if let place = approvalPlace { sentPlaces[Self.typedKey(text), default: []].insert(place) }
                     justSent = text
                 }
@@ -2267,6 +2355,7 @@ extension Pointer: Gestures {}
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
         gotOn()
+        stallsNoProgress = 0
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
@@ -2489,8 +2578,15 @@ extension Pointer: Gestures {}
             // User 11-11: a video's spoken words (口播文案) and what it is about, from WeChat, 抖音, 视频号.
             guard let listen else { throw DeviceError(message: "Listening is not available here.") }
             let seconds = min(max(a["seconds"]?.double ?? 60, 5), 180)
+            let earlier = notes.filter { $0.hasPrefix("听到和字幕") }
             let heard = await listen(seconds)
             notes.append("听到和字幕（\(Int(seconds)) 秒）：" + String(heard.prefix(4000)))
+            // 124 on the phone 11-12 (h07): a short 抖音 video plays round and round, and it was listened to six times
+            // over. Heard again is heard all.
+            if Self.repeatsHeard(heard, before: earlier) {
+                listenedAll = true
+                notes.append(Self.videoLoopedNote)
+            }
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
             try await phone.drag(pts.map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)

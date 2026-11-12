@@ -127,7 +127,7 @@ import XCTest
     /// User 11-11: "不論成功失敗都要反饋，告訴我成功還是失敗". 121's failed cloud tasks came back with an empty answer.
     func testEveryResultSaysWhetherItWorked() {
         let done: [JObject] = [["action": .str("tap")], ["action": .str("done"), "answer": .str("深圳明天 28°C")]]
-        XCTAssertEqual(CloudBridge.outcome(of: done).answer, "成功：深圳明天 28°C")
+        XCTAssertEqual(CloudBridge.outcome(of: done).answer, "深圳明天 28°C", "user 11-12: no 成功 on a success")
         let failed: [JObject] = [["action": .str("fail"), "reason": .str("kept going back and forth between two screens")]]
         XCTAssertEqual(CloudBridge.outcome(of: failed).status, "failed")
         XCTAssertEqual(CloudBridge.outcome(of: failed).answer, "失败：在几个画面之间来回打转，没能做完")
@@ -137,11 +137,11 @@ import XCTest
         XCTAssertEqual(CloudBridge.outcome(of: chinese).answer, "失败：" + AppNames.hans("請先繫結手機號，之後才能留言。"))
         XCTAssertTrue(CloudBridge.outcome(of: chinese).answer.contains("请先"), CloudBridge.outcome(of: chinese).answer)
         let traditional: [JObject] = [["action": .str("done"), "answer": .str("深圳明天（11/12 週四）最高溫 28°")]]
-        XCTAssertEqual(CloudBridge.outcome(of: traditional).answer, "成功：深圳明天（11/12 周四）最高温 28°")
+        XCTAssertEqual(CloudBridge.outcome(of: traditional).answer, "深圳明天（11/12 周四）最高温 28°")
         XCTAssertEqual(CloudBridge.outcome(of: [["action": .str("stopped")]]).answer, "失败：任务被停止了")
-        XCTAssertEqual(CloudBridge.said(true, "成功：已发出"), "成功：已发出", "not twice")
+        XCTAssertEqual(CloudBridge.said(true, "成功：已发出"), "已发出", "a 成功 the model wrote comes off")
         // 122 q12: a part not found is not a success.
-        XCTAssertEqual(CloudBridge.said(true, "（未能核實）第五個商品¥48.15"), "成功（未经核实）：第五个商品¥48.15")
+        XCTAssertEqual(CloudBridge.said(true, "（未能核實）第五個商品¥48.15"), "（未经核实）第五个商品¥48.15")
         XCTAssertEqual(CloudBridge.said(true, "Wi-Fi 是 HUAWEI-510；電池電量百分比未能核實。"), "部分失败：Wi-Fi 是 HUAWEI-510；电池电量百分比未能核实。")
         XCTAssertTrue(WatchSettings.phoneTaskResult(action: "fail", answer: nil, attempted: [], reason: "step limit reached")
             .hasPrefix("失败：这次任务未能确认完成（步骤用完了还没做完）"))

@@ -1220,11 +1220,20 @@ import Foundation
             }
             if AppPlaces.looksLikeHome(rows) { return rows }
             if AppPlaces.inSearch(rows) {
-                log("home: Search is open; emptying it and tapping away")
-                try await key("cmd+a")
-                try await key("backspace")
-                try await Task.sleep(nanoseconds: 400_000_000)
-                try await tap(Self.searchBlank.x, Self.searchBlank.y)
+                // 124 over the cloud 11-12 (e02): 備忘錄's own search results ("最佳搜尋結果") read as Search. Emptying and
+                // tapping away did nothing, five times, twice, with no flick home; the run then said 行事曆 was not on the
+                // phone. And with no keyboard up, Cmd+A and Delete could reach a note. Search with its keyboard is emptied
+                // once; anything else that reads as Search, or the same again, is left by the flick home.
+                if attempt == 0, await keyboardIsUp(rows, shown) {
+                    log("home: Search is open; emptying it and tapping away")
+                    try await key("cmd+a")
+                    try await key("backspace")
+                    try await Task.sleep(nanoseconds: 400_000_000)
+                    try await tap(Self.searchBlank.x, Self.searchBlank.y)
+                } else {
+                    log("home: a search screen (Search or an app's own); flicking home")
+                    try await flickHome()
+                }
             } else if await keyboardIsUp(rows, shown) {
                 // With a keyboard up the flick opens the app switcher, and the next flick goes back to the app: four
                 // flicks ended a WeChat task nowhere. Measured over USB: a tap in the left margin closes it and touches
