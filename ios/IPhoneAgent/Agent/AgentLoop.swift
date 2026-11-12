@@ -151,11 +151,67 @@ extension Pointer: Gestures {}
         "购物车：第\(n)次看到加购成功的提示，这一件已经加进去了（这次任务一共加了\(n)次）。同一件不要再点加入购物车，每点一次就多一件；目标要几件就只加几次。"
     }
 
-    /// A text already sent that this one is: the same, or (4 characters or more) inside it or holding it.
+    /// A text already sent that this one is: the same, or (4 characters or more) inside it or holding it with little
+    /// around it (an @name). 126 over the cloud 11-12 (g5): a note of ~900 characters quoting "G5买东西做完", sent a
+    /// moment before, was refused as that message.
     static func sameMessage(_ typed: String, in sent: Set<String>) -> String? {
         guard !typed.isEmpty else { return nil }
         if sent.contains(typed) { return typed }
-        return sent.first { s in min(s.count, typed.count) >= 4 && (s.contains(typed) || typed.contains(s)) }
+        return sent.first { s in
+            min(s.count, typed.count) >= 4 && abs(s.count - typed.count) <= 12 && (s.contains(typed) || typed.contains(s))
+        }
+    }
+
+    /// The thought says part `n` is finished ("第5部分完成", "part 5 done"), or the last numbered item of the part's
+    /// text ("第18项完成" for a part that ends with "18. 新建一条备忘录…").
+    static func saysPartDone(_ thought: String, part n: Int, text: String) -> Bool {
+        let t = AppNames.hans(thought).lowercased().filter { !$0.isWhitespace }
+        var marks = ["第\(n)部分完成", "第\(n)部分已完成", "part\(n)done", "part\(n)isdone", "part\(n)complete", "part\(n)finished"]
+        let ns = text as NSString
+        let items = ((try? NSRegularExpression(pattern: #"(?<!\d)(\d{1,2})[\.、．]"#))?
+            .matches(in: text, range: NSRange(location: 0, length: ns.length)) ?? [])
+            .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
+        if let last = items.max() { marks += ["第\(last)项完成", "第\(last)项已完成", "item\(last)done", "item\(last)isdone"] }
+        return marks.contains { t.contains($0) }
+    }
+
+    /// How many things the goal puts in carts: for each clause that adds (加入购物车, 加购), its count (一件, 一份, 2杯;
+    /// not 第一个 or 前5个), one when it gives none. At least one.
+    static func cartWanted(_ task: String) -> Int {
+        let numbers: [String: Int] = ["一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10]
+        let re = try? NSRegularExpression(pattern: #"(?<![第前])([0-9]+|[一两二三四五六七八九十])(件|份|杯|个|盒|瓶|袋)"#)
+        var total = 0
+        for clause in AppNames.hans(task).components(separatedBy: CharacterSet(charactersIn: "，,；;。")) {
+            guard clause.contains("加入购物车") || clause.contains("加购") else { continue }
+            let ns = clause as NSString
+            let n = re?.firstMatch(in: clause, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
+            total += n.flatMap { Int($0) ?? numbers[$0] } ?? 1
+        }
+        return max(total, 1)
+    }
+
+    /// A tap the thought says adds to the cart (点加入购物车, tap 加购), not one that closes the sheet, opens the cart,
+    /// or takes one off.
+    static func addsToCart(_ thought: String) -> Bool {
+        let t = AppNames.hans(thought).lowercased()
+        let adds = t.range(of: #"(点击|点|按|tap)[^，。,.]{0,8}(加入购物车|加购|add to cart)"#, options: .regularExpression) != nil
+        let other = ["关闭", "关掉", "close", "返回", "back", "减", "删除", "移除", "remove", "打开购物车", "去购物车", "进入购物车",
+                     "open the cart", "go to the cart", "购物车图标", "cart icon"].contains { t.contains($0) }
+        return adds && !other
+    }
+
+    static func cartFullReason(_ n: Int) -> String {
+        "Refused: the \"added to cart\" toast came \(n) time(s), as many as the goal asks: it is in the cart. Do not tap "
+            + "加入购物车 again. Close the sheet (✕) and open the cart page (购物车) to check the count; tap − there if it holds too many."
+    }
+
+    /// A thought that drags a picture down to close it ("往下拖一下关闭", "drag it down to close it").
+    static func saysDragDown(_ thought: String) -> Bool {
+        let t = AppNames.hans(thought).lowercased()
+        // Not 往下滑 / swipe down: said of a page, they mean its content goes up, the finger up.
+        let down = ["往下拖", "向下拖", "下拉关闭", "下滑关闭", "drag it down", "drag down", "dragging it down",
+                    "drag the picture down"].contains { t.contains($0) }
+        return down && ["关", "close"].contains { t.contains($0) }
     }
 
     static func sentNote(_ text: String, to place: String?) -> String {
@@ -378,6 +434,14 @@ extension Pointer: Gestures {}
         if running { throw DeviceError(message: "stop the agent first") }
         task = ""; plan = ""; steps = []; shots = [:]
     }
+
+    /// Called between two steps of a run (127, user 11-12): the watch tells the owner, who wrote again while this task
+    /// goes on, that it will come to it after. Nil for a run with no one to answer.
+    var betweenSteps: (() async -> Void)?
+
+    /// Something done between two steps, outside this run (a reply in WeChat), written down so the model knows why the
+    /// screen may have moved.
+    func aside(_ text: String) { record(nil, ["action": .str("aside"), "reason": .str(text)]) }
 
     private func record(_ shot: Data? = nil, _ step: JObject) {
         if ["blocked", "refused", "loop"].contains(step["action"]?.str ?? "") { refusalsNoProgress += 1 }
@@ -669,7 +733,7 @@ extension Pointer: Gestures {}
         // 125 in 测试群 11-12: the model sees a step's first 300 characters (recentActions), and how to close the picture
         // came after them. Short, the way out first.
         "Refused: still in \(app), never left it: nothing to open. This is a picture or video \(app) shows full screen "
-            + "(a screenshot of another app is only a picture). Note what you need from it, then drag it down to close it."
+            + "(a screenshot of another app is only a picture). Note what you need, then drag it down (y 350 to 800) to close it."
     }
 
     /// Whether a text sent before would go where it went already: the title read now among those it was sent to. No
@@ -875,9 +939,15 @@ extension Pointer: Gestures {}
         let goal = key(task)
         // The same day: "進新浪網" without an address; a learned route opened Safari by its icon again. A web address
         // typed for a goal that names a browser and posts nothing goes to the address bar, not to a chat.
-        if key(text).range(of: #"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(/\S*)?$"#, options: .regularExpression) != nil,
+        let address = key(text).range(of: #"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(/\S*)?$"#, options: .regularExpression) != nil
+        if address,
            goal.range(of: #"safari|chrome|浏览器|瀏覽器|网址|網址|网站|網站|网页|網頁"#, options: .regularExpression) != nil,
            !publishes(task) { return false }
+        // 126 over the cloud 11-12 (g3): Safari could not reach the search site, so the model typed cn.bing.com in the
+        // address bar; the goal also posted to 测试群, and the address was held as a message "about to send into the
+        // wrong place" until the run ended. An address typed outside a chat app is not a message unless the goal's
+        // message is that address.
+        if address, !chatApp, !messageParts(task).map(key).contains(where: { !$0.isEmpty && $0.contains(typed) }) { return false }
         guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
         let messages = messageParts(task).map(key).filter { !$0.isEmpty }
@@ -1169,6 +1239,7 @@ extension Pointer: Gestures {}
                                      "reason": .str("stuck: refused \(refusalsNoProgress) times and nothing got on")])
                         return finish()
                     }
+                    if let between = betweenSteps { await between() }  // a stop meanwhile ends the next step as usual
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
@@ -1418,6 +1489,29 @@ extension Pointer: Gestures {}
                            "thought": .str("A picture shown full screen in \(pic): dragging it down closes it.")]
                 }
             }
+            // 126 in 测试群 11-12: "看完图片后把它往下拖一下关闭" came with a swipe from y 800 to y 300, up: the picture
+            // stayed open and the reply took 35 s more. A drag the thought calls down, to close a picture, goes down.
+            if act["action"]?.str == "swipe", let y1 = act["y1"]?.double, let y2 = act["y2"]?.double, y2 < y1,
+               Self.saysDragDown(act["thought"]?.str ?? "") {
+                DebugLog.write("swipe: the thought drags down to close a picture and the swipe went up; turned down")
+                act["y1"] = .num(min(y2, 350))
+                act["y2"] = .num(max(y1, 800))
+            }
+            // 126 over the cloud 11-12 (g6): "已加购5次" in the model's own words, and 加入购物车 tapped again each time the
+            // spec sheet came up. Once the "added" toast has come as often as the goal asks for, adding is refused.
+            if act["action"]?.str == "tap", cartAdds >= Self.cartWanted(task), Self.addsToCart(act["thought"]?.str ?? "") {
+                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.cartFullReason(cartAdds))])
+                return false
+            }
+            // 126 over the cloud 11-12 (g7): "备忘录已完整写入第1至17项结果，第18项完成" and then "open 微信" for the next
+            // part, with no done: the part stayed open, and the run went back and forth between 备忘录 and 微信 for 56
+            // steps checking the note. A part the thought calls finished, as the run moves on to another app, is done.
+            if act["action"]?.str == "open", parts.count >= 2, partIndex < parts.count,
+               Self.saysPartDone(act["thought"]?.str ?? "", part: partIndex + 1, text: parts[partIndex]) {
+                DebugLog.write("part \(partIndex + 1): the thought says it is finished; the next part begins")
+                _ = partFinished(["answer": .str(String((act["thought"]?.str ?? "").prefix(300))), "by": .str("actor")],
+                                 shot: planned.shot)
+            }
             if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
                AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")) {
                 sameAppRefused += 1
@@ -1648,9 +1742,12 @@ extension Pointer: Gestures {}
                 // search box was refused ~290 times. Only a message sent into a chat is never typed again.
                 // 125 stress test 11-12 (u05): "125压力测试艾特" went out, then "@蓝海乐 125压力测试艾特" was typed and went
                 // out too: the same message with more around it is the same message.
+                // 126 over the cloud 11-12 (a03): a note's first line "126回归比价" was typed with Return in 备忘录, and
+                // "126回归比价完成" for 测试群 held it: refused 25 times as sent already, and the run failed. "More around
+                // it" holds for messages sent into a chat only; anything else typed with Return must be the same text.
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
                 let sentMatch = Self.sameMessage(typedNow, in: messageSent)
-                    ?? (Self.inChatApp(steps, task: task) ? Self.sameMessage(typedNow, in: sentTexts) : nil)
+                    ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow) ? typedNow : nil)
                 if name == "type", let sent = sentMatch,
                    keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
@@ -1749,7 +1846,9 @@ extension Pointer: Gestures {}
                 // Customer spec 11-10 (§0.6, §13.3): a message from a task the cloud gave waits for approval before it goes.
                 // Over Wi-Fi 11-10 a search (行事曆, www.163.com, 牙刷) was held for approval too: what the goal itself
                 // names, in a goal that posts nothing, is not a message.
-                if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"),
+                // 126 over the cloud 11-12 (g5): "第5组记录" typed in 備忘錄 and its Return waited for approval as a message;
+                // s03's fix (125) had kept it out of the wrong-place check only. In an app that sends nothing, nothing waits.
+                if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"), !Self.inLocalApp(steps),
                    Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps, task: task)), !approvedTexts.contains(Self.typedKey(text)) {
                     var shown = text  // what the approval shows: a paste, as read off the screen (B4)
                     if text == Self.pastePlaceholder, let before = pasteFrame, let current = screen?.frame ?? planned.shot {
@@ -2015,9 +2114,13 @@ extension Pointer: Gestures {}
         }
         if Pasteboard.needed(text) || Pasteboard.prefersExact(text), !pasteHopOff {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
-            if hop == .lost {  // no further typing or sending when the app switch lost its destination
+            if hop == .lost {
+                // 126 over the cloud 11-12 (g2): the trip through Lan Agent did not come back, the run paused, and a task
+                // of 20 parts ended at its first. Nothing was pasted and no more paste trips this run, but the run goes
+                // on: the next look sees where the phone is, and the text is typed by Lan Agent's keyboard or as pinyin.
                 pasteHopOff = true
-                throw BlindError(reason: "paste target could not be verified after switching apps; no text was pasted")
+                throw DeviceError(message: "Not typed: the paste trip through Lan Agent did not come back to the field, "
+                                  + "so nothing was pasted. Look at the screen, go back to the field, tap it, and type again.")
             }
             if hop == .filled {
                 // A missing keyboard or uncertain OCR does not prove the paste missed. Keep the field and inspect

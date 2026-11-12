@@ -84,22 +84,24 @@ import XCTest
         XCTAssertTrue(agent.sent.isEmpty)
     }
 
-    func testALostPasteTargetStopsBeforeAnyTextOrSendCanReachAnotherApp() async throws {
-        let actor = FakeModel { _ in "DO: type 你好" }
+    /// 126 over the cloud 11-12 (g2): a lost paste trip paused the run, and a task of 20 parts ended at its first. The
+    /// step still types and sends nothing (the rest of that reply is dropped, a send still needs approval, no more paste
+    /// trips this run), but the run goes on from a fresh look.
+    func testALostPasteTargetTypesNothingAndTheRunGoesOn() async throws {
+        let actor = FakeModel { _ in "DO: type 你好\nDO: key enter" }
         let phone = FakeGestures()
         let agent = AgentLoop(phone: phone, screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
         agent.fastText = true; agent.pinyinMisses = 2
-        agent.pasteHop = { _ in .lost }
-        do {
-            _ = try await agent.step()
-            XCTFail("an unknown paste destination must stop the run")
-        } catch is BlindError {
-            // A normal DeviceError would be replanned and could continue sending in the wrong app.
-        } catch {
-            XCTFail("the lost target must stop as a screen-safety error, got \(error)")
-        }
-        XCTAssertTrue(phone.calls.isEmpty)
+        var hops = 0
+        agent.pasteHop = { _ in hops += 1; return .lost }
+        var thrown: Error?
+        do { _ = try await agent.step() } catch { thrown = error }
+        XCTAssertFalse(thrown is BlindError, "a lost paste trip no longer pauses the whole run")
+        let said = thrown?.localizedDescription ?? agent.steps.last?["reason"]?.str ?? ""
+        XCTAssertTrue(said.contains("nothing was pasted"), said)
+        XCTAssertTrue(phone.calls.isEmpty, "no text and no Return reach whatever app is in front")
         XCTAssertTrue(agent.sent.isEmpty)
+        XCTAssertEqual(hops, 1)
     }
 }
 

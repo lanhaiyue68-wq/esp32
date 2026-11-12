@@ -128,7 +128,7 @@ extension AppModel {
             "capture": .str(feed.nativeStatus),
             "watching": .bool(watching),
             "calibrated": .bool(pointer.calibrated),
-            "planner": .str(PlusRest.shared.summary),
+            "planner": .str(PlusRest.summaryAll),
             "foreground": .bool(UIApplication.shared.applicationState == .active),
             "keyboard": .bool(keyboardBridge.onScreen()),
             "takeover": .int(agent.takeover),

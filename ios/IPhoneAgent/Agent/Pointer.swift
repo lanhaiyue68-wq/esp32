@@ -583,7 +583,10 @@ import Foundation
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
             (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
             log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
-            try await arrive(x, y, before: before, began: began)
+            // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
+            // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle
+            // search finds the pointer and corrects it before the click (2-4 s, only then).
+            if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
             let clickedAt = now()
             try await device.send("click")
             if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
@@ -605,7 +608,10 @@ import Foundation
             // a precise tap: the arrival check first; the older wiggle search only if it did not see the pointer there
             if try await arrive(x, y, before: before, began: began) != .onTarget { try await self.aim(x, y, required: true) }
         } else {
-            try await arrive(x, y, before: before, began: began)
+            // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
+            // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle
+            // search finds the pointer and corrects it before the click (2-4 s, only then).
+            if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
         }
         if viaBorder, let first = firstSeen { learnBorderLift(missedBy: Double(first.y) - y) }
         let clickedAt = now()
@@ -889,7 +895,10 @@ import Foundation
             lastClick = nil
             pos = nil
             try await point(x, y)
-            try await arrive(x, y, before: before, began: began)
+            // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
+            // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle
+            // search finds the pointer and corrects it before the click (2-4 s, only then).
+            if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
         }
         try await device.send("press")
         do { try await Task.sleep(nanoseconds: UInt64(seconds * 1e9)) } catch {

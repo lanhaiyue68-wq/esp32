@@ -116,6 +116,12 @@ import UIKit
     var watchInterjectedAt: [String: Double] = [:]  // per chat: the last interjection, at most one per ten minutes
     var watchSelfOpened: (chat: String, at: Double)?  // a chat this watch opened from its red number (its badge is gone now)
     var watchRecheckedBeforeReturn: String?  // the chat read once more before going back to the list (124: a message came in meanwhile)
+    var watchLeftAt: [String: Double] = [:]  // per chat: when this watch got back to the list from it
+    var watchPreviewOpened: [String: String] = [:]  // per chat: the list line it was opened again for (once per line)
+    var watchScrolledUpAt: Double = 0  // when the watch last tapped the status bar to take the chat list to its top
+    var watchQueued: [String] = []  // chats whose owner wrote while a task ran: read first when it is done
+    var watchBusyTold: Set<String> = []  // chats told "busy" during the task now running (once each)
+    var watchBanner: (title: String, body: String)?  // the newest WeChat banner seen while the task runs
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
     /// A tool call that changes something, waiting for the owner's "确认" (two minutes).
     var watchPendingCall: (chat: String, sender: String, call: OwnerTools.Call, request: String, at: Double)?

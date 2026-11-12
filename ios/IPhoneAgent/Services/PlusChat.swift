@@ -6,6 +6,8 @@ import Foundation
 /// Until 11-08 every run planned with Doubao (865 calls in logs(12), none to Plus): sign-in was only tested in phase A.
 /// Any failure — not signed in, the quota, the network, a changed backend — plans with `fallback` instead, logged, and
 /// Plus rests a while (half an hour after a 429, from two minutes up to half an hour otherwise) before it is tried again.
+/// User 11-12: "登錄兩個 codex，一個額度用完自動切換另一個": with a second account signed in, a failing account rests
+/// and the other one plans; Doubao only when none can.
 @MainActor final class PlusChat: ChatModel {
     static let enabledKey = "plusPlanner", modelKey = "plusPlannerModel"
     /// Answered in 2.4–3.4 s on this account in phase A (logs 11-07).
@@ -13,46 +15,75 @@ import Foundation
 
     typealias Ask = (ChatGPTPlus.Tokens, String, String, String, Data?) async throws -> (ChatGPTPlus.Answer, ChatGPTPlus.Tokens)
 
+    /// One signed-in account: its tokens, where fresh ones go, and how long it rests after a failure.
+    struct Account {
+        let name: String
+        let tokens: () -> ChatGPTPlus.Tokens?
+        let save: (ChatGPTPlus.Tokens) -> Void
+        let rest: PlusRest
+    }
+
     let plusModel: String
     let fallback: ChatModel
-    private let tokens: () -> ChatGPTPlus.Tokens?
-    private let save: (ChatGPTPlus.Tokens) -> Void
+    private let accounts: [Account]
     private let askPlus: Ask
-    private let rest: PlusRest
     private(set) var lastUsedPlus = false
+    /// The account that answered last ("1", "2"); nil when the fallback did.
+    private(set) var lastAccount: String?
     var model: String { lastUsedPlus ? "plus:\(plusModel)" : fallback.model }
+    /// Who plans when no account can, as the user is told ("豆包", or the backup first).
+    var fallbackLabel = "豆包"
 
-    init(model: String, fallback: ChatModel, tokens: @escaping () -> ChatGPTPlus.Tokens? = { ChatGPTPlus.saved },
-         save: @escaping (ChatGPTPlus.Tokens) -> Void = { ChatGPTPlus.save($0) },
+    /// `tokens`, `save` and `rest` are account 1; `second` is account 2 (none unless given).
+    init(model: String, fallback: ChatModel, tokens: @escaping () -> ChatGPTPlus.Tokens? = { ChatGPTPlus.saved(slot: 0) },
+         save: @escaping (ChatGPTPlus.Tokens) -> Void = { ChatGPTPlus.save($0, slot: 0) },
          ask: @escaping Ask = { try await ChatGPTPlus.ask($0, model: $1, system: $2, prompt: $3, image: $4) },
-         rest: PlusRest? = nil) {
-        self.plusModel = model; self.fallback = fallback; self.tokens = tokens; self.save = save; self.askPlus = ask
-        self.rest = rest ?? PlusRest()
+         rest: PlusRest? = nil, second: Account? = nil) {
+        self.plusModel = model; self.fallback = fallback; self.askPlus = ask
+        self.accounts = [Account(name: "1", tokens: tokens, save: save, rest: rest ?? PlusRest())] + (second.map { [$0] } ?? [])
+    }
+
+    /// Account 2 as signed in on this phone.
+    static var secondAccount: Account {
+        Account(name: "2", tokens: { ChatGPTPlus.saved(slot: 1) }, save: { ChatGPTPlus.save($0, slot: 1) }, rest: .second)
     }
 
     /// The planner for a run: Plus when it is switched on and signed in, else the given model.
-    static func planner(fallback: ChatModel, defaults: UserDefaults = .standard) -> ChatModel {
+    static func planner(fallback doubao: ChatModel, defaults: UserDefaults = .standard) -> ChatModel {
         let on = defaults.object(forKey: enabledKey) as? Bool ?? true
+        // User 11-12: a backup model the user filled in plans before the model in Settings (豆包).
+        let backup = BackupModel.client()
+        let fallback: ChatModel = backup.map { ModelChain([$0, doubao], rests: [.backup, nil]) } ?? doubao
+        if let backup { DebugLog.write("planner: backup \(backup.model), then \(doubao.model)") }
         guard on, ChatGPTPlus.saved != nil else {
             DebugLog.write("planner: \(fallback.model) (Plus \(on ? "not signed in" : "switched off"))")
             return fallback
         }
         let model = defaults.string(forKey: modelKey).flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel
-        DebugLog.write("planner: ChatGPT Plus \(model), \(fallback.model) if it fails")
-        return PlusChat(model: model, fallback: fallback, rest: .shared)
+        let two = ChatGPTPlus.saved(slot: 0) != nil && ChatGPTPlus.saved(slot: 1) != nil
+        DebugLog.write("planner: ChatGPT Plus \(model)\(two ? " (2 accounts)" : ""), \(fallback.model) if it fails")
+        let plus = PlusChat(model: model, fallback: fallback, rest: .shared, second: secondAccount)
+        if backup != nil { plus.fallbackLabel = "候補模型" }
+        return plus
     }
 
     func chat(system: String, text: String, image: Data?, maxTokens: Int, temperature: Double) async throws -> ChatResult {
-        if !rest.resting, let signedIn = tokens() {
+        let say = accounts[0].rest.onFailure  // RunSession tells the user through account 1's (the shared one)
+        let named = accounts.count > 1 && accounts.dropFirst().contains { $0.tokens() != nil }
+        var failed: [String] = []  // accounts that failed on this call
+        for account in accounts {
+            guard !account.rest.resting, let signedIn = account.tokens() else { continue }
             do {
                 let (answer, fresh) = try await askPlus(signedIn, plusModel, system, text, image)
-                if fresh != signedIn { save(fresh) }
+                if fresh != signedIn { account.save(fresh) }
                 guard !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ChatGPTPlus.Failure(message: "empty answer")
                 }
                 lastUsedPlus = true
-                rest.succeeded()
-                DebugLog.write("plus planner: \(plusModel) first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms, effort \(ChatGPTPlus.reasoningEffort ?? "default")")
+                lastAccount = account.name
+                account.rest.succeeded()
+                if !failed.isEmpty { say?("Codex 帳號 \(failed.joined(separator: "、")) 不能用，已改用帳號 \(account.name)") }
+                DebugLog.write("plus planner: \(plusModel)\(named ? " (account \(account.name))" : "") first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms, effort \(ChatGPTPlus.reasoningEffort ?? "default")")
                 return ChatResult(text: answer.text, firstToken: answer.firstTokenMs.map { Double($0) / 1000 },
                                   total: Double(answer.totalMs) / 1000, finishReason: "stop")
             } catch is CancellationError {
@@ -60,11 +91,23 @@ import Foundation
             } catch {
                 if Task.isCancelled { throw CancellationError() }  // a stopped run says nothing about Plus
                 let message = error.localizedDescription
-                let seconds = rest.failed(message, networkDown: ModelRequestFailure.isNetworkDown(error))
-                DebugLog.write("plus planner: \(message.prefix(160)); \(fallback.model) plans for \(Int(seconds / 60)) min")
+                let down = ModelRequestFailure.isNetworkDown(error)
+                // Said once below, when no account is left: account 1's quota said alone while account 2 answers
+                // would be wrong.
+                let seconds = account.rest.failed(message, networkDown: down, quiet: true)
+                failed.append(account.name)
+                DebugLog.write("plus planner\(named ? " (account \(account.name))" : ""): \(message.prefix(160)); it rests \(Int(seconds / 60)) min")
+                if down { break }  // no network: another account cannot do better
             }
         }
+        if !failed.isEmpty {
+            let back = accounts.map(\.rest.secondsLeft).filter { $0 > 0 }.min() ?? 0
+            let who = named ? "（帳號 \(failed.joined(separator: "、"))）" : ""
+            say?("Codex 連不上\(who)，接下來 \(max(1, Int(back / 60))) 分鐘由\(fallbackLabel)規劃")
+            DebugLog.write("plus planner: no account can plan; \(fallback.model) plans")
+        }
         lastUsedPlus = false
+        lastAccount = nil
         return try await fallback.chat(system: system, text: text, image: image, maxTokens: maxTokens, temperature: temperature)
     }
 }
@@ -73,6 +116,10 @@ import Foundation
 /// (11-08 20:04Z on: 57 timeouts in a row, a third of the time of a long task, and nobody could tell).
 @MainActor final class PlusRest {
     static let shared = PlusRest()
+    /// Account 2's (user 11-12): it rests on its own.
+    static let second = PlusRest()
+    /// The backup planner's (BackupModel): a wrong key or no credit is not asked every step.
+    static let backup = PlusRest()
     private(set) var failures = 0
     private(set) var lastError = ""
     private var until = 0.0
@@ -80,16 +127,27 @@ import Foundation
     var onFailure: ((String) -> Void)?
 
     var resting: Bool { now() < until }
+    var secondsLeft: Double { max(0, until - now()) }
     /// Where things stand, for the test channel and for the start of a run.
     var summary: String { failures == 0 ? "ok" : "unreachable (\(failures) in a row): \(lastError.prefix(80))" }
+
+    /// No signed-in account can plan now (account 2 counts only when it is signed in).
+    static var allDown: Bool {
+        shared.failures > 0 && (ChatGPTPlus.saved(slot: 1) == nil || second.failures > 0)
+    }
+    /// Both accounts, for the start of a run and the test channel.
+    static var summaryAll: String {
+        ChatGPTPlus.saved(slot: 1) == nil ? shared.summary : "account 1 \(shared.summary); account 2 \(second.summary)"
+    }
 
     /// The seconds Plus now rests.
     /// A network that is down for a moment says nothing about Codex: over USB 11-09 a Wi-Fi drop of a few minutes put it to
     /// rest for 2, then 10 minutes, and the next tasks ran without it. It rests a minute, and the next real failure is still a first.
     static let offlineRest = 60.0
 
+    /// quiet: the caller tells the user (PlusChat, once for all accounts).
     @discardableResult
-    func failed(_ message: String, networkDown: Bool = false) -> Double {
+    func failed(_ message: String, networkDown: Bool = false, quiet: Bool = false) -> Double {
         if networkDown {
             lastError = message
             until = now() + Self.offlineRest
@@ -99,7 +157,7 @@ import Foundation
         lastError = message
         let seconds = Self.restSeconds(failures: failures, message: message)
         until = now() + seconds
-        onFailure?("Codex 連不上（\(message.prefix(40))），接下來 \(Int(seconds / 60)) 分鐘由豆包規劃")
+        if !quiet { onFailure?("Codex 連不上（\(message.prefix(40))），接下來 \(Int(seconds / 60)) 分鐘由豆包規劃") }
         return seconds
     }
 

@@ -41,14 +41,24 @@ enum ChatGPTPlus {
 
     // MARK: - stored sign-in
 
-    static var saved: Tokens? {
-        Keychain.get(keychainAccount).flatMap { try? JSONDecoder().decode(Tokens.self, from: Data($0.utf8)) }
+    /// User 11-12: "登錄兩個 codex，一個額度用完自動切換另一個". Account 1 keeps the key it always had (a sign-in made
+    /// before stays); account 2 has its own.
+    static let accounts = 2
+    private static func keychainKey(_ slot: Int) -> String { slot == 0 ? keychainAccount : "\(keychainAccount)-\(slot + 1)" }
+
+    static func saved(slot: Int) -> Tokens? {
+        Keychain.get(keychainKey(slot)).flatMap { try? JSONDecoder().decode(Tokens.self, from: Data($0.utf8)) }
     }
 
-    static func save(_ tokens: Tokens?) {
+    static func save(_ tokens: Tokens?, slot: Int) {
         let text = tokens.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        Keychain.set(text, for: keychainAccount)
+        Keychain.set(text, for: keychainKey(slot))
     }
+
+    /// Account 1's sign-in, else account 2's: signed in at all.
+    static var saved: Tokens? { saved(slot: 0) ?? saved(slot: 1) }
+
+    static func save(_ tokens: Tokens?) { save(tokens, slot: 0) }
 
     // MARK: - device-code sign-in
 
@@ -121,7 +131,9 @@ enum ChatGPTPlus {
         let tokens = Tokens(idToken: id, accessToken: access,
                             refreshToken: (o["refresh_token"] as? String) ?? old?.refreshToken ?? "",
                             accountID: accountID(idToken: id) ?? old?.accountID)
-        save(tokens)
+        // User 11-12, two accounts: fresh tokens go back where the old ones were (account 2's refresh must not
+        // overwrite account 1); a new sign-in is saved by the caller into the account it was made for.
+        if let old, let slot = (0..<accounts).first(where: { saved(slot: $0) == old }) { save(tokens, slot: slot) }
         return tokens
     }
 

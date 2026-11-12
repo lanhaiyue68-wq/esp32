@@ -24,6 +24,11 @@ import Foundation
     /// moves to the top, and a long task makes a long preview: the owner's task was never seen, nor a muted dot on a row
     /// with a long preview. The time column starts at 0.82 or later: pieces are kept by where they start.
     private static func listTitles(_ rows: [[CandidatePicker.Piece]]) -> [(text: String, box: CGRect)] {
+        listEntries(rows).map { ($0.text, $0.box) }
+    }
+
+    /// The list rows with a title, each with its preview line (the chat's last message, no whitespace).
+    static func listEntries(_ rows: [[CandidatePicker.Piece]]) -> [(text: String, box: CGRect, preview: String)] {
         let body = rows.compactMap { row -> (text: String, box: CGRect)? in
             let pieces = row.filter { (0.19...0.75).contains($0.box.minX) && (0.10...0.90).contains($0.box.midY) }
             guard !pieces.isEmpty else { return nil }
@@ -31,15 +36,16 @@ import Foundation
             let text = pieces.contains { $0.box.maxX > 0.8 } ? withoutTime(raw) : raw  // read together with the time
             return (text, pieces.reduce(CGRect.null) { $0.union($1.box) })
         }
-        return body.filter { match in
-            !match.text.isEmpty && body.contains(where: { preview in
+        return body.compactMap { match -> (text: String, box: CGRect, preview: String)? in
+            guard !match.text.isEmpty, let below = body.first(where: { preview in
                 (0.018...0.050).contains(preview.box.midY - match.box.midY) &&
                 abs(preview.box.minX - match.box.minX) <= 0.06 &&
                 // Position only: box heights say nothing here. On the CI replica of logs(12)'s list a 19 px preview
                 // was as tall as its 24 px title, and 小柳's two characters were shorter than their preview with Latin
                 // letters. The next row's title is 0.08 or more below, never this close.
                 preview.box.height >= 0.006
-            })
+            }) else { return nil }
+            return (match.text, match.box, below.text)
         }
     }
 
@@ -75,16 +81,23 @@ import Foundation
     /// next to a title box is marked. A duplicate listed name (logs26 had two 蓝海乐) or a truncated one leaves the
     /// choice to the model. A listed chat out of view is not unread: WeChat moves a chat with a new message to the top
     /// (logs 11-06: the model, guessing, opened 主人蓝海乐 four checks in a row with nothing new).
-    static func unread(rows: [[CandidatePicker.Piece]], rules: WatchSettings.Rules, badge: (CGRect) -> Bool) -> Unread {
+    /// `missed`: a listed chat whose list line (its last message) is not what this watch read last there. 126 in 测试群
+    /// 11-12: "@蓝 这是哪个城市" came in the second the watch left the chat after reading the picture before it; a chat
+    /// open shows no red mark, and back on the list the line had changed with nothing marked: it waited for good.
+    static func unread(rows: [[CandidatePicker.Piece]], rules: WatchSettings.Rules, badge: (CGRect) -> Bool,
+                       missed: ((String, String) -> Bool)? = nil) -> Unread {
+        listScrolled = false
         guard !rules.targets.isEmpty, WatchListReturn.view(rows: rows, chat: "") == .list else { return .unknown }
+        listScrolled = isScrolled(rows)
+        let entries = listEntries(rows)
         var hits: [(chat: String, box: CGRect)] = []
         for chat in rules.targets {
             let name = chat.filter { !$0.isWhitespace }
             guard !name.isEmpty, !name.contains("…"), !name.contains("...") else { return .unknown }
-            let found = titles(rows, name)
+            let found = entries.filter { WatchReport.sameName($0.text, name) }
             if found.count > 1 { return .unknown }
-            guard let box = found.first else { continue }
-            if badge(box) { hits.append((chat, box)) }
+            guard let entry = found.first else { continue }
+            if badge(entry.box) || missed?(chat, entry.preview) == true { hits.append((chat, entry.box)) }
         }
         if let top = hits.min(by: { $0.box.midY < $1.box.midY }) { return .row(top.chat, CGPoint(x: 0.5, y: top.box.midY)) }
         let listed = rules.targets.map { $0.filter { !$0.isWhitespace } }
@@ -96,6 +109,21 @@ import Foundation
         return .none
     }
 
+    /// The chat list on the last look was scrolled past its top (see isScrolled).
+    static var listScrolled = false
+
+    /// The list is not at its top: the first row's title is cut by the bar above it, or a row's words show above the
+    /// first whole row. 126 in 测试群 11-12: after a look further down for other red marks, the pinned 测试群 stayed half
+    /// under the title bar, the corner of its avatar, where the red mark sits, with it. The search field is no row.
+    static func isScrolled(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        guard let top = listEntries(rows).min(by: { $0.box.midY < $1.box.midY }) else { return false }
+        if top.box.midY < 0.135 { return true }
+        return rows.joined().contains { p in
+            (0.19...0.75).contains(p.box.minX) && p.box.midY > 0.10 && p.box.midY < top.box.midY - 0.03
+                && !["搜索", "搜尋", "Search"].contains(where: { p.text.contains($0) })
+        }
+    }
+
     /// Where the red mark sits: on the top-right corner of the avatar, left of the title.
     static func badgeArea(_ title: CGRect) -> CGRect {
         CGRect(x: title.minX - 0.075, y: title.midY - 0.04, width: 0.065, height: 0.04)
@@ -105,10 +133,10 @@ import Foundation
     /// after JPEG softens its edge; a number badge is 15 % or more.
     static let badgeShare = 0.02
 
-    static func unread(in frame: Data, rules: WatchSettings.Rules) -> Unread {
+    static func unread(in frame: Data, rules: WatchSettings.Rules, missed: ((String, String) -> Bool)? = nil) -> Unread {
         guard let image = Vision.image(frame) else { return .unknown }
         return unread(rows: CandidatePicker.rows(in: frame, top: 0.055, bottom: 1), rules: rules,
-                      badge: { Vision.redShare(image, in: badgeArea($0)) >= badgeShare })
+                      badge: { Vision.redShare(image, in: badgeArea($0)) >= badgeShare }, missed: missed)
     }
 
     /// The same, with the words read off the main thread: the watch looks every few seconds (W4).
@@ -147,7 +175,8 @@ import Foundation
     /// `title`: the listed chat on screen; `anyTitle`: any chat's title on screen (never the list's).
     static func open(phone: Gestures, screen: ScreenSource, rules: WatchSettings.Rules, canAct: () -> Bool,
                      inspectList: ((Data) -> Unread)? = nil, title: ((Data) -> String?)? = nil,
-                     anyTitle: ((Data) -> String?)? = nil, onTap: ((String) -> Void)? = nil) async -> Outcome {
+                     anyTitle: ((Data) -> String?)? = nil, onTap: ((String) -> Void)? = nil,
+                     missed: ((String, String) -> Bool)? = nil) async -> Outcome {
         guard !rules.targets.isEmpty else { return .fallback }
         let title = title ?? { WatchReport.navigationChat(in: $0, targets: rules.targets) }
         let anyTitle = anyTitle ?? { WatchReport.navigationTitle(in: $0) }
@@ -160,7 +189,7 @@ import Foundation
             guard let frame = screen.frame else { return .fallback }
             if let chat = title(frame) { return .inChat(chat) }
             let point: CGPoint, landed: (Data) -> String?
-            switch inspectList?(frame) ?? unread(in: frame, rules: rules) {
+            switch inspectList?(frame) ?? unread(in: frame, rules: rules, missed: missed) {
             case .none: return .nothing
             case .unknown: return .fallback
             case .row(let chat, let p):

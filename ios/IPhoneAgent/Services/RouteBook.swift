@@ -79,7 +79,11 @@ import Foundation
             // “早啊新闻”…" and typed 早啊新闻: a 9-minute newscast instead of the first video. A text the old goal gave
             // and this one does not is the old task's own: a goal with nothing to type is not done that way; another
             // one types what it gives itself.
-            let stale = Self.typedTexts(in: recipe.lines).filter { named.contains($0) && !wanted.contains($0) }
+            // 126 over the cloud 11-12 (g7): the way of g5's 20 parts was followed with "第5组记录", "G5全部做完" and g5's
+            // whole note (its old results) still in it: a recipe keeps only the first 512 characters of its goal, so they
+            // were not found there, and the model's first answer copied the old messages. Any text this goal does not
+            // give is the old task's own.
+            let stale = Self.typedTexts(in: recipe.lines).filter { !wanted.contains($0) }
             if !stale.isEmpty, !Self.typingWords.contains(where: { wanted.contains($0) }) { continue }
             guard !elsewhere.isEmpty || !stale.isEmpty else { return recipe }
             var adapted = recipe
