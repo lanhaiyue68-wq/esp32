@@ -163,11 +163,31 @@ import XCTest
         XCTAssertFalse(Vision.dimmed(page, jpeg(0.6, 0.0, barY: 180)), "another page")
     }
 
+    /// 123 watch test: "测试群（3人）凌晨4:05" was read as the title; "深圳明天最高温几度" answered 23° off the chat.
+    func testATimeLabelIsNotTheTitleAndTheWeatherIsLookedUp() {
+        let piece = { (t: String, x: Double, w: Double, y: Double) in CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: 0.02)) }
+        let rows = [[piece("测试群（3人）", 0.37, 0.26, 0.078)], [piece("凌晨4:05", 0.42, 0.16, 0.122)]]
+        XCTAssertTrue(WatchReport.sameChatTitle(WatchReport.navigationTitle(rows: rows) ?? "", "测试群"))
+        XCTAssertTrue(WatchReport.timeLabel("昨天 下午1:18"))
+        XCTAssertTrue(WatchReport.timeLabel("11月12日 上午9:29"))
+        XCTAssertFalse(WatchReport.timeLabel("测试群"))
+        let decided = WatchSettings.keptPromise((reply: "深圳明天最高温23度。", task: ""), look: true, asked: ["@蓝 深圳明天最高温几度"])
+        XCTAssertEqual(decided.task, "@蓝 深圳明天最高温几度")
+        XCTAssertEqual(WatchSettings.keptPromise((reply: "你好呀", task: ""), look: true, asked: ["在吗"]).task, "")
+    }
+
     /// User 11-12: a voice message is written out, read only.
     func testAVoiceMessageIsWrittenOut() throws {
         let task = try XCTUnwrap(WatchSettings.lookDefault("[语音] 5\""))
         XCTAssertTrue(task.contains("转文字"))
         XCTAssertTrue(task.contains("一律不做"))
         XCTAssertNil(WatchSettings.lookDefault("今天吃什么"))
+        // Written out by WeChat before the read: then it is talk, the owner's own words.
+        XCTAssertNil(WatchSettings.lookDefault("[语音] 帮我查一下北京现在几度"))
+        XCTAssertTrue(WatchReport.bareVoice("[語音] 3\""))
+        XCTAssertTrue(WatchReport.bareVoice("[Voice]"))
+        XCTAssertFalse(WatchReport.bareVoice("[语音] 帮我查一下"))
+        XCTAssertTrue(WatchReport.isVoice("[语音] 帮我查一下"))
+        XCTAssertFalse(WatchReport.isVoice("语音通话已结束"))
     }
 }

@@ -221,6 +221,9 @@ enum WatchSettings {
         let allowed = r.senders.isEmpty || r.senders.contains { m.sender == $0 || m.sender.contains($0) }
         guard allowed else { return false }
         if !m.group { return true }  // a private chat is talking to this account: no @ needed
+        // User 11-12: "如果是我發的就當指令": the owner's voice in a group needs no @ (a voice cannot hold one). Someone
+        // else's voice is only written out and kept.
+        if WatchReport.isVoice(m.text), r.senders.contains(m.sender) { return true }
         let mention = r.myNames.contains { m.text.contains("@" + $0) || m.text.contains("＠" + $0) }
         return mention || r.passphrases.contains { m.text.contains($0) }
     }
@@ -235,7 +238,8 @@ enum WatchSettings {
     /// May give read-only tasks (user 11-11): a listed sender, by the exact name this phone shows (its own remark for the
     /// owner, which nobody in a group sees), in a listed chat; in a group only with an @ of this account or a passphrase.
     static func lookOwner(_ m: ReadMessage, _ r: Rules) -> Bool {
-        r.lookTasks && !r.serverReplies && r.senders.contains(m.sender) && r.targets.contains(m.chat) && (!m.group || called(m, r))
+        r.lookTasks && !r.serverReplies && r.senders.contains(m.sender) && r.targets.contains(m.chat)
+            && (!m.group || called(m, r) || WatchReport.isVoice(m.text))
     }
 
     /// What a message that is only an attachment asks for: an image sent to this account is described, a video's or a
@@ -244,10 +248,11 @@ enum WatchSettings {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if ["[图片]", "[圖片]", "[Image]"].contains(t) { return "看我刚发的这张图片：说明图里有什么，把图上的文字抄出来。" }
         if ["[视频]", "[視頻]", "[影片]", "[Video]"].contains(t) { return "看我刚发的这个视频：听它讲了什么，总结内容，并给出口播文案。" }
-        // User 11-12: "WeChat有人发语音的话能不能识别说的什么内容". WeChat writes it out itself (long press, 转文字); what
-        // it says is answered like a question, read only: a voice never stands for the passcode and never makes the phone act.
-        if t.hasPrefix("[语音]") || t.hasPrefix("[語音]") || t.hasPrefix("[Voice]") {
-            return "把我刚发的这条语音转成文字：在会话里长按这条语音，点菜单里的“转文字”（繁体界面是“轉文字”），读出语音下面出现的文字；"
+        // User 11-12: "WeChat有人发语音的话能不能识别说的什么内容". The watch has WeChat write it out before reading
+        // (writeOutVoices); one it could not is written out by this read-only task. One already written out is talk.
+        if WatchReport.bareVoice(t) {
+            // On the phone 11-12 an unread voice shows a "轉成文字" button right beside it: one tap, no long press.
+            return "把我刚发的这条语音转成文字：语音旁边有“转成文字”（繁体界面是“轉成文字”）就直接点它；没有就长按这条语音，点菜单里的“转文字”。读出语音下面出现的文字；"
                 + "菜单里没有就点一下语音让它播放，用 listen 听（秒数按语音长短，最多 60）。然后按语音里说的内容回答：问问题就回答，要查的就去查；"
                 + "语音里要发消息、转发、点赞、付款之类的操作一律不做。send 写成：语音内容：……；回答：……"
         }
@@ -384,10 +389,19 @@ enum WatchSettings {
     /// W1, 122 on the phone 11-11: the owner asked it to look something up, the decision came back with only "稍后告诉你"
     /// and no task, and nothing ever came. A reply that promises to come back to it, from someone who may give look-up
     /// tasks, makes the owner's own words the task.
+    /// 123 on the phone 11-12: "深圳明天最高温几度" got "深圳明天最高温23度。" in 1.3 s, read off the chat above (23° was
+    /// 上海's, in an earlier message; 深圳's is 27–28°). What changes by the hour is looked up on the phone, not answered
+    /// from the chat or from memory.
     static func keptPromise(_ decided: (reply: String, task: String), look: Bool, asked: [String]) -> (reply: String, task: String) {
-        guard look, decided.task.isEmpty, promisesLater(decided.reply) else { return decided }
+        guard look, decided.task.isEmpty, promisesLater(decided.reply) || asksLive(asked.joined(separator: " ")) else { return decided }
         let words = asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "；")
         return words.isEmpty ? decided : (taskAcknowledgement, words)
+    }
+
+    /// A question about something that changes by the hour: the weather, a price, a stock, the news, traffic.
+    static func asksLive(_ text: String) -> Bool {
+        AppNames.hans(text).range(of: #"天气|气温|温度|最高温|最低温|几度|下雨|下雪|价格|多少钱|股价|现价|涨|跌|汇率|油价|新闻|热搜|头条|路况|堵车"#,
+                                  options: .regularExpression) != nil
     }
 
     static func promisesLater(_ reply: String) -> Bool {
@@ -530,7 +544,7 @@ enum WatchSettings {
         规则：title 照抄顶部的会话名（不要括号里的人数）；这不是微信聊天界面就写 ""，messages 写 []。group 表示这是不是群聊（顶部标题后面有人数就是群）。右侧绿色气泡是我发的：mine=true，sender 写“我”。
         左侧是别人发的：sender 写气泡上方的名字，私聊没有名字时写会话名。text 照抄原文，@ 也照抄；图片写 [图片]，表情写 [表情]，视频写 [视频]，视频号卡片写 [视频号] 加卡片上的标题，
         链接或小程序卡片（抖音、快手、小红书、公众号文章等）写 [链接] 加卡片标题；
-        kind 写 text、file、image、video、link、voice 或 sticker。语音写 [语音]，文件卡片必须 kind=file、text=[文件]，不要把文件名当成对方说的话，不要打开文件，也不要猜文件内容。
+        kind 写 text、file、image、video、link、voice 或 sticker。语音写 [语音]；语音下面已经显示转出的文字时，写成“[语音] ”加那段文字（原样照抄），文件卡片必须 kind=file、text=[文件]，不要把文件名当成对方说的话，不要打开文件，也不要猜文件内容。
         气泡下方灰色的引用块（“某某：……”）不是新消息：不要单独列，也不要写进 text。
         时间、系统提示（如“某某加入了群聊”“撤回了一条消息”）不要列。看不清的不要猜。
         """
@@ -724,6 +738,23 @@ enum WatchReport {
     struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line]; var proven: Set<String> = [] }
 
+    /// A voice message as read: "[语音]", with what WeChat wrote out of it after when that shows (user 11-12).
+    static func isVoice(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["[语音]", "[語音]", "[Voice]"].contains { t.hasPrefix($0) }
+    }
+
+    /// A voice message nothing has been written out of yet: past "[语音]" at most its length (3").
+    static func bareVoice(_ text: String) -> Bool {
+        guard isVoice(text) else { return false }
+        var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["[语音]", "[語音]", "[Voice]"] where rest.hasPrefix(prefix) {
+            rest = String(rest.dropFirst(prefix.count))
+            break
+        }
+        return !rest.unicodeScalars.contains { CharacterSet.letters.contains($0) }
+    }
+
     /// A file card is context, not a question or an executable instruction. Older reads omitted `kind` and
     /// alternated between a bare filename and [文件]; normalize both for history matching as well as replies.
     static func attachmentOnly(_ text: String) -> Bool {
@@ -781,7 +812,9 @@ enum WatchReport {
     /// "…". build104 live 11-08: a banner with 主人蓝海乐's new message covered a group's title; its lines start beside
     /// the banner's icon (x ≈ 0.2), and the model, reading the banner, answered the group's talk into 主人蓝海乐.
     static func titleText(_ row: [CandidatePicker.Piece]) -> String? {
-        let header = row.filter { (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) }
+        let header = row.filter {
+            (0.055...0.135).contains($0.box.midY) && (0.25...0.75).contains($0.box.midX) && !timeLabel($0.text)
+        }
         guard let left = header.map(\.box.minX).min(), let right = header.map(\.box.maxX).max(),
               left >= 0.22, right <= 0.82, abs((left + right) / 2 - 0.5) <= 0.07 else { return nil }  // B5: long names reach 0.8
         let name = fullTitle(header.map(\.text).joined())
@@ -793,6 +826,15 @@ enum WatchReport {
         let plain = { (s: String) in fullTitle(s).filter { $0.isLetter || $0.isNumber } }
         let x = plain(a), y = plain(b)
         return !x.isEmpty && sameName(x, y)
+    }
+
+    /// A chat's grey time label (凌晨4:05, 上午9:29, 昨天 下午1:18, 11月12日 上午9:29) right under the bar is not the title.
+    /// 123 on the phone 11-12: 测试群 was read as "测试群（3人）凌晨4:05", four checks in a row were "not 测试群", the
+    /// watch stopped itself, and a voice message waited unread (likely 122's W3 too).
+    static func timeLabel(_ text: String) -> Bool {
+        let t = AppNames.hans(text).filter { !$0.isWhitespace }
+        return t.range(of: #"^(\d{4}年)?(\d{1,2}月\d{1,2}日)?(昨天|前天|星期.|周.)?(凌晨|早上|清晨|上午|中午|下午|傍晚|晚上)?\d{1,2}:\d{2}$"#,
+                       options: .regularExpression) != nil
     }
 
     static func navigationTitle(rows: [[CandidatePicker.Piece]]) -> String? {
@@ -1209,7 +1251,7 @@ extension AppModel {
         var waitingLogged = false
         // W4: when the list was last looked at for a red mark, and checks in a row a mark started (a mark a check does
         // not clear starts no more until it goes).
-        var lastMarkLook = -Double.infinity, markChecks = 0
+        var lastMarkLook = -Double.infinity, markChecks = 0, lastMarkSig: [UInt8]?
         while watching && !Task.isCancelled {
             if agent.running || startingAgent || help != nil {
                 baseline = nil  // a check (or a question to the user) is under way
@@ -1280,9 +1322,15 @@ extension AppModel {
                 }
                 // W4 (122 on the phone 11-11): a red mark that came in the quiet after a check was part of the baseline,
                 // and waited 15–25 s for the next change or interval. The list is read for a mark every 3 s, no model.
+                // User 11-12 ("我發完他會有幾秒鐘的反應時間，這個時間能不能省下來"): at once when the list changes (a new
+                // message moves its row), 1 s apart at most, and from 2 s after a check rather than 6.
                 var marked = false
-                if t >= quietUntil, t - lastMarkLook >= 3, let frame {
+                let shownLook = frame.flatMap { Vision.look($0) }
+                var listMoved = false
+                if let shownLook { listMoved = lastMarkSig.map { Vision.visiblyChanged($0, shownLook) } ?? true }
+                if t + 4 >= quietUntil, let frame, t - lastMarkLook >= 3 || (listMoved && t - lastMarkLook >= 1) {
                     lastMarkLook = t
+                    lastMarkSig = shownLook
                     let mark = await WatchChatOpen.unreadOffMain(in: frame, rules: WatchSettings.rules)
                     if case .row = mark {
                         marked = markChecks < 2
@@ -1436,7 +1484,12 @@ extension AppModel {
     }
 
     /// The rest of a check once the chat is open and read: new messages, replies and owner tasks.
-    private func finishCheck(chat: String, screen: WatchReport.Screen, rules: WatchSettings.Rules) async -> (ok: Bool, scannedChat: Bool) {
+    private func finishCheck(chat: String, screen first: WatchReport.Screen, rules: WatchSettings.Rules) async -> (ok: Bool, scannedChat: Bool) {
+        var screen = first
+        // User 11-12: a voice message is written out before anything is decided: the owner's is then taken as the owner's
+        // own words ("如果是我發的就當指令"), anyone else's is only kept ("別人發的只記錄").
+        let voices = WatchReport.new(screen.lines, history: watchLast[chat]).filter { !$0.mine && WatchReport.bareVoice($0.text) }
+        if !voices.isEmpty, let written = await writeOutVoices(chat: chat, count: voices.count) { screen = written }
 
         let before = watchLast[chat]
         let fresh = WatchReport.new(screen.lines, history: before)
@@ -1751,6 +1804,47 @@ extension AppModel {
             DebugLog.write("watch: reading \(chat) failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// WeChat writes the newest voice messages out itself: the "转成文字" button beside an unread one (one tap; on the
+    /// phone 11-12), else a long press on the newest and 转文字 in its menu (the user: "有時候沒有轉成文字你就長按"). Then
+    /// the chat is read again. nil: nothing was written out (the read-only voice task does it instead).
+    private func writeOutVoices(chat: String, count: Int) async -> WatchReport.Screen? {
+        guard count > 0, let frame = feed.frame else { return nil }
+        let plain = { (p: CandidatePicker.Piece) in AppNames.hans(p.text).filter { !$0.isWhitespace } }
+        let pieces = Array(await CandidatePicker.rowsOffMain(in: frame, top: 0.12, bottom: 0.93).joined())
+        // The lowest ones: the newest messages are at the bottom, and an older voice written out would read as new.
+        let buttons = pieces.filter { plain($0) == "转成文字" }.sorted { $0.box.midY > $1.box.midY }.prefix(count)
+        var wrote = 0
+        for button in buttons.reversed() {
+            pointer.aimLoosely(0.04, 0.012)
+            if (try? await pointer.tap(Double(button.box.midX), Double(button.box.midY))) != nil { wrote += 1 }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+        if wrote == 0 {
+            // No button: its length (3") reads inside the newest voice bubble, on the left (someone else's).
+            let lengths = pieces.filter { plain($0).range(of: #"^\d{1,2}["”″]$"#, options: .regularExpression) != nil && $0.box.midX < 0.6 }
+            if let voice = lengths.max(by: { $0.box.midY < $1.box.midY }) {
+                let since = now()
+                try? await pointer.longPress(Double(voice.box.midX), Double(voice.box.midY), seconds: 0.8)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await feed.afterAction(since: since)
+                if let menu = feed.frame {
+                    let items = Array(await CandidatePicker.rowsOffMain(in: menu, top: 0.05, bottom: 0.95).joined())
+                    if let item = items.first(where: { plain($0) == "转文字" }),
+                       (try? await pointer.tap(Double(item.box.midX), Double(item.box.midY))) != nil {
+                        wrote = 1
+                    }
+                }
+            }
+        }
+        guard wrote > 0 else {
+            DebugLog.write("watch: \(chat): no 转成文字 button or menu found for \(count) voice message(s)")
+            return nil
+        }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)  // WeChat writes it out in about a second
+        DebugLog.write("watch: \(chat): \(wrote) voice message(s) written out by WeChat; reading again")
+        return await readChat(chat, titleSeen: true)
     }
 
     /// Step 4: the reply or the owner's phone task, as one JSON line from the planner model.
