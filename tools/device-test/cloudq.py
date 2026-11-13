@@ -63,6 +63,8 @@ for item in queue:
             if task.get('approval') == 'pending' and (pend_text, task.get('approval_seq')) not in answered:
                 text = pend_text
                 fits = text and (text.strip() in item['task'] or any(w in text for w in item.get('approve_if', [])))
+                dest = (task.get('approval_request') or {}).get('destination') or ''
+                fits = fits and (not dest or any(g in dest for g in ('测试群', '验证群', '測試群', '驗證群')))  # only the two test groups
                 verdict = 'approve' if fits and not item.get('reject') else 'reject'
                 call('POST', f'/api/v1/tasks/{tid}/{verdict}')
                 answered.add((text, task.get('approval_seq')))

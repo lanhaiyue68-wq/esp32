@@ -177,17 +177,23 @@ extension Pointer: Gestures {}
 
     /// How many things the goal puts in carts: for each clause that adds (加入购物车, 加购), its count (一件, 一份, 2杯;
     /// not 第一个 or 前5个), one when it gives none. At least one.
-    static func cartWanted(_ task: String) -> Int {
+    static func cartWanted(_ task: String) -> Int { max(cartCounts(task).reduce(0, +), 1) }
+
+    /// The most the goal asks of any one thing it puts in a cart (一件 → 1), at least one.
+    static func cartEach(_ task: String) -> Int { max(cartCounts(task).max() ?? 1, 1) }
+
+    /// For each clause of the goal that adds to a cart, its count.
+    static func cartCounts(_ task: String) -> [Int] {
         let numbers: [String: Int] = ["一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10]
         let re = try? NSRegularExpression(pattern: #"(?<![第前])([0-9]+|[一两二三四五六七八九十])(件|份|杯|个|盒|瓶|袋)"#)
-        var total = 0
+        var counts: [Int] = []
         for clause in AppNames.hans(task).components(separatedBy: CharacterSet(charactersIn: "，,；;。")) {
             guard clause.contains("加入购物车") || clause.contains("加购") else { continue }
             let ns = clause as NSString
             let n = re?.firstMatch(in: clause, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
-            total += n.flatMap { Int($0) ?? numbers[$0] } ?? 1
+            counts.append(n.flatMap { Int($0) ?? numbers[$0] } ?? 1)
         }
-        return max(total, 1)
+        return counts
     }
 
     /// A tap the thought says adds to the cart (点加入购物车, tap 加购), not one that closes the sheet, opens the cart,
@@ -611,11 +617,22 @@ extension Pointer: Gestures {}
     /// 123 over the cloud 11-12: a goal of nine parts in seven apps followed a remembered way, did only the weather, and
     /// finished with made-up results for the other eight (拼多多 ¥3.9, a 验证群 message nobody sent); the check said OK.
     /// An app the goal names that this run never went into cannot have given a result. nil = may finish.
-    static func unvisitedReason(task: String, steps: [JObject]) -> String? {
-        let missing = unvisitedApps(task: task, steps: steps)
+    /// `answer`: an app the answer itself says was not done (a part with the app and 未完成 / 没做 / skipped) is not
+    /// counted, so an honest answer can finish.
+    static func unvisitedReason(task: String, steps: [JObject], answer: String = "") -> String? {
+        let missing = unvisitedApps(task: task, steps: steps).filter { !Self.ownsNotDone(answer, about: [$0]) }
         guard !missing.isEmpty else { return nil }
         return "This run never went into " + missing.joined(separator: "、") + ": whatever the answer says about them is not "
             + "from this run. Open each of them now and read it there, or answer that those parts were not done."
+    }
+
+    /// Whether a part of the answer (split at ；; 。 and line ends) names one of `words` and says it was not done or sent.
+    static func ownsNotDone(_ answer: String, about words: [String]) -> Bool {
+        let notDone = ["未完成", "未能完成", "没有完成", "没完成", "没做", "未做", "跳过", "做不到", "未发送", "没发送", "没有发送", "未发出",
+                       "没发出", "not done", "skipped", "could not", "not sent", "wasn't sent", "was not sent"]
+        return AppNames.hans(answer).lowercased().components(separatedBy: CharacterSet(charactersIn: "；;。\n")).contains { part in
+            words.contains { !$0.isEmpty && part.contains(AppNames.hans($0).lowercased()) } && notDone.contains { part.contains($0) }
+        }
     }
 
     static func unvisitedApps(task: String, steps: [JObject]) -> [String] {
@@ -623,10 +640,16 @@ extension Pointer: Gestures {}
         let goal = AppNames.hans(task).lowercased().replacingOccurrences(
             of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ", options: .regularExpression)
         // Only what the model did and said while doing it: not the plan, nor this check's own words.
+        // 130 over the cloud 11-13 (q130b g5): on 淘宝's cart the executor "remembered" items 5-8 as done and noted made-up
+        // results for them (拼多多 ¥13.9, a message never sent), then typed them into the note: what a note or typing
+        // says is no visit. The app opened, and what the model thought while acting in it, are.
         let acted: Set<String> = ["open", "tap", "type", "note", "swipe", "key", "hold", "listen", "press", "back", "home", "wait", "path"]
         var said: [String] = []
+        // Fourth round (g8): the thought of "open 美团" said "now items 16 (美团) and 17 (时钟)"; Clock was never opened and its
+        // answer made up. An open's thought is the plan ahead: only the app it opened counts.
         for s in steps where acted.contains(s["action"]?.str ?? "") {
-            for key in ["thought", "thought_zh", "app", "text"] { if let v = s[key]?.str { said.append(v) } }
+            let keys = ["note", "type", "open"].contains(s["action"]?.str ?? "") ? ["app"] : ["thought", "thought_zh", "app", "text"]
+            for key in keys { if let v = s[key]?.str { said.append(v) } }
         }
         let seen = AppNames.hans(said.joined(separator: "\n")).lowercased()
         var missing: [String] = []
@@ -678,6 +701,54 @@ extension Pointer: Gestures {}
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
     }
 
+    /// The messages the goal asks to send (发“…” / 发送“…”, not in a 不要… clause), as typedKey keys.
+    static func goalMessages(_ task: String) -> [String] {
+        let t = AppNames.hans(task).replacingOccurrences(of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ",
+                                                         options: .regularExpression)
+        guard let re = try? NSRegularExpression(pattern: #"发(?:送)?\s*[“"「]([^”"」]{1,40})[”"」]"#) else { return [] }
+        let ns = t as NSString
+        return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { typedKey(ns.substring(with: $0.range(at: 1))) }
+    }
+
+    /// The texts the goal says to write somewhere (写“…”, 写上 / 写入, a note's first line), as typedKey keys.
+    static func goalWrites(_ task: String) -> [String] {
+        let t = AppNames.hans(task)
+        guard let re = try? NSRegularExpression(pattern: #"写(?:上|入|下)?\s*[“"「]([^”"」]{1,40})[”"」]"#) else { return [] }
+        let ns = t as NSString
+        return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { typedKey(ns.substring(with: $0.range(at: 1))) }
+    }
+
+    /// 130 over the cloud 11-13 (q130b g5): "8. 已在微信测试群发送G5买东西做完" — nothing was typed or sent; only a watch run
+    /// (endAfterSend) checked its message. A message the goal asks for that this run never sent, unless the answer says so.
+    static func unsentGoalReason(task: String, sent: Set<String>, answer: String) -> String? {
+        let missing = goalMessages(task).filter { !wasSent($0, sent) && !ownsNotDone(answer, about: [$0]) }
+        guard !missing.isEmpty else { return nil }
+        return "This run never sent " + missing.map { "“\($0)”" }.joined(separator: "、") + ". Send each in the chat the goal "
+            + "names now (it is approved there), or say in the answer that it was not sent."
+    }
+
+    /// Whether a screen title is a chat the goal names ("测试群（4人）" for a goal that posts to 测试群).
+    static func goalNamesChat(_ title: String, task: String) -> Bool {
+        let name = AppNames.hans(title).replacingOccurrences(of: #"[（(]\d+人?[)）]"#, with: "", options: .regularExpression)
+            .filter { !$0.isWhitespace }
+        return name.count >= 2 && AppNames.hans(task).filter { !$0.isWhitespace }.contains(name)
+    }
+
+    /// A goal message counts as sent when a sent text holds it (a 。 or a space more), or it holds a sent text of 4+.
+    static func wasSent(_ message: String, _ sent: Set<String>) -> Bool {
+        sent.contains { $0 == message || $0.contains(message) || ($0.count >= 4 && message.contains($0)) }
+    }
+
+    /// What the answer cannot have from this run, in the owner's words: apps never opened, messages never sent.
+    static func unverifiedNote(task: String, steps: [JObject], sent: Set<String>) -> String? {
+        let apps = unvisitedApps(task: task, steps: steps)
+        let messages = goalMessages(task).filter { !wasSent($0, sent) }
+        var parts: [String] = []
+        if !apps.isEmpty { parts.append("本次没有打开" + apps.joined(separator: "、") + "，相关项目没有做") }
+        if !messages.isEmpty { parts.append("没有发出" + messages.map { "“\($0)”" }.joined(separator: "、")) }
+        return parts.isEmpty ? nil : parts.joined(separator: "；")
+    }
+
     /// The numbered items of an answer or a note ("2. …", "2、…", "第2项…"), each with where its text starts and ends.
     static func numberedItems(_ text: String) -> [(n: Int, body: Range<String.Index>)] {
         // "12.5元" is not item 12: the mark is not followed by a digit
@@ -726,27 +797,60 @@ extension Pointer: Gestures {}
         return out
     }
 
+    /// A done check's objection without the parts (split at ；; and line ends) that are the run's own sent messages or a
+    /// cart count the cart had before; nil when nothing else is left.
+    static func standingObjection(_ objection: String, sent: Set<String>, adds: Int, wanted: Int, each: Int? = nil) -> String? {
+        let parts = objection.components(separatedBy: CharacterSet(charactersIn: "；;\n"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        func setAside(_ s: String) -> Bool {
+            blamesOwnSend(s, sent: sent) || blamesOldCart(s, adds: adds, wanted: wanted, each: each)
+        }
+        guard parts.count > 1 else { return setAside(objection) ? nil : objection }
+        let left = parts.filter { !setAside($0) }
+        if left.isEmpty { return nil }
+        return left.count == parts.count ? objection : left.joined(separator: "；")
+    }
+
+    /// Whether a spot has 发送 / 發送 / Send written on it (OCR rows of the frame around it, screen fractions).
+    static func labelsSend(_ rows: [[CandidatePicker.Piece]], at p: CGPoint) -> Bool {
+        rows.joined().contains { piece in
+            let t = AppNames.hans(piece.text).lowercased().replacingOccurrences(of: " ", with: "")
+            return (t.contains("发送") || t == "send")
+                && abs(piece.box.midX - p.x) <= 0.08 && abs(piece.box.midY - p.y) <= 0.05
+        }
+    }
+
     /// Whether a done check objects to a cart count higher than the goal asked, while this run added no more than asked
     /// (1...wanted "added" toasts): the extra was in the cart before. An objection with no count above `wanted` (nothing
-    /// in the cart, the wrong item) still stands.
-    static func blamesOldCart(_ objection: String, adds: Int, wanted: Int) -> Bool {
+    /// in the cart, the wrong item) still stands. `each`: the most the goal asks of one thing (130 g4: 淘宝 一件 and 美团 一份
+    /// made `wanted` 2, and "淘宝 ×2, 1 asked" was not seen as too many); `wanted` when not given.
+    static func blamesOldCart(_ objection: String, adds: Int, wanted: Int, each: Int? = nil) -> Bool {
         guard adds >= 1, adds <= wanted else { return false }
+        let limit = each ?? wanted
         let t = AppNames.hans(objection).lowercased()
         guard t.contains("购物车") || t.contains("cart") else { return false }
         let ns = t as NSString
         let re = try? NSRegularExpression(pattern: #"(?:(?<![a-z])[×x]\s?|(?:数量|quantity|count)\D{0,4})(\d{1,3})(?!\d)"#)
         let counts = (re?.matches(in: t, range: NSRange(location: 0, length: ns.length)) ?? [])
             .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
-        return counts.contains { $0 > wanted }
+        return counts.contains { $0 > limit }
     }
 
     /// Whether a done check's objection comes from what this run sent: it quotes a sent text (keys from typedKey, at least
     /// 4 characters: a short 你好 or 好的 may be named for another reason), or, once the run has sent something, it is
     /// about a chat's latest messages. 128 second round (g4): the check named the run's own "G4全部做完" only as "10:17
     /// 的G4消息"; the latest messages a run reads before it sends are never the ones on the screen at the end.
+    /// 130 over the cloud 11-13 (g2): "G2买东西做完 was not sent on its own, the screen shows a garbled joined message" was
+    /// set aside as the run's own message, and the answer said both were sent. That a message did not go out, or went
+    /// out wrong, is an objection to the run's own sending: it always stands.
     static func blamesOwnSend(_ objection: String, sent: Set<String>) -> Bool {
         let keys = sent.filter { $0.count >= 4 && !$0.hasPrefix("tap:") }
         guard !keys.isEmpty else { return false }
+        let low = AppNames.hans(objection).lowercased()
+        let notSent = ["未发出", "没发出", "没有发出", "未发送", "没发送", "没有发送", "未单独发出", "未成功发送", "发送失败", "乱码", "拼接",
+                       "不完整", "错字", "garbl", "not sent", "wasn't sent", "was not sent", "never sent", "unsent", "not been sent",
+                       "jumbled", "mixed up", "merged"]
+        if notSent.contains(where: { low.contains($0) }) { return false }
         let said = typedKey(objection)
         if keys.contains(where: { said.contains($0) }) { return true }
         let t = AppNames.hans(objection).lowercased()
@@ -1549,8 +1653,18 @@ extension Pointer: Gestures {}
                                       recipe: run.recipe) }
         }
         // A run that sent by tapping and ended done: that spot is this screen's send button, by its look.
+        // 130 over the cloud 11-13 (g2): WeChat's + by the input box had been learned so, and sends went there. Only a spot
+        // with 发送 / Send written on it is learned.
         if let controls, steps.last?["action"]?.str == "done", !sentTexts.isEmpty, let tap = sendTap {
-            controls.learn("send", at: tap.point, on: tap.frame)
+            Task { @MainActor in
+                let y = Double(tap.point.y)
+                let rows = await CandidatePicker.rowsOffMain(in: tap.frame, top: max(0, y - 0.06), bottom: min(1, y + 0.06))
+                if Self.labelsSend(rows, at: tap.point) {
+                    controls.learn("send", at: tap.point, on: tap.frame)
+                } else {
+                    DebugLog.write(String(format: "send: (%.3f, %.3f) not learned: no 发送 written there", tap.point.x, tap.point.y))
+                }
+            }
         }
         sendTap = nil
     }
@@ -1713,8 +1827,12 @@ extension Pointer: Gestures {}
                     DebugLog.write(String(format: "back: tapping the learned back button at (%.3f, %.3f)", hit.point.x, hit.point.y))
                     use(hit, "back")
                 } else if act["action"]?.str == "tap", unsent != nil, let x = act["x"]?.double, let y = act["y"]?.double,
-                          let hit = controls.find("send", in: shown),
-                          Self.sends(act) || hypot(x / 1000 - Double(hit.point.x), y / 1000 - Double(hit.point.y)) <= 0.12 {
+                          !Self.onReturnKey(act), let hit = controls.find("send", in: shown),
+                          hypot(x / 1000 - Double(hit.point.x), y / 1000 - Double(hit.point.y)) <= 0.12 {
+                    // 130 over the cloud 11-13 (g2): the model tapped the keyboard's 發送; any tap at the bottom right
+                    // was taken to the learned "send" (0.933, 0.607), which was WeChat's + by the input box. Nothing was
+                    // sent, the run went on as if it had, and the next message was typed into the old one and sent as
+                    // "G2买东 G2G2全部做完部做完西做完". The learned spot is used only for a tap aimed near it.
                     // The send button found by how it looked when a send went out, not the model's guess of it.
                     DebugLog.write(String(format: "send: the learned send button at (%.3f, %.3f), score %.2f", hit.point.x, hit.point.y, hit.score))
                     use(hit, "send")
@@ -1793,15 +1911,30 @@ extension Pointer: Gestures {}
                 && Self.answersWholeGoal(act["answer"]?.str ?? "", task: task)
             let endsTask = parts.count < 2 || partIndex >= parts.count - 1 || coversGoal
             var unvisited: String?  // only for a task given in words (not the watch's fixed ways)
-            if name == "done", endsTask, presetPlan.isEmpty, !keyboardGuard { unvisited = Self.unvisitedReason(task: task, steps: steps) }
+            if name == "done", endsTask, presetPlan.isEmpty, !keyboardGuard {
+                let answer = act["answer"]?.str ?? ""
+                unvisited = Self.unvisitedReason(task: task, steps: steps, answer: answer)
+                if unvisited == nil, endAfterSend == nil {
+                    unvisited = Self.unsentGoalReason(task: task, sent: sentTexts, answer: answer)  // sent, not only approved
+                }
+            }
             if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) ?? unvisited {
                 doneRejected += 1
-                if doneRejected >= 3 {  // it keeps claiming a result it did not make: stop and ask the user
-                    record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])
-                    return true
+                if doneRejected >= 3 {  // it keeps claiming a result it did not make
+                    // 130 (q130b g5): a goal of many things is not thrown away for the few made up: they are named as
+                    // not done, and the rest goes out as a partial failure. Anything else stops as before.
+                    if Self.goalParts(task) >= 3, let answer = act["answer"]?.str,
+                       let note = Self.unverifiedNote(task: task, steps: steps, sent: sentTexts) {
+                        act["answer"] = .str((answer.hasPrefix("部分失败") ? "" : "部分失败：") + answer + "（" + note + "）")
+                        DebugLog.write("done: refused 3 times; it goes out with the parts not done named")
+                    } else {
+                        record(planned.shot, ["action": .str("fail"), "reason": .str("claimed done 3 times without doing it: " + missing)])
+                        return true
+                    }
+                } else {
+                    record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
+                    return false
                 }
-                record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
-                return false
             }
             // 129 over the cloud 11-13 (g4): item 2 was noted right at 56 s (G1全部做完, G2买东西做完, G2全部做完);
             // the final answer, written after the run had sent G4买东西做完 there, gave the chat as it was then, and the
@@ -1823,16 +1956,20 @@ extension Pointer: Gestures {}
                     // twice, and the answer was "corrected" to messages the run had sent itself. The checker's prompt
                     // says so (128) and was not followed: a contradiction that quotes the run's own sent text is the
                     // run's own change, not a wrong answer.
-                    if let w = wrong, Self.blamesOwnSend(w, sent: sentTexts.union(approvedTexts)) {
-                        DebugLog.write("done check: its objection quotes what this run sent; the answer stands as read")
-                        wrong = nil
-                    }
                     // 128 over the cloud 11-13 (g8): the lamp was in the cart twice from earlier days; this run added one
                     // (×3). The check said "×3, more than the 1 asked", twice, and the run spent 2 minutes trying to take
                     // two off (four rounds of taps refused). What this run added is counted; the rest was there before.
-                    if let w = wrong, Self.blamesOldCart(w, adds: cartAdds, wanted: Self.cartWanted(task)) {
-                        DebugLog.write("done check: a cart count above the \(cartAdds) this run added; the rest was there before")
-                        wrong = nil
+                    // 130 (g4): both came in one sentence ("item 2 …; item 4 cart ×2"): each part is weighed on its own,
+                    // and only the parts that are the run's own messages or the cart's earlier count are set aside.
+                    if let w = wrong {
+                        let kept = Self.standingObjection(w, sent: sentTexts.union(approvedTexts), adds: cartAdds,
+                                                          wanted: Self.cartWanted(task), each: Self.cartEach(task))
+                        if kept != w {
+                            DebugLog.write(kept == nil
+                                ? "done check: its objection is to this run's own messages or the cart's earlier count; the answer stands as read"
+                                : "done check: the parts about this run's own messages or the cart's earlier count set aside")
+                        }
+                        wrong = kept
                     }
                     var stands = false  // no await inside && (the build 116 CI error was one inside ??)
                     if wrong != nil, answer == rejectedAnswer { stands = await confirmedBySecondModel(answer, frame: frame) }
@@ -1874,8 +2011,16 @@ extension Pointer: Gestures {}
                         && !Vision.changedNear(seen, screen?.frame, around: target))
                     if !safe {
                         let (was, now) = (seen ?? Data(), screen?.frame ?? Data())
-                        safe = Self.sameWords(await CandidatePicker.rowsOffMain(in: was, top: 0.055, bottom: 1),
-                                              await CandidatePicker.rowsOffMain(in: now, top: 0.055, bottom: 1))
+                        let wasRows = await CandidatePicker.rowsOffMain(in: was, top: 0.055, bottom: 1)
+                        let nowRows = await CandidatePicker.rowsOffMain(in: now, top: 0.055, bottom: 1)
+                        safe = Self.sameWords(wasRows, nowRows)
+                        // 130 over the cloud 11-13: about 15 answers a run (3 s each) were dropped this way, most after a
+                        // tap while a page went on loading or a banner turned. Where the words around the tap's target
+                        // are the same, in the same places, and nothing new came there, the target did not move.
+                        if !safe, name == "tap", target.count == 1, Self.sameWordsNear(wasRows, nowRows, around: target[0]) {
+                            safe = true
+                            DebugLog.write("stale plan: the words around the target are as they were; acting")
+                        }
                     }
                     if !safe {
                         lastStale = act
@@ -2015,8 +2160,36 @@ extension Pointer: Gestures {}
                 // "125压力测试比价完成") and then its body were each taken for that message by their Return in 備忘錄,
                 // "about to send into the wrong place", and the run failed. In an app that sends nothing to anyone,
                 // Return is a new line or a search.
-                let isMessage = sending && !Self.inLocalApp(steps)
-                    && Self.needsApproval(unsent ?? "", task: task, chatApp: Self.inChatApp(steps, task: task))
+                // 130 over the cloud 11-13 (q130b g5): "open 淘寶" left 测试群 in front; the run took itself to be in 淘寶,
+                // where typing is no message, and "G5买东西做完" went out with no approval. Under a chat title the goal
+                // names, Return sends a message whatever app the run thinks it is in.
+                var localHere = Self.inLocalApp(steps), chatOnScreen = false
+                if sending, localHere, let title = (screen?.frame ?? planned.shot).flatMap({ WatchReport.navigationTitle(in: $0) }),
+                   Self.goalNamesChat(title, task: task) {
+                    DebugLog.write("send: \(title) is on screen, not the app last opened: a message, approval first")
+                    (localHere, chatOnScreen) = (false, true)
+                }
+                // 130 over the cloud 11-13 (fourth round, g4): with the app in front not known, the note's first line
+                // "第4组记录" (the goal: 第一行写“第4组记录”) and its Return were taken for a message to the wrong place,
+                // blocked twice, and Codex took over. What the goal says to write (写“…”), and not to send, is no message
+                // unless a chat the goal names is on the screen.
+                let typedNow = Self.typedKey(unsent ?? "")
+                let writtenOnly = !typedNow.isEmpty && Self.goalWrites(task).contains { typedNow.contains($0) }
+                    && !Self.goalMessages(task).contains { typedNow.contains($0) }
+                // Never in a chat app known to be in front, nor under a chat title the goal names ("在测试群写“你好”" is
+                // a message there): only then is it a note's line.
+                if sending, writtenOnly, !chatOnScreen {
+                    let front = Self.appInFront(steps, startedIn: nil).map { AppNames.hans($0).lowercased() }
+                    let inChat = front.map { f in Self.chatApps.contains { f.contains($0) } } ?? false
+                    let title = (screen?.frame ?? planned.shot).flatMap { WatchReport.navigationTitle(in: $0) }
+                    let chatTitle = title.map { Self.goalNamesChat($0, task: task) && !Self.goalWrites(task).contains(Self.typedKey($0)) } ?? false
+                    if !inChat, !chatTitle {
+                        DebugLog.write("send: \(unsent ?? "") is what the goal says to write, not to send: no message")
+                        localHere = true
+                    }
+                }
+                let isMessage = sending && !localHere
+                    && Self.needsApproval(unsent ?? "", task: task, chatApp: chatOnScreen || Self.inChatApp(steps, task: task))
                 let sendFrame = screen?.frame ?? planned.shot
                 var seenTitle = isMessage ? sendFrame.flatMap { WatchReport.navigationTitle(in: $0) } : nil
                 if isMessage, seenTitle == nil {
@@ -2102,6 +2275,14 @@ extension Pointer: Gestures {}
                 }
                 momentum = name == "swipe"
                 actFrame = screen?.frame
+                // 130 over the cloud 11-13 (q130c c3): each "open 美团外卖" searched for an app of that name first (12-14 s)
+                // and only then opened 美团, three times in one run. A part of an app no Home Screen page shows and that
+                // never opened here opens its app at once.
+                if name == "open", let app = act["app"]?.str, let host = Self.hostApp(app), AppPlaces.page(of: app) == nil,
+                   !AppPlaces.wasOpened(app) {
+                    DebugLog.write("open \(app): a part of \(host); opening \(host)")
+                    act["app"] = .str(host)
+                }
                 do { try await perform(act) }
                 catch let absent as AppNotOnPhone {
                     // 127 over the cloud 11-12 (g4): "美团外卖" is a part of 美团, not an app; the item was skipped as "not
@@ -2590,6 +2771,74 @@ extension Pointer: Gestures {}
 
     /// Whether two screens read the same: most of what was read still reads, in the same place (a video or an animation
     /// behind it moves; on a list that scrolled the words are the same and their places are not).
+    /// Whether the goal asks for a chat's latest or most recent messages (最新的三条消息, 最近一条).
+    static func asksLatestMessages(_ task: String) -> Bool {
+        let t = AppNames.hans(task)
+        return (t.contains("最新") || t.contains("最近")) && (t.contains("消息") || t.contains("条"))
+    }
+
+    /// 130 over the cloud 11-13: "the latest three" of a WeChat chat were read one short or out of order in 3 of 12 runs
+    /// (the model counted bubbles off the picture). With a chat on the screen, its messages read off it, newest first,
+    /// each with the grey time above it, for the model to count. nil: no chat title, or no message read.
+    static func chatLines(_ rows: [[CandidatePicker.Piece]]) -> String? {
+        guard let title = WatchReport.navigationTitle(rows: rows) else { return nil }
+        let pieces = rows.joined().sorted { $0.box.midY < $1.box.midY }
+        // Above the input bar: above the keyboard's own keys when it is up, else above the bottom bar.
+        let keys: Set<String> = ["发送", "發送", "空格", "下一个", "下一個", "已填入：", "已填入", "按住说话", "按住 说话", "按住說話"]
+        let bottom = pieces.filter { keys.contains($0.text) }.map { Double($0.box.minY) }.min().map { $0 - 0.09 } ?? 0.9
+        var rowsOnScreen: [(y: Double, pieces: [CandidatePicker.Piece])] = []
+        for p in pieces {
+            let y = Double(p.box.midY)
+            guard y > 0.14, y < bottom else { continue }
+            if let i = rowsOnScreen.indices.last, abs(rowsOnScreen[i].y - y) < 0.012 {
+                rowsOnScreen[i].pieces.append(p)
+            } else {
+                rowsOnScreen.append((y: y, pieces: [p]))
+            }
+        }
+        let lines: [(y: Double, x: Double, right: Double, text: String)] = rowsOnScreen.map { row in
+            let left = row.pieces.sorted { $0.box.minX < $1.box.minX }
+            return (y: row.y, x: Double(left.first?.box.minX ?? 0), right: Double(left.map(\.box.maxX).max() ?? 0),
+                    text: left.map(\.text).joined())
+        }
+        // The lines of one bubble (or a name and its bubble) are under 0.035 apart; a time stands alone. A line that starts
+        // in the right half is mine; one that stays in the left half is someone else's; a full-width one cannot be told.
+        var messages: [(side: String, text: String, time: String?)] = []
+        var time: String?, lastY = -1.0, afterTime = true
+        for line in lines {
+            if WatchReport.timeLabel(line.text) { (time, afterTime) = (line.text, true); continue }
+            if !afterTime, line.y - lastY < 0.035, !messages.isEmpty {
+                messages[messages.count - 1].text += line.text
+            } else {
+                let side = line.x >= 0.4 ? "me (right, green)" : line.right < 0.62 ? "other (left)" : "a long message (side: see the picture)"
+                messages.append((side: side, text: line.text, time: time))
+            }
+            (lastY, afterTime) = (line.y, false)
+        }
+        guard !messages.isEmpty else { return nil }
+        let newestFirst = messages.reversed().prefix(8).enumerated().map { i, m in
+            "\(i + 1). \(m.side): \(m.text)" + (m.time.map { "  [time above: \($0)]" } ?? "")
+        }
+        return "A WeChat chat is on the screen (\(title)). Its messages read off this screen, NEWEST FIRST (grey times are "
+            + "not messages):\n" + newestFirst.joined(separator: "\n")
+            + "\nThe latest N messages are numbers 1 to N here. Check them against the picture; when fewer than N are listed, "
+            + "the older ones are above: swipe down a little to see them."
+    }
+
+    /// The words around a tap target (±0.09 across, ±0.06 down) on two looks are the same ones in the same places, with
+    /// none gone and none new. A target with no words around it (an icon alone) cannot be told: false.
+    static func sameWordsNear(_ a: [[CandidatePicker.Piece]], _ b: [[CandidatePicker.Piece]], around p: CGPoint) -> Bool {
+        func near(_ q: CandidatePicker.Piece) -> Bool { abs(q.box.midX - p.x) <= 0.09 && abs(q.box.midY - p.y) <= 0.06 }
+        func key(_ s: String) -> String { AppPlaces.normalized(s) }
+        let before = a.joined().filter { near($0) && !key($0.text).isEmpty }
+        let after = b.joined().filter { near($0) && !key($0.text).isEmpty }
+        guard !before.isEmpty else { return false }
+        func found(_ x: CandidatePicker.Piece, in list: [CandidatePicker.Piece]) -> Bool {
+            list.contains { key($0.text) == key(x.text) && abs($0.box.midX - x.box.midX) < 0.02 && abs($0.box.midY - x.box.midY) < 0.012 }
+        }
+        return before.allSatisfy { found($0, in: after) } && after.allSatisfy { found($0, in: before) }
+    }
+
     static func sameWords(_ a: [[CandidatePicker.Piece]], _ b: [[CandidatePicker.Piece]]) -> Bool {
         func words(_ rows: [[CandidatePicker.Piece]]) -> [CandidatePicker.Piece] { rows.flatMap { $0 }.filter { AppPlaces.normalized($0.text).count >= 2 } }
         let (x, y) = (words(a), words(b))
@@ -2936,6 +3185,13 @@ extension Pointer: Gestures {}
         cartToastShown = cartToast
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
+        }
+        // Only inside a chat app, under a chat title the goal names: a note titled 第5组记录 has a centred title too, and
+        // its lines must never be listed as messages.
+        if Self.asksLatestMessages(task), Self.inChatApp(steps, task: task),
+           let title = WatchReport.navigationTitle(rows: readRows), Self.goalNamesChat(title, task: task),
+           let chat = Self.chatLines(readRows) {
+            prompt += "\n\n" + chat
         }
         if ourKeyboardOnScreen?() == true {
             prompt += "\n\nThe keyboard on screen is the app's own (\"Lan Agent 輸入法\"): the field is focused, use type."

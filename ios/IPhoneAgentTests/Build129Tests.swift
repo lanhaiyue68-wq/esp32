@@ -109,6 +109,130 @@ import XCTest
         XCTAssertEqual(AgentLoop.numberedItems(answer).map { $0.n }, [1, 2, 3, 4], "12.5元 is not item 12")
     }
 
+    /// 130 (g2): a learned "send" was the + by the input box; a garbled message went out and the check was set aside.
+    func testAMessageThatDidNotGoOutIsNeverSetAside() {
+        let sent: Set<String> = [AgentLoop.typedKey("G2买东西做完"), AgentLoop.typedKey("G2全部做完")]
+        XCTAssertFalse(AgentLoop.blamesOwnSend("测试群最新三条消息顺序与内容不符，且“G2买东西做完”“G2全部做完”未单独发出，屏幕显示为重复拼接的乱码消息。", sent: sent))
+        XCTAssertFalse(AgentLoop.blamesOwnSend("item 8: G2买东西做完 was not sent; the chat shows a garbled message", sent: sent))
+        XCTAssertTrue(AgentLoop.blamesOwnSend("第2项最新三条消息与屏幕不符，屏幕最新三条是G2全部做完、G2买东西做完、G1全部做完", sent: sent))
+    }
+
+    /// 130 (g2): only a spot with 发送 written on it is learned as the send button.
+    func testOnlyASpotLabelledSendIsASendButton() {
+        let keyboard = [[CandidatePicker.Piece(text: "發送", box: CGRect(x: 0.80, y: 0.77, width: 0.11, height: 0.04))]]
+        XCTAssertTrue(AgentLoop.labelsSend(keyboard, at: CGPoint(x: 0.86, y: 0.79)))
+        XCTAssertFalse(AgentLoop.labelsSend(keyboard, at: CGPoint(x: 0.933, y: 0.607)), "the + by the input box")
+        XCTAssertFalse(AgentLoop.labelsSend([[CandidatePicker.Piece(text: "G2买东西做完", box: CGRect(x: 0.2, y: 0.59, width: 0.4, height: 0.03))]],
+                                            at: CGPoint(x: 0.933, y: 0.607)))
+    }
+
+    /// 130 (g4): one objection about item 2 (the run's own messages) and item 4 (the cart's earlier count).
+    func testEachPartOfAnObjectionIsWeighedOnItsOwn() {
+        let sent: Set<String> = [AgentLoop.typedKey("G4买东西做完"), AgentLoop.typedKey("G4全部做完")]
+        let g4 = "第2项最新三条消息与屏幕不符，最新三条应为G4买东西做完、G4全部做完、G2买东西做完；第4项购物车数量为2，目标要求数量1。"
+        let task = "4. 在淘宝搜索“充电宝”，选第一个规格，加入购物车一件；7. 在美团外卖搜索“汉堡”，把一份最便宜的加入购物车"
+        XCTAssertEqual(AgentLoop.cartWanted(task), 2)
+        XCTAssertEqual(AgentLoop.cartEach(task), 1)
+        XCTAssertNil(AgentLoop.standingObjection(g4, sent: sent, adds: 1, wanted: 2, each: 1))
+        let mixed = "第2项最新三条应为G4买东西做完；第15项计算结果应为89991"
+        XCTAssertEqual(AgentLoop.standingObjection(mixed, sent: sent, adds: 1, wanted: 2, each: 1), "第15项计算结果应为89991")
+        XCTAssertEqual(AgentLoop.standingObjection("第15项计算结果应为89991", sent: sent, adds: 1, wanted: 2), "第15项计算结果应为89991")
+    }
+
+    /// 130 (q130b g5): on 淘宝's cart the executor noted made-up results for items 5-8 and typed them into the note.
+    func testMadeUpPartsAreCaughtAndAnHonestAnswerMayFinish() {
+        let goal = "帮我做这二十件事：4. 在淘宝搜索“洗衣液”；5. 在拼多多搜索“洗衣液”，记下第一个商品的价格；8. 在微信测试群发“G5买东西做完”；19. 在微信测试群发“G5全部做完”"
+        let steps: [JObject] = [
+            ["action": .str("open"), "app": .str("淘宝")],
+            ["action": .str("note"), "thought": .str("items 4-8 are done"), "text": .str("5. 拼多多洗衣液第一个商品价格¥13.9")],
+            ["action": .str("open"), "app": .str("微信")],
+            ["action": .str("type"), "text": .str("4. 淘宝… 5. 拼多多洗衣液¥13.9")],
+        ]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: steps), ["拼多多"])
+        XCTAssertEqual(AgentLoop.goalMessages(goal), ["G5买东西做完", "G5全部做完"])
+        let sent: Set<String> = ["G5全部做完"]
+        let madeUp = "4. 淘宝¥13.9；5. 拼多多¥13.9；8. 已在微信测试群发送“G5买东西做完”"
+        XCTAssertNotNil(AgentLoop.unvisitedReason(task: goal, steps: steps, answer: madeUp))
+        XCTAssertNotNil(AgentLoop.unsentGoalReason(task: goal, sent: sent, answer: madeUp))
+        let honest = "4. 淘宝¥13.9；5. 拼多多没做；8. “G5买东西做完”未发送"
+        XCTAssertNil(AgentLoop.unvisitedReason(task: goal, steps: steps, answer: honest))
+        XCTAssertNil(AgentLoop.unsentGoalReason(task: goal, sent: sent, answer: honest))
+        XCTAssertEqual(AgentLoop.unverifiedNote(task: goal, steps: steps, sent: sent),
+                       "本次没有打开拼多多，相关项目没有做；没有发出“G5买东西做完”")
+        XCTAssertEqual(AgentLoop.goalMessages("不要在测试群发“你好”；在验证群发送「C1全部做完」"), ["C1全部做完"])
+        // fourth round (g8): the plan in an open's thought is no visit
+        let clockGoal = "16. 在美团打开“订单”；17. 在时钟的世界时钟里看有哪些城市"
+        let planned: [JObject] = [["action": .str("open"), "app": .str("美团"),
+                                   "thought": .str("现在需要完成第16项（美团订单）和第17项（时钟世界时钟），先打开美团")]]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: clockGoal, steps: planned), ["时钟"])
+        let visited = planned + [["action": .str("open"), "app": .str("時鐘")]]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: clockGoal, steps: visited), [])
+    }
+
+    /// 130 (q130b g5): "open 淘寶" left 测试群 in front and a message went out unapproved as "typing in 淘寶".
+    func testAChatTitleTheGoalNamesMakesItAMessage() {
+        let goal = "8. 在微信测试群发“G5买东西做完”；18. 新建一条备忘录，第一行写“第5组记录”"
+        XCTAssertTrue(AgentLoop.goalNamesChat("测试群（4人）", task: goal))
+        XCTAssertTrue(AgentLoop.goalNamesChat("測試群(4)", task: goal))
+        XCTAssertFalse(AgentLoop.goalNamesChat("第5组记录的备忘", task: goal))
+        XCTAssertFalse(AgentLoop.goalNamesChat("群", task: goal), "too short to tell")
+        XCTAssertFalse(AgentLoop.goalNamesChat("虾笔刀陪跑学员元群", task: goal))
+    }
+
+    private func piece(_ t: String, _ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> CandidatePicker.Piece {
+        CandidatePicker.Piece(text: t, box: CGRect(x: x0 / 592, y: y0 / 1280, width: (x1 - x0) / 592, height: (y1 - y0) / 1280))
+    }
+
+    /// 130: "the latest three" read one short or out of order; the chat on screen is listed newest first.
+    func testAChatOnScreenIsListedNewestFirst() {
+        XCTAssertTrue(AgentLoop.asksLatestMessages("打开微信测试群，看最新的三条消息是谁发的"))
+        XCTAssertFalse(AgentLoop.asksLatestMessages("在微信测试群发“G1全部做完”"))
+        // g6's last screen: three time labels, four own bubbles, Lan Agent's keyboard below
+        let g6 = [piece("测试群(4人)", 218, 98, 372, 128), piece("G5买东西做完", 298, 185, 468, 215), piece("下午4:05", 250, 272, 342, 298),
+                  piece("G5全部做完", 324, 345, 468, 375), piece("下午4:12", 250, 433, 342, 459), piece("G6买东西做完", 298, 506, 468, 536),
+                  piece("下午4:20", 250, 594, 342, 620), piece("G6全部做完", 324, 667, 468, 697), piece("已填入：", 252, 935, 342, 960),
+                  piece("發送", 486, 1002, 534, 1030)].map { [$0] }
+        let list = AgentLoop.chatLines(g6) ?? ""
+        XCTAssertTrue(list.contains("1. me (right, green): G6全部做完  [time above: 下午4:20]"), list)
+        XCTAssertTrue(list.contains("3. me (right, green): G5全部做完"), list)
+        XCTAssertTrue(list.contains("4. me (right, green): G5买东西做完"), list)
+        XCTAssertFalse(list.contains("發送"), "the keyboard is not a message")
+        // g2's garbled two-line bubble is one message
+        let g2 = [piece("测试群(4人)", 218, 98, 372, 128), piece("下午2:57", 250, 560, 342, 586),
+                  piece("G2买东 G2G2全部做完部做完", 116, 634, 468, 664), piece("西做完", 116, 668, 190, 698),
+                  piece("發送", 486, 1002, 534, 1030)].map { [$0] }
+        XCTAssertTrue((AgentLoop.chatLines(g2) ?? "").contains("1. a long message (side: see the picture): G2买东 G2G2全部做完部做完西做完"))
+        XCTAssertNil(AgentLoop.chatLines([[piece("淘宝", 30, 300, 100, 330)]]), "no chat title")
+        // a note titled 第5组记录 has a centred title too: the app in front is what keeps its lines out of the list
+        let goal = "2. 打开微信测试群，看最新的三条消息；18. 新建一条备忘录，第一行写“第5组记录”"
+        XCTAssertTrue(AgentLoop.goalNamesChat("第5组记录", task: goal), "the goal names it, so the title alone is not enough")
+        XCTAssertFalse(AgentLoop.inChatApp([["action": .str("open"), "app": .str("备忘录")]], task: goal))
+        XCTAssertTrue(AgentLoop.inChatApp([["action": .str("open"), "app": .str("微信")]], task: goal))
+    }
+
+    /// 130 (fourth round, g4): a note's first line, which the goal says to write, was taken for a message.
+    func testWhatTheGoalSaysToWriteIsNotAMessage() {
+        let goal = "8. 在微信测试群发“G4买东西做完”；18. 新建一条备忘录，第一行写“第4组记录”，下面写第1到第17项的结果"
+        XCTAssertEqual(AgentLoop.goalWrites(goal), ["第4组记录"])
+        XCTAssertEqual(AgentLoop.goalMessages(goal), ["G4买东西做完"])
+        XCTAssertEqual(AgentLoop.goalWrites("在验证群发“写好了”"), [], "写 inside a message is not a note")
+        XCTAssertEqual(AgentLoop.goalWrites("在测试群写“你好”"), ["你好"], "written in a chat: the app and the title decide")
+        XCTAssertTrue(AgentLoop.chatApps.contains("微信"))
+    }
+
+    /// 130: an answer dropped as stale although the words around its tap target had not moved.
+    func testTheWordsAroundATargetTellWhetherItMoved() {
+        let before = [[piece("加入购物车", 250, 1180, 340, 1210)], [piece("双11大促", 20, 300, 200, 330)]]
+        let banner = [[piece("加入购物车", 250, 1180, 340, 1210)], [piece("限时秒杀", 20, 300, 200, 330)]]
+        let target = CGPoint(x: 295.0 / 592, y: 1195.0 / 1280)
+        XCTAssertTrue(AgentLoop.sameWordsNear(before, banner, around: target), "a banner turned elsewhere")
+        let popup = [[piece("加入购物车", 250, 1180, 340, 1210)], [piece("选择颜色", 230, 1150, 330, 1172)]]
+        XCTAssertFalse(AgentLoop.sameWordsNear(before, popup, around: target), "something new came over the target")
+        let moved = [[piece("加入购物车", 250, 1100, 340, 1130)]]
+        XCTAssertFalse(AgentLoop.sameWordsNear(before, moved, around: target), "the button moved")
+        XCTAssertFalse(AgentLoop.sameWordsNear([[piece("x", 20, 30, 30, 40)]], banner, around: target), "no words there: cannot tell")
+    }
+
     /// 128 (g1): twenty things followed the remembered end of the last such run; several numbered things plan afresh.
     func testSeveralNumberedThingsAreNotARememberedWay() {
         XCTAssertGreaterThanOrEqual(AgentLoop.goalParts("帮我做这三件事：1. 查天气；2. 算差价；3. 发群"), 3)

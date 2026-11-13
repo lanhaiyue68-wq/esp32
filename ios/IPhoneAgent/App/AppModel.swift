@@ -155,6 +155,12 @@ import UIKit
             routes.enabled = memory.enabled
             agent.routes = routes
             let controls = ControlBook(file: support.appendingPathComponent("controls-v1.json"))
+            // 130 over the cloud 11-13 (g2): a learned "send" was WeChat's + by the input box, and a message never went
+            // out. Sends learned before a 发送 label was required are forgotten once; back buttons stay.
+            if !UserDefaults.standard.bool(forKey: "learnedSendReset130") {
+                controls.forget(role: "send")
+                UserDefaults.standard.set(true, forKey: "learnedSendReset130")
+            }
             controls.enabled = memory.enabled
             agent.controls = controls
         }

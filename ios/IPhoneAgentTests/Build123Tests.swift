@@ -43,7 +43,10 @@ import XCTest
         ]
         XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: steps), ["拼多多", "淘宝"], "美团 is not to be opened")
         XCTAssertNotNil(AgentLoop.unvisitedReason(task: goal, steps: steps))
-        let all = steps + [["action": .str("open"), "app": .str("拼多多")], ["action": .str("note"), "text": .str("淘宝第一个商品19.9元")]]
+        // build 130: what a note says is no visit; the app opened, or a step taken in it, is
+        let noted = steps + [["action": .str("open"), "app": .str("拼多多")], ["action": .str("note"), "text": .str("淘宝第一个商品19.9元")]]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: noted), ["淘宝"])
+        let all = noted + [["action": .str("swipe"), "thought": .str("淘宝搜索结果往下看第一个商品")]]
         XCTAssertNil(AgentLoop.unvisitedReason(task: goal, steps: all))
         let notDone = try? Actions.parseActions("DO: note 北京现在温度7°。done 已完成九项查询")
         XCTAssertEqual(notDone?.count, 2)

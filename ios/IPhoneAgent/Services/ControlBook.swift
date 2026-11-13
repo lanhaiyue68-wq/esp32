@@ -44,6 +44,15 @@ import Foundation
 
     var count: Int { controls.count }
     func clear() { controls = []; save() }
+    /// Forget every learned control of one role ("send" or "back").
+    func forget(role: String) {
+        let before = controls.count
+        controls.removeAll { $0.role == role }
+        if controls.count != before {
+            DebugLog.write("learned \(role): \(before - controls.count) forgotten")
+            save()
+        }
+    }
 
     /// The learned `role` control on this frame, the best match among those that worked before.
     func find(_ role: String, in frame: Data) -> Hit? {
