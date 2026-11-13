@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-13 晚上 130 測完四波 16 組；131 已編譯（IPA 在桌面，等安裝回歸）
+- 130 四波 16 組結果與每個 bug：docs/build131-summary.md、docs/device-2026-11-12-build124-report.md 尾段。
+- 131：commit 9592fcc＋f01dfd2（第一次 CI 編譯失敗：修 U 的變數 typedNow 與同一範圍重名，改名 pendingKey），CI 分支 build131-ci，run 43419650461 成功；E:\桌面\Lan-Agent-build131-unsigned.ipa（SHA256 9e2a4ecd…45f2，CFBundleVersion 131）。
+- 下一步：使用者安裝 131（並換固定散熱）後，三波（q128g、q130b、q130c）再測。
+
 ## 2026-11-13 下午 129 回歸＋130 已編譯（IPA 在桌面，等安裝回歸）
 - 129 同 4 組：1151／1245／1275 s、g8 失敗（337 s），約 58/80（全程 thermal serious）。所有問題總表 docs/build130-summary.md。
 - 130：commit 1278d89，CI 分支 build130-ci，run 43377447245 成功；E:\桌面\Lan-Agent-build130-unsigned.ipa（SHA256 c3d724ae…ad32，CFBundleVersion 130）。
