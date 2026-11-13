@@ -8,7 +8,7 @@ fresh = os.path.join(out, 'logs_fresh')
 subprocess.run([P, 'pulllog.py', fresh], capture_output=True)
 subprocess.run([P, 'pulllog1.py', fresh], capture_output=True)
 lines = set()
-for f in glob.glob('logs_all/*.log') + glob.glob('logs_131/*.log') + glob.glob(os.path.join(out, '*', 'debug*.log')):
+for f in glob.glob('logs_all/*.log') + glob.glob('logs_13[1-9]/*.log') + glob.glob(os.path.join(out, '*', 'debug*.log')):
     with open(f, encoding='utf-8', errors='replace') as h:
         lines.update(h.read().splitlines())
 L = sorted(l for l in lines if l[:4] == '2026')

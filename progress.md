@@ -634,3 +634,7 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 ## 2026-11-14 03:45 132 已編
 - 131 回歸：使用者 03:35 叫停（c3 第 164 步、c4 沒跑）；成績表在 docs/build131-summary.md 尾段。
 - 132（d8659d2，build132-ci run 43484673225）：V、W/W2/W3、J2、X、Y/Y2/Y3、Z1–Z5、S2、N2、輸入提示、T 診斷；明細 docs/build132-summary.md。IPA：E:/桌面/Lan-Agent-build132-unsigned.ipa（CFBundleVersion 132，SHA256 e1dec042…a066）。
+
+## 2026-11-14 07:55 132 回歸完成
+- 三波 12 組：g1/g2/g8/g3/g6 20/20、g7 19/20、c1/c2 19/20、g4 18+2、g5 約 18、c4 約 19.5/22、c3 失敗（京東沒裝，連要失敗 3 次）。Codex 0 失敗。
+- 133 候選 7 條見 docs/build132-summary.md。
