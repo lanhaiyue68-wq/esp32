@@ -2173,9 +2173,9 @@ extension Pointer: Gestures {}
                 // "第4组记录" (the goal: 第一行写“第4组记录”) and its Return were taken for a message to the wrong place,
                 // blocked twice, and Codex took over. What the goal says to write (写“…”), and not to send, is no message
                 // unless a chat the goal names is on the screen.
-                let typedNow = Self.typedKey(unsent ?? "")
-                let writtenOnly = !typedNow.isEmpty && Self.goalWrites(task).contains { typedNow.contains($0) }
-                    && !Self.goalMessages(task).contains { typedNow.contains($0) }
+                let pendingKey = Self.typedKey(unsent ?? "")
+                let writtenOnly = !pendingKey.isEmpty && Self.goalWrites(task).contains { pendingKey.contains($0) }
+                    && !Self.goalMessages(task).contains { pendingKey.contains($0) }
                 // Never in a chat app known to be in front, nor under a chat title the goal names ("在测试群写“你好”" is
                 // a message there): only then is it a note's line.
                 if sending, writtenOnly, !chatOnScreen {
