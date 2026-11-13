@@ -25,6 +25,7 @@ import Foundation
         var maps: [String: ProbeMap]? = nil
         var motionVersion: Int? = nil
         var requiresFeedback: Bool? = nil
+        var borderLift: Double? = nil
     }
     static let calibrationTolerance = 0.015
     private var maps: [String: ProbeMap]?
@@ -73,6 +74,7 @@ import Foundation
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             maps = saved.maps
             requiresFeedback = saved.requiresFeedback ?? false
+            if let lift = saved.borderLift { borderLiftY = min(max(lift, -Self.borderLiftLimit), Self.borderLiftLimit) }
             // Older builds certified open-loop movement. Remeasure using endpoint
             // feedback before treating those parameters as validated.
             if saved.motionVersion != ProbeMotion.version { stale = true }
@@ -221,7 +223,7 @@ import Foundation
         guard let span else { return nil }
         return Saved(w: span.w, h: span.h, seen: seen.mapValues { $0.map { [$0.0, $0.1] } }, quality: quality,
                      aspect: aspect, stale: stale ? true : nil, maps: maps, motionVersion: ProbeMotion.version,
-                     requiresFeedback: requiresFeedback ? true : nil)
+                     requiresFeedback: requiresFeedback ? true : nil, borderLift: borderLiftY)
     }
 
     /// Calibration plus the observed landings, so the correction survives a restart.
@@ -628,13 +630,19 @@ import Foundation
     /// How far below the target a move back from the right border lands, learned from where it is seen. Over USB 11-09 and 11-10
     /// all 16 such landings seen were 0.029 to 0.042 low (0.027 on 11-08), against a median 0.004 from the corner: a button at
     /// the top right is 0.05 tall, so the half of them nobody sees clicked under it.
-    private(set) var borderLiftY = 0.0
+    /// 128 over the cloud 11-13 (g1): it started at 0 on every app launch and the Home Screen never shows the pointer, so
+    /// nothing was learned there: WeChat (0.848, 0.722) and Calculator (0.846, 0.488) in the right column were missed 5 times
+    /// at lift 0 and 0.016 (59.5 s and 25.6 s to open), never at 0.037-0.041. It starts at the usual bias and is saved.
+    private(set) var borderLiftY = Pointer.borderLiftStart
 
     func learnBorderLift(missedBy error: Double) {
         guard abs(error) < Self.borderMisreading else { return }  // too far to be the same pointer
         borderLiftY = min(max(borderLiftY + error / 2, -Self.borderLiftLimit), Self.borderLiftLimit)
         log(String(format: "border landing %.3f off in y; lift now %.3f", error, borderLiftY))
+        save()
     }
+
+    static let borderLiftStart = 0.035
 
     static let borderMisreading = 0.08
     static let borderLiftLimit = 0.06

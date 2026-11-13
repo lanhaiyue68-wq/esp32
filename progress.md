@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-13 128 兩輪回歸完成；129 修正 A–I 在本機（未編譯、未 commit）
+- 128（手機已裝）跑 q128g 兩輪（g1/g2/g4/g8）：第一輪 4443 s 約 77/80，第二輪 4524 s 約 73/80；127 同 4 組 5710 s 約 67/80。報告 docs/device-2026-11-12-build124-report.md 尾段（每組錯因、時間拆解、兩輪總表）。
+- 129 本機改動：Pointer.swift（borderLiftY 起算 0.035＋存檔）、AgentLoop.swift（多件任務不套記住做法但主導者照舊、分段件數算 App 數、完成檢查不採信本輪自發訊息／原有購物車數量、同頁來回捲第三次轉向拒絕）、prompts/app-rules.md 5 條；測試 Build129Tests.swift、Build114Tests.swift。
+- 下一步：使用者決定是否推 129（編譯要 xcode-27，分支 build129-ci 推 private）；裝後同 4 組回歸。
+
 ## 2026-11-11 build 122（已編譯，IPA 已放桌面，等使用者安裝後重測）
 - 內容：121 真機自測 127 題找到的 28 個問題（第 17 項點讚／關注不擋留到 123），加使用者要的 Codex 剩餘額度與「成功：／失败：原因」回報。交付說明 docs/delivery-build122.md，問題經過見 docs/device-2026-11-11-build121-report.md。
 - 編譯：第一次 run 43011686829 失敗（navigationTitle 屬於 WatchReport，寫成 WatchSettings）；修後 run 43012108153 成功，提交 f4cb9ac，IPA build 122，SHA256 3b37e0a6775b…。Build122Tests 12／12；Build121Tests 一項期望過時已改測試（未重編）。

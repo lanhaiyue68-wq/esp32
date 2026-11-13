@@ -53,12 +53,13 @@ import XCTest
     func testTheBorderLiftIsLearnedFromWhereThePointerIsSeen() {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let p = Pointer(device: FakeDevice(), calibrationFile: file)
-        p.learnBorderLift(missedBy: 0.034)
-        XCTAssertEqual(p.borderLiftY, 0.017, accuracy: 1e-9)
-        p.learnBorderLift(missedBy: 0.017)  // with the lift on, it lands closer: the bias is still 0.034
-        XCTAssertEqual(p.borderLiftY, 0.0255, accuracy: 1e-9)
+        let start = Pointer.borderLiftStart  // build 129: no longer 0
+        p.learnBorderLift(missedBy: 0.010)
+        XCTAssertEqual(p.borderLiftY, start + 0.005, accuracy: 1e-9)
+        p.learnBorderLift(missedBy: -0.010)
+        XCTAssertEqual(p.borderLiftY, start, accuracy: 1e-9)
         p.learnBorderLift(missedBy: 0.3)
-        XCTAssertEqual(p.borderLiftY, 0.0255, accuracy: 1e-9, "a misreading is not learned")
+        XCTAssertEqual(p.borderLiftY, start, accuracy: 1e-9, "a misreading is not learned")
         for _ in 0..<20 { p.learnBorderLift(missedBy: 0.07) }
         XCTAssertEqual(p.borderLiftY, Pointer.borderLiftLimit, accuracy: 1e-9)
     }

@@ -678,6 +678,34 @@ extension Pointer: Gestures {}
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
     }
 
+    /// Whether a done check objects to a cart count higher than the goal asked, while this run added no more than asked
+    /// (1...wanted "added" toasts): the extra was in the cart before. An objection with no count above `wanted` (nothing
+    /// in the cart, the wrong item) still stands.
+    static func blamesOldCart(_ objection: String, adds: Int, wanted: Int) -> Bool {
+        guard adds >= 1, adds <= wanted else { return false }
+        let t = AppNames.hans(objection).lowercased()
+        guard t.contains("购物车") || t.contains("cart") else { return false }
+        let ns = t as NSString
+        let re = try? NSRegularExpression(pattern: #"(?:(?<![a-z])[×x]\s?|(?:数量|quantity|count)\D{0,4})(\d{1,3})(?!\d)"#)
+        let counts = (re?.matches(in: t, range: NSRange(location: 0, length: ns.length)) ?? [])
+            .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
+        return counts.contains { $0 > wanted }
+    }
+
+    /// Whether a done check's objection comes from what this run sent: it quotes a sent text (keys from typedKey, at least
+    /// 4 characters: a short 你好 or 好的 may be named for another reason), or, once the run has sent something, it is
+    /// about a chat's latest messages. 128 second round (g4): the check named the run's own "G4全部做完" only as "10:17
+    /// 的G4消息"; the latest messages a run reads before it sends are never the ones on the screen at the end.
+    static func blamesOwnSend(_ objection: String, sent: Set<String>) -> Bool {
+        let keys = sent.filter { $0.count >= 4 && !$0.hasPrefix("tap:") }
+        guard !keys.isEmpty else { return false }
+        let said = typedKey(objection)
+        if keys.contains(where: { said.contains($0) }) { return true }
+        let t = AppNames.hans(objection).lowercased()
+        return ["最新", "latest", "newest", "most recent"].contains { t.contains($0) }
+            && ["消息", "message", "条"].contains { t.contains($0) }
+    }
+
     /// A tap on the keyboard's bottom-right key, while a keyboard is up (0-1000): 发送 / 换行 below the backspace key
     /// (0.80–0.83) and above the globe and microphone (0.93–).
     static func onReturnKey(_ act: JObject) -> Bool {
@@ -1197,6 +1225,37 @@ extension Pointer: Gestures {}
         + "look closely for the right control (read its label), try another way, or leave it and say in the answer what "
         + "could not be done."
 
+    /// 128 over the cloud 11-13 (second round, g1): with the note written, the executor and then Codex scrolled it up and
+    /// down to "check" it, 15 swipes in pairs (about 4 minutes); a list or a menu gets the same. A page scrolled one way,
+    /// back, and the first way again has been seen whole: the next turn back is refused.
+    static func scrollsBackAgain(_ steps: [JObject], next: JObject) -> Bool {
+        guard let d = swipeDirection(next) else { return false }
+        var dirs = [d]
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" {
+                guard let e = swipeDirection(s) else { break }
+                dirs.insert(e, at: 0)
+            } else if observedActions.contains(a) { break }
+            if dirs.count >= 16 { break }
+        }
+        let turns = zip(dirs, dirs.dropFirst()).filter { $0 != $1 }.count
+        return turns >= scrollTurnsLimit
+    }
+
+    /// Up (-1) or down (+1) for a swipe that is mostly vertical and long enough to scroll (0-1000 coordinates).
+    static func swipeDirection(_ s: JObject) -> Int? {
+        guard s["action"]?.str == "swipe", let x1 = s["x1"]?.double, let y1 = s["y1"]?.double,
+              let x2 = s["x2"]?.double, let y2 = s["y2"]?.double else { return nil }
+        let (dx, dy) = (x2 - x1, y2 - y1)
+        guard abs(dy) >= 150, abs(dy) > 2 * abs(dx) else { return nil }
+        return dy > 0 ? 1 : -1
+    }
+
+    static let scrollTurnsLimit = 3
+    static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
+        + "been seen. Do not scroll it again. Go on with what the goal needs next, or answer from what you saw."
+
     static func sameSpot(_ a: JObject, _ b: JObject) -> Bool {
         guard a["action"] == b["action"] else { return false }
         let (pa, pb) = (pointerPath(a), pointerPath(b))
@@ -1245,8 +1304,14 @@ extension Pointer: Gestures {}
         approvedTexts = []
         checksLeft = 2
         rejectedAnswer = nil
-        recipe = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
-        plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && recipe == nil && planner != nil
+        // 128 over the cloud 11-13 (g1): a goal of twenty things followed "the way it was done before", which was the
+        // end of the last such run (scrolling a note, deleting a line, closing menus): 44 steps before Codex replanned.
+        // A goal of several numbered things is planned afresh; a remembered way is for one thing done again.
+        // Who leads stays as it was: a goal done before is not "not done before" because its way is not followed (the
+        // second round of 128, g8: Codex led all twenty things, 70 of 95 calls, about 4.5 s each against 2.5).
+        let remembered = presetPlan.isEmpty && learnedRoutes ? routes?.recipe(for: task) : nil
+        recipe = Self.goalParts(task) < 3 ? remembered : nil
+        plannerLeads = plannerLeadsUnknown && presetPlan.isEmpty && learnedRoutes && remembered == nil && planner != nil
         if plannerLeads { DebugLog.write("run: not done before; the planner does it and it is remembered") }
         (sendTap, backMissed, actFrame) = (nil, false, nil)
         do {
@@ -1693,7 +1758,23 @@ extension Pointer: Gestures {}
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
                     let answer = act["answer"]?.str ?? "", frame = screen?.frame ?? planned.shot
-                    let wrong = await wrongClaim(answer, frame: frame)
+                    var wrong = await wrongClaim(answer, frame: frame)
+                    // 128 over the cloud 11-13 (g2): item 2 read 测试群's latest three right (G1全部做完, G1买东西做完,
+                    // G8全部做完); the check, seeing the chat at the end, said G2全部做完 and G2买东西做完 were missing,
+                    // twice, and the answer was "corrected" to messages the run had sent itself. The checker's prompt
+                    // says so (128) and was not followed: a contradiction that quotes the run's own sent text is the
+                    // run's own change, not a wrong answer.
+                    if let w = wrong, Self.blamesOwnSend(w, sent: sentTexts.union(approvedTexts)) {
+                        DebugLog.write("done check: its objection quotes what this run sent; the answer stands as read")
+                        wrong = nil
+                    }
+                    // 128 over the cloud 11-13 (g8): the lamp was in the cart twice from earlier days; this run added one
+                    // (×3). The check said "×3, more than the 1 asked", twice, and the run spent 2 minutes trying to take
+                    // two off (four rounds of taps refused). What this run added is counted; the rest was there before.
+                    if let w = wrong, Self.blamesOldCart(w, adds: cartAdds, wanted: Self.cartWanted(task)) {
+                        DebugLog.write("done check: a cart count above the \(cartAdds) this run added; the rest was there before")
+                        wrong = nil
+                    }
                     var stands = false  // no await inside && (the build 116 CI error was one inside ??)
                     if wrong != nil, answer == rejectedAnswer { stands = await confirmedBySecondModel(answer, frame: frame) }
                     if let wrong, !stands {
@@ -1843,6 +1924,10 @@ extension Pointer: Gestures {}
                 }
                 if name == "tap", Self.repeatsRound(steps, next: act) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.roundReason)])
+                    return false
+                }
+                if name == "swipe", Self.scrollsBackAgain(steps, next: act) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.scrollBackReason)])
                     return false
                 }
                 if name == "tap", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {
@@ -2420,12 +2505,21 @@ extension Pointer: Gestures {}
     /// The steps a part may take before Codex looks: 20, and 10 more for each further numbered thing it holds, at most
     /// 80. 127 over the cloud 11-12 (g1): a part with five of twenty things was "not getting on" at 20 steps with
     /// nothing failed, and Codex drove it at about twice the time a step.
+    /// 128 over the cloud 11-13 (g1): Codex's parts name their things without numbers ("Results 13–15 and 17 are noted —
+    /// open Safari…, 天氣…, 計算機…, 時鐘…"): the apps a part names count as its things too.
     static func partSteps(for part: String) -> Int {
         let ns = part as NSString
         let items = (try? NSRegularExpression(pattern: #"(?<![\d.])\d{1,2}[.、．](?!\d)"#))?
             .numberOfMatches(in: part, range: NSRange(location: 0, length: ns.length)) ?? 0
-        return min(partSteps + 10 * max(0, items - 1), 80)
+        let text = AppNames.hans(part).lowercased()
+        let apps = Set(partApps.compactMap { names in names.contains { text.contains($0) } ? names[0] : nil }).count
+        return min(partSteps + 10 * max(0, max(items, apps) - 1), 80)
     }
+
+    /// Apps a part may name, each with its other names (Simplified, lowercased).
+    static let partApps = [["微信", "wechat"], ["淘宝"], ["拼多多"], ["美团"], ["高德"], ["抖音"], ["safari", "浏览器"],
+                           ["天气", "weather"], ["计算器", "计算机", "calculator"], ["时钟", "clock"], ["备忘录", "notes"],
+                           ["日历", "行事历", "calendar"], ["京东"], ["小红书"]]
     static let troubleLimit = 3     // or this many steps that plainly failed
     static let swipesInARow = 5     // or this many swipes in a row (a wheel: 14 wrong swipes, then one tap by Codex)
 
