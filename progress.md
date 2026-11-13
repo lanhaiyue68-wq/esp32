@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-13 下午 129 回歸＋130 已編譯（IPA 在桌面，等安裝回歸）
+- 129 同 4 組：1151／1245／1275 s、g8 失敗（337 s），約 58/80（全程 thermal serious）。所有問題總表 docs/build130-summary.md。
+- 130：commit 1278d89，CI 分支 build130-ci，run 43377447245 成功；E:\桌面\Lan-Agent-build130-unsigned.ipa（SHA256 c3d724ae…ad32，CFBundleVersion 130）。
+- 下一步：使用者安裝 130 後同 4 組回歸。
+
 ## 2026-11-13 128 兩輪回歸完成；129 已編譯（IPA 在桌面，等安裝回歸）
 - 128（手機已裝）跑 q128g 兩輪（g1/g2/g4/g8）：第一輪 4443 s 約 77/80，第二輪 4524 s 約 73/80；127 同 4 組 5710 s 約 67/80。報告 docs/device-2026-11-12-build124-report.md 尾段（每組錯因、時間拆解、兩輪總表）。
 - 129 本機改動：Pointer.swift（borderLiftY 起算 0.035＋存檔）、AgentLoop.swift（多件任務不套記住做法但主導者照舊、分段件數算 App 數、完成檢查不採信本輪自發訊息／原有購物車數量、同頁來回捲第三次轉向拒絕）、prompts/app-rules.md 5 條；測試 Build129Tests.swift、Build114Tests.swift。
