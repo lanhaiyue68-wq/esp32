@@ -55,12 +55,14 @@ import XCTest
         let p = Pointer(device: FakeDevice(), calibrationFile: file)
         let start = Pointer.borderLiftStart  // build 129: no longer 0
         p.learnBorderLift(missedBy: 0.010)
-        XCTAssertEqual(p.borderLiftY, start + 0.005, accuracy: 1e-9)
+        XCTAssertEqual(p.borderLiftY, start + 0.0025, accuracy: 1e-9)  // a quarter of the way (129)
         p.learnBorderLift(missedBy: -0.010)
         XCTAssertEqual(p.borderLiftY, start, accuracy: 1e-9)
         p.learnBorderLift(missedBy: 0.3)
         XCTAssertEqual(p.borderLiftY, start, accuracy: 1e-9, "a misreading is not learned")
-        for _ in 0..<20 { p.learnBorderLift(missedBy: 0.07) }
+        p.learnBorderLift(missedBy: -0.073)  // 129 (g1): another thing taken for the pointer
+        XCTAssertEqual(p.borderLiftY, start, accuracy: 1e-9, "0.05 off or more is not learned")
+        for _ in 0..<20 { p.learnBorderLift(missedBy: 0.045) }
         XCTAssertEqual(p.borderLiftY, Pointer.borderLiftLimit, accuracy: 1e-9)
     }
 }

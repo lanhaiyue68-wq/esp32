@@ -49,9 +49,11 @@ enum AppPlaces {
 
     /// When the pages were last read again for an app no page knew (see AppOpener.openAppNow).
     private static let readAgainKey = "appPlacesReadAgainAtV1"
-    static func mayReadAgain(now: Date = Date()) -> Bool {
-        now.timeIntervalSince1970 - UserDefaults.standard.double(forKey: readAgainKey) >= 3 * 86_400
+    static func mayReadAgain(now: Date = Date(), every: Double = 3 * 86_400) -> Bool {
+        now.timeIntervalSince1970 - UserDefaults.standard.double(forKey: readAgainKey) >= every
     }
+    /// A remembered app missing from its page: the apps were moved, and the pages are read again at most this often (s).
+    static let rereadAfterMiss = 600.0
     static func readAgainNow(now: Date = Date()) { UserDefaults.standard.set(now.timeIntervalSince1970, forKey: readAgainKey) }
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
@@ -333,6 +335,20 @@ extension AppModel {
             } else if AppPlaces.page(showing: rows) == nil {
                 // The page in front was not recognised: it is on a page all the same, so look through them.
                 if try await openFromPages(name) { return true }
+            }
+            // 129 over the cloud 11-13 (g1): the user had moved the apps to the first two pages; the pages remembered were
+            // the old ones, and with the Home Screen coming back on another page than the first, 抖音, 淘宝, 拼多多 and
+            // 高德 went to page 3, were not there, and opened by Search (22-26 s each, against ~7 s by the icon). A
+            // remembered app missing from its page means the apps were moved: read the pages again now (at most every
+            // 10 minutes), then open it from what they show.
+            if AppPlaces.mayReadAgain(every: AppPlaces.rereadAfterMiss) {
+                AppPlaces.readAgainNow()
+                DebugLog.write("open \(name): not on page \(target + 1) as remembered; the apps were moved, reading the Home Screen pages again")
+                AppPlaces.clear()
+                try await pointer.goHome()
+                try await mapHomeScreen()
+                try await pointer.goHome()
+                if AppPlaces.page(of: name) != nil { return try await openAppNow(name) }
             }
             if AppPlaces.missed(name) >= 2 {
                 DebugLog.write("open \(name): not on page \(target + 1) twice in a row; Search from now on")

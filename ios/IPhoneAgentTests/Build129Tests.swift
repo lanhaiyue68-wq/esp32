@@ -15,7 +15,7 @@ import XCTest
         let p = Pointer(device: FakeDevice(), calibrationFile: file)
         p.learnBorderLift(missedBy: 0.02)
         let learned = p.borderLiftY
-        XCTAssertEqual(learned, Pointer.borderLiftStart + 0.01, accuracy: 1e-9)
+        XCTAssertEqual(learned, Pointer.borderLiftStart + 0.005, accuracy: 1e-9)
         let again = Pointer(device: FakeDevice(), calibrationFile: file)
         XCTAssertEqual(again.borderLiftY, learned, accuracy: 1e-9, "the next launch starts from what was learned")
         XCTAssertEqual(again.span, Pointer.Span(w: 445, h: 620), "the calibration itself is kept")
@@ -68,6 +68,45 @@ import XCTest
         XCTAssertNil(AgentLoop.swipeDirection(swipe(500, 520)), "too short to scroll")
         XCTAssertNil(AgentLoop.swipeDirection(["action": .str("swipe"), "x1": .num(900), "y1": .num(500), "x2": .num(100), "y2": .num(520)]),
                      "a sideways swipe")
+    }
+
+    /// 129 (g1): the landings read off 129's first day keep the lift near the steady bias.
+    func testTheBorderLiftHoldsAgainstOddReadings() {
+        let p = Pointer(device: FakeDevice(), calibrationFile: FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".json"))
+        var lifts: [Double] = []
+        for raw in [0.026, -0.004, -0.06, 0.034] {  // where they really landed, below the target
+            p.learnBorderLift(missedBy: raw - p.borderLiftY)
+            lifts.append(p.borderLiftY)
+        }
+        XCTAssertTrue(lifts.allSatisfy { $0 > 0.02 && $0 < 0.04 }, "\(lifts)")
+    }
+
+    /// 129 (g1): the pages are read again when a remembered app is not on its page, at most every 10 minutes.
+    func testThePagesMayBeReadAgainSoonAfterAMiss() {
+        let now = Date()
+        AppPlaces.readAgainNow(now: now.addingTimeInterval(-700))
+        XCTAssertTrue(AppPlaces.mayReadAgain(now: now, every: AppPlaces.rereadAfterMiss))
+        XCTAssertFalse(AppPlaces.mayReadAgain(now: now), "the three days for an app no page knew stay")
+        AppPlaces.readAgainNow(now: now.addingTimeInterval(-300))
+        XCTAssertFalse(AppPlaces.mayReadAgain(now: now, every: AppPlaces.rereadAfterMiss))
+    }
+
+    /// 129 (g4): item 2 was noted right when read; the final answer retold it with the run's own later message.
+    func testAnItemRetoldWithTheRunsOwnMessagesIsPutBackAsNoted() {
+        let answer = "已完成全部20项任务，结果如下：1. 深圳多云；2. 微信测试群最新三条消息：下午1:40「G2买东西做完」、下午1:50「G2全部做完」、下午2:01「G4买东西做完」。；3. 抖音价格 12.5元；4. 淘宝 ×1"
+        let notes = ["1. 深圳多云", "2. 测试群最新三条（均为我自己发的）：下午1:19 G1全部做完；下午1:28 G2买东西做完；下午1:40 G2全部做完"]
+        let sent: Set<String> = [AgentLoop.typedKey("G4买东西做完"), AgentLoop.typedKey("G4全部做完")]
+        let kept = AgentLoop.keepReadNotes(answer, notes: notes, sent: sent)
+        XCTAssertTrue(kept.contains("下午1:19 G1全部做完"), kept)
+        XCTAssertFalse(kept.contains("G4买东西做完"), kept)
+        XCTAssertTrue(kept.hasPrefix("已完成全部20项任务，结果如下：1. 深圳多云；2. 测试群"), kept)
+        XCTAssertTrue(kept.hasSuffix("；3. 抖音价格 12.5元；4. 淘宝 ×1"), kept)
+        XCTAssertEqual(AgentLoop.keepReadNotes(answer, notes: notes, sent: []), answer, "nothing sent: as answered")
+        let told = "1. 深圳多云；2. 最新三条：G1全部做完、G2买东西做完、G2全部做完；3. 已发G4买东西做完"
+        XCTAssertEqual(AgentLoop.keepReadNotes(told, notes: notes, sent: sent), told, "item 3 has no note; item 2 tells no own message")
+        XCTAssertEqual(AgentLoop.numberedItems("第13项：Safari搜索").first?.n, 13)
+        XCTAssertEqual(AgentLoop.numberedItems(answer).map { $0.n }, [1, 2, 3, 4], "12.5元 is not item 12")
     }
 
     /// 128 (g1): twenty things followed the remembered end of the last such run; several numbered things plan afresh.

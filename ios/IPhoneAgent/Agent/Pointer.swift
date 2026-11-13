@@ -635,16 +635,20 @@ import Foundation
     /// at lift 0 and 0.016 (59.5 s and 25.6 s to open), never at 0.037-0.041. It starts at the usual bias and is saved.
     private(set) var borderLiftY = Pointer.borderLiftStart
 
+    /// 129 over the cloud 11-13 (g1): from 0.035, landings read -0.009, -0.035, -0.073 and +0.057 off took it to -0.023 in
+    /// three steps, and Calculator and Meituan in the right column were each missed twice (28 s and 29 s to open). The bias
+    /// is a steady one (0.03-0.05 low every time over USB): a reading 0.05 off is another thing taken for the pointer, and
+    /// each reading moves it a quarter of the way.
     func learnBorderLift(missedBy error: Double) {
         guard abs(error) < Self.borderMisreading else { return }  // too far to be the same pointer
-        borderLiftY = min(max(borderLiftY + error / 2, -Self.borderLiftLimit), Self.borderLiftLimit)
+        borderLiftY = min(max(borderLiftY + error / 4, -Self.borderLiftLimit), Self.borderLiftLimit)
         log(String(format: "border landing %.3f off in y; lift now %.3f", error, borderLiftY))
         save()
     }
 
     static let borderLiftStart = 0.035
 
-    static let borderMisreading = 0.08
+    static let borderMisreading = 0.05
     static let borderLiftLimit = 0.06
 
     private var clicksInPlace = 0

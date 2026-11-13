@@ -678,6 +678,54 @@ extension Pointer: Gestures {}
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
     }
 
+    /// The numbered items of an answer or a note ("2. …", "2、…", "第2项…"), each with where its text starts and ends.
+    static func numberedItems(_ text: String) -> [(n: Int, body: Range<String.Index>)] {
+        // "12.5元" is not item 12: the mark is not followed by a digit
+        guard let re = try? NSRegularExpression(pattern: #"(?:^|[；;。：:，,\n]|\s)\s*(?:第\s*)?(\d{1,2})\s*(?:[.、．](?!\d)|项[：:]?|項[：:]?)\s*"#)
+        else { return [] }
+        let ns = text as NSString
+        let heads = re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { m -> (Int, Range<String.Index>)? in
+            guard let n = Int(ns.substring(with: m.range(at: 1))), let r = Range(m.range, in: text) else { return nil }
+            return (n, r)
+        }
+        // A list goes up one by one from 1 (a note may be one item of it, any number); a 1 starts it again.
+        var items: [(Int, Range<String.Index>)] = []
+        for h in heads {
+            if h.0 == 1 { items = [h] } else if items.isEmpty || h.0 == items[items.count - 1].0 + 1 { items.append(h) }
+        }
+        return items.enumerated().map { (i, h) -> (n: Int, body: Range<String.Index>) in
+            let end = i + 1 < items.count ? items[i + 1].1.lowerBound : text.endIndex
+            return (n: h.0, body: h.1.upperBound..<end)
+        }
+    }
+
+    /// The answer, with any item that now tells of this run's own sent messages (keys from typedKey, 4+ characters) while
+    /// its first note did not, put back as that note tells it.
+    static func keepReadNotes(_ answer: String, notes: [String], sent: Set<String>) -> String {
+        let keys = sent.filter { $0.count >= 4 && !$0.hasPrefix("tap:") }
+        guard !keys.isEmpty else { return answer }
+        var noted: [Int: String] = [:]
+        for note in notes {
+            guard let first = numberedItems(note).first, noted[first.n] == nil else { continue }
+            noted[first.n] = String(note[first.body]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !noted.isEmpty else { return answer }
+        var out = "", cursor = answer.startIndex
+        for item in numberedItems(answer) {
+            out += answer[cursor..<item.body.lowerBound]
+            let body = String(answer[item.body])
+            if let note = noted[item.n], !note.isEmpty,
+               keys.contains(where: { typedKey(body).contains($0) && !typedKey(note).contains($0) }) {
+                out += note
+            } else {
+                out += body
+            }
+            cursor = item.body.upperBound
+        }
+        out += answer[cursor...]
+        return out
+    }
+
     /// Whether a done check objects to a cart count higher than the goal asked, while this run added no more than asked
     /// (1...wanted "added" toasts): the extra was in the cart before. An objection with no count above `wanted` (nothing
     /// in the cart, the wrong item) still stands.
@@ -1755,6 +1803,17 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("done rejected"), "reason": .str(missing)])
                 return false
             }
+            // 129 over the cloud 11-13 (g4): item 2 was noted right at 56 s (G1全部做完, G2买东西做完, G2全部做完);
+            // the final answer, written after the run had sent G4买东西做完 there, gave the chat as it was then, and the
+            // check passed it. An item the answer now tells with this run's own messages, which its note did not, is
+            // put back as it was noted when read.
+            if name == "done", endsTask, let answer = act["answer"]?.str {
+                let kept = Self.keepReadNotes(answer, notes: notes, sent: sentTexts.union(approvedTexts))
+                if kept != answer {
+                    DebugLog.write("done: an item retold with this run's own messages is put back as it was noted")
+                    act["answer"] = .str(kept)
+                }
+            }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
                     let answer = act["answer"]?.str ?? "", frame = screen?.frame ?? planned.shot
@@ -2544,6 +2603,19 @@ extension Pointer: Gestures {}
     /// A guard saw the run go round: Codex looks afresh once, another way. If it goes round again the run stops. True: it stopped.
     private func changeOfPlan(_ shot: Data?, _ why: String) async throws -> Bool {
         guard !rescued else {
+            // 129 over the cloud 11-13 (g8): item 4 opened the wrong lamp; the executor and then Codex went product page ↔
+            // spec sheet (its ✕, then 加入购物车 again) and the whole twenty-thing run failed at 337 s with 3 things done.
+            // A goal of several things leaves this one as 未能完成 and goes on with the rest (twice a run at most).
+            if itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 {
+                itemFailsLeft -= 1
+                let line = "未能完成：" + why
+                if !notes.contains(line) { notes.append(line) }
+                (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
+                record(shot, ["action": .str("loop"), "reason": .str(why + ". " + Self.oneThingFailedReason)])
+                try await replan(stuck: true)
+                gotOn()
+                return false
+            }
             record(shot, ["action": .str("fail"), "reason": .str(why)])
             return true
         }
