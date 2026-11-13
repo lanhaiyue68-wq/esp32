@@ -630,3 +630,7 @@ logs39: evidence confirms 2.20–4.18% fit RMS and near-origin back taps before 
 - 123 on the phone: tap tolerance confirmed (2.06 -> 1.15 s a tap, 0 misses); regressions found and fixed in 124: a second send of one text into one chat, made-up results from apps never opened, steps not widened on remembered ways, a note swallowing the next action, a time label read into the chat title (the watch stopped itself), weather answered off the chat, a picture in WeChat taken for an app; voice messages are written out by WeChat (the owner's are commands, others' kept).
 - 125 (local, not pushed by the user's word): 群收录 (docs/spec-group-archive-125.md, protocol section 6).
 - Desktop: Lan-Agent-build124-unsigned.ipa (SHA256 4c3c9e14214a62eda62eae1559ab810bca9dc361bd8d8e779a02c2af2db63eab). Next: install 124 and run the regression in E:\AgentStorage\agent-handoff\lan-agent-2026-11-12-handoff.md. Device test scripts: tools/device-test/.
+
+## 2026-11-14 03:45 132 已編
+- 131 回歸：使用者 03:35 叫停（c3 第 164 步、c4 沒跑）；成績表在 docs/build131-summary.md 尾段。
+- 132（d8659d2，build132-ci run 43484673225）：V、W/W2/W3、J2、X、Y/Y2/Y3、Z1–Z5、S2、N2、輸入提示、T 診斷；明細 docs/build132-summary.md。IPA：E:/桌面/Lan-Agent-build132-unsigned.ipa（CFBundleVersion 132，SHA256 e1dec042…a066）。
