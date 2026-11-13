@@ -143,9 +143,21 @@ extension Pointer: Gestures {}
     private var messageSent: Set<String> = []
     /// Times the "added to the cart" toast came up in this run, and whether it showed on the last screen read.
     private var cartAdds = 0, cartToastShown = false
+    /// The same toasts by the app they came in (AppNames.hans, lowercased; "" when no app is known).
+    private var cartAddsIn: [String: Int] = [:]
+    /// The done check sent the run back once for an item it said it had not done (skippedWithoutReason).
+    private var skipAsked = false
     static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
         let text = AppNames.hans(rows.joined().map(\.text).joined())
         return ["加购成功", "已加入购物车", "成功加入购物车", "加入购物车成功", "已加购", "已添加到购物车"].contains { text.contains($0) }
+    }
+    /// Whether an "added to the cart" text in this app is a shop's toast: an app that sells things, or one not known
+    /// (opened by its icon, or none opened yet), as before. In 备忘录, 微信 or Safari it is words someone wrote.
+    static func sellsThings(_ app: String?) -> Bool {
+        guard let app else { return true }
+        let name = AppNames.hans(app).lowercased()
+        return ["淘宝", "天猫", "拼多多", "京东", "美团", "饿了么", "闲鱼", "唯品会", "抖音", "taobao", "pinduoduo", "jd", "meituan"]
+            .contains { name.contains($0) }
     }
     static func cartNote(_ n: Int) -> String {
         "购物车：第\(n)次看到加购成功的提示，这一件已经加进去了（这次任务一共加了\(n)次）。同一件不要再点加入购物车，每点一次就多一件；目标要几件就只加几次。"
@@ -178,6 +190,17 @@ extension Pointer: Gestures {}
     /// How many things the goal puts in carts: for each clause that adds (加入购物车, 加购), its count (一件, 一份, 2杯;
     /// not 第一个 or 前5个), one when it gives none. At least one.
     static func cartWanted(_ task: String) -> Int { max(cartCounts(task).reduce(0, +), 1) }
+
+    /// What the goal asks to put in the cart of this app: the parts (；) that name it (美团外卖 for 美团 too). The whole
+    /// goal's count when no app is known or no part names it.
+    static func cartWanted(_ task: String, in app: String?) -> Int {
+        guard let app else { return cartWanted(task) }
+        let name = AppNames.hans(app).lowercased()
+        let counts = AppNames.hans(task).lowercased().components(separatedBy: CharacterSet(charactersIn: "；;\n"))
+            .filter { !name.isEmpty && $0.contains(name) }
+            .flatMap { cartCounts($0) }
+        return counts.isEmpty ? cartWanted(task) : max(counts.reduce(0, +), 1)
+    }
 
     /// The most the goal asks of any one thing it puts in a cart (一件 → 1), at least one.
     static func cartEach(_ task: String) -> Int { max(cartCounts(task).max() ?? 1, 1) }
@@ -635,6 +658,33 @@ extension Pointer: Gestures {}
         }
     }
 
+    /// 131 over the cloud 11-13 (r131b g5): after four new plans, item 12 (抖音 搜索“北京胡同”) was in none of them; the
+    /// model saw it was missing only in 备忘录, answered "12. …：未执行，无记录", and finished, though nothing stood in its
+    /// way. Items of a goal of 3+ things the answer says were not done, with no reason given (a login, verification, an
+    /// app not installed, nothing found, the minimum order), and not a summary of other items. nil: none.
+    /// `absent`: apps this run found are not on the phone (r131c c1: 京东, its item answered "未完成该项读取").
+    static func skippedWithoutReason(_ answer: String, task: String, absent: [String] = []) -> String? {
+        guard goalParts(task) >= 3 else { return nil }
+        let notDone = ["未执行", "没执行", "没有执行", "未做", "没做", "没有做", "未进行", "没进行", "未完成", "没完成", "没有完成",
+                       "无记录", "没有记录", "not done"]
+        let reasons = ["登录", "登陆", "验证", "实名", "身份", "安装", "没装", "未装", "不存在", "找不到", "没找到", "没有找到", "未找到",
+                       "无法", "不能", "不支持", "失败", "超时", "网络", "付款", "支付", "下单", "起送", "因为", "由于", "原因", "因",
+                       "不要", "禁止", "要求"]
+        let skipped = numberedItems(answer).filter { item in
+            let body = AppNames.hans(String(answer[item.body])).lowercased()
+            return notDone.contains { body.contains($0) } && !reasons.contains { body.contains($0) }
+                && body.range(of: #"第\s*\d{1,2}\s*[项項]"#, options: .regularExpression) == nil
+                && !absent.contains { app in
+                    let name = AppNames.hans(app).lowercased()
+                    return !name.isEmpty && body.contains(name)
+                }
+        }.map { $0.n }
+        guard !skipped.isEmpty else { return nil }
+        return "The answer says item " + skipped.map { String($0) }.joined(separator: "、") + " was not done, and nothing stopped "
+            + "it (no login, no verification, nothing missing). Do it on the phone now, add its result, then finish again. If "
+            + "something does stop it, say what in the answer."
+    }
+
     static func unvisitedApps(task: String, steps: [JObject]) -> [String] {
         if steps.contains(where: { $0["action"]?.str == "takeover" }) { return [] }  // the user did part of it by hand
         let goal = AppNames.hans(task).lowercased().replacingOccurrences(
@@ -723,8 +773,11 @@ extension Pointer: Gestures {}
     static func unsentGoalReason(task: String, sent: Set<String>, answer: String) -> String? {
         let missing = goalMessages(task).filter { !wasSent($0, sent) && !ownsNotDone(answer, about: [$0]) }
         guard !missing.isEmpty else { return nil }
-        return "This run never sent " + missing.map { "“\($0)”" }.joined(separator: "、") + ". Send each in the chat the goal "
-            + "names now (it is approved there), or say in the answer that it was not sent."
+        // 131 over the cloud 11-13 (g4): "G4全部做完" from an earlier day was in the group; told this, the model went 备忘录 ↔
+        // 微信 (each time it saw the old bubble it took the message as sent) until the loop guard stopped it.
+        return "This run never sent " + missing.map { "“\($0)”" }.joined(separator: "、") + ". The same words already in the "
+            + "chat are an older message from an earlier run, not this run's: type and send each again now in the chat the "
+            + "goal names (it is approved there), or say in the answer that it was not sent."
     }
 
     /// Whether a screen title is a chat the goal names ("测试群（4人）" for a goal that posts to 测试群).
@@ -770,6 +823,23 @@ extension Pointer: Gestures {}
         }
     }
 
+    /// The answer with this run's notes added after it, when it covers under half of a goal of 3+ numbered things; nil
+    /// otherwise. Notes the run itself wrote (the cart's count, a listen's transcript) and ones the answer holds are left out.
+    static func completedAnswer(_ answer: String, notes: [String], task: String) -> String? {
+        let wanted = goalParts(task)
+        guard wanted >= 3, Set(numberedItems(answer).map { $0.n }).count * 2 < wanted else { return nil }
+        let said = typedKey(answer)
+        var added: [String] = [], keys: Set<String> = []
+        for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") {
+            let k = typedKey(note)
+            guard !k.isEmpty, !said.contains(k), !keys.contains(k) else { continue }
+            keys.insert(k)
+            added.append(note)
+        }
+        guard !added.isEmpty else { return nil }
+        return answer + "\n本次记录的全部结果：\n" + added.joined(separator: "\n")
+    }
+
     /// The answer, with any item that now tells of this run's own sent messages (keys from typedKey, 4+ characters) while
     /// its first note did not, put back as that note tells it.
     static func keepReadNotes(_ answer: String, notes: [String], sent: Set<String>) -> String {
@@ -800,7 +870,12 @@ extension Pointer: Gestures {}
     /// A done check's objection without the parts (split at ；; and line ends) that are the run's own sent messages or a
     /// cart count the cart had before; nil when nothing else is left.
     static func standingObjection(_ objection: String, sent: Set<String>, adds: Int, wanted: Int, each: Int? = nil) -> String? {
-        let parts = objection.components(separatedBy: CharacterSet(charactersIn: "；;\n"))
+        // 131 over the cloud 11-13 (r131b g6): "任务2最新三条消息与屏幕不符，任务4商品价格前后矛盾，…" came as one sentence, and
+        // the part about item 2 (this run's messages) set aside item 4's price too (18.24 in item 4, 13.18 in item 6). A
+        // comma before the next item's number parts it as well.
+        let marked = objection.replacingOccurrences(of: #"[，,]\s*(?=(?:任务|任務|第|item\s*)\d{1,2})"#, with: "\n",
+                                                    options: [.regularExpression, .caseInsensitive])
+        let parts = marked.components(separatedBy: CharacterSet(charactersIn: "；;\n"))
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         func setAside(_ s: String) -> Bool {
             blamesOwnSend(s, sent: sent) || blamesOldCart(s, adds: adds, wanted: wanted, each: each)
@@ -1449,7 +1524,7 @@ extension Pointer: Gestures {}
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft, refusalsNoProgress) = (0, [], false, 2, 0)
-        (cartAdds, cartToastShown) = (0, false)
+        (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -1776,9 +1851,15 @@ extension Pointer: Gestures {}
             }
             // 126 over the cloud 11-12 (g6): "已加购5次" in the model's own words, and 加入购物车 tapped again each time the
             // spec sheet came up. Once the "added" toast has come as often as the goal asks for, adding is refused.
-            if act["action"]?.str == "tap", cartAdds >= Self.cartWanted(task), Self.addsToCart(act["thought"]?.str ?? "") {
-                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.cartFullReason(cartAdds))])
-                return false
+            // 131 over the cloud 11-13 (r131b g5): counted over the whole goal, 淘宝 一件 and 美团外卖 一份 made 2 for both:
+            // 淘宝 got a second bottle, and 美团's one add was refused. Each app is held to what the goal asks of it.
+            if act["action"]?.str == "tap", Self.addsToCart(act["thought"]?.str ?? "") {
+                let shop = Self.appInFront(steps, startedIn: startApp)
+                let added = shop.map { cartAddsIn[AppNames.hans($0).lowercased(), default: 0] } ?? cartAdds
+                if added >= Self.cartWanted(task, in: shop) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.cartFullReason(added))])
+                    return false
+                }
             }
             // 126 over the cloud 11-12 (g7): "备忘录已完整写入第1至17项结果，第18项完成" and then "open 微信" for the next
             // part, with no done: the part stayed open, and the run went back and forth between 备忘录 and 微信 for 56
@@ -1917,6 +1998,11 @@ extension Pointer: Gestures {}
                 if unvisited == nil, endAfterSend == nil {
                     unvisited = Self.unsentGoalReason(task: task, sent: sentTexts, answer: answer)  // sent, not only approved
                 }
+                let absent = steps.filter { $0["action"]?.str == "open failed" }.compactMap { $0["app"]?.str }
+                if unvisited == nil, !skipAsked, let skipped = Self.skippedWithoutReason(answer, task: task, absent: absent) {
+                    skipAsked = true  // once a run: an item it then cannot do goes out as said
+                    unvisited = skipped
+                }
             }
             if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) ?? unvisited {
                 doneRejected += 1
@@ -1941,11 +2027,21 @@ extension Pointer: Gestures {}
             // check passed it. An item the answer now tells with this run's own messages, which its note did not, is
             // put back as it was noted when read.
             if name == "done", endsTask, let answer = act["answer"]?.str {
-                let kept = Self.keepReadNotes(answer, notes: notes, sent: sentTexts.union(approvedTexts))
+                // Messages only (131 r131c c2: sentTexts holds a note's typed "C2组记录" and searches' Return too).
+                let kept = Self.keepReadNotes(answer, notes: notes, sent: messageSent.union(approvedTexts))
                 if kept != answer {
                     DebugLog.write("done: an item retold with this run's own messages is put back as it was noted")
                     act["answer"] = .str(kept)
                 }
+            }
+            // 131 over the cloud 11-13 (g1): both Codex accounts down (one "model not supported", one at its limit), the
+            // executor planned, and the run ended with the last part's answer only ("第11项完成…"): the other nineteen
+            // results were in its notes but not in the answer. An answer that covers under half of a goal's things gets
+            // what this run noted added after it.
+            if name == "done", endsTask, let answer = act["answer"]?.str,
+               let full = Self.completedAnswer(answer, notes: notes, task: task) {
+                DebugLog.write("done: the answer covers few of the goal's things; what this run noted is added")
+                act["answer"] = .str(full)
             }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
@@ -1962,7 +2058,9 @@ extension Pointer: Gestures {}
                     // 130 (g4): both came in one sentence ("item 2 …; item 4 cart ×2"): each part is weighed on its own,
                     // and only the parts that are the run's own messages or the cart's earlier count are set aside.
                     if let w = wrong {
-                        let kept = Self.standingObjection(w, sent: sentTexts.union(approvedTexts), adds: cartAdds,
+                        // 131 over the cloud 11-13 (r131c c2): "备忘录第一行是“美元≈6.67人民币”，不是“C2组记录”" was set aside
+                        // as this run's own message: sentTexts holds what was typed into the note too. Messages only.
+                        let kept = Self.standingObjection(w, sent: messageSent.union(approvedTexts), adds: cartAdds,
                                                           wanted: Self.cartWanted(task), each: Self.cartEach(task))
                         if kept != w {
                             DebugLog.write(kept == nil
@@ -2023,6 +2121,9 @@ extension Pointer: Gestures {}
                         }
                     }
                     if !safe {
+                        // 131 over the cloud 11-13: ~110 answers dropped in four runs and the words-around check above
+                        // let none through; the log did not say what was dropped (a tap, typing, a swipe).
+                        DebugLog.write("stale plan: dropping \(name), \(target.count) target point(s), \(staleRun) in a row")
                         lastStale = act
                         if staleRun >= 5 {  // it keeps moving right there: let the planner look afresh
                             staleRun = 0
@@ -2052,7 +2153,11 @@ extension Pointer: Gestures {}
                     if Self.typedKey(act["text"]?.str ?? "") == Self.typedKey(pendingInput), pendingRefused < 2 {
                         pendingRefused += 1
                         record(planned.shot, ["action": .str("blocked"),
+                            // 131 over the cloud 11-13 (r131c c3): 抖音's search for 猫 — one character OCR could not
+                            // confirm — went type, refused, tap the field and type again, four rounds and 16 minutes.
                             "reason": .str("Text was already entered: \(pendingInput). Inspect the current field. "
+                                + "If it shows these words, search or send now with the Return / 搜索 key (key: return); "
+                                + "do not tap the field and type them again. "
                                 + "Do not clear, retype, or paste over correct text; send it once if correct. "
                                 + "Only use explicit correction keys if a visible mistake needs fixing.")])
                         return false
@@ -2772,6 +2877,25 @@ extension Pointer: Gestures {}
     /// Whether two screens read the same: most of what was read still reads, in the same place (a video or an animation
     /// behind it moves; on a list that scrolled the words are the same and their places are not).
     /// Whether the goal asks for a chat's latest or most recent messages (最新的三条消息, 最近一条).
+    /// 131 over the cloud 11-13: 测试群 opened in the middle of its history and "the latest three" were read off it as it
+    /// was: in r131b g6 with no swipe at all, in g5 after one swipe up that still moved it (7-9 pm messages, not the G3/G5
+    /// ones of 10-11 pm). What to say with the chat's message list, from the steps since the run came into the chat; nil
+    /// once a swipe up there moved nothing (the bottom).
+    static func chatBottomNote(_ steps: [JObject]) -> String? {
+        for s in steps.reversed() {
+            let action = s["action"]?.str ?? ""
+            if action == "swipe" {
+                guard let y1 = s["y1"]?.double, let y2 = s["y2"]?.double, y2 < y1 else { continue }  // down: older ones
+                if s["changed"] == .bool(false) || s["scrolled"] == .bool(false) { return nil }
+                return "The last swipe up still moved this chat, so newer messages may be below: swipe up again until the "
+                    + "screen stops changing; only then is number 1 the newest."
+            }
+            if ["open", "tap", "back", "home", "type", "key", "press"].contains(action) { break }
+        }
+        return "It is not known yet that this is the bottom of the chat (a chat can open in the middle of its history): "
+            + "before noting the latest messages, swipe up once (y 800 → 300); if nothing moves, number 1 is the newest."
+    }
+
     static func asksLatestMessages(_ task: String) -> Bool {
         let t = AppNames.hans(task)
         return (t.contains("最新") || t.contains("最近")) && (t.contains("消息") || t.contains("条"))
@@ -3174,9 +3298,13 @@ extension Pointer: Gestures {}
         }
         // 125 stress test 11-12 (s01): 加入购物车 was tapped again and again and the cart held ×5 of a cup the goal asked
         // for once. Each time the "added" toast comes up it is written down, and the model is told at once.
-        let cartToast = Self.addedToCart(readRows)
+        // 131 over the cloud 11-13 (r131b g3): two of three counts were read in 备忘录 (an old note's "…台灯已加入购物车", then
+        // the model's own "淘宝雨伞两次出现加购成功提示"), and the done check took the cart to hold three umbrellas.
+        let frontApp = Self.appInFront(steps, startedIn: startApp)
+        let cartToast = Self.addedToCart(readRows) && Self.sellsThings(frontApp)
         if cartToast, !cartToastShown {
             cartAdds += 1
+            cartAddsIn[frontApp.map { AppNames.hans($0).lowercased() } ?? "", default: 0] += 1
             let line = Self.cartNote(cartAdds)
             notes.append(line)
             gotOn()
@@ -3192,6 +3320,8 @@ extension Pointer: Gestures {}
            let title = WatchReport.navigationTitle(rows: readRows), Self.goalNamesChat(title, task: task),
            let chat = Self.chatLines(readRows) {
             prompt += "\n\n" + chat
+            // Before the run sends anything: what it sends lands at the bottom, and the latest it reads come before that.
+            if sentTexts.isEmpty, let bottom = Self.chatBottomNote(steps) { prompt += "\n" + bottom }
         }
         if ourKeyboardOnScreen?() == true {
             prompt += "\n\nThe keyboard on screen is the app's own (\"Lan Agent 輸入法\"): the field is focused, use type."

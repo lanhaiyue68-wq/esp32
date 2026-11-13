@@ -1,5 +1,30 @@
+import Combine
 import SwiftUI
 import UIKit
+
+/// The phone's screen as the feed last saw it, redrawn on its own at most twice a second: the feed's frames no longer
+/// redraw whole pages (user 11-13: the yellow buttons needed several taps while sharing was on). `placeholder` false:
+/// nothing shows until a frame comes.
+struct LiveFrame: View {
+    let feed: VideoFeed
+    var placeholder = true
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+            } else if placeholder {
+                Color(uiColor: .tertiarySystemFill)
+            } else {
+                Color.clear.frame(height: 0)
+            }
+        }
+        .onReceive(feed.liveFrames.throttle(for: .milliseconds(500), scheduler: DispatchQueue.main, latest: true)) { jpeg in
+            image = jpeg.flatMap { UIImage(data: $0) }
+        }
+    }
+}
 
 /// Spacing on the 8 pt grid; colors are the system's semantic colors plus the app's accent (the eyes' glow).
 enum Space {

@@ -441,7 +441,7 @@ extension AppModel {
         guard let dir = traces.dir?.appendingPathComponent("video") else { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         videoDir = dir
-        videoSink = feed.$frame.compactMap { $0 }
+        videoSink = feed.liveFrames.compactMap { $0 }
             .throttle(for: .milliseconds(500), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] jpeg in self?.saveVideoFrame(jpeg) }
     }

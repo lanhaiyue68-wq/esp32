@@ -24,6 +24,7 @@ private struct LearningContent: View {
     @AppStorage(ExperienceStore.enabledKey) private var enabled = true
     @State private var clearing = false
     @State private var appPlaces = AppPlaces.count  // UserDefaults, not observed: read on appear and after clearing
+    @State private var placesCleared = false
 
     var body: some View {
         List {
@@ -37,7 +38,14 @@ private struct LearningContent: View {
                 LabeledContent("Learned app places", value: "\(appPlaces)")
                 // User 11-13: apps moved to the first pages for speed. A wrong place is only forgotten one app at a time,
                 // and the pages are read again at most every three days: moved apps went through Search until then.
-                Button("重新記 App 位置（移動過 App 後按）") { AppPlaces.clear(); appPlaces = 0 }
+                // User 11-13: "黃色按鈕…按到也沒反應": with no place known the count stayed 0, so a tap showed nothing.
+                Button {
+                    AppPlaces.clear(); appPlaces = 0
+                    Haptics.success()
+                    placesCleared = true
+                } label: {
+                    Text(placesCleared ? "已清除，下次打开 App 时会重新读取主屏幕" : "重新记 App 位置（移动过 App 后按）")
+                }
             } footer: {
                 Text(LocalizedStringKey(enabled
                      ? "Related lessons are included in later task requests. This is local experience memory, not model-weight training. A reference does not prove success."

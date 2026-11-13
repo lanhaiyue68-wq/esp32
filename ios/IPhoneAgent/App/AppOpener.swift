@@ -55,9 +55,11 @@ enum AppPlaces {
     /// A remembered app missing from its page: the apps were moved, and the pages are read again at most this often (s).
     static let rereadAfterMiss = 600.0
     static func readAgainNow(now: Date = Date()) { UserDefaults.standard.set(now.timeIntervalSince1970, forKey: readAgainKey) }
+    /// The learning page's "重新記 App 位置": the next open reads the pages at once (no wait since the last read).
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: mappedKey)
+        UserDefaults.standard.removeObject(forKey: readAgainKey)
     }
 
     /// User 11-09: "盡量走ocr的方式看app在哪邊位置，然後記住這個位置下次就可以直接打開". The Home Screen's pages were read
@@ -316,7 +318,10 @@ extension AppModel {
             rows = read
         }
         if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
-        if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows) {
+        // Not read yet (or the last read got nothing): read the pages, at most every 10 minutes, so a hot phone whose read
+        // fails is not made to try again on every open.
+        if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows), AppPlaces.mayReadAgain(every: AppPlaces.rereadAfterMiss) {
+            AppPlaces.readAgainNow()
             try await mapHomeScreen()
             guard let now = await homeRows(top: 0.02) else { return try await bySearch(name) }
             rows = now
@@ -344,11 +349,13 @@ extension AppModel {
             if AppPlaces.mayReadAgain(every: AppPlaces.rereadAfterMiss) {
                 AppPlaces.readAgainNow()
                 DebugLog.write("open \(name): not on page \(target + 1) as remembered; the apps were moved, reading the Home Screen pages again")
-                AppPlaces.clear()
+                // 131 over the cloud 11-13 (g4): the places were cleared first, the phone was hot and the read got no page
+                // ("0 Home Screen page(s) read, 0 names known", 57 s): every app after that went through Search (淘宝 105 s).
+                // What is read replaces what was known, name by name; a read that gets nothing loses nothing.
                 try await pointer.goHome()
                 try await mapHomeScreen()
                 try await pointer.goHome()
-                if AppPlaces.page(of: name) != nil { return try await openAppNow(name) }
+                if let now = AppPlaces.page(of: name), now != target { return try await openAppNow(name) }
             }
             if AppPlaces.missed(name) >= 2 {
                 DebugLog.write("open \(name): not on page \(target + 1) twice in a row; Search from now on")
@@ -411,7 +418,9 @@ extension AppModel {
             page += 1
             try await swipePage(next: true)
         }
-        AppPlaces.mapped = true
+        // 131 (g4): a read that got no page left "mapped" set, and with no name known every app went through Search for
+        // the three days until the next read. Only a read that got a page counts.
+        if page > 0 { AppPlaces.mapped = true }
         DebugLog.write(String(format: "open: %ld Home Screen page(s) read, %ld names known, %.1f s", page, AppPlaces.count, now() - began))
     }
 

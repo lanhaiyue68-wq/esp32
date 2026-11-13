@@ -21,6 +21,19 @@ import Foundation
         let tokens: () -> ChatGPTPlus.Tokens?
         let save: (ChatGPTPlus.Tokens) -> Void
         let rest: PlusRest
+        /// The models this account listed when last read, and how to read them again (nil: it is not read; tests).
+        var listed: () -> [String] = { [] }
+        var readModels: ((ChatGPTPlus.Tokens) async throws -> [String])? = nil
+    }
+
+    /// The planner's model when this account lists it (or nothing is known yet), else the account's own first one.
+    nonisolated static func model(for listed: [String], preferred: String) -> String {
+        listed.isEmpty || listed.contains(preferred) ? preferred : listed[0]
+    }
+
+    /// The account's own "this model is not for you" (not a 400 about one request, a picture too big).
+    nonisolated static func modelRefused(_ message: String) -> Bool {
+        message.contains("HTTP 400") && message.contains("model") && message.contains("not supported")
     }
 
     let plusModel: String
@@ -30,7 +43,9 @@ import Foundation
     private(set) var lastUsedPlus = false
     /// The account that answered last ("1", "2"); nil when the fallback did.
     private(set) var lastAccount: String?
-    var model: String { lastUsedPlus ? "plus:\(plusModel)" : fallback.model }
+    /// The model that answered last (an account's own when it cannot use `plusModel`).
+    private(set) var lastPlusModel: String?
+    var model: String { lastUsedPlus ? "plus:\(lastPlusModel ?? plusModel)" : fallback.model }
     /// Who plans when no account can, as the user is told ("豆包", or the backup first).
     var fallbackLabel = "豆包"
 
@@ -38,14 +53,17 @@ import Foundation
     init(model: String, fallback: ChatModel, tokens: @escaping () -> ChatGPTPlus.Tokens? = { ChatGPTPlus.saved(slot: 0) },
          save: @escaping (ChatGPTPlus.Tokens) -> Void = { ChatGPTPlus.save($0, slot: 0) },
          ask: @escaping Ask = { try await ChatGPTPlus.ask($0, model: $1, system: $2, prompt: $3, image: $4) },
-         rest: PlusRest? = nil, second: Account? = nil) {
+         rest: PlusRest? = nil, second: Account? = nil, listed: @escaping () -> [String] = { [] },
+         readModels: ((ChatGPTPlus.Tokens) async throws -> [String])? = nil) {
         self.plusModel = model; self.fallback = fallback; self.askPlus = ask
-        self.accounts = [Account(name: "1", tokens: tokens, save: save, rest: rest ?? PlusRest())] + (second.map { [$0] } ?? [])
+        self.accounts = [Account(name: "1", tokens: tokens, save: save, rest: rest ?? PlusRest(), listed: listed,
+                                 readModels: readModels)] + (second.map { [$0] } ?? [])
     }
 
     /// Account 2 as signed in on this phone.
     static var secondAccount: Account {
-        Account(name: "2", tokens: { ChatGPTPlus.saved(slot: 1) }, save: { ChatGPTPlus.save($0, slot: 1) }, rest: .second)
+        Account(name: "2", tokens: { ChatGPTPlus.saved(slot: 1) }, save: { ChatGPTPlus.save($0, slot: 1) }, rest: .second,
+                listed: { ChatGPTPlus.listedModels(slot: 1) }, readModels: { try await ChatGPTPlus.readModels($0, slot: 1) })
     }
 
     /// The planner for a run: Plus when it is switched on and signed in, else the given model.
@@ -62,7 +80,8 @@ import Foundation
         let model = defaults.string(forKey: modelKey).flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel
         let two = ChatGPTPlus.saved(slot: 0) != nil && ChatGPTPlus.saved(slot: 1) != nil
         DebugLog.write("planner: ChatGPT Plus \(model)\(two ? " (2 accounts)" : ""), \(fallback.model) if it fails")
-        let plus = PlusChat(model: model, fallback: fallback, rest: .shared, second: secondAccount)
+        let plus = PlusChat(model: model, fallback: fallback, rest: .shared, second: secondAccount,
+                            listed: { ChatGPTPlus.listedModels(slot: 0) }, readModels: { try await ChatGPTPlus.readModels($0, slot: 0) })
         if backup != nil { plus.fallbackLabel = "候補模型" }
         return plus
     }
@@ -73,17 +92,35 @@ import Foundation
         var failed: [String] = []  // accounts that failed on this call
         for account in accounts {
             guard !account.rest.resting, let signedIn = account.tokens() else { continue }
+            var asked = Self.model(for: account.listed(), preferred: plusModel)
             do {
-                let (answer, fresh) = try await askPlus(signedIn, plusModel, system, text, image)
+                let reply: (ChatGPTPlus.Answer, ChatGPTPlus.Tokens)
+                do {
+                    reply = try await askPlus(signedIn, asked, system, text, image)
+                } catch let refused where Self.modelRefused(refused.localizedDescription) && account.readModels != nil {
+                    // User 11-14: "默認就一個6.1luna" — account 1's plan lists gpt-6-luna first and no gpt-6.1-* (11-13 log),
+                    // not gpt-6.1-terra, and since 11-13
+                    // it was put to rest each time (6 hours from 132's first fix) while it could plan. Its own models
+                    // are read and its own first one is asked, once; it is used from then on.
+                    guard let read = account.readModels else { throw refused }
+                    let ownList = try await read(signedIn)
+                    let own = Self.model(for: ownList, preferred: plusModel)
+                    guard own != asked else { throw refused }
+                    DebugLog.write("plus planner (account \(account.name)): \(asked) is not for this account; asking \(own)")
+                    asked = own
+                    reply = try await askPlus(signedIn, asked, system, text, image)
+                }
+                let (answer, fresh) = reply
                 if fresh != signedIn { account.save(fresh) }
                 guard !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ChatGPTPlus.Failure(message: "empty answer")
                 }
                 lastUsedPlus = true
                 lastAccount = account.name
+                lastPlusModel = asked
                 account.rest.succeeded()
                 if !failed.isEmpty { say?("Codex 帳號 \(failed.joined(separator: "、")) 不能用，已改用帳號 \(account.name)") }
-                DebugLog.write("plus planner: \(plusModel)\(named ? " (account \(account.name))" : "") first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms, effort \(ChatGPTPlus.reasoningEffort ?? "default")")
+                DebugLog.write("plus planner: \(asked)\(named ? " (account \(account.name))" : "") first token \(answer.firstTokenMs ?? -1) ms, total \(answer.totalMs) ms, effort \(ChatGPTPlus.reasoningEffort ?? "default")")
                 return ChatResult(text: answer.text, firstToken: answer.firstTokenMs.map { Double($0) / 1000 },
                                   total: Double(answer.totalMs) / 1000, finishReason: "stop")
             } catch is CancellationError {
@@ -163,8 +200,21 @@ import Foundation
 
     func succeeded() { failures = 0; lastError = ""; until = 0 }
 
-    nonisolated static func restSeconds(failures: Int, message: String) -> Double {
-        if message.contains("HTTP 429") { return 1800 }
+    /// 131 over the cloud 11-13 (user: "账号1有问题，这种情况你让他自动切2"): account 1 answered "the 'gpt-6.1-terra' model
+    /// is not supported when using Codex with a ChatGPT account" and was asked again every 2-10 minutes before account 2;
+    /// account 2 at its limit said it would reset in 8 minutes (resets_at) and rested 30. An account that cannot use the
+    /// model rests 6 hours, so account 2 plans straight away; one at its limit rests until it says it resets.
+    nonisolated static func restSeconds(failures: Int, message: String, at: Double = Date().timeIntervalSince1970) -> Double {
+        let unusable = 6 * 3600.0
+        if message.contains("HTTP 429") {
+            if let r = message.range(of: #""resets_at"\s*:\s*\d{9,11}"#, options: .regularExpression),
+               let resets = Double(String(message[r].filter { $0.isNumber })) {
+                return min(max(resets - at + 30, 60), unusable)
+            }
+            return 1800
+        }
+        // Only the account's own "this model is not for you": a 400 about one request (a picture too big) is that request's.
+        if message.contains("HTTP 400"), message.contains("model"), message.contains("not supported") { return unusable }
         return failures <= 1 ? 120 : failures == 2 ? 600 : 1800
     }
 }

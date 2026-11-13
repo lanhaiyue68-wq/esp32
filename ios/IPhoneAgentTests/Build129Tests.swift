@@ -90,6 +90,9 @@ import XCTest
         XCTAssertFalse(AppPlaces.mayReadAgain(now: now), "the three days for an app no page knew stay")
         AppPlaces.readAgainNow(now: now.addingTimeInterval(-300))
         XCTAssertFalse(AppPlaces.mayReadAgain(now: now, every: AppPlaces.rereadAfterMiss))
+        AppPlaces.clear()  // 131 (g4): "重新記 App 位置" reads at the next open, whatever the last read
+        XCTAssertTrue(AppPlaces.mayReadAgain(now: now, every: AppPlaces.rereadAfterMiss))
+        XCTAssertFalse(AppPlaces.mapped)
     }
 
     /// 129 (g4): item 2 was noted right when read; the final answer retold it with the run's own later message.
@@ -218,6 +221,138 @@ import XCTest
         XCTAssertEqual(AgentLoop.goalWrites("在验证群发“写好了”"), [], "写 inside a message is not a note")
         XCTAssertEqual(AgentLoop.goalWrites("在测试群写“你好”"), ["你好"], "written in a chat: the app and the title decide")
         XCTAssertTrue(AgentLoop.chatApps.contains("微信"))
+    }
+
+    /// 131 (r131b g5, g6): a chat opened mid-history; older messages were read as the newest after one swipe up (g5) or none (g6).
+    func testTheLatestMessagesWaitForASwipeUpThatMovesNothing() {
+        let open: JObject = ["action": .str("open"), "app": .str("微信")]
+        let up: JObject = ["action": .str("swipe"), "x1": .num(40), "y1": .num(800), "x2": .num(40), "y2": .num(300), "changed": .bool(true)]
+        XCTAssertTrue(AgentLoop.chatBottomNote([open])?.hasPrefix("It is not known yet") == true, "g6: read at once")
+        XCTAssertTrue(AgentLoop.chatBottomNote([open, up])?.hasPrefix("The last swipe up still moved") == true, "g5")
+        var still = up; still["changed"] = .bool(false)
+        XCTAssertNil(AgentLoop.chatBottomNote([open, up, still]), "nothing moved: the bottom")
+        var words = up; words["scrolled"] = .bool(false)
+        XCTAssertNil(AgentLoop.chatBottomNote([open, words]), "the words did not move")
+        var down = up; down["y1"] = .num(300); down["y2"] = .num(800)
+        XCTAssertNil(AgentLoop.chatBottomNote([open, still, down, ["action": .str("note")]]), "older ones after the bottom")
+        XCTAssertNotNil(AgentLoop.chatBottomNote([open, still, ["action": .str("tap")]]), "a tap since: look again")
+    }
+
+    /// User 11-14: "下次更新要顯示每個賬號的賬號和賬號名字": email, name and plan from the id token.
+    func testAnAccountIsShownByItsEmailNameAndPlan() throws {
+        let payload: [String: Any] = ["email": "someone@example.com", "name": "Some One",
+                                      "https://api.openai.com/auth": ["chatgpt_plan_type": "plus", "chatgpt_account_id": "acc-1"]]
+        let body = try JSONSerialization.data(withJSONObject: payload).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        let token = "e30." + body + ".sig"
+        XCTAssertEqual(ChatGPTPlus.identity(idToken: token),
+                       ChatGPTPlus.Identity(email: "someone@example.com", name: "Some One", plan: "plus"))
+        XCTAssertEqual(ChatGPTPlus.accountID(idToken: token), "acc-1")
+        XCTAssertNil(ChatGPTPlus.identity(idToken: "not a token"))
+    }
+
+    /// User 11-14: "默認就一個6.1luna" — account 1's plan lists gpt-6.1-luna, not gpt-6.1-terra; it plans with its own.
+    func testACodexAccountThatCannotUseTheModelPlansWithItsOwn() async throws {
+        XCTAssertEqual(PlusChat.model(for: [], preferred: "gpt-6.1-terra"), "gpt-6.1-terra", "nothing read yet")
+        XCTAssertEqual(PlusChat.model(for: ["gpt-6.1-luna", "gpt-6.1-terra"], preferred: "gpt-6.1-terra"), "gpt-6.1-terra")
+        XCTAssertEqual(PlusChat.model(for: ["gpt-6.1-luna", "gpt-5.6-terra"], preferred: "gpt-6.1-terra"), "gpt-6.1-luna")
+        let t1 = ChatGPTPlus.Tokens(idToken: "i", accessToken: "a1", refreshToken: "r1", accountID: "1")
+        var listed: [String] = [], reads = 0, asked: [String] = []
+        let rest = PlusRest()
+        let plus = PlusChat(model: "gpt-6.1-terra", fallback: FakeModel { _ in "doubao" }, tokens: { t1 }, save: { _ in },
+                            ask: { tokens, model, _, _, _ in
+                                asked.append(model)
+                                if model == "gpt-6.1-terra" {
+                                    throw ChatGPTPlus.Failure(message: "HTTP 400：{\"detail\":\"The 'gpt-6.1-terra' model is not supported when using Codex with a ChatGPT account.\"}")
+                                }
+                                return (ChatGPTPlus.Answer(text: "plan", model: model, firstTokenMs: 1, totalMs: 2, quota: [:]), tokens)
+                            }, rest: rest, listed: { listed },
+                            readModels: { _ in reads += 1; listed = ["gpt-6.1-luna", "gpt-5.6-terra"]; return listed })
+        let first = try await plus.chat(system: "s", text: "t", image: nil, maxTokens: 1, temperature: 0)
+        XCTAssertEqual(first.text, "plan")
+        XCTAssertEqual(asked, ["gpt-6.1-terra", "gpt-6.1-luna"])
+        XCTAssertEqual(plus.model, "plus:gpt-6.1-luna")
+        XCTAssertFalse(rest.resting, "account 1 answered: it does not rest")
+        _ = try await plus.chat(system: "s", text: "t", image: nil, maxTokens: 1, temperature: 0)
+        XCTAssertEqual(asked.last, "gpt-6.1-luna", "its own from then on")
+        XCTAssertEqual(reads, 1)
+    }
+
+    /// 131 (r131b g6): one sentence about item 2 (the run's own messages) and item 4's price; all of it was set aside.
+    func testAnObjectionInOneSentenceIsWeighedItemByItem() {
+        let sent: Set<String> = [AgentLoop.typedKey("G6买东西做完"), AgentLoop.typedKey("G6全部做完")]
+        let g6 = "任务2最新三条消息与屏幕不符，屏幕最新为G6全部做完、G6买东西做完，任务4商品价格前后矛盾，任务6差价用的价格与任务4不同。"
+        let kept = AgentLoop.standingObjection(g6, sent: sent, adds: 1, wanted: 2, each: 1) ?? ""
+        XCTAssertTrue(kept.contains("任务4商品价格前后矛盾") && kept.contains("任务6"), kept)
+        XCTAssertFalse(kept.contains("任务2"), kept)
+        XCTAssertEqual(AgentLoop.standingObjection("第2项最新三条应为G6全部做完，与答案不符", sent: sent, adds: 1, wanted: 2, each: 1),
+                       nil, "a comma inside one item's part does not part it")
+    }
+
+    /// 131 (r131b g5): item 12 was lost in four new plans and answered "未执行，无记录" with nothing in its way.
+    func testAnItemNotDoneWithNoReasonIsSentBackOnce() {
+        let goal = (1...20).map { "\($0). 第\($0)件事" }.joined(separator: "；")
+        let full = (1...20).map { n -> String in
+            n == 12 ? "12. 抖音搜索“北京胡同”：未执行，无记录" : n == 7 ? "7. 美团：差¥18.72起送，无法进入确认订单页"
+                : n == 5 ? "5. 拼多多：要求登录，已跳过" : n == 20 ? "20. 以上为全部结果；第12项未执行" : "\(n). 结果\(n)"
+        }.joined(separator: "；")
+        let reason = AgentLoop.skippedWithoutReason(full, task: goal) ?? ""
+        XCTAssertTrue(reason.hasPrefix("The answer says item 12 was not done"), reason)  // not 5 (login), 7 (起送), 20 (summary)
+        XCTAssertNil(AgentLoop.skippedWithoutReason("12. 抖音：没装抖音，未执行", task: goal), "a reason given")
+        XCTAssertNil(AgentLoop.skippedWithoutReason(full, task: "看天气"), "not a goal of several things")
+        let jd = "7. 京东鼠标垫第一个商品：未记录到具体名称和价格（任务执行中未完成该项读取）"
+        XCTAssertNotNil(AgentLoop.skippedWithoutReason(jd, task: goal))
+        XCTAssertNil(AgentLoop.skippedWithoutReason(jd, task: goal, absent: ["京東"]), "r131c c1: 京东 is not on the phone")
+    }
+
+    /// 131 (r131b g5): 淘宝 一件 and 美团外卖 一份 made 2 for both; 淘宝 got a second bottle and 美团's add was refused.
+    func testEachAppIsHeldToWhatTheGoalAsksOfIt() {
+        let task = "4. 在淘宝搜索“洗衣液”，在前5个商品里挑价格最低的一个，选第一个颜色或规格，加入购物车一件，再打开购物车确认；"
+            + "7. 在美团外卖搜索“麻辣烫”，打开第一家店，把一份最便宜的加入购物车（要选规格就选默认的第一个）；13. 看淘宝购物车最上面一件"
+        XCTAssertEqual(AgentLoop.cartWanted(task), 2, "the whole goal, as before")
+        XCTAssertEqual(AgentLoop.cartWanted(task, in: "淘寶"), 1)
+        XCTAssertEqual(AgentLoop.cartWanted(task, in: "美团"), 1, "美团外卖's part names 美团 too")
+        XCTAssertEqual(AgentLoop.cartWanted(task, in: nil), 2)
+        XCTAssertEqual(AgentLoop.cartWanted(task, in: "京东"), 2, "no part names it: the whole goal")
+        XCTAssertEqual(AgentLoop.cartWanted("在美团外卖把两杯奶茶加入购物车，再加购一份薯条", in: "美团外卖"), 3)
+    }
+
+    /// 131 (r131b g3): "已加入购物车" in an old note and the model's own typing in 备忘录 counted as two more adds.
+    func testOnlyAShopsToastCountsAsAnAdd() {
+        XCTAssertTrue(AgentLoop.sellsThings("淘寶"))
+        XCTAssertTrue(AgentLoop.sellsThings("美团外卖"))
+        XCTAssertTrue(AgentLoop.sellsThings(nil), "no app known: as before")
+        XCTAssertFalse(AgentLoop.sellsThings("备忘录"))
+        XCTAssertFalse(AgentLoop.sellsThings("備忘錄"))
+        XCTAssertFalse(AgentLoop.sellsThings("微信"))
+    }
+
+    /// 131 (g1): with Codex down the run ended with one part's answer; the notes held the rest.
+    func testAnAnswerCoveringFewThingsGetsTheNotesAdded() {
+        let goal = (1...20).map { "\($0). 第\($0)件事" }.joined(separator: "；")
+        let notes = ["深圳今天天气：毛毛雨，最高27°", "高德地图：到深圳北站35分钟", "第11项 淘宝我的淘宝：待收货0个",
+                     "购物车：第1次看到加购成功的提示，这一件已经加进去了", "高德地图：到深圳北站35分钟"]
+        let short = "第11项完成：淘宝我的淘宝：待收货0个"
+        let full = AgentLoop.completedAnswer(short, notes: notes, task: goal) ?? ""
+        XCTAssertTrue(full.hasPrefix(short), full)
+        XCTAssertTrue(full.contains("深圳今天天气：毛毛雨，最高27°") && full.contains("高德地图：到深圳北站35分钟"), full)
+        XCTAssertFalse(full.contains("购物车：第1次"), "the run's own cart line")
+        XCTAssertEqual(full.components(separatedBy: "高德地图").count, 2, "a note once")
+        let whole = (1...20).map { "\($0). 结果\($0)" }.joined(separator: "；")
+        XCTAssertNil(AgentLoop.completedAnswer(whole, notes: notes, task: goal), "an answer to all twenty stays")
+    }
+
+    /// 131 (g1): account 1 "model not supported" was asked again every few minutes; account 2 rested 30 min though it
+    /// said it would reset in 8.
+    func testACodexAccountRestsAsLongAsItsOwnErrorSays() {
+        let unsupported = #"HTTP 400：{"detail":"The 'gpt-6.1-terra' model is not supported when using Codex with a ChatGPT account.","error":{"type":"invalid_request_error"}}"#
+        XCTAssertEqual(PlusRest.restSeconds(failures: 1, message: unsupported), 6 * 3600)
+        let limit = #"HTTP 429：{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus","resets_at":1794571252}}"#
+        XCTAssertEqual(PlusRest.restSeconds(failures: 1, message: limit, at: 1794570772), 510, accuracy: 0.001, "8 minutes and 30 s")
+        XCTAssertEqual(PlusRest.restSeconds(failures: 1, message: limit, at: 1794571300), 60, "already past: a minute")
+        XCTAssertEqual(PlusRest.restSeconds(failures: 1, message: "HTTP 429：limit"), 1800, "no time given: as before")
+        let picture = #"HTTP 400：{"error":{"type":"invalid_request_error","message":"image too large"}}"#
+        XCTAssertEqual(PlusRest.restSeconds(failures: 1, message: picture), 120, "one request's 400 is not the account's")
     }
 
     /// 130: an answer dropped as stale although the words around its tap target had not moved.

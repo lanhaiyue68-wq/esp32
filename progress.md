@@ -1,5 +1,9 @@
 # 当前进度
 
+## 2026-11-13 23:05 131 回歸進行中；132 修正在本機（使用者換新視窗）
+- 131 三波（chain131.sh：r131g 完、r131b、r131c 進行中）；第一波：修 O、R、N 真機生效；Codex 兩帳號都掛（帳號 1 方案降級）；修 J 過熱時清空 App 位置。
+- 132 未 commit：V 答案從筆記補、W 帳號休息依錯誤種類、J2 重讀不清空；23:40 加 X（使用者開 App 不再硬按回主畫面）、Y（黃色按鈕按不到：畫面不再每張重畫整頁、狀態籤加大可按範圍）、N2、T 診斷日誌；版本號 132。見 docs/build132-summary.md。交接 E:/AgentStorage/agent-handoff/lan-agent-2026-11-13-night-handoff.md。
+
 ## 2026-11-13 晚上 130 測完四波 16 組；131 已編譯（IPA 在桌面，等安裝回歸）
 - 130 四波 16 組結果與每個 bug：docs/build131-summary.md、docs/device-2026-11-12-build124-report.md 尾段。
 - 131：commit 9592fcc＋f01dfd2（第一次 CI 編譯失敗：修 U 的變數 typedNow 與同一範圍重名，改名 pendingKey），CI 分支 build131-ci，run 43419650461 成功；E:\桌面\Lan-Agent-build131-unsigned.ipa（SHA256 9e2a4ecd…45f2，CFBundleVersion 131）。

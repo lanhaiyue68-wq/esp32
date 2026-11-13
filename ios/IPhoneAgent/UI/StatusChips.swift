@@ -44,6 +44,9 @@ struct StatusChips: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Capsule().fill(ok ? Palette.surface : Palette.warning.opacity(0.14)))
+            // user 11-13: hard to hit. The chip looks the same; the tappable area around it is 40 pt tall.
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityValue(Text(ok ? "Ready" : "Needs setup"))

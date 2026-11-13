@@ -95,18 +95,7 @@ struct HomeView: View {
                 Text("I'll tell you when a run is done or needs your help, since you won't see this app while I work.")
             }
             .overlay { if app.departing { DepartureOverlay() } }
-            .overlay(alignment: .top) {
-                if let hint = app.homeHint {
-                    Label { Text(verbatim: hint) } icon: { Image(systemName: "arrow.up.to.line") }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
-                        .background(.regularMaterial, in: Capsule())
-                        .padding(.top, Space.s)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .animation(.easeOut(duration: 0.25), value: app.homeHint)
-            .overlay(alignment: .topTrailing) {  // right under the record button
+            .overlay(alignment: .topTrailing) {  // right under the record button (the home hint: over every tab, IPhoneAgentApp)
                 if !agent.running {
                     CalibrateButton(calibrator: app.calibrator, board: board, pointer: app.pointer)
                         .padding(.trailing, Space.l).padding(.top, Space.xs)
@@ -173,13 +162,7 @@ struct HomeView: View {
     private var liveSection: some View {
         Section {
             HStack(alignment: .top, spacing: Space.m) {
-                Group {
-                    if let jpeg = feed.frame, let img = UIImage(data: jpeg) {
-                        Image(uiImage: img).resizable().scaledToFit()
-                    } else {
-                        Color(uiColor: .tertiarySystemFill)
-                    }
-                }
+                LiveFrame(feed: feed)
                 .frame(width: 64, height: 138)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: Space.s) {
@@ -288,6 +271,8 @@ struct HomeView: View {
                 if let blocker {
                     Button { app.setupPage = blocker.page } label: {
                         Label(blocker.text, systemImage: "exclamationmark.circle").font(.footnote)
+                            .frame(maxWidth: .infinity, minHeight: 36)  // user 11-13: one line of small text was hard to hit
+                            .contentShape(Rectangle())
                     }
                     .tint(Palette.warning)
                 }

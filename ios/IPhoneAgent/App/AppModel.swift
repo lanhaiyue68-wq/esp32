@@ -54,6 +54,7 @@ import UIKit
     /// A banner on Home: the app could not leave by itself (swipe up), or the run waits while the app is in front.
     @Published var homeHint: String?
     var resumeAsked = 0.0  // when Continue was tapped in the app
+    var backgroundAt = 0.0  // when iOS last put the app in the background (leaveApp: did it come back by itself?)
     let live = LiveActivityController()
     let notifier = Notifier()
     private(set) lazy var recorder = DemoRecorder(app: self)
@@ -272,6 +273,7 @@ import UIKit
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.backgroundAt = now()
                 self?.metrics.enteredBackground(); DebugLog.write("app: background")
                 self?.refreshDecoderSoon()
             }

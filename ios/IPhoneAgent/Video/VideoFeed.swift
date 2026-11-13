@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import ImageIO
 import Network
@@ -135,7 +136,11 @@ extension ScreenSource {
         return nativeStatus
     }
     var freshnessProofAt: Double { isNative ? directState.confirmedAt : capturedAt > 0 ? capturedAt : updated }
-    @Published private(set) var frame: Data?
+    /// The latest frame. Not @Published: every frame (and every same-value set of size/note/status with it) redrew
+    /// every page that shows the feed, 15+ times a second while sharing was on, and taps on the app's buttons were
+    /// lost (user 11-13: "黃色按鈕…按到也沒反應，要多按幾次"). What shows or saves frames subscribes to liveFrames.
+    private(set) var frame: Data? { didSet { liveFrames.send(frame) } }
+    let liveFrames = CurrentValueSubject<Data?, Never>(nil)
     @Published private(set) var size = CGSize.zero
     @Published private(set) var note = ""  // last decoder problem, shown in Diagnostics
     private(set) var updated = 0.0
@@ -280,8 +285,12 @@ extension ScreenSource {
                 lastLook = look
             }
             capturedAt = timestamp
-            size = CGSize(width: width, height: height)
-            broken = false; note = ""; nativeStatus = "整屏取屏中"
+            // Set only on a change: a @Published set redraws its pages even when the value is the same.
+            let shape = CGSize(width: width, height: height)
+            if size != shape { size = shape }
+            broken = false
+            if !note.isEmpty { note = "" }
+            if nativeStatus != "整屏取屏中" { nativeStatus = "整屏取屏中" }
             metrics?.frameDecoded(ms: ms)
         case .idle(let id, let seq, let timestamp):
             guard directState.idle(id, sequence: seq, confirmedAt: timestamp, at: now()) else { return }

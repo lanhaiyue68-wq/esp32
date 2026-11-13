@@ -77,21 +77,23 @@ struct PhaseATestView: View {
                 .onChange(of: slot) { _ in
                     signedIn = ChatGPTPlus.saved(slot: slot) != nil
                     code = nil
-                    models = []
+                    models = ChatGPTPlus.listedModels(slot: slot)  // what it listed last, then read again
                     plusStatus = ""
                     answer = ""
+                    if signedIn { loadModels() }
                 }
                 LabeledContent("狀態", value: signedIn ? "已登入" : "未登入")
-                LabeledContent("兩個帳號", value: (0..<ChatGPTPlus.accounts)
-                    .map { "帳號 \($0 + 1)：\(ChatGPTPlus.saved(slot: $0) == nil ? "未登入" : "已登入")" }.joined(separator: "，"))
+                ForEach(0..<ChatGPTPlus.accounts, id: \.self) { s in
+                    LabeledContent("帳號 \(s + 1)", value: who(s))
+                }
                 if let code {
                     LabeledContent("一次性代碼", value: code.userCode)
                     Button("打開登入頁（代碼已複製）") { UIApplication.shared.open(code.verificationURL) }
                 }
                 Button(signingIn ? "等待你在網頁上登入…" : "登入 ChatGPT（帳號 \(slot + 1)）") { signIn() }.disabled(signingIn)
-                Button("讀取我能用的模型") { loadModels() }.disabled(!signedIn)
-                Picker("模型", selection: $model) {
-                    ForEach(models.isEmpty ? [model] : models, id: \.self) { Text($0).tag($0) }
+                Button("重新讀取我能用的模型") { loadModels() }.disabled(!signedIn)
+                Picker("模型", selection: $model) {  // the planner's model stays listed even when this account lacks it
+                    ForEach(models.contains(model) ? models : [model] + models, id: \.self) { Text($0).tag($0) }
                 }
                 Button(asking ? "詢問中…" : "用目前畫面問一次") { askOnce() }.disabled(!signedIn || asking)
                 Toggle("用 Plus 當總指揮（規劃者）", isOn: $plusPlanner)
@@ -140,7 +142,11 @@ struct PhaseATestView: View {
             }
         }
         .navigationTitle("新架構測試（階段 A）")
-        .onAppear { bridge.start() }
+        .onAppear {
+            bridge.start()
+            if models.isEmpty { models = ChatGPTPlus.listedModels(slot: slot) }
+            if signedIn { loadModels() }
+        }
     }
 
     private func runKeyboard(_ send: Send) {
@@ -199,14 +205,27 @@ struct PhaseATestView: View {
         }
     }
 
+    /// An account as it signed in: name, email and plan (user 11-14: "要顯示每個賬號的賬號和賬號名字").
+    private func who(_ s: Int) -> String {
+        guard let tokens = ChatGPTPlus.saved(slot: s) else { return "未登入" }
+        guard let id = ChatGPTPlus.identity(idToken: tokens.idToken) else { return "已登入（讀不到帳號資料）" }
+        let names = [id.name, id.email].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "  ")
+        return (names.isEmpty ? "已登入" : names) + (id.plan.map { "（方案 \($0)）" } ?? "")
+    }
+
+    /// User 11-14: "要點一下下面的黃字才會都顯示出來…默認就一個6.1luna". The list is read when the page opens and when the
+    /// account changes; the planner's model is no longer replaced by this account's first one (account 1's list has no
+    /// gpt-6.1-terra, and the switch went for account 2 too): an account that cannot use it plans with its own.
     private func loadModels() {
-        guard let tokens = ChatGPTPlus.saved(slot: slot) else { return }
+        let from = slot
+        guard let tokens = ChatGPTPlus.saved(slot: from) else { return }
         Task { @MainActor in
             do {
-                let list = try await ChatGPTPlus.models(tokens)
+                let list = try await ChatGPTPlus.readModels(tokens, slot: from)
+                guard from == slot else { return }  // the account was changed meanwhile
                 models = list
-                if let first = list.first, !list.contains(model) { model = first }
-                plusStatus = "可用模型 \(list.count) 個"
+                let own = PlusChat.model(for: list, preferred: model)
+                plusStatus = "可用模型 \(list.count) 個" + (own == model ? "" : "；帳號 \(from + 1) 不能用 \(model)，規劃時自動改用 \(own)")
                 DebugLog.write("phase A plus: models \(list.prefix(12).joined(separator: ", "))")
             } catch {
                 plusStatus = "❌ \(error.localizedDescription)"
@@ -222,7 +241,7 @@ struct PhaseATestView: View {
         answer = ""
         Task { @MainActor in
             do {
-                let (a, fresh) = try await ChatGPTPlus.ask(tokens, model: model,
+                let (a, fresh) = try await ChatGPTPlus.ask(tokens, model: PlusChat.model(for: models, preferred: model),
                                                            prompt: "用一句中文說：這張 iPhone 截圖是什麼畫面？", image: app.feed.frame)
                 if fresh != tokens { ChatGPTPlus.save(fresh, slot: from) }
                 var lines = ["✅ \(a.text)",

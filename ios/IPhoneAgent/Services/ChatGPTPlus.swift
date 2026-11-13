@@ -60,6 +60,17 @@ enum ChatGPTPlus {
 
     static func save(_ tokens: Tokens?) { save(tokens, slot: 0) }
 
+    /// The models an account listed when last read (GET /models), kept per account: user 11-14, account 1's plan lists
+    /// gpt-6.1-luna first and has no gpt-6.1-terra, which account 2 plans with. Empty until read.
+    static func listedModels(slot: Int) -> [String] { UserDefaults.standard.stringArray(forKey: "plusModelsV1.\(slot)") ?? [] }
+    static func saveListed(_ list: [String], slot: Int) { UserDefaults.standard.set(list, forKey: "plusModelsV1.\(slot)") }
+    /// Reads an account's models and keeps them.
+    static func readModels(_ tokens: Tokens, slot: Int) async throws -> [String] {
+        let list = try await models(tokens)
+        if !list.isEmpty { saveListed(list, slot: slot) }
+        return list
+    }
+
     // MARK: - device-code sign-in
 
     static func requestDeviceCode() async throws -> DeviceCode {
@@ -139,14 +150,36 @@ enum ChatGPTPlus {
 
     /// The ChatGPT account id in the id token: {"https://api.openai.com/auth": {"chatgpt_account_id": …}}.
     static func accountID(idToken: String) -> String? {
+        guard let auth = claims(idToken)?["https://api.openai.com/auth"] as? [String: Any] else { return nil }
+        return auth["chatgpt_account_id"] as? String
+    }
+
+    /// Who signed in, from the id token: email, name and ChatGPT plan ("plus", "free"…). User 11-14: "下次更新要顯示每個
+    /// 賬號的賬號和賬號名字" (account 1's plan had lost gpt-6.1-terra, and which account it was could not be told).
+    /// Shown on the sign-in page only, never logged.
+    struct Identity: Equatable {
+        var email: String?
+        var name: String?
+        var plan: String?
+    }
+
+    static func identity(idToken: String) -> Identity? {
+        guard let payload = Self.claims(idToken) else { return nil }
+        let auth = payload["https://api.openai.com/auth"] as? [String: Any]
+        let profile = payload["https://api.openai.com/profile"] as? [String: Any]
+        return Identity(email: (payload["email"] as? String) ?? (profile?["email"] as? String),
+                        name: payload["name"] as? String,
+                        plan: auth?["chatgpt_plan_type"] as? String)
+    }
+
+    /// The JWT's payload (base64url JSON).
+    private static func claims(_ idToken: String) -> [String: Any]? {
         let parts = idToken.split(separator: ".")
         guard parts.count >= 2 else { return nil }
         var b64 = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while b64.count % 4 != 0 { b64 += "=" }
-        guard let data = Data(base64Encoded: b64),
-              let claims = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let auth = claims["https://api.openai.com/auth"] as? [String: Any] else { return nil }
-        return auth["chatgpt_account_id"] as? String
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     static func formBody(_ pairs: [(String, String)]) -> Data {

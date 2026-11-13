@@ -152,10 +152,8 @@ struct SeePage: View {
                                 .disabled(feed.requestingSharing)
                             if feed.requestingSharing { Button("取消等待") { feed.stopNativeSharing() } }
                         }
-                        if let jpeg = feed.frame, let image = UIImage(data: jpeg) {
-                            Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 240)
-                                .accessibilityLabel("直接取屏预览")
-                        }
+                        LiveFrame(feed: feed, placeholder: false).frame(maxHeight: 240)
+                            .accessibilityLabel("直接取屏预览")
                     }
                 }
                 Text("画面在手机本地处理，仅在原有模型决策时提交截图。此模式无需开启 AirPlay 镜像，也无需 USB 连接。")

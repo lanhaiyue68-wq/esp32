@@ -14,6 +14,7 @@ extension AppModel {
         for method in ["home swipe", "home swipe again"] {  // one flick sometimes does not take (logs(11))
             if Task.isCancelled || runStartGate.cancelled || !startingAgent && !agent.running { return false }
             if inBackground { return true }
+            let flicked = now()
             do {
                 switch method {
                 case "cmd+h": try await pointer.key("cmd+h")
@@ -24,6 +25,12 @@ extension AppModel {
                 continue
             }
             if await waitForBackground(2) { DebugLog.write("leave app: in background after \(method)"); return true }
+            // build131 g8: the flick did send the app away, and 0.4 s later it was in front again, twice: the user
+            // was opening it (the agent's swipe 2.5 s before made it look like ours). A second flick only fights them.
+            if backgroundAt > flicked {
+                DebugLog.write("leave app: back in front by itself after \(method) (the user opened it); not swiping again")
+                return false
+            }
             DebugLog.write("leave app: still in front after \(method)")
         }
         return false

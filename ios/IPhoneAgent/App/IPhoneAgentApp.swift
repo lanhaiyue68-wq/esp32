@@ -43,6 +43,19 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        // 131 over the cloud 11-13 (g3): the user opened the learning page mid-run; the run held 28 minutes waiting for
+        // them to leave, and only the Agent tab said so ("我手機上它沒有動啊"). Every tab shows it now.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let hint = app.homeHint {
+                Label { Text(verbatim: hint) } icon: { Image(systemName: "arrow.up.to.line") }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.top, Space.xs)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: app.homeHint)
         .fullScreenCover(item: $app.review) { draft in ReviewView(draft: draft, app: app) }
         .background {
             Color.clear.fullScreenCover(item: $app.setupPage) { page in
