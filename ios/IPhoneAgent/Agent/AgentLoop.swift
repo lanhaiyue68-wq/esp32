@@ -296,14 +296,24 @@ extension Pointer: Gestures {}
         + "不要再重新加载，接着做下一项。"
 
     /// 133 over the cloud 11-14 (y5, 23:3x): "open 天气" showed Screen Time's limit page; the run opened 天气 again and
-    /// again until the loop guard ended it. The owner's limit is not ours to lift: the thing is noted as not done.
+    /// again until the loop guard ended it. User 11-15: "該按忽略限制就按吧…除了替我輸密碼其他的都可以": the limit is
+    /// lifted the least way (15 minutes, else today); a Screen Time passcode is never typed, and then the thing is not done.
     static func screenTimeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
         let text = AppNames.hans(rows.joined().map(\.text).joined())
         return ["已达到时间限制", "时间限制", "停用时间", "屏幕使用时间", "Time Limit", "Downtime"].contains { text.contains($0) }
-            && ["忽略限制", "Ignore Limit", "请求更多时间", "Ask For More Time"].contains { text.contains($0) }
+            && ["忽略限制", "Ignore Limit", "请求更多时间", "Ask For More Time", "15分钟后提醒我", "今天内忽略限制",
+                "Remind Me in 15 Minutes", "Ignore Limit for Today"].contains { text.contains($0) }
     }
-    static let screenTimeNote = "这个 App 被手机的“屏幕使用时间”限制住了。这是机主的设置：不要点“忽略限制”或“请求更多时间”，"
-        + "这一项现在做不成，记为未能完成（原因：屏幕使用时间限制），接着做下一项。"
+    /// A Screen Time passcode is asked for (输入屏幕使用时间密码 / Enter Screen Time Passcode).
+    static func screenTimePasscodeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let text = AppNames.hans(rows.joined().map(\.text).joined())
+        return ["屏幕使用时间密码", "Screen Time Passcode", "输入密码"].contains { text.contains($0) }
+    }
+    static let screenTimeNote = "这个 App 被手机的“屏幕使用时间”限制住了。机主允许解除：点“忽略限制”，再选“15分钟后提醒我”"
+        + "（没有这一项才选“今天内忽略限制”），然后接着做。如果要输入屏幕使用时间密码，就不要输，退出来，把这一项记为未能完成"
+        + "（原因：要屏幕使用时间密码），接着做下一项。"
+    static let screenTimePasscodeNote = "这里要输入密码（屏幕使用时间或账号的密码）：密码不能代输。退出来，把这一项记为未能完成"
+        + "（原因：要密码），接着做下一项。"
 
     /// Where the gray cursor disk is on this screen (0-1000), so what it covers is not read as a badge.
     static func cursorNote(_ at: CGPoint) -> String {
@@ -2020,10 +2030,9 @@ extension Pointer: Gestures {}
             // 133 over the cloud 11-14 (y4): "12345*678-9876/3.5=" went in right each time, but Calculator showed only the
             // end of the long expression ("345×678−9,876"); the run cleared and typed it again 42 times, 25 minutes and
             // most of its steps. The same keys (3 or more) a fourth time without anything found between are refused.
-            // The owner's Screen Time limit is never lifted (screenTimeShown).
-            if act["action"]?.str == "tap", ["忽略限制", "ignore limit", "请求更多时间", "ask for more time"]
-                .contains(where: { AppNames.hans(act["thought"]?.str ?? "").lowercased().contains($0) }) {
-                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.screenTimeNote)])
+            // A Screen Time passcode is never typed (user 11-15: everything but typing a password for them).
+            if act["action"]?.str == "type", Self.screenTimePasscodeShown(readRows) {
+                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.screenTimePasscodeNote)])
                 return false
             }
             if act["action"]?.str == "press" {
@@ -3589,7 +3598,11 @@ extension Pointer: Gestures {}
         if pointerAt != .zero { prompt += "\n\n" + Self.cursorNote(pointerAt) }
         appErrorLooks = Self.appErrorShown(readRows) ? appErrorLooks + 1 : 0
         if appErrorLooks >= 3 { prompt += "\n\n" + Self.appErrorNote }
-        if Self.screenTimeShown(readRows) { prompt += "\n\n" + Self.screenTimeNote }
+        if Self.screenTimePasscodeShown(readRows) {
+            prompt += "\n\n" + Self.screenTimePasscodeNote
+        } else if Self.screenTimeShown(readRows) {
+            prompt += "\n\n" + Self.screenTimeNote
+        }
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }
