@@ -1997,6 +1997,16 @@ extension Pointer: Gestures {}
                         continue
                     }
                     if failures >= maxFailures {
+                        // D20, 134 over the cloud 11-15 (y5, y6): Search stopped listing Safari; three tries to open it were
+                        // three errors in a row and two runs of 50 things failed (y6 at 102 s, one thing done). In a goal
+                        // of several things the thing is left 未能完成 and the run goes on (a few times at most).
+                        let what = error.localizedDescription.components(separatedBy: " did not open this time").first ?? ""
+                        let why = error.localizedDescription.contains(" did not open this time")
+                            ? what + " 这次打不开（系统搜索里找不到它）" : "连续出错：" + String(error.localizedDescription.prefix(80))
+                        if (try? await skipStuckThing(nil, why)) == true {
+                            failures = 0
+                            continue
+                        }
                         record(nil, ["action": .str("fail"), "reason": .str("\(failures) errors in a row")])
                         guard try await askForHelp() else { return finish() }
                         failures = 0

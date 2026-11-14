@@ -518,6 +518,12 @@ extension AppModel {
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         var rows: [[CandidatePicker.Piece]] = []
         if let frame = await freshFrame() { rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.7) }
+        // D20, 134 over the cloud 11-15 (y5 19:37, then six times 20:44–20:46): "Safari" typed, and 1 s later Search
+        // listed nothing for it; once, 30 s later, it opened. Results that are slow to come are looked for once more.
+        if !AppPlaces.returnOpens(rows), AppPlaces.searchResult(name, in: rows) == nil {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if let frame = await freshFrame() { rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.7) }
+        }
         if AppPlaces.returnOpens(rows) {
             // The keyboard's own Return: the board's Enter does nothing with it up.
             if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
