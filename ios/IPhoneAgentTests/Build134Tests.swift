@@ -184,6 +184,29 @@ import XCTest
         XCTAssertTrue(AgentLoop.locationOffNote.contains("不要去设置里打开"))
     }
 
+    /// D16, 134 (y3, y4): a new plan held the next few things; when it ran out the run went out with 16 of 50 done.
+    func testThingsLeftOfABigGoalAreFound() {
+        let goal = "帮我做这12件事：" + (1...12).map { n -> String in
+            switch n {
+            case 5: return "5. 在微信验证群发“Y9验证”加上现在的时间"
+            case 6: return "6. 如果深圳比首尔热就在微信测试群发“Y9温差大”，否则发“Y9温差小”"
+            case 7: return "7. 在微信测试群往上翻，数一数今天我自己发了几条包含“全部做完”的消息"
+            case 11: return "11. 检查一遍：上面哪几项没做成"
+            case 12: return "12. 把以上所有结果按编号整理好告诉我"
+            default: return "\(n). 在淘宝搜索“保温杯\(n)”，记下价格"
+            }
+        }.joined(separator: "；")
+        let told = ["第1项：¥9.5", "第31项：备忘录\"X4组记录\"第2项——抖音", "未能完成：1. 第3项：高德 — 点击（stuck）",
+                    "1. 第4项：打开淘宝 -> 第4项完成：¥3", "第8项：A；第9项：B"]
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: told, sent: ["Y9验证4:13"]), [2, 6, 7, 10],
+                       "another list's 第2项 is not this goal's; a message counts once it went out; 告诉我/检查 come with the answer")
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: told, sent: ["Y9验证4:13", "Y9温差小", "Y9全部做完"]), [2, 7, 10],
+                       "counting messages that hold 全部做完 is not sending one")
+        XCTAssertEqual(AgentLoop.itemsLeft(task: "1. 看天气；2. 发微信", told: [], sent: []), [], "under 10 things: as before")
+        XCTAssertEqual(AgentLoop.itemRanges([7, 8, 9, 11, 17, 18, 19, 21, 22]), "7–9, 11, 17–19, 21, 22")
+        XCTAssertTrue(AgentLoop.itemsLeftLine([2, 7]).contains("第N项"))
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

@@ -103,6 +103,10 @@ extension Pointer: Gestures {}
     private var bounceRefused = 0
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
+    /// D16: new plans made for a goal of 10+ things whose plan ran out with things not done (see itemsLeft), and what
+    /// was noted and sent at the last one (another comes only after something more got done).
+    private var continuations = 0
+    private var continuedAt: (notes: Int, sent: Int)?
     /// A Home flick that changed nothing gets one keyboard alternative, never another identical flick.
     private var homeRecoveryTried = false
 
@@ -553,6 +557,8 @@ extension Pointer: Gestures {}
         bounceGuard = nil
         bounceRefused = 0
         doneRejected = 0
+        continuations = 0
+        continuedAt = nil
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -1240,6 +1246,58 @@ extension Pointer: Gestures {}
         for k in numbers where k == n + 1 { n = k }
         return n
     }
+
+    /// D16 (134 over the cloud 11-15, y3 and y4): Codex was out and Doubao planned; a new plan after a stuck part held
+    /// the next 4–5 things only. Its last part done, the run took that for the end of the goal: "done" was refused three
+    /// times ("never went into 抖音…") and the run went out with 16 of 50 things (y3) and 36 (y4), the messages and the
+    /// closing note never made. The goal's numbered things nothing tells of yet: no note, finished or given-up part, or
+    /// answer heads one with 第N项, and no message it asks to send (发“…”) went out. Things that only ask to be told
+    /// (告诉我, 检查一遍) come with the final answer and are left out. Empty for a goal under 10 things.
+    static func itemsLeft(task: String, told: [String], sent: Set<String>) -> [Int] {
+        let goal = AppNames.hans(task)
+        let items = numberedItems(goal)
+        guard items.count >= 10,
+              let head = try? NSRegularExpression(pattern: #"(?:^\s*(?:\d{1,2}\s*[.、．]\s*)?|[；;。\n]\s*|->\s*|未能完成[：:]\s*(?:\d{1,2}\s*[.、．]\s*)?)第\s*(\d{1,2})\s*[项項]"#),
+              let send = try? NSRegularExpression(pattern: #"发\s*[“"「]([^”"」]{2,20})[”"」]"#) else { return [] }
+        var said = Set<Int>()
+        for text in told {
+            let ns = AppNames.hans(text) as NSString
+            for m in head.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)) {
+                if let n = Int(ns.substring(with: m.range(at: 1))) { said.insert(n) }
+            }
+        }
+        return items.compactMap { item -> Int? in
+            let body = String(goal[item.body]).trimmingCharacters(in: .whitespaces)
+            if said.contains(item.n) || body.contains("告诉我") || body.hasPrefix("检查") { return nil }
+            let ns = body as NSString
+            let asked = send.matches(in: body, range: NSRange(location: 0, length: ns.length))
+                .map { typedKey(ns.substring(with: $0.range(at: 1))) }
+            if asked.contains(where: { key in sent.contains { $0.contains(key) } }) { return nil }
+            return item.n
+        }
+    }
+
+    /// Numbers as runs: [7, 8, 9, 11, 17, 18, 19] → "7–9, 11, 17–19".
+    static func itemRanges(_ numbers: [Int]) -> String {
+        var out: [String] = [], i = 0
+        while i < numbers.count {
+            var j = i
+            while j + 1 < numbers.count, numbers[j + 1] == numbers[j] + 1 { j += 1 }
+            out.append(j - i >= 2 ? "\(numbers[i])–\(numbers[j])" : (i...j).map { String(numbers[$0]) }.joined(separator: ", "))
+            i = j + 1
+        }
+        return out.joined(separator: ", ")
+    }
+
+    /// For the planner: the goal's things left (itemsLeft), every one to be planned.
+    static func itemsLeftLine(_ left: [Int]) -> String {
+        "The goal's things with no result yet: " + itemRanges(left) + ". Plan EVERY one of them, one part per thing, in the "
+            + "goal's order, each part starting with 第N项： (N = its number in the goal). Leave out only ones already given "
+            + "up above (未能完成): those stay not done. The run ends only when all the goal's things have a result."
+    }
+
+    /// At most this many new plans for things left when a plan runs out (D16).
+    static let continuationLimit = 8
 
     /// B4 (122 over the cloud 11-11): the clipboard cannot be read from the background, and the approval showed only
     /// "（粘贴的内容）". What the paste put in is read off the screen: the words after it that were nowhere before it
@@ -2284,6 +2342,23 @@ extension Pointer: Gestures {}
                 if unvisited == nil, !skipAsked, let skipped = Self.skippedWithoutReason(answer, task: task, absent: absent) {
                     skipAsked = true  // once a run: an item it then cannot do goes out as said
                     unvisited = skipped
+                }
+            }
+            // D16: a plan that ran out is not the end of a goal of 10+ things (see itemsLeft): the things left get a new
+            // plan, once something more got done since the last one, at most continuationLimit times a run.
+            if name == "done", endsTask, presetPlan.isEmpty, endAfterSend == nil, planner != nil,
+               continuations < Self.continuationLimit {
+                let left = Self.itemsLeft(task: task, told: notes + doneParts + [act["answer"]?.str ?? ""], sent: messageSent)
+                let now = (notes: notes.count, sent: messageSent.count)
+                if !left.isEmpty, continuedAt.map({ now.notes > $0.notes || now.sent > $0.sent }) ?? true {
+                    continuations += 1
+                    continuedAt = now
+                    doneRejected = 0
+                    record(planned.shot, ["action": .str("plan continues"),
+                                          "reason": .str("the plan ran out with the goal's things \(Self.itemRanges(left)) not done")])
+                    DebugLog.write("plan: ran out with \(left.count) of the goal's things not done; new plan \(continuations)")
+                    try await replan(rest: left)
+                    return false
                 }
             }
             if name == "done", endsTask, let missing = unsentReason ?? (inkSeen == false ? Self.noInkReason : Self.unmadeResult(task: task, steps: steps)) ?? unvisited {
@@ -3730,9 +3805,18 @@ extension Pointer: Gestures {}
             + recipe.lines.map { "- " + $0 }.joined(separator: "\n")
     }
 
-    func replan(stuck: Bool = false) async throws {
+    func replan(stuck: Bool = false, rest: [Int] = []) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
         var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))"
+        // D16: a new plan of a goal of 10+ things names the things left, so it does not stop at the next few.
+        let left = rest.isEmpty && stuck && presetPlan.isEmpty
+            ? Self.itemsLeft(task: task, told: notes + doneParts, sent: messageSent) : rest
+        if !rest.isEmpty {
+            prompt += "\n\nThe last plan is finished:\n\(plan)"
+            if !doneParts.isEmpty {
+                prompt += "\n\nAlready done and checked on the screen (never redo): " + doneParts.joined(separator: " | ")
+            }
+        }
         if stuck {
             let last = steps.last ?? JObject()
             prompt += "\n\nThe previous plan got stuck (last event: \(pyStr(last["action"])) \(last["reason"]?.str ?? "")):"
@@ -3744,6 +3828,7 @@ extension Pointer: Gestures {}
                     + "\nPlan only what is left."
             }
         }
+        if !left.isEmpty { prompt += "\n\n" + Self.itemsLeftLine(left) }
         prompt += notesText
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
