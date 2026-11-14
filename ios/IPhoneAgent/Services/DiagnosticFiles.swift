@@ -83,6 +83,16 @@ struct DiagnosticFiles {
             try trimImages(folder, byteLimit: policy.imageBytes)
         }
         var remaining = folders.count, size = folders.reduce(0) { $0 + bytes($1) }
+        // 133 over the cloud 11-14: runs of 20 to 50 things left ~20 MB of pictures each, so only the last three stayed
+        // and the steps of the afternoon's failures were gone by evening. Over the size limit, older runs (all but the
+        // newest two) lose their pictures first and keep steps.jsonl (a few MB); whole folders go only after that.
+        for folder in folders.dropFirst(2).reversed()
+        where size > policy.maxBytes && folder.standardizedFileURL != active?.standardizedFileURL {
+            let before = bytes(folder)
+            try trimImages(folder.appendingPathComponent("video"), byteLimit: 0)
+            try trimImages(folder, byteLimit: 0)
+            size -= before - bytes(folder)
+        }
         for folder in folders.reversed() {
             guard folder.standardizedFileURL != active?.standardizedFileURL else { continue }
             let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? now

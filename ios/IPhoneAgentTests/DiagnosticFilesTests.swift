@@ -40,6 +40,17 @@ final class DiagnosticFilesTests: XCTestCase {
         XCTAssertLessThanOrEqual(try storage.maintain().bytes, 25)
         XCTAssertEqual(storage.usage().runs, 1)
     }
+    /// 133 (11-14): pictures filled the budget and older runs' steps were deleted with them.
+    func testOverTheBudgetOlderRunsLosePicturesBeforeTheirSteps() throws {
+        storage.policy.maxBytes = 60
+        let oldest = try run(recent(3), bytes: 10); _ = try run(recent(2), bytes: 10); _ = try run(recent(1), bytes: 10)
+        _ = try put("Documents/traces/\(oldest.lastPathComponent)/001.jpg", bytes: 30)
+        _ = try put("Documents/traces/\(oldest.lastPathComponent)/video/001.jpg", bytes: 10)
+        XCTAssertLessThanOrEqual(try storage.maintain().bytes, 60)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldest.appendingPathComponent("steps.jsonl").path), "its steps stay")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldest.appendingPathComponent("001.jpg").path))
+        XCTAssertEqual(storage.usage().runs, 3)
+    }
     func testAgeLimitPreservesAnActiveRun() throws {
         let date = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 22))!
         let old = try run("20261020-000000", date: date), active = try run("20261021-000000", date: date)
