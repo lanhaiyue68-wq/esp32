@@ -1,6 +1,6 @@
 # Lan Agent 133：132 回歸（11-14 三波 12 組）的修正
 
-都在本機 build123 工作區，版本號已改 133（`ios/Config/Shared.xcconfig`），還沒推上 CI 編譯（GitHub 額度低，等使用者點頭）。
+程式在 build123（bd82e0c），版本 133。CI：分支 build133-ci（bd82e0c＋不跑測試的 CI commit），private 倉庫 run 43557478140 成功。IPA：E:\桌面\Lan-Agent-build133-unsigned.ipa（CFBundleVersion 133，SHA256 599fd343f493274c998bd52f22b19c4f5b6f321ead814542cf577c082357eedd）。
 
 | 修正 | 問題（哪一組） | 改法 | 檔案 |
 |---|---|---|---|
