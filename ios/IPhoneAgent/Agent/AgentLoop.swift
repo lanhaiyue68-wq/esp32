@@ -157,6 +157,8 @@ extension Pointer: Gestures {}
     private var cartAddsIn: [String: Int] = [:]
     /// Steps up to here were looked at for a + in 美团 / 饿了么 (addsWithoutToast).
     private var cartTapsChecked = 0
+    /// Looks in a row that showed the app's own network error page (appErrorShown).
+    private var appErrorLooks = 0
     /// The done check sent the run back once for an item it said it had not done (skippedWithoutReason).
     private var skipAsked = false
     static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
@@ -178,6 +180,16 @@ extension Pointer: Gestures {}
     /// A text already sent that this one is: the same, or (4 characters or more) inside it or holding it with little
     /// around it (an @name). 126 over the cloud 11-12 (g5): a note of ~900 characters quoting "G5买东西做完", sent a
     /// moment before, was refused as that message.
+    /// 133 over the cloud 11-14 (y1): "在验证群发“Y1验证”加上现在手机顶部显示的时间" went out as Y1验证9:47 and, after a new
+    /// plan, again as Y1验证9:50. A message the goal asks for once, with something added to it, was sent already.
+    static func sameGoalMessage(_ typed: String, sent: Set<String>, task: String) -> String? {
+        let asked = goalMessages(task)
+        for g in asked where g.count >= 2 && typed.contains(g) && asked.filter({ $0 == g }).count == 1 {
+            if let s = sent.first(where: { $0.contains(g) }) { return s }
+        }
+        return nil
+    }
+
     static func sameMessage(_ typed: String, in sent: Set<String>) -> String? {
         guard !typed.isEmpty else { return nil }
         if sent.contains(typed) { return typed }
@@ -235,7 +247,10 @@ extension Pointer: Gestures {}
     /// or takes one off.
     static func addsToCart(_ thought: String) -> Bool {
         let t = AppNames.hans(thought).lowercased()
-        let adds = t.range(of: #"(点击|点|按|tap)[^，。,.]{0,8}(加入购物车|加购|add to cart)"#, options: .regularExpression) != nil
+        // 133 over the cloud 11-14 (x3): 美团 got the same 套餐 ×3 with no add counted; "tap the yellow Add to Cart button"
+        // has 12 characters between: up to 16 now, and 加到 / 加进 / "add it to the cart" too.
+        let adds = t.range(of: #"(点击|点|按|tap)[^，。,.]{0,16}(加入购物车|加到购物车|加进购物车|加购|add to cart|add (it|this|one) to (the )?cart)"#,
+                           options: .regularExpression) != nil
         let other = ["关闭", "关掉", "close", "返回", "back", "减", "删除", "移除", "remove", "打开购物车", "去购物车", "进入购物车",
                      "open the cart", "go to the cart", "购物车图标", "cart icon"].contains { t.contains($0) }
         return adds && !other
@@ -252,7 +267,7 @@ extension Pointer: Gestures {}
     /// A tap the thought calls a dish's + ("点它的绿色加号", "tap its green + button").
     static func tapsPlus(_ thought: String) -> Bool {
         let t = AppNames.hans(thought).lowercased()
-        return t.range(of: #"(点击|点|按|tap)[^，。,.]{0,14}(加号|[+＋]|plus)"#, options: .regularExpression) != nil
+        return t.range(of: #"(点击|点|按|tap)[^，。,.]{0,20}(加号|[+＋]|plus)"#, options: .regularExpression) != nil
             && !["减", "关闭", "返回", "minus", "close", "back"].contains { t.contains($0) }
     }
 
@@ -260,6 +275,17 @@ extension Pointer: Gestures {}
     static func addsDish(_ thought: String, in app: String?) -> Bool {
         addsToCart(thought) || (addsWithoutToast(app) && tapsPlus(thought))
     }
+
+    /// 133 over the cloud 11-14 (x4, x5, x6, r133b2): 美团 answered "网络错误（H403#CS8#…）" from 20:30 on; reloading never
+    /// helped and the runs went round until the loop guard ended them. An app's own error page on 3 looks in a row:
+    /// the model is told to write the thing down as not done and go on.
+    static func appErrorShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let text = AppNames.hans(rows.joined().map(\.text).joined())
+        return ["网络错误", "网络好像不太给力", "网络不给力", "网络异常", "加载失败", "请求失败", "服务器开小差", "H403#"]
+            .contains { text.contains($0) }
+    }
+    static let appErrorNote = "这个 App 一直显示网络错误，重新加载也没用：这一项现在做不成。把它记为未能完成（原因：App 报网络错误），"
+        + "不要再重新加载，接着做下一项。"
 
     /// Where the gray cursor disk is on this screen (0-1000), so what it covers is not read as a badge.
     static func cursorNote(_ at: CGPoint) -> String {
@@ -1318,7 +1344,10 @@ extension Pointer: Gestures {}
         // A goal that posts but gives no message ("整理成一段話發到测试群"): its own words typed in a chat app may be the
         // message; typed in 天气 or 淘宝 they are searches.
         guard !messages.isEmpty else { return chatApp }
-        return messages.contains { $0.contains(typed) || typed.contains($0) }
+        // 133 over the cloud 11-14 (x1): "咖啡" typed in 美团's search box, in a goal that sends “X1咖啡便宜”, was held as
+        // the message; its search was refused twice as "the wrong place" and the run failed at 515 s. Outside a chat app
+        // only the whole message, or nearly, is it: one word of it is a search.
+        return messages.contains { typed.contains($0) || ($0.contains(typed) && (chatApp || typed.count * 10 >= $0.count * 7)) }
     }
 
     static let chatApps = ["微信", "wechat", "qq", "企业微信", "钉钉", "飞书", "信息", "messages", "短信", "telegram", "whatsapp", "line"]
@@ -1628,9 +1657,10 @@ extension Pointer: Gestures {}
         }
         replayedRoute = nil
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
-        (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft, refusalsNoProgress) = (0, [], false, 2, 0)
+        (stallsNoProgress, messageSent, sendIsMessage, refusalsNoProgress) = (0, [], false, 0)
+        itemFailsLeft = Self.itemFailsAllowed(task)
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
-        (failRefusedAt, freeFailRefusals, cartTapsChecked) = (-1, 0, 0)
+        (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks) = (-1, 0, 0, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -1682,8 +1712,9 @@ extension Pointer: Gestures {}
                     blindLooks = 0
                     offlineWaits = 0
                     if refusalsNoProgress >= Self.refusalLimit {
-                        record(nil, ["action": .str("fail"),
-                                     "reason": .str("stuck: refused \(refusalsNoProgress) times and nothing got on")])
+                        let why = "stuck: refused \(refusalsNoProgress) times and nothing got on"
+                        if try await skipStuckThing(nil, why) { continue }
+                        record(nil, ["action": .str("fail"), "reason": .str(why)])
                         return finish()
                     }
                     if let between = betweenSteps { await between() }  // a stop meanwhile ends the next step as usual
@@ -1704,8 +1735,9 @@ extension Pointer: Gestures {}
                             troubles = 0
                             stallsNoProgress += 1
                             if stallsNoProgress >= Self.stallLimit {
-                                record(nil, ["action": .str("fail"),
-                                             "reason": .str("stuck: \(stallsNoProgress) new plans in a row and nothing got on")])
+                                let why = "stuck: \(stallsNoProgress) new plans in a row and nothing got on"
+                                if try await skipStuckThing(nil, why) { continue }
+                                record(nil, ["action": .str("fail"), "reason": .str(why)])
                                 return finish()
                             }
                             try await replan(stuck: true)
@@ -2312,6 +2344,7 @@ extension Pointer: Gestures {}
                 // it" holds for messages sent into a chat only; anything else typed with Return must be the same text.
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
                 let sentMatch = Self.sameMessage(typedNow, in: messageSent)
+                    ?? Self.sameGoalMessage(typedNow, sent: messageSent, task: task)
                     ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow) ? typedNow : nil)
                 if name == "type", let sent = sentMatch,
                    keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
@@ -2900,7 +2933,9 @@ extension Pointer: Gestures {}
     static func stepBudget(plan: String, base: Int, goal: String = "") -> Int {
         let parts = max(Self.parts(of: plan).count, goalParts(goal))
         guard parts >= 2 else { return base }
-        return max(base, min(parts * 20, 240))
+        // 133 over the cloud 11-14 (y1–y6): goals of 50 things had 240 steps, under 5 a thing. Past 20 things each
+        // gets 12 more (at most 600).
+        return max(base, min(parts * 20, max(240, min(parts * 12, 600))))
     }
 
     /// A part that asks to find something out (记下, 查, 看, 是什么, 多少…), as against one that does something (send,
@@ -3112,22 +3147,35 @@ extension Pointer: Gestures {}
         return kept.count * 10 >= max(x.count, y.count) * 7
     }
 
+    /// 133 over the cloud 11-14: goals of 24 to 50 things (x2, x3, x5, x6, y2, y3) and of 20 (g3, g6, c4) ended whole
+    /// at one thing that would not go: three new plans with nothing got on, 25 refusals, or a loop after Codex had looked
+    /// once; x3 stopped at item 3 of 26. Things of a goal that may fail and be skipped: one in five, at least two.
+    static func itemFailsAllowed(_ task: String) -> Int { max(2, goalParts(task) / 5) }
+
+    /// The run is stuck on one thing of a goal of several: it is written down as 未能完成, its part closed, the counters
+    /// cleared, and Codex plans the rest. False (the caller stops the run) for a goal of one thing or when none are left.
+    private func skipStuckThing(_ shot: Data?, _ why: String) async throws -> Bool {
+        guard itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 else { return false }
+        itemFailsLeft -= 1
+        let what = parts.count >= 2 && partIndex < parts.count ? parts[partIndex] + "（" + why + "）" : why
+        let line = "未能完成：" + String(what.prefix(160))
+        if !notes.contains(line) { notes.append(line) }
+        _ = closeFailedPart(why, by: nil)
+        (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
+        (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
+        record(shot, ["action": .str("thing skipped"), "reason": .str(why + ". " + Self.oneThingFailedReason)])
+        try await replan(stuck: true)
+        gotOn()
+        return true
+    }
+
     /// A guard saw the run go round: Codex looks afresh once, another way. If it goes round again the run stops. True: it stopped.
     private func changeOfPlan(_ shot: Data?, _ why: String) async throws -> Bool {
         guard !rescued else {
             // 129 over the cloud 11-13 (g8): item 4 opened the wrong lamp; the executor and then Codex went product page ↔
             // spec sheet (its ✕, then 加入购物车 again) and the whole twenty-thing run failed at 337 s with 3 things done.
-            // A goal of several things leaves this one as 未能完成 and goes on with the rest (twice a run at most).
-            if itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 {
-                itemFailsLeft -= 1
-                let line = "未能完成：" + why
-                if !notes.contains(line) { notes.append(line) }
-                (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
-                record(shot, ["action": .str("loop"), "reason": .str(why + ". " + Self.oneThingFailedReason)])
-                try await replan(stuck: true)
-                gotOn()
-                return false
-            }
+            // A goal of several things leaves this one as 未能完成 and goes on with the rest (skipStuckThing).
+            if try await skipStuckThing(shot, why) { return false }
             record(shot, ["action": .str("fail"), "reason": .str(why)])
             return true
         }
@@ -3491,6 +3539,8 @@ extension Pointer: Gestures {}
         cartToastShown = cartToast
         // 132 over the cloud 11-14 (g5, g7): "待收货 1 个" with no order anywhere: the cursor disk sat on the icon.
         if pointerAt != .zero { prompt += "\n\n" + Self.cursorNote(pointerAt) }
+        appErrorLooks = Self.appErrorShown(readRows) ? appErrorLooks + 1 : 0
+        if appErrorLooks >= 3 { prompt += "\n\n" + Self.appErrorNote }
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }
