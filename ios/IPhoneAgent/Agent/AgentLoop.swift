@@ -295,6 +295,16 @@ extension Pointer: Gestures {}
     static let appErrorNote = "这个 App 一直显示网络错误，重新加载也没用：这一项现在做不成。把它记为未能完成（原因：App 报网络错误），"
         + "不要再重新加载，接着做下一项。"
 
+    /// 133 over the cloud 11-14 (y5, 23:3x): "open 天气" showed Screen Time's limit page; the run opened 天气 again and
+    /// again until the loop guard ended it. The owner's limit is not ours to lift: the thing is noted as not done.
+    static func screenTimeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let text = AppNames.hans(rows.joined().map(\.text).joined())
+        return ["已达到时间限制", "时间限制", "停用时间", "屏幕使用时间", "Time Limit", "Downtime"].contains { text.contains($0) }
+            && ["忽略限制", "Ignore Limit", "请求更多时间", "Ask For More Time"].contains { text.contains($0) }
+    }
+    static let screenTimeNote = "这个 App 被手机的“屏幕使用时间”限制住了。这是机主的设置：不要点“忽略限制”或“请求更多时间”，"
+        + "这一项现在做不成，记为未能完成（原因：屏幕使用时间限制），接着做下一项。"
+
     /// Where the gray cursor disk is on this screen (0-1000), so what it covers is not read as a badge.
     static func cursorNote(_ at: CGPoint) -> String {
         "The gray cursor disk is at x \(Int((at.x * 1000).rounded())), y \(Int((at.y * 1000).rounded())): "
@@ -749,7 +759,7 @@ extension Pointer: Gestures {}
                        "not done"]
         let reasons = ["登录", "登陆", "验证", "实名", "身份", "安装", "没装", "未装", "不存在", "找不到", "没找到", "没有找到", "未找到",
                        "无法", "不能", "不支持", "失败", "超时", "网络", "付款", "支付", "下单", "起送", "因为", "由于", "原因", "因",
-                       "不要", "禁止", "要求"]
+                       "不要", "禁止", "要求", "卡住", "打转", "来回", "网络错误", "限制", "报错", "步骤用完"]
         let stopsBeforePaying = #"(未|没有|没|不)(提交订单|确认订单|确认支付|支付|付款|下单|提交)"#
         let skipped = numberedItems(answer).filter { item in
             let body = AppNames.hans(String(answer[item.body])).lowercased()
@@ -2010,6 +2020,12 @@ extension Pointer: Gestures {}
             // 133 over the cloud 11-14 (y4): "12345*678-9876/3.5=" went in right each time, but Calculator showed only the
             // end of the long expression ("345×678−9,876"); the run cleared and typed it again 42 times, 25 minutes and
             // most of its steps. The same keys (3 or more) a fourth time without anything found between are refused.
+            // The owner's Screen Time limit is never lifted (screenTimeShown).
+            if act["action"]?.str == "tap", ["忽略限制", "ignore limit", "请求更多时间", "ask for more time"]
+                .contains(where: { AppNames.hans(act["thought"]?.str ?? "").lowercased().contains($0) }) {
+                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.screenTimeNote)])
+                return false
+            }
             if act["action"]?.str == "press" {
                 let keys = Self.typedKey(act["text"]?.str ?? "")
                 if keys.count >= 3 {
@@ -3573,6 +3589,7 @@ extension Pointer: Gestures {}
         if pointerAt != .zero { prompt += "\n\n" + Self.cursorNote(pointerAt) }
         appErrorLooks = Self.appErrorShown(readRows) ? appErrorLooks + 1 : 0
         if appErrorLooks >= 3 { prompt += "\n\n" + Self.appErrorNote }
+        if Self.screenTimeShown(readRows) { prompt += "\n\n" + Self.screenTimeNote }
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }

@@ -57,6 +57,16 @@ import XCTest
         XCTAssertFalse(AgentLoop.goalSearches(task).contains("Y3全部做完"))
     }
 
+    /// 133 (y5): Screen Time's limit page on 天气; the run opened 天气 again and again.
+    func testScreenTimesLimitPageIsSeen() {
+        func rows(_ t: [String]) -> [[CandidatePicker.Piece]] {
+            [t.enumerated().map { CandidatePicker.Piece(text: $1, box: CGRect(x: 0.3, y: 0.3 + Double($0) * 0.05, width: 0.4, height: 0.02)) }]
+        }
+        XCTAssertTrue(AgentLoop.screenTimeShown(rows(["已达到时间限制", "你已达到“天气”的使用限制", "忽略限制"])))
+        XCTAssertTrue(AgentLoop.screenTimeShown(rows(["Time Limit", "Ignore Limit"])))
+        XCTAssertFalse(AgentLoop.screenTimeShown(rows(["屏幕使用时间", "每日平均 3小时"])), "the Settings page itself, no limit sheet")
+    }
+
     /// 133 (x3): "tap the yellow Add to Cart button" was not counted in 美团.
     func testLongerAddWordsCount() {
         XCTAssertTrue(AgentLoop.addsToCart("I tap the yellow Add to Cart button under the cheapest set."))
