@@ -167,11 +167,14 @@ import XCTest
     }
 
     func testTheGoalsDatesAreWorkedOut() {
-        let facts = AgentLoop.dateFacts("在日历看2026年12月25日和2027年1月1日分别是星期几", today: today, calendar: calendar)
-        XCTAssertTrue(facts.contains("2026年12月25日 星期五（41天后）"), facts)
-        XCTAssertTrue(facts.contains("2027年1月1日 星期五（48天后）"), facts)
-        XCTAssertTrue(facts.contains("今天 2026年11月14日 星期六"), facts)
-        XCTAssertEqual(AgentLoop.dateFacts("看深圳天气", today: today, calendar: calendar), "")
+        let facts = AgentLoop.dateFacts(in: "在日历看2026年12月25日和2027年1月1日分别是星期几", today: today, calendar: calendar)
+        XCTAssertTrue(facts.contains("2026-12-25, Friday (星期五) 41 days from today"), facts)
+        XCTAssertTrue(facts.contains("2027-01-01, Friday (星期五) 48 days from today"), facts)
+        let bare = AgentLoop.dateFacts(in: "12月25日是星期几", today: today, calendar: calendar)
+        XCTAssertTrue(bare.contains("2026-12-25, Friday (星期五)"), "no year: this year's: " + bare)
+        XCTAssertEqual(AgentLoop.dateFacts(in: "2026年1月1日", today: today, calendar: calendar).components(separatedBy: ";").count, 1,
+                       "a date with its year is not counted again without it")
+        XCTAssertEqual(AgentLoop.dateFacts(in: "看深圳天气", today: today, calendar: calendar), "")
     }
 
     /// 134 (y3): 高德's "继续关闭定位服务" sheet, 29 times round.

@@ -1011,28 +1011,6 @@ extension Pointer: Gestures {}
 
     private static func startOfDay(_ d: Date?, _ calendar: Calendar) -> Date? { d.map { calendar.startOfDay(for: $0) } }
 
-    /// The goal's dates worked out on the phone (weekday, days from today), so the answer never rests on a guess.
-    static func dateFacts(_ task: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
-        guard let re = try? NSRegularExpression(pattern: #"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]"#) else { return "" }
-        let ns = task as NSString
-        let names = ["日", "一", "二", "三", "四", "五", "六"]
-        func show(_ d: Date) -> String {
-            let c = calendar.dateComponents([.year, .month, .day, .weekday], from: d)
-            return "\(c.year ?? 0)年\(c.month ?? 0)月\(c.day ?? 0)日 星期\(names[(c.weekday ?? 1) - 1])"
-        }
-        let now = calendar.startOfDay(for: today)
-        var seen = Set<String>(), facts: [String] = []
-        for m in re.matches(in: task, range: NSRange(location: 0, length: ns.length)) {
-            guard let d = date(ns, m, at: 1, calendar: calendar, near: today).map({ calendar.startOfDay(for: $0) }),
-                  seen.insert(show(d)).inserted, let days = calendar.dateComponents([.day], from: now, to: d).day else { continue }
-            facts.append(show(d) + (days == 0 ? "（今天）" : days > 0 ? "（\(days)天后）" : "（\(-days)天前）"))
-            if facts.count == 6 { break }
-        }
-        guard !facts.isEmpty else { return "" }
-        return "\n\nDates in the goal, worked out on the phone (use these; still open an app the goal names): 今天 " + show(now)
-            + "；" + facts.joined(separator: "；")
-    }
-
     /// The text with each weekday it gives for a date ("12月1日是星期日", "2026年12月1日（周二）") made right by the calendar.
     /// A date without a year is in today's year, or the next when it would be over half a year back.
     static func rightWeekdays(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
@@ -1998,7 +1976,7 @@ extension Pointer: Gestures {}
 
     private var taught: String {
         (hints.isEmpty ? "" : "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n"))
-            + (lessons?.context(task: task) ?? "") + Prompts.userRules + Self.dateFacts(task, today: Date())
+            + (lessons?.context(task: task) ?? "") + Prompts.userRules
             + (reference.isEmpty ? "" : "\n\nKnowledge base chosen by the user. Base every reply on it; when it does not "
                + "cover the question, use the user's fallback reply instead of guessing. Never send anything from "
                + "outside it about the user, and never copy one chat's content into another chat:\n" + reference)
@@ -3194,23 +3172,41 @@ extension Pointer: Gestures {}
 
     /// 122 on the phone 11-12: "2027 年 1 月 1 日是星期几" was answered 星期三; it is a Friday. A date the goal names gets
     /// its weekday worked out here, not by the model.
-    static func dateFacts(in goal: String) -> String {
-        guard let re = try? NSRegularExpression(pattern: #"(\d{4})\s*(?:年|-|/|\.)\s*(\d{1,2})\s*(?:月|-|/|\.)\s*(\d{1,2})"#) else { return "" }
-        let calendar = Calendar(identifier: .gregorian)
+    /// 134 over the cloud 11-15: dates without a year (12月25日) and the days from today too (y6 counted 99 for 84).
+    static func dateFacts(in goal: String, today: Date = Date(), calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"(\d{4})\s*(?:年|-|/|\.)\s*(\d{1,2})\s*(?:月|-|/|\.)\s*(\d{1,2})"#),
+              let bare = try? NSRegularExpression(pattern: #"(?<![\d年/.\-])(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]"#) else { return "" }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = calendar
+        f.timeZone = calendar.timeZone
         f.dateFormat = "yyyy-MM-dd, EEEE"
         let zh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
         let ns = goal as NSString
         var said: [String] = []
-        for m in re.matches(in: goal, range: NSRange(location: 0, length: ns.length)) {
+        let now = calendar.startOfDay(for: today)
+        func add(_ date: Date) {
+            let away = calendar.dateComponents([.day], from: now, to: calendar.startOfDay(for: date)).day ?? 0
+            let when = away == 0 ? "today" : away > 0 ? "\(away) days from today" : "\(-away) days ago"
+            let line = "\(f.string(from: date)) (\(zh[calendar.component(.weekday, from: date) - 1])) \(when)"
+            if !said.contains(line) { said.append(line) }
+        }
+        let full = re.matches(in: goal, range: NSRange(location: 0, length: ns.length))
+        for m in full {
             guard let y = Int(ns.substring(with: m.range(at: 1))), let mo = Int(ns.substring(with: m.range(at: 2))),
                   let d = Int(ns.substring(with: m.range(at: 3))), (1...12).contains(mo), (1...31).contains(d),
                   let date = calendar.date(from: DateComponents(year: y, month: mo, day: d)),
                   calendar.component(.day, from: date) == d else { continue }
-            let line = "\(f.string(from: date)) (\(zh[calendar.component(.weekday, from: date) - 1]))"
-            if !said.contains(line) { said.append(line) }
+            add(date)
+        }
+        for m in bare.matches(in: goal, range: NSRange(location: 0, length: ns.length))
+        where !full.contains(where: { NSIntersectionRange($0.range, m.range).length > 0 }) {  // a date with its year: done above
+            guard let mo = Int(ns.substring(with: m.range(at: 1))), let d = Int(ns.substring(with: m.range(at: 2))),
+                  (1...12).contains(mo), (1...31).contains(d),
+                  var date = calendar.date(from: DateComponents(year: calendar.component(.year, from: today), month: mo, day: d)),
+                  calendar.component(.day, from: date) == d else { continue }
+            if date.timeIntervalSince(today) < -183 * 86_400, let next = calendar.date(byAdding: .year, value: 1, to: date) { date = next }
+            add(date)
         }
         return said.isEmpty ? "" : " Dates in the goal: " + said.joined(separator: "; ") + "."
     }
