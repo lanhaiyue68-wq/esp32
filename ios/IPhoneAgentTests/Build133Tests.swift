@@ -69,6 +69,20 @@ import XCTest
         XCTAssertTrue(AgentLoop.goalNamesChat("测试群（4人", task: task))
     }
 
+    /// 133 (h21): "北京明天最高X度（X换成你看到的数字）" sent as 北京明天最高12度 was reported as not sent.
+    func testAMessageWithAWordToReplaceMatchesTheFilledOne() {
+        let task = "帮我做这三件事：1. 天气里看北京明天的最高温；2. 在验证群发“北京明天最高X度”（X换成你看到的数字）；3. 告诉我发出去没有"
+        XCTAssertEqual(AgentLoop.placeholders(task), ["X"])
+        XCTAssertTrue(AgentLoop.wasSent("北京明天最高X度", ["北京明天最高12度"], task: task))
+        XCTAssertFalse(AgentLoop.wasSent("北京明天最高X度", ["北京明天最高度"], task: task), "nothing in its place")
+        XCTAssertFalse(AgentLoop.wasSent("北京明天最高X度", ["上海明天最高12度"], task: task))
+        XCTAssertNil(AgentLoop.unverifiedNote(task: task, steps: [], sent: ["北京明天最高12度"]).flatMap { $0.contains("没有发出") ? $0 : nil })
+        let city = "在验证群发“截图城市是：城市名”（城市名换成你看到的）"
+        XCTAssertTrue(AgentLoop.wasSent(AgentLoop.typedKey("截图城市是：城市名"), ["截图城市是：首尔"], task: city))
+        XCTAssertTrue(AgentLoop.wasSent("X2首尔温差N度", ["X2首尔温差5度"], task: "发“X2首尔温差N度”（N换成第10项算出的数字）"))
+        XCTAssertFalse(AgentLoop.wasSent("G5全部做完", ["G4全部做完"], task: "发“G5全部做完”"), "no word to replace")
+    }
+
     func testTheCursorNoteSaysWhereTheDiskIs() {
         XCTAssertTrue(AgentLoop.cursorNote(CGPoint(x: 0.25, y: 0.5)).contains("x 250, y 500"))
     }

@@ -823,7 +823,7 @@ extension Pointer: Gestures {}
     /// 130 over the cloud 11-13 (q130b g5): "8. 已在微信测试群发送G5买东西做完" — nothing was typed or sent; only a watch run
     /// (endAfterSend) checked its message. A message the goal asks for that this run never sent, unless the answer says so.
     static func unsentGoalReason(task: String, sent: Set<String>, answer: String) -> String? {
-        let missing = goalMessages(task).filter { !wasSent($0, sent) && !ownsNotDone(answer, about: [$0]) }
+        let missing = goalMessages(task).filter { !wasSent($0, sent, task: task) && !ownsNotDone(answer, about: [$0]) }
         guard !missing.isEmpty else { return nil }
         // 131 over the cloud 11-13 (g4): "G4全部做完" from an earlier day was in the group; told this, the model went 备忘录 ↔
         // 微信 (each time it saw the old bubble it took the message as sent) until the loop guard stopped it.
@@ -840,14 +840,39 @@ extension Pointer: Gestures {}
     }
 
     /// A goal message counts as sent when a sent text holds it (a 。 or a space more), or it holds a sent text of 4+.
-    static func wasSent(_ message: String, _ sent: Set<String>) -> Bool {
-        sent.contains { $0 == message || $0.contains(message) || ($0.count >= 4 && message.contains($0)) }
+    /// 133 over the cloud 11-14 (h21): "在验证群发“北京明天最高X度”（X换成你看到的数字）" was sent as 北京明天最高12度, and the
+    /// answer got "没有发出“北京明天最高X度”" and 部分失败. A message holding a word the goal says to replace matches
+    /// any sent text with something in its place.
+    static func wasSent(_ message: String, _ sent: Set<String>, task: String = "") -> Bool {
+        if sent.contains(where: { $0 == message || $0.contains(message) || ($0.count >= 4 && message.contains($0)) }) { return true }
+        for word in placeholders(task) {
+            guard let r = message.range(of: word) else { continue }
+            let (head, tail) = (String(message[..<r.lowerBound]), String(message[r.upperBound...]))
+            guard head.count + tail.count >= 2 else { continue }
+            let filled = sent.contains { s in
+                let start: Range<String.Index>? = head.isEmpty ? s.startIndex..<s.startIndex : s.range(of: head)
+                guard let h = start else { return false }
+                guard !tail.isEmpty else { return h.upperBound < s.endIndex }
+                guard let t = s.range(of: tail, range: h.upperBound..<s.endIndex) else { return false }
+                return t.lowerBound > h.upperBound
+            }
+            if filled { return true }
+        }
+        return false
+    }
+
+    /// The words a goal says to replace: "（X换成你看到的数字）" → X, "（城市名换成你看到的）" → 城市名.
+    static func placeholders(_ task: String) -> [String] {
+        let t = AppNames.hans(task)
+        guard let re = try? NSRegularExpression(pattern: #"[（(]\s*([^（()）,，。；;\s]{1,6}?)\s*(?:换成|替换成|改成)"#) else { return [] }
+        let ns = t as NSString
+        return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
     }
 
     /// What the answer cannot have from this run, in the owner's words: apps never opened, messages never sent.
     static func unverifiedNote(task: String, steps: [JObject], sent: Set<String>) -> String? {
         let apps = unvisitedApps(task: task, steps: steps)
-        let messages = goalMessages(task).filter { !wasSent($0, sent) }
+        let messages = goalMessages(task).filter { !wasSent($0, sent, task: task) }
         var parts: [String] = []
         if !apps.isEmpty { parts.append("本次没有打开" + apps.joined(separator: "、") + "，相关项目没有做") }
         if !messages.isEmpty { parts.append("没有发出" + messages.map { "“\($0)”" }.joined(separator: "、")) }
