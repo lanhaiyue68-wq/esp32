@@ -184,6 +184,17 @@ struct PhaseATestView: View {
                 // User 11-12: "登出後點登錄不跳轉網頁": the page waited for a second button. It opens by itself now.
                 _ = await UIApplication.shared.open(c.verificationURL)
                 let tokens = try await ChatGPTPlus.waitForSignIn(c)
+                // User 11-15 ("账号2有额度，为啥不切换过去"): both accounts answered 429 with the same resets_at: the
+                // second sign-in had gone through Safari still signed in as account 1. The same ChatGPT account twice
+                // is not saved.
+                if let other = ChatGPTPlus.sameAccount(as: tokens, otherThan: into) {
+                    code = nil
+                    plusStatus = "❌ 這和帳號 \(other + 1) 是同一個 ChatGPT 帳號，沒有存。請在 Safari 打開 chatgpt.com 先登出，"
+                        + "再按登入、用另一個帳號登入。"
+                    DebugLog.write("phase A plus: account \(into + 1) sign-in was account \(other + 1) again; not saved")
+                    signingIn = false
+                    return
+                }
                 ChatGPTPlus.save(tokens, slot: into)
                 signedIn = slot == into
                 code = nil

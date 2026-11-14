@@ -148,6 +148,18 @@ enum ChatGPTPlus {
         return tokens
     }
 
+    /// The other account slot already signed in as the same ChatGPT account (same email, else same account id), or nil.
+    /// User 11-15: both slots answered 429 with one resets_at; the second sign-in had reused Safari's account 1.
+    static func sameAccount(as tokens: Tokens, otherThan slot: Int) -> Int? {
+        let mine = identity(idToken: tokens.idToken)?.email?.lowercased()
+        return (0..<accounts).first { s in
+            guard s != slot, let other = saved(slot: s) else { return false }
+            if let mine, let theirs = identity(idToken: other.idToken)?.email?.lowercased() { return mine == theirs }
+            if let a = tokens.accountID, let b = other.accountID { return a == b }
+            return false
+        }
+    }
+
     /// The ChatGPT account id in the id token: {"https://api.openai.com/auth": {"chatgpt_account_id": …}}.
     static func accountID(idToken: String) -> String? {
         guard let auth = claims(idToken)?["https://api.openai.com/auth"] as? [String: Any] else { return nil }

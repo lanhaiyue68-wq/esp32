@@ -1710,7 +1710,7 @@ extension Pointer: Gestures {}
         (stallsNoProgress, messageSent, sendIsMessage, refusalsNoProgress) = (0, [], false, 0)
         itemFailsLeft = Self.itemFailsAllowed(task)
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
-        (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns) = (-1, 0, 0, 0, [:])
+        (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         installAsked = []
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
@@ -1769,6 +1769,15 @@ extension Pointer: Gestures {}
                         return finish()
                     }
                     if let between = betweenSteps { await between() }  // a stop meanwhile ends the next step as usual
+                    // 134 over the cloud 11-15 (y2): of 63 minutes, 38 made 50 results (46 s each) and 25 went on things
+                    // skipped in the end, one of them 9 minutes: a part may take up to 80 steps before it counts as
+                    // stalled, then three new plans. In a goal of 10 things or more, 30 steps with nothing found, sent
+                    // or finished skip the thing (~4 minutes).
+                    stepsSinceProgress += 1
+                    if presetPlan.isEmpty, Self.goalParts(task) >= 10, stepsSinceProgress >= Self.bigGoalPatience,
+                       try await skipStuckThing(nil, "no result in \(stepsSinceProgress) steps") {
+                        continue
+                    }
                     // build104 live 11-08: a one-part task (a smiley) spent all 50 steps with 9 strokes that left no ink and
                     // Codex never came, because only plans of several parts had this budget. Every task the planner or the
                     // user gave gets it (fixed flows such as watching WeChat keep their own); steps Codex drives don't count.
@@ -1785,7 +1794,8 @@ extension Pointer: Gestures {}
                                                         + " not getting on: \(stepsInPart) steps, \(troubles) failed, swiping \(swiping)")])
                             troubles = 0
                             stallsNoProgress += 1
-                            if stallsNoProgress >= Self.stallLimit {
+                            // A goal of 10 things or more skips the thing at its first stall (134 y2, above).
+                            if stallsNoProgress >= (Self.goalParts(task) >= 10 ? 1 : Self.stallLimit) {
                                 let why = "stuck: \(stallsNoProgress) new plans in a row and nothing got on"
                                 if try await skipStuckThing(nil, why) { continue }
                                 record(nil, ["action": .str("fail"), "reason": .str(why)])
@@ -3303,7 +3313,12 @@ extension Pointer: Gestures {}
     private func gotOn() {
         (departures, circleRefused, bounceGuard, bounceRefused, deadRefused) = ([], 0, nil, 0, 0)
         pressRuns = [:]
+        stepsSinceProgress = 0
     }
+
+    /// Steps since something was last found, sent or finished (gotOn).
+    private var stepsSinceProgress = 0
+    static let bigGoalPatience = 30
 
     /// Key presses (typedKey of the press text) since something was last found or finished.
     private var pressRuns: [String: Int] = [:]
