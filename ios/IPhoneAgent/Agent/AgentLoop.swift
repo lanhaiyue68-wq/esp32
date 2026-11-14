@@ -1668,7 +1668,7 @@ extension Pointer: Gestures {}
         (stallsNoProgress, messageSent, sendIsMessage, refusalsNoProgress) = (0, [], false, 0)
         itemFailsLeft = Self.itemFailsAllowed(task)
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
-        (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks) = (-1, 0, 0, 0)
+        (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns) = (-1, 0, 0, 0, [:])
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -2005,6 +2005,19 @@ extension Pointer: Gestures {}
                 if added >= Self.cartWanted(task, in: shop) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.cartFullReason(added))])
                     return false
+                }
+            }
+            // 133 over the cloud 11-14 (y4): "12345*678-9876/3.5=" went in right each time, but Calculator showed only the
+            // end of the long expression ("345×678−9,876"); the run cleared and typed it again 42 times, 25 minutes and
+            // most of its steps. The same keys (3 or more) a fourth time without anything found between are refused.
+            if act["action"]?.str == "press" {
+                let keys = Self.typedKey(act["text"]?.str ?? "")
+                if keys.count >= 3 {
+                    pressRuns[keys, default: 0] += 1
+                    if pressRuns[keys, default: 0] > 3 {
+                        record(planned.shot, ["action": .str("refused"), "reason": .str(Self.samePressReason)])
+                        return false
+                    }
                 }
             }
             // 126 over the cloud 11-12 (g7): "备忘录已完整写入第1至17项结果，第18项完成" and then "open 微信" for the next
@@ -3216,7 +3229,15 @@ extension Pointer: Gestures {}
     /// parts goes back and forth by nature, and the guard stopped runs with the first part done (e01, f02, f06 on 11-09).
     private func gotOn() {
         (departures, circleRefused, bounceGuard, bounceRefused, deadRefused) = ([], 0, nil, 0, 0)
+        pressRuns = [:]
     }
+
+    /// Key presses (typedKey of the press text) since something was last found or finished.
+    private var pressRuns: [String: Int] = [:]
+    static let samePressReason = "Refused: you already pressed exactly these keys 3 times. They went in: a calculator shows "
+        + "only the end of a long expression, so its start looks missing when it is not. Read the result line instead. With "
+        + "brackets in the sum, the calculator does × and ÷ before + and −: press = after the bracketed part, then go on "
+        + "from that result. Note the result and go on with the next thing."
 
     /// A list is scrolled from the screen's margin: a press that starts on a button can click it (over USB 11-09 three
     /// swipes each moved a permission sheet a step on). Measured in Settings: from the margin it scrolls the same. Not from
