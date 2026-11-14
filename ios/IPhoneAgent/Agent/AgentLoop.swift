@@ -184,7 +184,10 @@ extension Pointer: Gestures {}
     /// plan, again as Y1验证9:50. A message the goal asks for once, with something added to it, was sent already.
     static func sameGoalMessage(_ typed: String, sent: Set<String>, task: String) -> String? {
         let asked = goalMessages(task)
-        for g in asked where g.count >= 2 && typed.contains(g) && asked.filter({ $0 == g }).count == 1 {
+        // 134 over the cloud 11-15 (y1): a note of the results ("…已在验证群发Y1验证01:45…") held Y1验证 and was refused
+        // 42 times as the message again. Only the message with a little added (a time) is it, never a whole note.
+        for g in asked where g.count >= 2 && typed.contains(g) && typed.count <= g.count + 12
+            && asked.filter({ $0 == g }).count == 1 {
             if let s = sent.first(where: { $0.contains(g) }) { return s }
         }
         return nil
@@ -499,6 +502,7 @@ extension Pointer: Gestures {}
     /// next to the box, which the tap check above missed, typed the text again, and left it in the box).
     private var typedBase: [String: Int] = [:]
     private var unsent: String?  // typed, not sent yet
+    private var unsentApp: String?  // the app in front when `unsent` was typed
     private var boxCleared = false  // a send run emptied the box before its first type
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
@@ -1387,6 +1391,12 @@ extension Pointer: Gestures {}
     /// Whether the app opened last in this run sends messages. No app opened by name: the goal's own apps decide (build
     /// 121 over the cloud 11-11: a learned route opens its app by the icon, and 下水径 typed in 高德 and an address
     /// typed in Safari were held as messages); a goal that names none, or names a chat app, may be in one.
+    /// Whether this app sends messages (微信, 企业微信, 钉钉…).
+    static func isChatApp(_ app: String) -> Bool {
+        let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
+        return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
+    }
+
     static func inChatApp(_ steps: [JObject], task: String = "") -> Bool {
         guard let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str else {
             let goal = AppNames.hans(task).lowercased()
@@ -2423,7 +2433,7 @@ extension Pointer: Gestures {}
                 // it" holds for messages sent into a chat only; anything else typed with Return must be the same text.
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
                 let sentMatch = Self.sameMessage(typedNow, in: messageSent)
-                    ?? Self.sameGoalMessage(typedNow, sent: messageSent, task: task)
+                    ?? (Self.inChatApp(steps, task: task) ? Self.sameGoalMessage(typedNow, sent: messageSent, task: task) : nil)
                     // 133 over the cloud 11-14 (y3): “iPhone 17” searched in 微信's 搜一搜 counted as sent; typed again
                     // over the box's old words it was refused 16 times. What the goal says to search is a search.
                     ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow)
@@ -2444,6 +2454,15 @@ extension Pointer: Gestures {}
                 // What a button does can change with what was typed: a search button that did nothing may be the right one now
                 // (over USB 11-09 it missed twice, the word was typed again, and it stayed refused).
                 if name == "type" { noKeyboard = 0; unsent = act["text"]?.str ?? ""; quietSinceSend = 0; deadTaps = []; deadRefused = 0 }
+                if name == "type" { unsentApp = Self.appInFront(steps, startedIn: startApp) }
+                // 134 over the cloud 11-15 (y2): "Y2临时" typed in 备忘录's search went along to 微信 as the message to
+                // send; every tap there was "the wrong place" and the thing at hand (拼多多) was skipped. Words typed in an
+                // app that sends nothing stay there when another app opens. Typed in a chat app they stay held: the draft
+                // is still in that chat's box and goes out only with approval.
+                if name == "open", unsent != nil, let typedIn = unsentApp, !Self.isChatApp(typedIn) {
+                    DebugLog.write("open: “\(unsent ?? "")” was typed in \(typedIn), not a chat; it stays there")
+                    unsent = nil
+                }
                 // Build 121 over the cloud 11-11: a 抖音 share link was pasted into 测试群 (cmd+v) and sent with Return with
                 // no approval asked: only typed text was held. What is pasted counts as typed.
                 if Self.pastes(act) { unsent = Self.pastedText(pasteboard()); quietSinceSend = 0; pasteFrame = screen?.frame ?? planned.shot }

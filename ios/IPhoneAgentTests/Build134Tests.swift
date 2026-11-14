@@ -40,6 +40,12 @@ import XCTest
         XCTAssertNil(AgentLoop.sameGoalMessage("Y1全部做完", sent: ["Y1验证9:47"], task: task), "another message")
         let twice = "1. 在测试群发“打卡”；2. 在验证群发“打卡”"
         XCTAssertNil(AgentLoop.sameGoalMessage("打卡1", sent: ["打卡"], task: twice), "asked twice: not this guard")
+        let note = "9. 深圳AQI 12优
+10. 已在验证群发“Y1验证9:47”
+11. 小红书前4篇：1.深圳Citywalk…"
+        XCTAssertNil(AgentLoop.sameGoalMessage(AgentLoop.typedKey(note), sent: ["Y1验证9:47"], task: task),
+                     "134 y1: a note of the results is not the message again")
+        XCTAssertTrue(AgentLoop.isChatApp("微信") && AgentLoop.isChatApp("企业微信") && !AgentLoop.isChatApp("备忘录"))
     }
 
     /// 133 (x4, x5, x6): 美团's "网络错误（H403#CS8#…）" page, reloaded until the loop guard ended the run.
