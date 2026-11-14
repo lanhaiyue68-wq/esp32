@@ -228,6 +228,19 @@ import XCTest
         XCTAssertEqual(AgentLoop.shownOnlyWhileHeld(after, now: after), "")
     }
 
+    /// D21, 134 (z6): the Today View's Screen Time widget names apps (天氣, WeChat, 行事曆); it is no Home Screen.
+    func testTheTodayViewIsNoHomeScreen() {
+        func p(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x - 0.06, y: y - 0.012, width: 0.12, height: 0.024))
+        }
+        let today = [[p("照片處理完會顯示在此處", 0.5, 0.22)], [p("如何", 0.15, 0.39), p("加入遺產", 0.21, 0.42)],
+                     [p("聯絡人", 0.19, 0.46), p("99%", 0.68, 0.46)], [p("7時37分", 0.25, 0.55)],
+                     [p("天氣", 0.24, 0.78), p("WeChat", 0.69, 0.78)], [p("1時28分", 0.27, 0.80), p("30分", 0.66, 0.80)],
+                     [p("行事曆", 0.25, 0.84), p("高德地圖", 0.74, 0.84)], [p("34分", 0.24, 0.86), p("26分", 0.66, 0.86)],
+                     [p("設定", 0.24, 0.89), p("淘宝", 0.66, 0.89)]]
+        XCTAssertFalse(AppPlaces.looksLikeHome(today))
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

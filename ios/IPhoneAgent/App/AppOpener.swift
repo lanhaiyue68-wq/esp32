@@ -317,7 +317,11 @@ extension AppModel {
             guard let read = await homeRows(top: 0.02) else { return try await bySearch(name) }
             rows = read
         }
-        if let spot = AppPlaces.label(name, in: rows), try await tapIcon(spot, name: name, on: "the page in front") { return true }
+        // D21, 134 over the cloud 11-15 (z6): home never came (the Today View), and the page in front was its Screen Time
+        // widget, which lists 天氣, WeChat, 行事曆 by name: "open 微信: the page in front" tapped WeChat there and opened
+        // Settings › Screen Time, eleven times. A name is tapped as an icon only on a page that looks like the Home Screen.
+        if AppPlaces.looksLikeHome(rows), let spot = AppPlaces.label(name, in: rows),
+           try await tapIcon(spot, name: name, on: "the page in front") { return true }
         // Not read yet (or the last read got nothing): read the pages, at most every 10 minutes, so a hot phone whose read
         // fails is not made to try again on every open.
         if !AppPlaces.mapped, AppPlaces.looksLikeHome(rows), AppPlaces.mayReadAgain(every: AppPlaces.rereadAfterMiss) {

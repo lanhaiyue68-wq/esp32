@@ -1236,7 +1236,14 @@ import Foundation
     private func goHomeNow() async throws -> [[CandidatePicker.Piece]]? {
         drawChain = false
         guard let screen else { try await flickHome(); return nil }
-        for attempt in 0..<5 {
+        for attempt in 0..<6 {  // D21: two flicks, then a page swipe and a flick in turn
+            if attempt == 5 {  // the last swipe's result is looked at, not followed by one more flick
+                if let shown = screen.frame {
+                    let rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.02, bottom: 1)
+                    if AppPlaces.looksLikeHome(rows) { return rows }
+                }
+                break
+            }
             let shown = screen.frame
             var rows: [[CandidatePicker.Piece]] = []
             if let shown { rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.02, bottom: 1) }
@@ -1286,12 +1293,20 @@ import Foundation
                     try await Task.sleep(nanoseconds: 500_000_000)
                 }
                 try await flickHome()
+            } else if attempt >= 2, attempt % 2 == 0 {
+                // D21, 134 over the cloud 11-15 (21:46 on, z4–z6 and the next run): a page swipe went past the first page
+                // into the Today View (widgets, no dock, no Search pill). The Home Screen comes back to where it was left,
+                // and a flick there never reaches the pages: "no Home Screen seen" 200 times in two hours. Two flicks and
+                // still not home: the pages are swiped back toward the first (from the Today View that is page 1; in the
+                // app switcher it only moves the cards, and the next flick goes back).
+                log("home: two flicks and still no Home Screen (the Today View?); swiping toward the first page")
+                try await swipe(0.85, 0.5, 0.15, 0.5, hold: false)
             } else {
                 try await flickHome()
             }
             try await Task.sleep(nanoseconds: 800_000_000)
         }
-        log("home: no Home Screen seen after five tries")
+        log("home: no Home Screen seen after six tries")
         return nil
     }
 
