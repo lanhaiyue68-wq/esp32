@@ -1480,6 +1480,19 @@ extension Pointer: Gestures {}
         return nil
     }
 
+    /// Asks the owner whether to install an app the task needs and the phone does not have: true install, false end the
+    /// task, nil nobody to ask (the thing is noted as not installed, as before). Set per run by RunSession.
+    var askInstall: ((String) async -> Bool?)?
+    /// Apps asked about in this run (once each).
+    private var installAsked: Set<String> = []
+    /// What the run is told once the owner said yes. Never a password: Apple asks the owner for that on the phone.
+    static func installNote(_ app: String) -> String {
+        "机主同意下载安装“\(app)”：打开 App Store，搜索“\(app)”，在结果里找名字和开发者都对的那个 App，点“获取”（或云朵图标）。"
+            + "如果要输入 Apple ID 密码、要按两下侧边按钮或刷脸确认，就停在那里用 wait 等机主在手机上确认，绝对不要输入密码。"
+            + "按钮变成“打开”就是装好了：打开它，首次打开的条款点同意、权限只给要用到的，然后接着做原来的事。不要买 App 内的东西。"
+    }
+    static func installDeclined(_ app: String) -> String { "手机上没有“\(app)”，机主选择不下载，任务结束" }
+
     static let openFailedReason = " is not on this phone: it is not on the Home Screen and Search does not list it as an app. "
         + "Do not search the web for it and do not try again; if the goal needs it, stop with fail and say so."
 
@@ -1690,6 +1703,7 @@ extension Pointer: Gestures {}
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns) = (-1, 0, 0, 0, [:])
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
+        installAsked = []
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
         approvedTexts = []
@@ -2603,6 +2617,26 @@ extension Pointer: Gestures {}
                        (try? await perform(["action": .str("open"), "app": .str(host)])) != nil {
                         DebugLog.write("open \(absent.name): a part of \(host); \(host) opened")
                         act["app"] = .str(host)
+                    } else if let askInstall, !installAsked.contains(absent.name) {
+                        // User 11-15: "手机没有JD这时候会反馈给我是否下载JD，然后我说是就去下载…我说否就结束这个任务".
+                        installAsked.insert(absent.name)
+                        record(planned.shot, ["action": .str("waiting approval"), "reason": .str("install " + absent.name + "?")])
+                        switch await askInstall(absent.name) {
+                        case true?:
+                            let line = Self.installNote(absent.name)
+                            if !notes.contains(line) { notes.append(line) }
+                            record(planned.shot, ["action": .str("install approved"), "app": .str(absent.name), "reason": .str(line)])
+                            gotOn()
+                            try await replan(stuck: true)
+                            return false
+                        case false?:
+                            noHelp = true  // the owner said no: the task ends here, with no pause for help
+                            record(planned.shot, ["action": .str("fail"), "reason": .str(Self.installDeclined(absent.name))])
+                            return true
+                        case nil:
+                            record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
+                            return false
+                        }
                     } else {
                         record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
                         return false

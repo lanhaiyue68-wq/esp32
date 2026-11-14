@@ -66,6 +66,10 @@ for item in queue:
                 dest = (task.get('approval_request') or {}).get('destination') or ''
                 fits = fits and (not dest or any(g in dest for g in ('测试群', '验证群', '測試群', '驗證群')))  # only the two test groups
                 verdict = 'approve' if fits and not item.get('reject') else 'reject'
+                # build 135: "install_app" asks whether to download a missing app; per item "install": "approve" or
+                # "reject" (the default: the task ends, as the owner asked on 11-15)
+                if (task.get('approval_request') or {}).get('action') == 'install_app':
+                    verdict = item.get('install', 'reject')
                 call('POST', f'/api/v1/tasks/{tid}/{verdict}')
                 answered.add((text, task.get('approval_seq')))
                 time.sleep(2)

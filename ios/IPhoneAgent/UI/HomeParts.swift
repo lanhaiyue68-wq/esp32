@@ -25,6 +25,31 @@ struct DepartureOverlay: View {
     }
 }
 
+/// User 11-15: an app the task needs is not on the phone: download it, or end the task.
+struct InstallPanel: View {
+    @ObservedObject var app: AppModel
+
+    var body: some View {
+        Section {
+            Label { Text(verbatim: "手机上没有“\(app.installAsk ?? "")”，要下载安装吗？") } icon: {
+                Image(systemName: "arrow.down.app.fill").foregroundStyle(Palette.warning)
+            }
+            .font(.body.weight(.semibold))
+            Text(verbatim: "下载时如果要 Apple ID 密码或按两下侧边按钮，请你自己在手机上确认，我不会代输密码。")
+                .font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: Space.s) {
+                Button { app.answerInstall(true) } label: { Label { Text(verbatim: "下载") } icon: { Image(systemName: "arrow.down.circle.fill") } }
+                    .buttonStyle(.borderedProminent).tint(Palette.ok)
+                Button(role: .destructive) { app.answerInstall(false) } label: { Text(verbatim: "不下载，结束任务") }
+                    .buttonStyle(.bordered)
+            }
+            .controlSize(.regular)
+        } header: {
+            Text(verbatim: "需要下载 App")
+        }
+    }
+}
+
 /// "Needs your help": why, and Take over / Continue / Skip / Stop (the same as the Live Activity).
 struct HelpPanel: View {
     @ObservedObject var app: AppModel

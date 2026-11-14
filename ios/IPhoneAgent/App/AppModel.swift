@@ -62,6 +62,9 @@ import UIKit
     @Published var mockMirroring = false
     var moodReset: Task<Void, Never>?
     var helpWait: CheckedContinuation<AgentLoop.HelpChoice, Never>?
+    /// An app the task needs is not on the phone: its name while the user is asked whether to install it.
+    @Published var installAsk: String?
+    var installWait: CheckedContinuation<Bool, Never>?
     var currentIntent: SavedTask?
     var lastTask = ""
     var runStarted = Date()

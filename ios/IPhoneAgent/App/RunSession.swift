@@ -16,7 +16,8 @@ extension AppModel {
     func run(_ task: String, intent: SavedTask? = nil, hints: [String]? = nil,
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
              frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false, keyboardGuard: Bool = false,
-             learnedRoutes: Bool = true, approveSend: ((String) async -> Bool)? = nil, askHelp: Bool = true) async {
+             learnedRoutes: Bool = true, approveSend: ((String) async -> Bool)? = nil, askHelp: Bool = true,
+             askInstall: ((String) async -> Bool?)? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -35,6 +36,10 @@ extension AppModel {
         agent.learnedRoutes = learnedRoutes
         agent.approveSend = approveSend  // only a task from the cloud asks; every other run clears it
         agent.noHelp = !askHelp  // a task from the cloud: nobody can answer, it fails and says why
+        // User 11-15: a missing app is asked about: the cloud's own way, or here in the app for a run the user started
+        // on the phone. A WeChat watch run (keyboardGuard) has nobody at the phone: it notes the app as missing.
+        let here: ((String) async -> Bool?)? = askHelp && !keyboardGuard ? { [weak self] app in await self?.askInstallHere(app) } : nil
+        agent.askInstall = askInstall ?? here
         await startAgent(task)
     }
 
@@ -187,6 +192,7 @@ extension AppModel {
         runStartGate.cancel()
         stopWatch(String(localized: "stopped by you"))  // a stop from anywhere also ends WeChat watch
         answerHelp(.stop)
+        answerInstall(false)
         mockJob?.cancel()
         agent.stop()
         try? await Task.sleep(nanoseconds: 100_000_000)  // let a gesture in flight finish its own release
@@ -385,6 +391,25 @@ extension AppModel {
         live.update(mood: .failure, step: moveCount, line: line, phase: .help, status: .help)
         notifier.post(.help, title: String(localized: "Needs your help"), body: help ?? "", run: runID)
         return await withCheckedContinuation { helpWait = $0 }
+    }
+
+    /// An app the task needs is not on the phone: ask here (panel on Home, Live Activity, notification) and wait.
+    func askInstallHere(_ app: String) async -> Bool {
+        installAsk = app
+        let line = "手机上没有“\(app)”，要下载安装吗？"
+        live.update(mood: .listening, step: moveCount, line: line, phase: .help, status: .help)
+        notifier.post(.install, title: line, body: "打开 Lan Agent 选择“下载”或“不下载”（不下载就结束这个任务）。", run: runID)
+        return await withCheckedContinuation { installWait = $0 }
+    }
+
+    func answerInstall(_ yes: Bool) {
+        guard let wait = installWait else { return }
+        installWait = nil
+        installAsk = nil
+        notifier.clearHelp()
+        live.update(mood: .thinking, step: moveCount, line: yes ? "去 App Store 下载…" : "不下载，结束任务", phase: .running,
+                    status: .looking)
+        wait.resume(returning: yes)
     }
 
     func answerHelp(_ choice: AgentLoop.HelpChoice) {

@@ -78,3 +78,16 @@ import XCTest
         XCTAssertFalse(AgentLoop.addsToCart("点击底部导航栏的“购物车”图标，进入购物车页面。"))
     }
 }
+
+/// Build 135: user 11-15 — a missing app is asked about (download, or end the task).
+@MainActor final class Build135Tests: XCTestCase {
+    func testTheInstallNoteNeverTypesAPasswordAndTheNoEndsTheTask() {
+        let note = AgentLoop.installNote("京东")
+        XCTAssertTrue(note.contains("App Store") && note.contains("京东"))
+        XCTAssertTrue(note.contains("绝对不要输入密码"), "Apple asks the owner for the password on the phone")
+        XCTAssertTrue(note.contains("不要买 App 内的东西"))
+        XCTAssertEqual(AgentLoop.installDeclined("京东"), "手机上没有“京东”，机主选择不下载，任务结束")
+        XCTAssertEqual(CloudBridge.failureWords(AgentLoop.installDeclined("京东")), "手机上没有“京东”，机主选择不下载，任务结束",
+                       "the owner's words go back as they are")
+    }
+}

@@ -188,6 +188,16 @@ import Foundation
         guard current?.approval ?? true else { return true }
         var request: [String: Any] = ["action": "send_message", "text": text]
         if let place = destination?(), !place.isEmpty { request["destination"] = place }  // the chat title on screen
+        return await waitApproval(id, request)
+    }
+
+    /// User 11-15: an app the task needs is not on the phone: the owner is asked whether to install it, always (whether
+    /// or not the task's messages wait for approval). No answer in 10 minutes is a no.
+    func askInstall(_ app: String, for id: String) async -> Bool {
+        await waitApproval(id, ["action": "install_app", "app": app, "text": "手机上没有“\(app)”，要下载安装吗？"])
+    }
+
+    private func waitApproval(_ id: String, _ request: [String: Any]) async -> Bool {
         await report(id, ["status": "waiting_approval", "approval_request": request])
         let until = now() + Self.approvalWait
         while now() < until, !Task.isCancelled {

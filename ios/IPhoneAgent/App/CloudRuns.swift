@@ -10,7 +10,9 @@ extension AppModel {
         cloud.running = { [weak self] in (self?.agent.running ?? false) || (self?.startingAgent ?? false) }
         cloud.start = { [weak self] task, approve in
             guard let self else { return }
-            Task { await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false) }
+            // User 11-15: an app the task needs and the phone lacks is asked about through the cloud (install_app).
+            let install: (String) async -> Bool? = { [weak self] app in await self?.cloud.askInstall(app, for: task.id) }
+            Task { await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false, askInstall: install) }
         }
         cloud.outcome = { [weak self] task in
             guard let self, self.agent.task == task.instruction else {
