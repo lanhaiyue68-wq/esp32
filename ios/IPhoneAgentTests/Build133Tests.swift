@@ -60,6 +60,15 @@ import XCTest
         XCTAssertEqual(AgentLoop.rightWeekdays("温度12.5度，周末", today: today, calendar: calendar), "温度12.5度，周末")
     }
 
+    /// 133 (g7): the title read "测试群（4人" with its ）cut off; two sends were refused and the run failed.
+    func testAChatTitleWithItsBracketCutOffIsStillTheGroup() {
+        let task = "在微信测试群发“G7买东西做完”"
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "测试群（4人", task: task, steps: []), .right)
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "测试群(4", task: task, steps: []), .right)
+        XCTAssertNotEqual(AgentLoop.chatCheck(seen: "验证群（4人", task: task, steps: []), .right)
+        XCTAssertTrue(AgentLoop.goalNamesChat("测试群（4人", task: task))
+    }
+
     func testTheCursorNoteSaysWhereTheDiskIs() {
         XCTAssertTrue(AgentLoop.cursorNote(CGPoint(x: 0.25, y: 0.5)).contains("x 250, y 500"))
     }

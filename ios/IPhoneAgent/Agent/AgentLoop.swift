@@ -834,7 +834,7 @@ extension Pointer: Gestures {}
 
     /// Whether a screen title is a chat the goal names ("测试群（4人）" for a goal that posts to 测试群).
     static func goalNamesChat(_ title: String, task: String) -> Bool {
-        let name = AppNames.hans(title).replacingOccurrences(of: #"[（(]\d+人?[)）]"#, with: "", options: .regularExpression)
+        let name = AppNames.hans(title).replacingOccurrences(of: #"[（(]\d+人?(?:[)）]|$)"#, with: "", options: .regularExpression)
             .filter { !$0.isWhitespace }
         return name.count >= 2 && AppNames.hans(task).filter { !$0.isWhitespace }.contains(name)
     }
@@ -1349,7 +1349,9 @@ extension Pointer: Gestures {}
         let groups = namedGroups(task)
         guard !groups.isEmpty else { return .unknown }
         func key(_ s: String) -> String {
-            AppNames.hans(s.replacingOccurrences(of: #"[（(][^)）]*[)）]"#, with: "", options: .regularExpression))
+            // 133 over the cloud 11-14 (g7): the title read "测试群（4人", its ）cut off, and two sends were refused as
+            // "not the group the goal names": the run failed at 566 s. A bracket left open at the end goes too.
+            AppNames.hans(s.replacingOccurrences(of: #"[（(][^)）]*(?:[)）]|$)"#, with: "", options: .regularExpression))
                 .lowercased().filter { $0.isLetter || $0.isNumber }
         }
         if let seen {
