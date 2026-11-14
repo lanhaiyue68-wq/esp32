@@ -190,6 +190,14 @@ extension Pointer: Gestures {}
         return nil
     }
 
+    /// The words the goal says to search for (搜索“…”, 搜“…”, 查找“…”), as typedKey keys.
+    static func goalSearches(_ task: String) -> [String] {
+        let t = AppNames.hans(task)
+        guard let re = try? NSRegularExpression(pattern: #"(?:搜索|搜|查找)\s*[“"「]([^”"」]{1,40})[”"」]"#) else { return [] }
+        let ns = t as NSString
+        return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { typedKey(ns.substring(with: $0.range(at: 1))) }
+    }
+
     static func sameMessage(_ typed: String, in sent: Set<String>) -> String? {
         guard !typed.isEmpty else { return nil }
         if sent.contains(typed) { return typed }
@@ -2345,7 +2353,10 @@ extension Pointer: Gestures {}
                 let typedNow = Self.typedKey(act["text"]?.str ?? "")
                 let sentMatch = Self.sameMessage(typedNow, in: messageSent)
                     ?? Self.sameGoalMessage(typedNow, sent: messageSent, task: task)
-                    ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow) ? typedNow : nil)
+                    // 133 over the cloud 11-14 (y3): “iPhone 17” searched in 微信's 搜一搜 counted as sent; typed again
+                    // over the box's old words it was refused 16 times. What the goal says to search is a search.
+                    ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow)
+                        && !Self.goalSearches(task).contains(typedNow) ? typedNow : nil)
                 if name == "type", let sent = sentMatch,
                    keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed

@@ -50,6 +50,13 @@ import XCTest
         XCTAssertFalse(AgentLoop.appErrorShown(rows("美团外卖 汉堡 月售5000+")))
     }
 
+    /// 133 (y3): “iPhone 17” searched in 微信's 搜一搜 counted as sent; typing it again was refused 16 times.
+    func testWhatTheGoalSaysToSearchIsASearch() {
+        let task = "1. 在微信的搜一搜里搜索“iPhone 17”，记下第一个结果的标题；2. 在抖音搜“猫”；3. 在测试群发“Y3全部做完”"
+        XCTAssertEqual(AgentLoop.goalSearches(task), ["iPhone17", "猫"])
+        XCTAssertFalse(AgentLoop.goalSearches(task).contains("Y3全部做完"))
+    }
+
     /// 133 (x3): "tap the yellow Add to Cart button" was not counted in 美团.
     func testLongerAddWordsCount() {
         XCTAssertTrue(AgentLoop.addsToCart("I tap the yellow Add to Cart button under the cheapest set."))
