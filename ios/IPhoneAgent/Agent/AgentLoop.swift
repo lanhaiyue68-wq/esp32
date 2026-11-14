@@ -1493,6 +1493,15 @@ extension Pointer: Gestures {}
     }
     static func installDeclined(_ app: String) -> String { "手机上没有“\(app)”，机主选择不下载，任务结束" }
 
+    /// Apple's own apps: a failed open of one is Search failing, never something to download (134 y1: 行事曆).
+    static func builtInApp(_ app: String) -> Bool {
+        let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
+        return ["日历", "行事历", "时钟", "天气", "计算器", "计算机", "备忘录", "设置", "设定", "safari", "appstore", "照片", "相机",
+                "地图", "提醒事项", "信息", "电话", "邮件", "音乐", "钱包", "文件", "健康", "股市", "翻译", "指南针", "播客", "图书",
+                "家庭", "快捷指令", "通讯录", "facetime", "语音备忘录", "测距仪", "放大器", "查找", "手表", "视频", "游戏中心"]
+            .contains(name)
+    }
+
     static let openFailedReason = " is not on this phone: it is not on the Home Screen and Search does not list it as an app. "
         + "Do not search the web for it and do not try again; if the goal needs it, stop with fail and say so."
 
@@ -2617,7 +2626,12 @@ extension Pointer: Gestures {}
                        (try? await perform(["action": .str("open"), "app": .str(host)])) != nil {
                         DebugLog.write("open \(absent.name): a part of \(host); \(host) opened")
                         act["app"] = .str(host)
-                    } else if let askInstall, !installAsked.contains(absent.name) {
+                    } else if name == "open", askInstall != nil, !installAsked.contains(absent.name), !Self.builtInApp(absent.name),
+                              (try? await perform(act)) != nil {
+                        // 134 over the cloud 11-15 (y1): Search showed nothing once and 行事曆 was "not on this phone"; it
+                        // opened three minutes later. Before the owner is asked to install, a second look.
+                        DebugLog.write("open \(absent.name): found on a second look")
+                    } else if name == "open", let askInstall, !installAsked.contains(absent.name), !Self.builtInApp(absent.name) {
                         // User 11-15: "手机没有JD这时候会反馈给我是否下载JD，然后我说是就去下载…我说否就结束这个任务".
                         installAsked.insert(absent.name)
                         record(planned.shot, ["action": .str("waiting approval"), "reason": .str("install " + absent.name + "?")])

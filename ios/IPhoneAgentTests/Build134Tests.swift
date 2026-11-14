@@ -90,4 +90,14 @@ import XCTest
         XCTAssertEqual(CloudBridge.failureWords(AgentLoop.installDeclined("京东")), "手机上没有“京东”，机主选择不下载，任务结束",
                        "the owner's words go back as they are")
     }
+
+    /// 134 (y1): Search showed nothing once and 行事曆 was "not on this phone"; Apple's apps are never offered for download.
+    func testApplesOwnAppsAreNeverOfferedForDownload() {
+        XCTAssertTrue(AgentLoop.builtInApp("行事曆"))
+        XCTAssertTrue(AgentLoop.builtInApp("日历"))
+        XCTAssertTrue(AgentLoop.builtInApp("App Store"))
+        XCTAssertTrue(AgentLoop.builtInApp("計算機"))
+        XCTAssertFalse(AgentLoop.builtInApp("京东"))
+        XCTAssertFalse(AgentLoop.builtInApp("闲鱼"))
+    }
 }
