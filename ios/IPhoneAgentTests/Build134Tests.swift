@@ -213,6 +213,8 @@ import XCTest
         let taps = [tap(434, 166), tap(919, 166), tap(166, 250), tap(434, 166), tap(919, 166)]
         XCTAssertTrue(AgentLoop.repeatsRound(taps, next: tap(166, 250)))
         XCTAssertFalse(AgentLoop.repeatsRound(taps + [["action": .str("note"), "text": .str("第21项：开车19分钟")]], next: tap(166, 250)))
+        XCTAssertEqual(AgentLoop.bigGoalRefusalLimit, 12, "D19: a goal of 10+ things skips a thing after 12 refusals, not 25")
+        XCTAssertEqual(AgentLoop.refusalLimit, 25)
     }
 
     /// D18, 134 (y4, y5): Weather's day chart shows 下午3时's value only under a held finger.

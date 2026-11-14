@@ -137,8 +137,10 @@ extension Pointer: Gestures {}
     private var deadRefused = 0
     /// D18: the screen while the last hold was still down (see shownOnlyWhileHeld); nil once a look used it.
     private var heldFrame: Data?
-    /// D17: refusals of a round of taps (repeatsRound) since the last change of plan.
+    /// D17, D19: refusals of a round of taps (repeatsRound) or of a page scrolled back again (scrollsBackAgain) since
+    /// the last change of plan.
     private var roundRefused = 0
+    static let bigGoalRefusalLimit = 12
     private var untypedSearches = 0  // searches refused because nothing was typed (twice at most per run)
     private var blindLooks = 0
     private(set) var takeover = 0
@@ -1906,7 +1908,9 @@ extension Pointer: Gestures {}
                     failures = 0
                     blindLooks = 0
                     offlineWaits = 0
-                    if refusalsNoProgress >= Self.refusalLimit {
+                    // D19: in a goal of 10 things or more, 12 refusals with nothing got on skip the thing (25 took about
+                    // two minutes each time, six times in 134's y3–y5).
+                    if refusalsNoProgress >= (presetPlan.isEmpty && Self.goalParts(task) >= 10 ? Self.bigGoalRefusalLimit : Self.refusalLimit) {
                         let why = "stuck: refused \(refusalsNoProgress) times and nothing got on"
                         if try await skipStuckThing(nil, why) { continue }
                         record(nil, ["action": .str("fail"), "reason": .str(why)])
@@ -2653,6 +2657,13 @@ extension Pointer: Gestures {}
                     return false
                 }
                 if name == "swipe", Self.scrollsBackAgain(steps, next: act) {
+                    // D19, 134 over the cloud 11-15 (y5): 设置 › 关于本机 scrolled down, up, down; the turn back up to 型号名称
+                    // was then refused 20 times. Three refusals are a change of plan, as with a round of taps (D17).
+                    roundRefused += 1
+                    if roundRefused >= Self.refusalsInARow {
+                        roundRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept asking to scroll a page already seen whole")
+                    }
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.scrollBackReason)])
                     return false
                 }
