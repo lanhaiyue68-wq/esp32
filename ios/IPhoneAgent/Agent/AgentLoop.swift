@@ -1723,6 +1723,7 @@ extension Pointer: Gestures {}
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         installAsked = []
+        (coached, tryingTip) = ([], nil)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
         approvedTexts = []
@@ -3281,7 +3282,36 @@ extension Pointer: Gestures {}
     /// The run is stuck on one thing of a goal of several: it is written down as 未能完成, its part closed, the counters
     /// cleared, and Codex plans the rest. False (the caller stops the run) for a goal of one thing or when none are left.
     private func skipStuckThing(_ shot: Data?, _ why: String) async throws -> Bool {
-        guard itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 else { return false }
+        guard presetPlan.isEmpty else { return false }
+        var why = why
+        // A way learned for this step did not get it on: counted against the way (two misses and no win: dropped).
+        if let tip = tryingTip { lessons?.tipResult(tip, worked: false); tryingTip = nil }
+        // User 11-15: "这种问题以后出现了要让codex学会怎么解决…要让codex自己能解决这个问题". Before the thing is skipped,
+        // the planner looks at what was tried and the screen, once per thing: a way that works in this app is kept as an
+        // app tip (every later task naming the app gets it) and tried at once; a thing that cannot be done on this phone
+        // now (a service off, a password, the app's error page) is skipped at once, without going round.
+        let part = parts.count >= 2 && partIndex < parts.count ? parts[partIndex] : task  // one thing: the goal itself
+        let key = Self.thingKey(part)
+        if planner != nil, !part.isEmpty, coached.count < Self.coachLimit, coached.insert(key).inserted {
+            switch try await coach(part, why: why) {
+            case .way(let way):
+                let app = Self.appInFront(steps, startedIn: startApp) ?? ""
+                tryingTip = lessons?.learnAppTip(app: app, goal: part, text: way, run: trace?.dir?.lastPathComponent ?? "run")
+                let line = "新学到的做法：" + way
+                if !notes.contains(line) { notes.append(line) }
+                (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
+                (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
+                record(shot, ["action": .str("learned way"), "app": .str(app), "reason": .str(way)])
+                try await replan(stuck: true)
+                gotOn()
+                return true
+            case .blocked(let reason):
+                why = "做不成：" + reason
+            case .unknown:
+                break
+            }
+        }
+        guard Self.goalParts(task) >= 3, itemFailsLeft > 0 else { return false }  // one thing: the run stops as before
         itemFailsLeft -= 1
         let what = parts.count >= 2 && partIndex < parts.count ? parts[partIndex] + "（" + why + "）" : why
         let line = "未能完成：" + String(what.prefix(160))
@@ -3293,6 +3323,71 @@ extension Pointer: Gestures {}
         try await replan(stuck: true)
         gotOn()
         return true
+    }
+
+    /// Things (thingKey of the part) the planner was asked about in this run, and the app tip being tried now (its id).
+    private var coached: Set<String> = []
+    private var tryingTip: String?
+    static let coachLimit = 6  // asks a run at most
+
+    static func thingKey(_ s: String) -> String {
+        String(AppNames.hans(s).lowercased().filter { !$0.isWhitespace && !$0.isPunctuation }.prefix(80))
+    }
+
+    enum Coaching: Equatable { case way(String), blocked(String), unknown }
+
+    static let coachPrompt = """
+    You coach an AI agent that operates an iPhone for its owner with a mouse pointer. It is stuck on one thing of a \
+    longer goal. From the steps it tried and the screen now (the image), find why it did not work and what the right \
+    way is IN THIS APP: one concrete method that works with this app's own screens (which page or list, which control, \
+    which gesture), never "try again", "be careful" or screen coordinates. Reply with exactly one line, in the language \
+    of the goal:
+    WAY: <how to do this kind of step in this app, at most 80 characters>
+    or BLOCKED: <why it cannot be done on this phone now: a permission or service turned off, the app not installed, a \
+    login, code or password needed, the app's own error page>
+    or NONE when you cannot tell. Never suggest typing a password, paying, ordering, or changing a system setting.
+    """
+
+    static func parseCoaching(_ reply: String) -> Coaching {
+        for raw in reply.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            let upper = line.uppercased()
+            for (tag, make) in [("WAY:", Coaching.way), ("BLOCKED:", Coaching.blocked)] where upper.hasPrefix(tag) {
+                let text = line.dropFirst(tag.count).trimmingCharacters(in: .whitespaces)
+                // A remembered spot is wrong once the screen moves (LessonBook.parseLessons).
+                let spot = text.range(of: #"\d{2,4}\s*[,，]\s*\d{2,4}"#, options: .regularExpression) != nil
+                return text.isEmpty || spot ? .unknown : make(String(text.prefix(160)))
+            }
+            if upper.hasPrefix("NONE") { return .unknown }
+        }
+        return .unknown
+    }
+
+    /// The planner looks at a stuck thing: what was tried (the last steps) and the screen now.
+    private func coach(_ part: String, why: String) async throws -> Coaching {
+        guard let planner else { return .unknown }
+        let app = Self.appInFront(steps, startedIn: startApp) ?? "unknown"
+        let tried = steps.suffix(16).compactMap { s -> String? in
+            guard let a = s["action"]?.str, !["plan", "replan (stuck)", "planner drives"].contains(a) else { return nil }
+            var line = a
+            if let t = s["text"]?.str { line += " “\(t.prefix(40))”" }
+            if let t = s["thought"]?.str { line += " — " + String(t.prefix(110)) }
+            else if let r = s["reason"]?.str { line += " — " + String(r.prefix(110)) }
+            if s["changed"] == .bool(false) { line += " (screen did not change)" }
+            return line
+        }
+        let prompt = "Goal: \(task)\n\nThe stuck thing: \(part)\nApp in front: \(app)\nWhy it stopped: \(why)\n\nLast steps:\n"
+            + tried.joined(separator: "\n")
+        do {
+            let (reply, _, _) = try await ask("planner", planner, Self.coachPrompt, prompt)
+            DebugLog.write("coach: \(reply.replacingOccurrences(of: "\n", with: " ").prefix(200))")
+            return Self.parseCoaching(reply)
+        } catch let e where e is CancellationError || Task.isCancelled {
+            throw e
+        } catch {
+            DebugLog.write("coach failed: \(error.localizedDescription)")
+            return .unknown
+        }
     }
 
     /// A guard saw the run go round: Codex looks afresh once, another way. If it goes round again the run stops. True: it stopped.
@@ -3474,6 +3569,7 @@ extension Pointer: Gestures {}
         }
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
+        if let tip = tryingTip { lessons?.tipResult(tip, worked: true); tryingTip = nil }  // the way learned worked
         gotOn()
         (stallsNoProgress, refusalsNoProgress) = (0, 0)
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
@@ -3496,6 +3592,7 @@ extension Pointer: Gestures {}
     /// A refused fail closes the part it was in as 未能完成, so the next part is worked on: the run kept the part that
     /// cannot be done open, and Codex failed on it again and again (c3, 132). Returns what the refusal says about the next part.
     private func closeFailedPart(_ why: String, by: String?) -> String {
+        if let tip = tryingTip { lessons?.tipResult(tip, worked: false); tryingTip = nil }
         guard parts.count >= 2, partIndex < parts.count else { return "" }
         doneParts.append(parts[partIndex] + " -> 未能完成：" + String(why.prefix(80)))
         record(nil, ["action": .str("part failed"), "part": .int(partIndex + 1)])

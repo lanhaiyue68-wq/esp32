@@ -27,6 +27,11 @@ import Foundation
         var uses: Int? = nil
         var lastRun: String? = nil
         var lastTask: String? = nil
+        /// An app tip (user 11-15: "要让codex自己能解决"): learned when a run got stuck in this app, matched by the app's
+        /// name in later tasks, and kept only while it works (wins / fails).
+        var app: String? = nil
+        var wins: Int? = nil
+        var fails: Int? = nil
     }
 
     enum ReviewState: String, Codable { case reviewing, learned, noLesson, skipped, failed, interrupted }
@@ -331,7 +336,8 @@ import Foundation
     func relevant(to task: String, max: Int = 10) -> [Lesson] {
         guard enabled else { return [] }
         let active = lessons.filter { $0.disabled != true }
-        return ranked(task, active.filter { $0.auto != true }, max: max) + ranked(task, active.filter { $0.auto == true }, max: 4)
+        return ranked(task, active.filter { $0.auto != true }, max: max)
+            + ranked(task, active.filter { $0.auto == true && $0.app == nil }, max: 4)
     }
 
     private func ranked(_ task: String, _ pool: [Lesson], max: Int) -> [Lesson] {
@@ -371,7 +377,63 @@ import Foundation
             out += "\n\nLessons you drew from your own earlier runs of similar tasks (less certain; the user's lessons win):\n"
                 + own.map { "- " + $0.text }.joined(separator: "\n")
         }
+        let tips = appTips(for: task)
+        if !tips.isEmpty {
+            out += "\n\nWays that work in these apps, learned when an earlier run got stuck there (✓ = times it worked since). "
+                + "Use them first for that kind of step:\n"
+                + tips.map { "- " + $0.text + (($0.wins ?? 0) > 0 ? " ✓\($0.wins ?? 0)" : "") }.joined(separator: "\n")
+        }
         return out
+    }
+
+    // MARK: App tips (user 11-15: a stuck step is solved by the planner once, then known for every later task in that app)
+
+    /// The tips for the apps this text names (task or part), the best proven first.
+    func appTips(for text: String, max: Int = 6) -> [Lesson] {
+        guard enabled else { return [] }
+        let t = AppNames.hans(text).lowercased()
+        let found = lessons.filter { l in
+            guard let app = l.app, l.disabled != true else { return false }
+            return AppNames.variants(app).map { AppNames.hans($0).lowercased() }.contains { !$0.isEmpty && t.contains($0) }
+        }
+        return Array(found.sorted { a, b in
+            let (x, y) = ((a.wins ?? 0) - (a.fails ?? 0), (b.wins ?? 0) - (b.fails ?? 0))
+            return x != y ? x > y : a.updated > b.updated
+        }.prefix(max))
+    }
+
+    /// Keeps a way the planner gave for a stuck step in `app`; the same way again is reinforced. Its id, or nil.
+    @discardableResult func learnAppTip(app: String, goal: String, text: String, run: String) -> String? {
+        let clipped = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
+        let name = AppNames.hans(app).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard enabled, !clipped.isEmpty, !name.isEmpty else { return nil }
+        let shown = "【\(name)】" + clipped
+        if let i = lessons.firstIndex(where: { $0.app != nil && Self.sameLesson($0.text, shown) }) {
+            lessons[i].updated = clock()
+            lessons[i].seen = (lessons[i].seen ?? 1) + 1
+            save()
+            return lessons[i].id
+        }
+        let id = "\(run):tip:\(lessons.filter { $0.id.hasPrefix(run + ":tip:") }.count)"
+        lessons.insert(Lesson(id: id, task: String(goal.prefix(Self.taskChars)), text: shown, general: false, updated: clock(),
+                              auto: true, from: [run], app: name), at: 0)
+        let autos = lessons.filter { $0.auto == true }
+        if autos.count > Self.autoLimit {
+            let keep = Set(autos.sorted(by: Self.fresher).prefix(Self.autoLimit).map(\.id))
+            lessons.removeAll { $0.auto == true && !keep.contains($0.id) }
+        }
+        lessons = Array(lessons.prefix(Self.limit))
+        save()
+        return id
+    }
+
+    /// The step a tip was for went on (worked) or got stuck again. Two misses and no win: the tip is turned off.
+    func tipResult(_ id: String, worked: Bool) {
+        guard let i = lessons.firstIndex(where: { $0.id == id }) else { return }
+        if worked { lessons[i].wins = (lessons[i].wins ?? 0) + 1 } else { lessons[i].fails = (lessons[i].fails ?? 0) + 1 }
+        if (lessons[i].fails ?? 0) >= 2, (lessons[i].wins ?? 0) == 0 { lessons[i].disabled = true }
+        lessons[i].updated = clock()
+        save()
     }
 
     /// Chinese/Japanese as character pairs, other scripts as lowercased words.

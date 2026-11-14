@@ -107,3 +107,39 @@ import XCTest
         XCTAssertFalse(AgentLoop.builtInApp("闲鱼"))
     }
 }
+
+/// Build 135: user 11-15 — "要让codex自己能解决这个问题": a stuck step is solved by the planner once, kept as an app
+/// tip, given to every later task in that app, and dropped when it does not work.
+@MainActor final class Build135LearningTests: XCTestCase {
+    func testTheCoachsReplyIsAWayABlockOrNothing() {
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 天气：明天某小时不在逐小时条里，点十天预报里的那一天看"),
+                       .way("天气：明天某小时不在逐小时条里，点十天预报里的那一天看"))
+        XCTAssertEqual(AgentLoop.parseCoaching("想了一下\nBLOCKED: 定位服务已关闭，高德无法从当前位置规划路线"),
+                       .blocked("定位服务已关闭，高德无法从当前位置规划路线"))
+        XCTAssertEqual(AgentLoop.parseCoaching("NONE"), .unknown)
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 点 (850, 560) 那里"), .unknown, "a spot on the screen is no way")
+        XCTAssertEqual(AgentLoop.parseCoaching("随便试试"), .unknown)
+        XCTAssertEqual(AgentLoop.thingKey("打开 天气，看深圳明天下午3点！"), AgentLoop.thingKey("打开天气看深圳明天下午3点"))
+    }
+
+    func testAnAppTipReachesEveryTaskInThatAppAndIsDroppedWhenItFails() {
+        let book = LessonBook(file: nil)
+        let id = book.learnAppTip(app: "天氣", goal: "看深圳明天下午3点的温度", text: "明天的小时不在逐小时条里，点十天预报里的那一天", run: "r1")
+        XCTAssertNotNil(id)
+        XCTAssertEqual(book.appTips(for: "帮我看下天气，明天下午三点多少度").count, 1, "matched by the app, not the whole task")
+        XCTAssertEqual(book.appTips(for: "在高德查到深圳北站多久").count, 0)
+        XCTAssertTrue(book.context(task: "天气里看首尔后天早上8点").contains("点十天预报里的那一天"))
+        XCTAssertEqual(book.learnAppTip(app: "天气", goal: "x", text: "明天的小时不在逐小时条里，点十天预报里的那一天", run: "r2"), id,
+                       "the same way again is reinforced, not stored twice")
+        book.tipResult(id!, worked: false)
+        XCTAssertEqual(book.appTips(for: "天气").count, 1, "one miss: kept")
+        book.tipResult(id!, worked: false)
+        XCTAssertEqual(book.appTips(for: "天气").count, 0, "two misses and no win: dropped")
+        let kept = book.learnAppTip(app: "高德地图", goal: "y", text: "路线页顶部切到公交那一栏", run: "r3")!
+        book.tipResult(kept, worked: true)
+        book.tipResult(kept, worked: false)
+        book.tipResult(kept, worked: false)
+        XCTAssertEqual(book.appTips(for: "高德地图").count, 1, "it worked once: kept")
+        XCTAssertTrue(book.context(task: "用高德地图查路线").contains("✓1"))
+    }
+}
