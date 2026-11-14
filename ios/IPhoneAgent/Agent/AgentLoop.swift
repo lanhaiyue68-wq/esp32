@@ -1546,8 +1546,9 @@ extension Pointer: Gestures {}
     /// Asks the owner whether to install an app the task needs and the phone does not have: true install, false end the
     /// task, nil nobody to ask (the thing is noted as not installed, as before). Set per run by RunSession.
     var askInstall: ((String) async -> Bool?)?
-    /// Apps asked about in this run (once each).
+    /// Apps asked about in this run (once each), and apps looked for a second time before "not on this phone".
     private var installAsked: Set<String> = []
+    private var lookedAgain: Set<String> = []
     /// What the run is told once the owner said yes. Never a password: Apple asks the owner for that on the phone.
     static func installNote(_ app: String) -> String {
         "机主同意下载安装“\(app)”：打开 App Store，搜索“\(app)”，在结果里找名字和开发者都对的那个 App，点“获取”（或云朵图标）。"
@@ -1775,7 +1776,7 @@ extension Pointer: Gestures {}
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
-        installAsked = []
+        (installAsked, lookedAgain) = ([], [])
         (coached, tryingTip) = ([], nil)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -2709,8 +2710,7 @@ extension Pointer: Gestures {}
                        (try? await perform(["action": .str("open"), "app": .str(host)])) != nil {
                         DebugLog.write("open \(absent.name): a part of \(host); \(host) opened")
                         act["app"] = .str(host)
-                    } else if name == "open", askInstall != nil, !installAsked.contains(absent.name), !Self.builtInApp(absent.name),
-                              (try? await perform(act)) != nil {
+                    } else if name == "open", lookedAgain.insert(absent.name).inserted, (try? await perform(act)) != nil {
                         // 134 over the cloud 11-15 (y1): Search showed nothing once and 行事曆 was "not on this phone"; it
                         // opened three minutes later. Before the owner is asked to install, a second look.
                         DebugLog.write("open \(absent.name): found on a second look")
