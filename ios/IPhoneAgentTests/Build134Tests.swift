@@ -207,6 +207,14 @@ import XCTest
         XCTAssertTrue(AgentLoop.itemsLeftLine([2, 7]).contains("第N项"))
     }
 
+    /// D17, 134 (y4): 高德's round of taps, then the drive time noted; 公车捷运 was refused 25 times as the same round.
+    func testARoundThatNotedSomethingIsNoRound() {
+        func tap(_ x: Double, _ y: Double) -> JObject { ["action": .str("tap"), "x": .num(x), "y": .num(y)] }
+        let taps = [tap(434, 166), tap(919, 166), tap(166, 250), tap(434, 166), tap(919, 166)]
+        XCTAssertTrue(AgentLoop.repeatsRound(taps, next: tap(166, 250)))
+        XCTAssertFalse(AgentLoop.repeatsRound(taps + [["action": .str("note"), "text": .str("第21项：开车19分钟")]], next: tap(166, 250)))
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

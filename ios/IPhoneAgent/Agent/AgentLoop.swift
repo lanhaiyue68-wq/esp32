@@ -129,6 +129,8 @@ extension Pointer: Gestures {}
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
     private var deadRefused = 0
+    /// D17: refusals of a round of taps (repeatsRound) since the last change of plan.
+    private var roundRefused = 0
     private var untypedSearches = 0  // searches refused because nothing was typed (twice at most per run)
     private var blindLooks = 0
     private(set) var takeover = 0
@@ -559,6 +561,7 @@ extension Pointer: Gestures {}
         doneRejected = 0
         continuations = 0
         continuedAt = nil
+        roundRefused = 0
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -1736,7 +1739,9 @@ extension Pointer: Gestures {}
         var taps: [JObject] = []
         for s in steps.reversed() {
             let a = s["action"]?.str ?? ""
-            if a == "tap" { taps.insert(s, at: 0) } else if observedActions.contains(a) { break }
+            // D17, 134 over the cloud 11-15 (y4): 高德's 驾车 tab, the mode panel, 公车捷运, and round again; then the drive
+            // time was noted and 公车捷运 was refused 25 times as the same round. A round that noted something got on.
+            if a == "tap" { taps.insert(s, at: 0) } else if observedActions.contains(a) || ["note", "part done"].contains(a) { break }
             if taps.count >= 12 { break }
         }
         taps.append(next)
@@ -2621,6 +2626,13 @@ extension Pointer: Gestures {}
                     return false
                 }
                 if name == "tap", Self.repeatsRound(steps, next: act) {
+                    // D17: the same tap asked for again and again was refused 25 times (~2 minutes) before the thing was
+                    // skipped, twice in y4. Three refusals of a round are a change of plan, as with dead taps.
+                    roundRefused += 1
+                    if roundRefused >= Self.refusalsInARow {
+                        roundRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept asking for a round of taps already gone through")
+                    }
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.roundReason)])
                     return false
                 }
