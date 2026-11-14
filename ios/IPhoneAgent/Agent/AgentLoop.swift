@@ -307,6 +307,16 @@ extension Pointer: Gestures {}
             && ["忽略限制", "Ignore Limit", "请求更多时间", "Ask For More Time", "15分钟后提醒我", "今天内忽略限制",
                 "Remind Me in 15 Minutes", "Ignore Limit for Today"].contains { text.contains($0) }
     }
+    /// 134 over the cloud 11-15 (y3): 高德's route asked for location, "继续关闭定位服务" closed the sheet, the route button
+    /// brought it back, 29 times round. A route from here cannot be had with location off; Settings are not ours to change.
+    static func locationOffShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        let text = AppNames.hans(rows.joined().map(\.text).joined())
+        return ["定位服务已关闭", "继续关闭定位服务", "打开定位服务", "Location Services Off", "Turn On Location Services"]
+            .contains { text.contains($0) }
+    }
+    static let locationOffNote = "手机的定位服务关着：要“从现在位置/当前位置”出发的路线或“附近”的结果现在做不成。不要去设置里打开，"
+        + "也不要再点路线按钮：把这一项记为未能完成（原因：定位服务已关闭），接着做下一项。"
+
     /// A Screen Time passcode is asked for (输入屏幕使用时间密码 / Enter Screen Time Passcode).
     static func screenTimePasscodeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
         let text = AppNames.hans(rows.joined().map(\.text).joined())
@@ -689,7 +699,9 @@ extension Pointer: Gestures {}
         }
         let seconds = ((now() - started) * 100).rounded() / 100
         metrics?.llm(first: reply.firstToken, total: reply.total)
-        var rec: JObject = ["role": .str(role), "model": .str(llm.model), "prompt": .str(prompt),
+        // 134 over the cloud 11-15: whole prompts (the 50-thing goal each time) filled the trace's 2 MB in ~15 minutes, and
+        // the steps of where a long run got stuck were gone. The prompt is kept by its head and its tail (this look).
+        var rec: JObject = ["role": .str(role), "model": .str(llm.model), "prompt": .str(Self.tracedPrompt(prompt)),
                             "reply": .str(reply.text), "seconds": .num(seconds)]
         if let first = reply.firstToken { rec["first_token_s"] = .num((first * 100).rounded() / 100) }
         if lastActed > 0 { rec["frame_after_action_s"] = .num(((screen.capturedAt - lastActed) * 100).rounded() / 100) }
@@ -956,6 +968,69 @@ extension Pointer: Gestures {}
             let end = i + 1 < items.count ? items[i + 1].1.lowerBound : text.endIndex
             return (n: h.0, body: h.1.upperBound..<end)
         }
+    }
+
+    /// A date written 2026年11月14日, 11月14日 or 2026-11-14 (groups: year?, month, day).
+    static let datePattern = #"(?:(\d{4})\s*[年\-/.]\s*)?(\d{1,2})\s*[月\-/.]\s*(\d{1,2})\s*[日号號]?"#
+
+    static func date(_ ns: NSString, _ m: NSTextCheckingResult, at first: Int, calendar: Calendar, near: Date) -> Date? {
+        guard let month = Int(ns.substring(with: m.range(at: first + 1))), let day = Int(ns.substring(with: m.range(at: first + 2)))
+        else { return nil }
+        let given = m.range(at: first).location != NSNotFound ? Int(ns.substring(with: m.range(at: first))) : nil
+        let year = given ?? calendar.component(.year, from: near)
+        guard let d = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+              calendar.component(.month, from: d) == month, calendar.component(.day, from: d) == day else { return nil }
+        // No year and over half a year before `near`: the next one.
+        if given == nil, d.timeIntervalSince(near) < -183 * 86_400 { return calendar.date(byAdding: .year, value: 1, to: d) }
+        return d
+    }
+
+    /// 133 over the cloud 11-14 (y6): "从2026-11-14到2027-02-06春节还有99天"; it is 84. A count of days the answer gives
+    /// between two dates (从/自 A 到/至 B … N 天) or from today (距/离 B 还有 N 天) is checked with the calendar and put
+    /// right. A count that says it holds both ends (含, 包括) is left alone.
+    static func rightDayCounts(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        let d = datePattern
+        let between = #"(?:从|自|從)\s*"# + d + #"\s*(?:到|至)\s*"# + d + #"[^，。；;\d]{0,12}?(?:共|有|是|相差|差|还有|還有|还剩)?\s*(\d{1,4})\s*天"#
+        let fromToday = #"(?:距离|距離|距|离|離)\s*"# + d + #"[^，。；;\d]{0,12}?(?:还有|還有|还剩|有|共)\s*(\d{1,4})\s*天"#
+        var out = text as NSString
+        for (pattern, two) in [(between, true), (fromToday, false)] {
+            guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
+            let ns = out
+            for m in re.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)).reversed() {
+                let whole = ns.substring(with: m.range)
+                if whole.contains("含") || whole.contains("包括") { continue }
+                let start = startOfDay(two ? date(ns, m, at: 1, calendar: calendar, near: today) : Optional(today), calendar)
+                guard let a = start, let b = startOfDay(date(ns, m, at: two ? 4 : 1, calendar: calendar, near: a), calendar),
+                      let days = calendar.dateComponents([.day], from: a, to: b).day else { continue }
+                let n = m.range(at: two ? 7 : 4)
+                if Int(ns.substring(with: n)) != days { out = out.replacingCharacters(in: n, with: String(days)) as NSString }
+            }
+        }
+        return out as String
+    }
+
+    private static func startOfDay(_ d: Date?, _ calendar: Calendar) -> Date? { d.map { calendar.startOfDay(for: $0) } }
+
+    /// The goal's dates worked out on the phone (weekday, days from today), so the answer never rests on a guess.
+    static func dateFacts(_ task: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]"#) else { return "" }
+        let ns = task as NSString
+        let names = ["日", "一", "二", "三", "四", "五", "六"]
+        func show(_ d: Date) -> String {
+            let c = calendar.dateComponents([.year, .month, .day, .weekday], from: d)
+            return "\(c.year ?? 0)年\(c.month ?? 0)月\(c.day ?? 0)日 星期\(names[(c.weekday ?? 1) - 1])"
+        }
+        let now = calendar.startOfDay(for: today)
+        var seen = Set<String>(), facts: [String] = []
+        for m in re.matches(in: task, range: NSRange(location: 0, length: ns.length)) {
+            guard let d = date(ns, m, at: 1, calendar: calendar, near: today).map({ calendar.startOfDay(for: $0) }),
+                  seen.insert(show(d)).inserted, let days = calendar.dateComponents([.day], from: now, to: d).day else { continue }
+            facts.append(show(d) + (days == 0 ? "（今天）" : days > 0 ? "（\(days)天后）" : "（\(-days)天前）"))
+            if facts.count == 6 { break }
+        }
+        guard !facts.isEmpty else { return "" }
+        return "\n\nDates in the goal, worked out on the phone (use these; still open an app the goal names): 今天 " + show(now)
+            + "；" + facts.joined(separator: "；")
     }
 
     /// The text with each weekday it gives for a date ("12月1日是星期日", "2026年12月1日（周二）") made right by the calendar.
@@ -1923,7 +1998,7 @@ extension Pointer: Gestures {}
 
     private var taught: String {
         (hints.isEmpty ? "" : "\n\nHints for this task:\n" + hints.map { "- " + $0 }.joined(separator: "\n"))
-            + (lessons?.context(task: task) ?? "") + Prompts.userRules
+            + (lessons?.context(task: task) ?? "") + Prompts.userRules + Self.dateFacts(task, today: Date())
             + (reference.isEmpty ? "" : "\n\nKnowledge base chosen by the user. Base every reply on it; when it does not "
                + "cover the question, use the user's fallback reply instead of guessing. Never send anything from "
                + "outside it about the user, and never copy one chat's content into another chat:\n" + reference)
@@ -2274,9 +2349,9 @@ extension Pointer: Gestures {}
             // 132 over the cloud 11-14 (c3): "2026年12月1日是星期日"; it is a Tuesday. A weekday the answer gives for a
             // date is checked with the calendar and put right.
             if name == "done", endsTask, let answer = act["answer"]?.str {
-                let fixed = Self.rightWeekdays(answer, today: Date())
+                let fixed = Self.rightDayCounts(Self.rightWeekdays(answer, today: Date()), today: Date())
                 if fixed != answer {
-                    DebugLog.write("done: a weekday given for a date was wrong; put right")
+                    DebugLog.write("done: a weekday or a count of days given for a date was wrong; put right")
                     act["answer"] = .str(fixed)
                 }
             }
@@ -3330,6 +3405,11 @@ extension Pointer: Gestures {}
     private var tryingTip: String?
     static let coachLimit = 6  // asks a run at most
 
+    static func tracedPrompt(_ prompt: String) -> String {
+        guard prompt.count > 2200 else { return prompt }
+        return String(prompt.prefix(400)) + " … " + String(prompt.suffix(1600))
+    }
+
     static func thingKey(_ s: String) -> String {
         String(AppNames.hans(s).lowercased().filter { !$0.isWhitespace && !$0.isPunctuation }.prefix(80))
     }
@@ -3777,6 +3857,7 @@ extension Pointer: Gestures {}
         if pointerAt != .zero { prompt += "\n\n" + Self.cursorNote(pointerAt) }
         appErrorLooks = Self.appErrorShown(readRows) ? appErrorLooks + 1 : 0
         if appErrorLooks >= 3 { prompt += "\n\n" + Self.appErrorNote }
+        if Self.locationOffShown(readRows) { prompt += "\n\n" + Self.locationOffNote }
         if Self.screenTimePasscodeShown(readRows) {
             prompt += "\n\n" + Self.screenTimePasscodeNote
         } else if Self.screenTimeShown(readRows) {

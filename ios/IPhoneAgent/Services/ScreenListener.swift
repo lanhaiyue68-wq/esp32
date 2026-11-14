@@ -136,6 +136,8 @@ private final class Transcript: @unchecked Sendable {
         SFSpeechRecognizer.requestAuthorization { @Sendable status in Task { @MainActor in DebugLog.write("listen: speech recognition \(status.rawValue)") } }
     }
 
+    /// Siri and Dictation are off on this phone (kLSRErrorDomain 201): recognition goes to Apple's server from the start.
+    static var phoneRecognitionOff = false
     static var authorized: Bool { SFSpeechRecognizer.authorizationStatus() == .authorized }
     static var undecided: Bool { SFSpeechRecognizer.authorizationStatus() == .notDetermined }
 
@@ -169,7 +171,9 @@ private final class Transcript: @unchecked Sendable {
         let end = Date().addingTimeInterval(canSpeak ? seconds : min(seconds, 20))
         // 122 on the phone 11-11/12: all 17 listens failed at once with "kLSRErrorDomain 201: Siri and Dictation are
         // disabled": recognition on the phone itself needs Siri on. Then the rest is heard through Apple's server.
-        var onPhone = true
+        // 134 (11-15): every listen tried the phone first and lost its first second and those words; once seen, the
+        // server is used from the start until the app restarts.
+        var onPhone = !Self.phoneRecognitionOff
         while Date() < end, !Task.isCancelled {
             // One segment: a request of its own (a recognition off the phone stops at about a minute).
             let segmentEnd = min(end, Date().addingTimeInterval(55))
@@ -198,6 +202,7 @@ private final class Transcript: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if onPhone, request != nil, transcript.error.hasPrefix("kLSRErrorDomain 201") {
                     onPhone = false
+                    Self.phoneRecognitionOff = true
                     DebugLog.write("listen: recognition on the phone is off (Siri); hearing the rest through the server")
                     break
                 }

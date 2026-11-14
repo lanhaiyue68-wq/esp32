@@ -997,8 +997,11 @@ import Foundation
                     strokeCommand = false  // older firmware: move point by point below
                 }
             }
-            // A list scrolls by the stroke only when it goes slowly; a sideways page turn still needs the quick flick.
-            if points.count == 2 && hold && abs(points[1].y - points[0].y) > abs(points[1].x - points[0].x) {
+            // A list scrolls by the stroke only when it goes slowly. 134 over the cloud 11-15 (y2, y4): a sideways swipe
+            // went as one jump (press, move -194, release) and Weather's hourly strip never moved, ten swipes in a row.
+            // A swipe the model asks for (hold) goes slowly either way (a paging view still turns past half its width);
+            // the quick flick is for the page turns the app makes itself (hold false: the Home Screen's pages).
+            if points.count == 2 && hold {
                 try await pacedMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
             } else if strokeCommand != true || points.count <= 2 {
                 for p in points.dropFirst() {

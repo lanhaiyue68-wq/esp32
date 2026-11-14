@@ -143,3 +143,50 @@ import XCTest
         XCTAssertTrue(book.context(task: "用高德地图查路线").contains("✓1"))
     }
 }
+
+/// Build 135: the rest of 134's hell round fixed in code (user 11-15: "把所有问题都修好").
+@MainActor final class Build135FixesTests: XCTestCase {
+    private var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return c
+    }
+    private var today: Date { calendar.date(from: DateComponents(year: 2026, month: 11, day: 14))! }
+
+    /// 133 (y6): "从2026-11-14到2027-02-06春节还有99天"; it is 84.
+    func testACountOfDaysIsPutRight() {
+        XCTAssertEqual(AgentLoop.rightDayCounts("从2026-11-14到2027-02-06春节还有99天", today: today, calendar: calendar),
+                       "从2026-11-14到2027-02-06春节还有84天")
+        XCTAssertEqual(AgentLoop.rightDayCounts("从2026年11月14日到2027年2月6日共84天", today: today, calendar: calendar),
+                       "从2026年11月14日到2027年2月6日共84天", "right already")
+        XCTAssertEqual(AgentLoop.rightDayCounts("距离2026年12月25日还有40天", today: today, calendar: calendar),
+                       "距离2026年12月25日还有41天")
+        XCTAssertEqual(AgentLoop.rightDayCounts("从11月14日到12月25日（含首尾）共42天", today: today, calendar: calendar),
+                       "从11月14日到12月25日（含首尾）共42天", "both ends counted: left alone")
+        XCTAssertEqual(AgentLoop.rightDayCounts("价格12.5元，3.14倍", today: today, calendar: calendar), "价格12.5元，3.14倍")
+    }
+
+    func testTheGoalsDatesAreWorkedOut() {
+        let facts = AgentLoop.dateFacts("在日历看2026年12月25日和2027年1月1日分别是星期几", today: today, calendar: calendar)
+        XCTAssertTrue(facts.contains("2026年12月25日 星期五（41天后）"), facts)
+        XCTAssertTrue(facts.contains("2027年1月1日 星期五（48天后）"), facts)
+        XCTAssertTrue(facts.contains("今天 2026年11月14日 星期六"), facts)
+        XCTAssertEqual(AgentLoop.dateFacts("看深圳天气", today: today, calendar: calendar), "")
+    }
+
+    /// 134 (y3): 高德's "继续关闭定位服务" sheet, 29 times round.
+    func testTheLocationOffSheetIsSeen() {
+        let rows = [[CandidatePicker.Piece(text: "繼續關閉定位服務", box: CGRect(x: 0.2, y: 0.6, width: 0.6, height: 0.03))]]
+        XCTAssertTrue(AgentLoop.locationOffShown(rows))
+        XCTAssertTrue(AgentLoop.locationOffNote.contains("不要去设置里打开"))
+    }
+
+    /// 134: whole prompts filled the trace in ~15 minutes.
+    func testATracedPromptKeepsItsHeadAndTail() {
+        let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"
+        let kept = AgentLoop.tracedPrompt(long)
+        XCTAssertLessThan(kept.count, 2100)
+        XCTAssertTrue(kept.hasPrefix("甲") && kept.hasSuffix("这一眼"))
+        XCTAssertEqual(AgentLoop.tracedPrompt("短"), "短")
+    }
+}

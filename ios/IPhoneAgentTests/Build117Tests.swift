@@ -53,11 +53,25 @@ import XCTest
         XCTAssertTrue(dy.allSatisfy { abs($0) <= Pointer.swipeStep })
     }
 
-    func testASidewaysSwipeIsStillOneFlick() async throws {
+    /// 134 (y2, y4): one sideways jump never moved Weather's hourly strip. A held sideways swipe goes slowly too.
+    func testAHeldSidewaysSwipeGoesSlowlyToo() async throws {
         let device = FakeDevice()
         let (p, file) = try mapped(device)
         defer { try? FileManager.default.removeItem(at: file) }
         try await p.swipe(0.8, 0.5, 0.2, 0.5, hold: true)
+        let press = try XCTUnwrap(device.sent.lastIndex(of: "press"))
+        let release = try XCTUnwrap(device.sent.lastIndex(of: "release"))
+        let stroke = device.sent[(press + 1)..<release]
+        XCTAssertGreaterThan(stroke.count, 1, "\(stroke)")
+        let dx = stroke.compactMap { Int($0.split(separator: " ")[1]) }
+        XCTAssertTrue(dx.allSatisfy { abs($0) <= Pointer.swipeStep })
+    }
+
+    func testAnUnheldSidewaysSwipeIsStillOneFlick() async throws {  // the Home Screen's page turns
+        let device = FakeDevice()
+        let (p, file) = try mapped(device)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try await p.swipe(0.8, 0.5, 0.2, 0.5, hold: false)
         let press = try XCTUnwrap(device.sent.lastIndex(of: "press"))
         let release = try XCTUnwrap(device.sent.lastIndex(of: "release"))
         XCTAssertEqual(release - press - 1, 1, "\(device.sent[press...release])")
