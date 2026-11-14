@@ -493,7 +493,15 @@ extension AppModel {
         // selected and with the keyboard last used. The pill or a pull down only if it does not come.
         try await pointer.key("cmd+space")
         try? await Task.sleep(nanoseconds: 700_000_000)
-        if let rows = await homeRows(top: 0.02), !AppPlaces.inSearch(rows), !AppPlaces.keyboardShown(rows) {
+        // D20: on the slow phone of 11-15 (z2 21:08, 日历) Search was taken for absent after 0.7 s; it is looked for up to
+        // 1.4 s more before the pill or a pull down.
+        var shown = await homeRows(top: 0.02)
+        let askedAt = now()
+        while let rows = shown, !AppPlaces.inSearch(rows), !AppPlaces.keyboardShown(rows), now() - askedAt < 1.4 {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            shown = await homeRows(top: 0.02)
+        }
+        if let rows = shown, !AppPlaces.inSearch(rows), !AppPlaces.keyboardShown(rows) {
             DebugLog.write("open \(name): Cmd+Space brought no Search; the pill or a pull down")
             if let pill = AppPlaces.searchPill(in: rows) {
                 try await pointer.tap(pill.x, pill.y)
@@ -518,12 +526,16 @@ extension AppModel {
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         var rows: [[CandidatePicker.Piece]] = []
         if let frame = await freshFrame() { rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.7) }
-        // D20, 134 over the cloud 11-15 (y5 19:37, then six times 20:44–20:46): "Safari" typed, and 1 s later Search
-        // listed nothing for it; once, 30 s later, it opened. Results that are slow to come are looked for once more.
-        if !AppPlaces.returnOpens(rows), AppPlaces.searchResult(name, in: rows) == nil {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        // D20, 134 over the cloud 11-15 (y5, y6, z1, z2): Search had grown slow. Frames caught over USB (z2 21:14): typed at
+        // :39.5, the box said "Safari" at :40.8 with the Siri suggestions still under it, the read at :41.1 found nothing,
+        // and "Safari — 打開" came at :41.3. Safari and 備忘錄 were "not on this phone" three times in a row, and four runs
+        // of 50 things failed. The results are looked for every 0.4 s for up to 4 s more.
+        let waitedFrom = now()
+        while !AppPlaces.returnOpens(rows), AppPlaces.searchResult(name, in: rows) == nil, now() - waitedFrom < 4 {
+            try? await Task.sleep(nanoseconds: 400_000_000)
             if let frame = await freshFrame() { rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.7) }
         }
+        if now() - waitedFrom >= 0.4 { DebugLog.write(String(format: "open %@: Search's results looked for %.1f s more", name, now() - waitedFrom)) }
         if AppPlaces.returnOpens(rows) {
             // The keyboard's own Return: the board's Enter does nothing with it up.
             if await !keyboardBridge.type("", enter: true, within: 3) { try await pointer.key("enter") }
