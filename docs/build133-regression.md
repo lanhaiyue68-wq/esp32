@@ -109,4 +109,4 @@ USB 00:04 接回。手機只留最近 3 次任務的步驟紀錄（每次約 20M
 
 單元測試：Build134Tests.swift、DiagnosticFilesTests 新增一則。沒有 Mac，新正則與預期值用 Python 模擬過。
 
-版本號已改 134（7150cf7）。build123 從 133（bd82e0c）起 12 個 commit，未推。
+版本號 134。CI：build134-ci（0e0fb92＋不跑測試的 CI commit），private 倉庫 run 43613022596 成功；IPA E:\桌面\Lan-Agent-build134-unsigned.ipa（CFBundleVersion 134，SHA256 f601372ee0399989a2650f5ff8ae2e5a4a875ecb640e968ce3f029e691ae029a）。

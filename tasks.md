@@ -6,7 +6,9 @@
 - [x] 132 三波 12 組跑完（11-14 04:01–07:51）：5 組全對、逐項約 93%；表與 133 候選在 docs/build132-summary.md 尾段。
 - [x] 133 修正寫好（A1–A6；候選 6 重查不是 bug），docs/build133-summary.md。
 - [x] 133 已編（run 43557478140，bd82e0c），IPA 在桌面。
-- [ ] 裝 133 後三波回歸，驗 A1–A6（docs/build133-summary.md「裝 133 後要驗」）。
+- [x] 133 回歸＋高難度＋地獄級（docs/build133-regression.md）。
+- [x] 134 已編（run 43613022596），IPA 在桌面。
+- [ ] 裝 134 後重跑地獄級 q133y（chain133y.sh 改輸出 r134y），再跑舊三波。
 - [x] 查：測試中使用者打開 Lan Agent，有時 holding、有時 home swipe 後 stopped（g2 vs g8）→ 132 修 X。
 - [ ] Safari 在 Dock 只能搜尋打開（平均 50 秒）：移到主畫面或做圖示比對。
 - [x] 128 兩輪 q128g 回歸（11-13）：約 77/80、73/80，數據在報告尾段。
