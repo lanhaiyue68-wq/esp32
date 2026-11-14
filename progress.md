@@ -1,5 +1,9 @@
 # 当前进度
 
+## 2026-11-15 05:25 134 地獄級監看中；135 寫好未推（換新視窗）
+- 134 地獄級 y1–y4 都跑完（133 同題是假完成或中途失敗）；y5 進行中，之後 z1–z6。Codex 兩格是同一帳號、額度到 11-17。
+- 135（版本 135，未推）：D1–D15，docs/build135-summary.md。交接 E:/AgentStorage/agent-handoff/lan-agent-2026-11-15-handoff.md。
+
 ## 2026-11-15 134 已編譯（IPA 在桌面，等安裝回歸）
 - 133 回歸（11-14 13:42–11-15 00:51）：舊三波、真人單句 22 題、高難度 q133x（24–30 件）、地獄級 q133y（50 件×6）；明細 docs/build133-regression.md。
 - 134（build134-ci run 43613022596，0e0fb92＋CI commit）：B1/B2/C1–C11 共 13 條；IPA E:/桌面/Lan-Agent-build134-unsigned.ipa（CFBundleVersion 134，SHA256 f601372e…029a）。
