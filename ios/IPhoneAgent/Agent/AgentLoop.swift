@@ -27,6 +27,11 @@ struct InputNeedsVerification: LocalizedError {
     }
 }
 
+/// Typed with no keyboard on the screen and nothing new showed: nothing went in (132 c2). Not kept as typed.
+struct NothingTyped: LocalizedError {
+    var errorDescription: String? { "Not typed: no keyboard is on screen" }  // the step says AgentLoop.noKeyboardReason
+}
+
 /// What AgentLoop does on the phone (Pointer, or a fake in tests).
 @MainActor protocol Gestures: AnyObject {
     var device: HIDDevice { get }
@@ -137,6 +142,11 @@ extension Pointer: Gestures {}
     /// 124 over the cloud 11-12 (e02): 行事曆 did not open, the model gave up, and 视频号, Bluetooth and Weather were never
     /// tried. In a goal of three parts or more, this many single things may fail and be written down; the run goes on.
     private var itemFailsLeft = 2
+    /// 132 over the cloud 11-14 (c3): 京东 was not on the phone; Codex, driving, said fail three times in 14 s with nothing
+    /// done between, each refusal took one of the two allowed, and the third ended a twenty-item run at item 15 (16–20
+    /// never tried). A fail right after a refused one, with nothing done between, is the same item: it costs nothing
+    /// (twice in a row at most). And a refused fail closes the part it was in, so the next part is worked on.
+    private var failRefusedAt = -1.0, freeFailRefusals = 0
     static let oneThingFailedReason = "Not ended: one part could not be done; it is noted as 未能完成. Go on with the "
         + "other parts, then done, saying which part failed and why. Fail only if none of the rest can be done."
     /// The texts sent as messages into a chat (not a search's Return): only these are never typed again.
@@ -145,6 +155,8 @@ extension Pointer: Gestures {}
     private var cartAdds = 0, cartToastShown = false
     /// The same toasts by the app they came in (AppNames.hans, lowercased; "" when no app is known).
     private var cartAddsIn: [String: Int] = [:]
+    /// Steps up to here were looked at for a + in 美团 / 饿了么 (addsWithoutToast).
+    private var cartTapsChecked = 0
     /// The done check sent the run back once for an item it said it had not done (skippedWithoutReason).
     private var skipAsked = false
     static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
@@ -227,6 +239,36 @@ extension Pointer: Gestures {}
         let other = ["关闭", "关掉", "close", "返回", "back", "减", "删除", "移除", "remove", "打开购物车", "去购物车", "进入购物车",
                      "open the cart", "go to the cart", "购物车图标", "cart icon"].contains { t.contains($0) }
         return adds && !other
+    }
+
+    /// 美团 and 饿了么 show no "added" toast: a dish's + puts it in, with a count beside it. 132 over the cloud 11-14 (c3):
+    /// "把一份最便宜的加入购物车" became 10 things in 美团's cart (¥96.5), every + let through with no toast to count.
+    static func addsWithoutToast(_ app: String?) -> Bool {
+        guard let app else { return false }
+        let name = AppNames.hans(app).lowercased()
+        return ["美团", "饿了么", "meituan", "eleme"].contains { name.contains($0) }
+    }
+
+    /// A tap the thought calls a dish's + ("点它的绿色加号", "tap its green + button").
+    static func tapsPlus(_ thought: String) -> Bool {
+        let t = AppNames.hans(thought).lowercased()
+        return t.range(of: #"(点击|点|按|tap)[^，。,.]{0,14}(加号|[+＋]|plus)"#, options: .regularExpression) != nil
+            && !["减", "关闭", "返回", "minus", "close", "back"].contains { t.contains($0) }
+    }
+
+    /// An add to the cart: the words, or in 美团 / 饿了么 the + as well.
+    static func addsDish(_ thought: String, in app: String?) -> Bool {
+        addsToCart(thought) || (addsWithoutToast(app) && tapsPlus(thought))
+    }
+
+    /// Where the gray cursor disk is on this screen (0-1000), so what it covers is not read as a badge.
+    static func cursorNote(_ at: CGPoint) -> String {
+        "The gray cursor disk is at x \(Int((at.x * 1000).rounded())), y \(Int((at.y * 1000).rounded())): "
+            + "it is not a badge or a count; what is under it is hidden."
+    }
+
+    static func cartTapNote(_ n: Int) -> String {
+        "购物车：这个 App 加购不会弹提示，按加号算：这是第\(n)次加进购物车（这次任务一共加了\(n)次）。同一件不要再点加号，每点一次就多一份；目标要几份就只加几次。"
     }
 
     static func cartFullReason(_ n: Int) -> String {
@@ -663,21 +705,31 @@ extension Pointer: Gestures {}
     /// way. Items of a goal of 3+ things the answer says were not done, with no reason given (a login, verification, an
     /// app not installed, nothing found, the minimum order), and not a summary of other items. nil: none.
     /// `absent`: apps this run found are not on the phone (r131c c1: 京东, its item answered "未完成该项读取").
+    /// 132 over the cloud 11-14: "配送费与合计金额未完整读取" (g4), "商品种类数未确认" (c1) went through: those words were not
+    /// known, and g4's item also said "未支付", which counted as a reason. Each clause is judged with the ones before it
+    /// (a reason after it is not its reason), and stopping before paying (未支付, 未提交订单) is what was asked, not a reason.
     static func skippedWithoutReason(_ answer: String, task: String, absent: [String] = []) -> String? {
         guard goalParts(task) >= 3 else { return nil }
         let notDone = ["未执行", "没执行", "没有执行", "未做", "没做", "没有做", "未进行", "没进行", "未完成", "没完成", "没有完成",
-                       "无记录", "没有记录", "not done"]
+                       "无记录", "没有记录", "未记录", "没记录", "未确认", "没确认", "未完整读取", "未读取", "没读取", "没有读取",
+                       "not done"]
         let reasons = ["登录", "登陆", "验证", "实名", "身份", "安装", "没装", "未装", "不存在", "找不到", "没找到", "没有找到", "未找到",
                        "无法", "不能", "不支持", "失败", "超时", "网络", "付款", "支付", "下单", "起送", "因为", "由于", "原因", "因",
                        "不要", "禁止", "要求"]
+        let stopsBeforePaying = #"(未|没有|没|不)(提交订单|确认订单|确认支付|支付|付款|下单|提交)"#
         let skipped = numberedItems(answer).filter { item in
             let body = AppNames.hans(String(answer[item.body])).lowercased()
-            return notDone.contains { body.contains($0) } && !reasons.contains { body.contains($0) }
-                && body.range(of: #"第\s*\d{1,2}\s*[项項]"#, options: .regularExpression) == nil
-                && !absent.contains { app in
-                    let name = AppNames.hans(app).lowercased()
-                    return !name.isEmpty && body.contains(name)
-                }
+            guard body.range(of: #"第\s*\d{1,2}\s*[项項]"#, options: .regularExpression) == nil,
+                  !absent.contains(where: { app in
+                      let name = AppNames.hans(app).lowercased()
+                      return !name.isEmpty && body.contains(name)
+                  }) else { return false }
+            let clauses = body.replacingOccurrences(of: stopsBeforePaying, with: "", options: .regularExpression)
+                .components(separatedBy: CharacterSet(charactersIn: "，,；;。（）()"))
+            return clauses.indices.contains { i in
+                notDone.contains { clauses[i].contains($0) }
+                    && !reasons.contains { reason in clauses[...i].contains { $0.contains(reason) } }
+            }
         }.map { $0.n }
         guard !skipped.isEmpty else { return nil }
         return "The answer says item " + skipped.map { String($0) }.joined(separator: "、") + " was not done, and nothing stopped "
@@ -821,6 +873,32 @@ extension Pointer: Gestures {}
             let end = i + 1 < items.count ? items[i + 1].1.lowerBound : text.endIndex
             return (n: h.0, body: h.1.upperBound..<end)
         }
+    }
+
+    /// The text with each weekday it gives for a date ("12月1日是星期日", "2026年12月1日（周二）") made right by the calendar.
+    /// A date without a year is in today's year, or the next when it would be over half a year back.
+    static func rightWeekdays(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        let pattern = #"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]\s*[（(]?\s*(?:是|为|為)?\s*(?:星期|周|週|礼拜|禮拜)([一二三四五六日天])"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return text }
+        let names = ["日", "一", "二", "三", "四", "五", "六"]  // Calendar's weekday 1 is Sunday
+        let ns = text as NSString
+        var out = ns
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            guard let month = Int(ns.substring(with: m.range(at: 2))), let day = Int(ns.substring(with: m.range(at: 3))) else { continue }
+            var year = m.range(at: 1).location != NSNotFound ? Int(ns.substring(with: m.range(at: 1))) : nil
+            if year == nil {
+                let now = calendar.component(.year, from: today)
+                let thisYear = calendar.date(from: DateComponents(year: now, month: month, day: day))
+                year = thisYear.map { $0.timeIntervalSince(today) < -183 * 86_400 } == true ? now + 1 : now
+            }
+            guard let y = year, let date = calendar.date(from: DateComponents(year: y, month: month, day: day)),
+                  calendar.component(.month, from: date) == month, calendar.component(.day, from: date) == day else { continue }
+            let right = names[calendar.component(.weekday, from: date) - 1]
+            let said = ns.substring(with: m.range(at: 4))
+            if said == right || (said == "天" && right == "日") { continue }
+            out = out.replacingCharacters(in: m.range(at: 4), with: right) as NSString  // one character for one: ranges hold
+        }
+        return out as String
     }
 
     /// The answer with this run's notes added after it, when it covers under half of a goal of 3+ numbered things; nil
@@ -1525,6 +1603,7 @@ extension Pointer: Gestures {}
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (stallsNoProgress, messageSent, sendIsMessage, itemFailsLeft, refusalsNoProgress) = (0, [], false, 2, 0)
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
+        (failRefusedAt, freeFailRefusals, cartTapsChecked) = (-1, 0, 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -1853,8 +1932,8 @@ extension Pointer: Gestures {}
             // spec sheet came up. Once the "added" toast has come as often as the goal asks for, adding is refused.
             // 131 over the cloud 11-13 (r131b g5): counted over the whole goal, 淘宝 一件 and 美团外卖 一份 made 2 for both:
             // 淘宝 got a second bottle, and 美团's one add was refused. Each app is held to what the goal asks of it.
-            if act["action"]?.str == "tap", Self.addsToCart(act["thought"]?.str ?? "") {
-                let shop = Self.appInFront(steps, startedIn: startApp)
+            if act["action"]?.str == "tap", case let shop = Self.appInFront(steps, startedIn: startApp),
+               Self.addsDish(act["thought"]?.str ?? "", in: shop) {
                 let added = shop.map { cartAddsIn[AppNames.hans($0).lowercased(), default: 0] } ?? cartAdds
                 if added >= Self.cartWanted(task, in: shop) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.cartFullReason(added))])
@@ -2043,6 +2122,15 @@ extension Pointer: Gestures {}
                 DebugLog.write("done: the answer covers few of the goal's things; what this run noted is added")
                 act["answer"] = .str(full)
             }
+            // 132 over the cloud 11-14 (c3): "2026年12月1日是星期日"; it is a Tuesday. A weekday the answer gives for a
+            // date is checked with the calendar and put right.
+            if name == "done", endsTask, let answer = act["answer"]?.str {
+                let fixed = Self.rightWeekdays(answer, today: Date())
+                if fixed != answer {
+                    DebugLog.write("done: a weekday given for a date was wrong; put right")
+                    act["answer"] = .str(fixed)
+                }
+            }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
                     let answer = act["answer"]?.str ?? "", frame = screen?.frame ?? planned.shot
@@ -2082,11 +2170,21 @@ extension Pointer: Gestures {}
                 }
             }
             if name == "done", !coversGoal, partFinished(act, shot: planned.shot) { return false }
-            if name == "fail", itemFailsLeft > 0, presetPlan.isEmpty, Self.goalParts(task) >= 3 {
-                itemFailsLeft -= 1
-                let line = "未能完成：" + String((act["reason"]?.str ?? "").prefix(120))
-                if !notes.contains(line) { notes.append(line) }
-                record(planned.shot, ["action": .str("fail refused"), "reason": .str(Self.oneThingFailedReason)])
+            let failAgain = Self.failIsRepeat(refusedAt: failRefusedAt, lastActed: lastActed, free: freeFailRefusals)
+            if name == "fail", itemFailsLeft > 0 || failAgain, presetPlan.isEmpty, Self.goalParts(task) >= 3 {
+                let why = act["reason"]?.str ?? ""
+                if failAgain {
+                    freeFailRefusals += 1
+                } else {
+                    itemFailsLeft -= 1
+                    freeFailRefusals = 0
+                    let line = "未能完成：" + String(why.prefix(120))
+                    if !notes.contains(line) { notes.append(line) }
+                }
+                // The repeat is about the part already closed: the one now open is not closed with it.
+                let next = failAgain ? Self.alreadyNotedReason + nextPartText : closeFailedPart(why, by: act["by"]?.str)
+                failRefusedAt = now()
+                record(planned.shot, ["action": .str("fail refused"), "reason": .str(Self.oneThingFailedReason + next)])
                 return false
             }
             if name != "done" && name != "fail" {
@@ -2405,6 +2503,11 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("press failed"), "reason": .str(keys.localizedDescription)])
                     return false
                 }
+                catch is NothingTyped {
+                    aimNext = true  // the next tap on the box is aimed, as for the guard before typing
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.noKeyboardReason)])
+                    return false
+                }
                 catch let input as InputNeedsVerification {
                     if input.fieldMayBeComplete { pendingInput = input.expected }
                     lastActed = now()
@@ -2672,6 +2775,7 @@ extension Pointer: Gestures {}
             return false
         }
         let before = CandidatePicker.shows(text, in: start)
+        let keyboardBefore = CandidatePicker.keyboardUp(in: start) || ourKeyboardOnScreen?() == true
         try await phone.typeQuick(text)
         var after = await freshFrame()
         if let shown = after, CandidatePicker.shows(text, in: shown) <= before {  // the frame may predate the last key
@@ -2680,6 +2784,14 @@ extension Pointer: Gestures {}
         }
         if let shown = after, CandidatePicker.shows(text, in: shown) > before { return true }
         trace?.write(after, kind: "input verification", ["method": .str("pinyin"), "verified": .bool(false)])
+        // 132 over the cloud 11-14 (c2): "keyboard: no keyboard on screen", the keys went nowhere, and the text was kept
+        // as typed: typing 首尔 again was refused twice and the item given up (131 c3: 猫 in 抖音, 16 minutes). With no
+        // keyboard before or after and nothing new on the screen, nothing was typed.
+        let keyboardAfter = (after.map { CandidatePicker.keyboardUp(in: $0) } ?? false) || ourKeyboardOnScreen?() == true
+        if !keyboardBefore, !keyboardAfter {
+            DebugLog.write("type: no keyboard on screen and the text did not show; not kept as typed")
+            throw NothingTyped()
+        }
         DebugLog.write("type: pinyin unconfirmed; kept the field for inspection")
         throw InputNeedsVerification(expected: text, remaining: "", fieldMayBeComplete: true)
     }
@@ -3155,6 +3267,30 @@ extension Pointer: Gestures {}
         return partIndex < parts.count
     }
 
+    /// A fail right after a refused one, with nothing done since, is the same item again (c3, 132): free twice in a row.
+    static func failIsRepeat(refusedAt: Double, lastActed: Double, free: Int) -> Bool {
+        refusedAt >= 0 && lastActed <= refusedAt && free < 2
+    }
+
+    static let alreadyNotedReason = " That item is already noted as 未能完成: do not report it again; start the next item now."
+
+    /// The part now open, for a refusal ("" without parts, or when every part is closed).
+    private var nextPartText: String {
+        parts.count >= 2 && partIndex < parts.count ? " Next part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])" : ""
+    }
+
+    /// A refused fail closes the part it was in as 未能完成, so the next part is worked on: the run kept the part that
+    /// cannot be done open, and Codex failed on it again and again (c3, 132). Returns what the refusal says about the next part.
+    private func closeFailedPart(_ why: String, by: String?) -> String {
+        guard parts.count >= 2, partIndex < parts.count else { return "" }
+        doneParts.append(parts[partIndex] + " -> 未能完成：" + String(why.prefix(80)))
+        record(nil, ["action": .str("part failed"), "part": .int(partIndex + 1)])
+        gotOn()
+        (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
+        if by == "planner" { takeover = 0 }
+        return nextPartText
+    }
+
     /// The executor gave up: Codex takes over once before the user is asked. Never after a message went out (it must
     /// not go twice), nor when Codex itself gave up.
     private func rescue() async throws -> Bool {
@@ -3302,7 +3438,22 @@ extension Pointer: Gestures {}
         // the model's own "淘宝雨伞两次出现加购成功提示"), and the done check took the cart to hold three umbrellas.
         let frontApp = Self.appInFront(steps, startedIn: startApp)
         let cartToast = Self.addedToCart(readRows) && Self.sellsThings(frontApp)
-        if cartToast, !cartToastShown {
+        // In 美团 / 饿了么 each + that changed the screen is one add (no toast comes); a toast as well is not counted twice.
+        var tapAdded = false
+        if Self.addsWithoutToast(frontApp) {
+            for i in min(cartTapsChecked, steps.count)..<steps.count where steps[i]["action"]?.str == "tap"
+                && steps[i]["changed"] != .bool(false) && Self.addsDish(steps[i]["thought"]?.str ?? "", in: frontApp) {
+                tapAdded = true
+                cartAdds += 1
+                cartAddsIn[AppNames.hans(frontApp ?? "").lowercased(), default: 0] += 1
+                let line = Self.cartTapNote(cartAdds)
+                notes.append(line)
+                prompt += "\n\n" + line
+            }
+            if tapAdded { gotOn() }
+        }
+        cartTapsChecked = steps.count
+        if cartToast, !cartToastShown, !tapAdded {
             cartAdds += 1
             cartAddsIn[frontApp.map { AppNames.hans($0).lowercased() } ?? "", default: 0] += 1
             let line = Self.cartNote(cartAdds)
@@ -3311,6 +3462,8 @@ extension Pointer: Gestures {}
             prompt += "\n\n" + line
         }
         cartToastShown = cartToast
+        // 132 over the cloud 11-14 (g5, g7): "待收货 1 个" with no order anywhere: the cursor disk sat on the icon.
+        if pointerAt != .zero { prompt += "\n\n" + Self.cursorNote(pointerAt) }
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
         }
