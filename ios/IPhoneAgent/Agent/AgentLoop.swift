@@ -43,6 +43,8 @@ struct NothingTyped: LocalizedError {
     func goHome() async throws
     /// Press and hold (Pointer.longPress): WeChat's message menu (复制, 转发), an icon's menu.
     func longPress(_ x: Double, _ y: Double, seconds: Double) async throws
+    /// D18: the same, running `whileHeld` while the finger is still down (a chart shows the value under it only then).
+    func longPress(_ x: Double, _ y: Double, seconds: Double, whileHeld: @escaping @MainActor () async -> Void) async throws
     /// The next tap is for something this big (half width and height, 0-1): Pointer clicks a first stop inside it.
     func aimLoosely(_ halfX: Double, _ halfY: Double)
     func goBack() async throws
@@ -56,6 +58,10 @@ extension Gestures {
     func answerSharingQuestion() async throws -> Bool { false }
     /// Fakes in tests: a long press is recorded as a tap there.
     func longPress(_ x: Double, _ y: Double, seconds: Double) async throws { try await tap(x, y, aim: false) }
+    func longPress(_ x: Double, _ y: Double, seconds: Double, whileHeld: @escaping @MainActor () async -> Void) async throws {
+        try await longPress(x, y, seconds: seconds)
+        await whileHeld()
+    }
     func aimLoosely(_ halfX: Double, _ halfY: Double) {}
 }
 
@@ -129,6 +135,8 @@ extension Pointer: Gestures {}
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
     private var deadRefused = 0
+    /// D18: the screen while the last hold was still down (see shownOnlyWhileHeld); nil once a look used it.
+    private var heldFrame: Data?
     /// D17: refusals of a round of taps (repeatsRound) since the last change of plan.
     private var roundRefused = 0
     private var untypedSearches = 0  // searches refused because nothing was typed (twice at most per run)
@@ -1301,6 +1309,14 @@ extension Pointer: Gestures {}
 
     /// At most this many new plans for things left when a plan runs out (D16).
     static let continuationLimit = 8
+
+    /// D18: the words read while a finger was held that are gone once it let go (a chart's value under the finger,
+    /// "下午3:00 25°"), in reading order, at most 16 pieces.
+    static func shownOnlyWhileHeld(_ held: [[CandidatePicker.Piece]], now: [[CandidatePicker.Piece]]) -> String {
+        let after = Set(now.joined().map { AppPlaces.normalized($0.text) })
+        return held.joined().filter { !after.contains(AppPlaces.normalized($0.text)) }.prefix(16).map { $0.text }
+            .joined(separator: " ")
+    }
 
     /// B4 (122 over the cloud 11-11): the clipboard cannot be read from the background, and the approval showed only
     /// "（粘贴的内容）". What the paste put in is read off the screen: the words after it that were nowhere before it
@@ -3840,7 +3856,12 @@ extension Pointer: Gestures {}
                     + "\nPlan only what is left."
             }
         }
-        if !left.isEmpty { prompt += "\n\n" + Self.itemsLeftLine(left) }
+        if !left.isEmpty {
+            prompt += "\n\n" + Self.itemsLeftLine(left)
+        } else if presetPlan.isEmpty, Self.goalParts(task) >= 10 {
+            // y5: a thing skipped was planned again at once (its part had no number, so nothing showed it was given up).
+            prompt += "\n\nOne part per thing of the goal, each starting with 第N项： (N = its number in the goal)."
+        }
         prompt += notesText
         let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
         let (en, zh) = Actions.parsePlan(reply)
@@ -3915,6 +3936,18 @@ extension Pointer: Gestures {}
             readRows = await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1)
         } else {
             readRows = []
+        }
+        // D18: what showed only while the last hold was down (a chart's value under the finger).
+        if let held = heldFrame {
+            heldFrame = nil
+            var after = readRows
+            if after.isEmpty, let shown = screen?.frame { after = await CandidatePicker.rowsOffMain(in: shown, top: 0.055, bottom: 1) }
+            let heldRows = await CandidatePicker.rowsOffMain(in: held, top: 0.055, bottom: 1)
+            let words = Self.shownOnlyWhileHeld(heldRows, now: after)
+            if !words.isEmpty {
+                prompt += "\n\nShown only while your finger was held down (gone once it let go): " + words
+                DebugLog.write("hold: shown only while held: " + words)
+            }
         }
         // 125 stress test 11-12 (s01): 加入购物车 was tapped again and again and the cart held ×5 of a cup the goal asked
         // for once. Each time the "added" toast comes up it is written down, and the model is told at once.
@@ -4044,7 +4077,17 @@ extension Pointer: Gestures {}
             try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
         case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
-        case "hold": try await phone.longPress(p("x"), p("y"), seconds: 0.8)
+        case "hold":
+            // D18, 134 over the cloud 11-15 (y4, y5): Weather's page for tomorrow shows an hour's value (下午3時) only under
+            // a finger held on its chart, and every look came after the finger let go: ten minutes of swipes, then
+            // skipped. The screen is caught while held; the next look is told what showed only then (nextActions).
+            heldFrame = nil
+            let caught = screen
+            try await phone.longPress(p("x"), p("y"), seconds: 0.8, whileHeld: { [weak self] in
+                guard let caught, caught.live else { return }
+                try? await caught.requireFrame(after: now() - 0.5)  // 0.1 s after the press or later
+                self?.heldFrame = caught.frame
+            })
         case "listen":
             // User 11-11: a video's spoken words (口播文案) and what it is about, from WeChat, 抖音, 视频号.
             guard let listen else { throw DeviceError(message: "Listening is not available here.") }

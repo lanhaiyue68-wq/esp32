@@ -896,7 +896,12 @@ import Foundation
     /// Press and hold at a spot, then let go: the globe key shows its keyboard menu only on a long press (a click
     /// switches nothing visible, user 11-08). Like tap, the spot just clicked is held again without moving.
     func longPress(_ x: Double, _ y: Double, seconds: Double = 0.8) async throws { try await oneAtATime { try await longPressNow(x, y, seconds: seconds) } }
-    private func longPressNow(_ x: Double, _ y: Double, seconds: Double) async throws {
+    /// D18: `whileHeld` runs 0.6 s after the press, before the release (Weather's day chart shows an hour's value under
+    /// the finger only while it is down).
+    func longPress(_ x: Double, _ y: Double, seconds: Double, whileHeld: @escaping @MainActor () async -> Void) async throws {
+        try await oneAtATime { try await longPressNow(x, y, seconds: seconds, whileHeld: whileHeld) }
+    }
+    private func longPressNow(_ x: Double, _ y: Double, seconds: Double, whileHeld: (@MainActor () async -> Void)? = nil) async throws {
         drawChain = false
         if let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             log(String(format: "long press (%.3f, %.3f): same spot as the last click; holding without moving", x, y))
@@ -913,7 +918,16 @@ import Foundation
             if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
         }
         try await device.send("press")
-        do { try await Task.sleep(nanoseconds: UInt64(seconds * 1e9)) } catch {
+        do {
+            if let whileHeld {
+                let settle = min(0.6, seconds)
+                try await Task.sleep(nanoseconds: UInt64(settle * 1e9))
+                await whileHeld()
+                if seconds > settle { try await Task.sleep(nanoseconds: UInt64((seconds - settle) * 1e9)) }
+            } else {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            }
+        } catch {
             _ = try? await device.send("release")
             throw error
         }

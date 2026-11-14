@@ -62,7 +62,9 @@ Actions:
   tap X Y [precise]         (precise: the pointer is located and corrected before tapping, about 1 s slower;
                              use it for small or tightly packed targets: list rows, checkmarks, toggles, small icons)
   hold X Y                  (press and hold about a second: the menu of a WeChat message — 复制, 转发, 引用 — or of an
-                             app icon. Never write touch_and_hold or a swipe that stays in place: hold is the long press)
+                             app icon. Never write touch_and_hold or a swipe that stays in place: hold is the long press.
+                             On a chart (Weather's day page, Stocks) hold on the curve at the time you want: what the
+                             chart shows under the finger comes back to you as "Shown only while your finger was held")
   swipe X1 Y1 X2 Y2         (finger moves from X1,Y1 to X2,Y2: "swipe down" means Y2 > Y1. A list moves about as far
                              as the finger. What is BELOW (later rows): move the finger up, swipe 500 750 500 300. What
                              is ABOVE (the top of the page, earlier rows): move the finger down, swipe 500 300 500 750.

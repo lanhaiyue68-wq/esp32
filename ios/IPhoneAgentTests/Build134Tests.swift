@@ -215,6 +215,17 @@ import XCTest
         XCTAssertFalse(AgentLoop.repeatsRound(taps + [["action": .str("note"), "text": .str("第21项：开车19分钟")]], next: tap(166, 250)))
     }
 
+    /// D18, 134 (y4, y5): Weather's day chart shows 下午3时's value only under a held finger.
+    func testWhatShowedOnlyWhileHeldIsTold() {
+        func row(_ texts: [String], _ y: Double) -> [CandidatePicker.Piece] {
+            texts.enumerated().map { i, t in CandidatePicker.Piece(text: t, box: CGRect(x: 0.1 + 0.2 * Double(i), y: y, width: 0.15, height: 0.03)) }
+        }
+        let held = [row(["11月16日", "下午3:00", "25°"], 0.2), row(["凌晨12時", "清晨6時", "中午12時", "下午6時"], 0.6)]
+        let after = [row(["11月16日", "27°", "22°"], 0.2), row(["凌晨12時", "清晨6時", "中午12時", "下午6時"], 0.6)]
+        XCTAssertEqual(AgentLoop.shownOnlyWhileHeld(held, now: after), "下午3:00 25°")
+        XCTAssertEqual(AgentLoop.shownOnlyWhileHeld(after, now: after), "")
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"
