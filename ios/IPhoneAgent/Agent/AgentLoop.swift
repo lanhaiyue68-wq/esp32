@@ -4020,7 +4020,7 @@ extension Pointer: Gestures {}
 
     private func checkPrompt(_ answer: String) -> String {
         Self.checkPrompt(goal: task, today: Self.todayLine(goal: task), answer: answer, did: Self.whatItDid(steps), notes: notes,
-                         sent: sent, parts: parts.count)
+                         sent: sent, parts: max(parts.count, Self.goalParts(task)))
     }
 
     /// Build 121 over the cloud 11-11: goals of 7 and 8 parts were answered right and reported "（未能核實）": the check saw
@@ -4037,6 +4037,10 @@ extension Pointer: Gestures {}
             text += "\n\nThis goal has \(parts) parts done one after another, and the screen shows only where the last one ended. "
                 + "A value or a send from an earlier part is checked against what it did and wrote down above, not against this "
                 + "screen: call it wrong only when this screen or those lines contradict it."
+                // D33, y5 on 135: "淘宝首个保温杯价格记为¥12，当前屏幕显示为¥9.5" — ¥12 was read off the search list for item
+                // 7, and the screen was a shop page of other cups for item 44. Refused twice; the run ended worse.
+                + " This screen contradicts a value only when it shows that very thing (the same product, place or message "
+                + "on the same kind of page); another page, list or product with a different number is no contradiction."
         }
         return text + "\n\nThe image is the screen now."
     }
@@ -4066,6 +4070,20 @@ extension Pointer: Gestures {}
             + ". Fix it on the phone or correct the answer, then finish again."
     }
 
+    /// D32, y5 on 135: Codex drove parts to "done 第39项：(12345 × 678 − 9876) ÷ 3.5 = 2,388,581.14" and "done 第11项：2027年2月共有
+    /// 4个星期一…", and that went only into the list of parts done, which a plan of one part never shows. The last part (Codex,
+    /// "第49项：report all") answered from the notes: 未记录 for 11, 22, 35, 38, 39, 40 and more. What a part found is a note
+    /// like any other, headed with its item; nil when it says nothing.
+    static func partResultNote(part: String, found: String) -> String? {
+        let t = found.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bare = t.replacingOccurrences(of: #"[\s。．.!！]"#, with: "", options: .regularExpression)
+        guard bare.count >= 4, !["已经完成", "已完成了", "已做完了"].contains(bare) else { return nil }
+        let item = #"^第\s*\d{1,3}\s*[项項]"#
+        guard let head = part.range(of: item, options: .regularExpression), t.range(of: item, options: .regularExpression) == nil
+        else { return t }
+        return part[head].replacingOccurrences(of: " ", with: "") + "：" + t
+    }
+
     /// The executor's (or Codex's) "done" on a plan of several parts: the next part begins, the last one ends the run.
     /// A part Codex rescued is done: the executor takes the next one. True: the run goes on.
     private func partFinished(_ act: JObject, shot: Data?) -> Bool {
@@ -4081,6 +4099,10 @@ extension Pointer: Gestures {}
             return true
         }
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
+        if let line = Self.partResultNote(part: parts[partIndex], found: String((act["answer"]?.str ?? "").prefix(600))),
+           !notes.contains(line) {
+            notes.append(line)
+        }
         record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
         if let tip = tryingTip { lessons?.tipResult(tip, worked: true); tryingTip = nil }  // the way learned worked
         gotOn()
