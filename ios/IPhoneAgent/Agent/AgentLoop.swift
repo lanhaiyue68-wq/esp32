@@ -3717,7 +3717,8 @@ extension Pointer: Gestures {}
     way is IN THIS APP: one concrete method that works with this app's own screens (which page or list, which control, \
     which gesture), never "try again", "be careful" or screen coordinates. Reply with exactly one line, in the language \
     of the goal:
-    WAY: <how to do this kind of step in this app, at most 80 characters>
+    WAY: <how to do this kind of step in this app, at most 80 characters: a method that works another day for another \
+    goal, never this run's results, the numbers on the screen, or how far it got>
     or BLOCKED: <why it cannot be done on this phone now: a permission or service turned off, the app not installed, a \
     login, code or password needed, the app's own error page>
     or NONE when you cannot tell. Never suggest typing a password, paying, ordering, or changing a system setting.
@@ -3731,7 +3732,12 @@ extension Pointer: Gestures {}
                 let text = line.dropFirst(tag.count).trimmingCharacters(in: .whitespaces)
                 // A remembered spot is wrong once the screen moves (LessonBook.parseLessons).
                 let spot = text.range(of: #"\d{2,4}\s*[,，]\s*\d{2,4}"#, options: .regularExpression) != nil
-                return text.isEmpty || spot ? .unknown : make(String(text.prefix(160)))
+                // D30, 135 over the cloud 11-15 (y2): "深圳天气页的日落卡已显示日出6:36、日落17:40" and "第10项已听取并记录；当前在
+                // 淘宝商品页" were kept as ways, and every later task in that app would get them. A way is a method: one that
+                // tells this run's values (a time, a price, a percentage, an item number) or its progress is not kept.
+                let runFact = tag == "WAY:" && text.range(of: #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\s*\d+\s*[项項]|已(完成|听取|聽取|记录|記錄|读取|讀取|显示|顯示|打开|打開)|当前在|當前在"#,
+                                                         options: .regularExpression) != nil
+                return text.isEmpty || spot || runFact ? .unknown : make(String(text.prefix(160)))
             }
             if upper.hasPrefix("NONE") { return .unknown }
         }

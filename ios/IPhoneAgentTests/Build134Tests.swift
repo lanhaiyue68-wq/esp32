@@ -346,6 +346,15 @@ import XCTest
         XCTAssertFalse(TeachTip.parse("APP:\nWAY:\nSAY: 学到了三条做法。").isLesson, "a question answered, nothing to keep")
     }
 
+    /// D30, 135 (y2): this run's values and progress were kept as ways for the app.
+    func testARunsResultIsNoWay() {
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 深圳天气页的日落卡已显示日出6:36、日落17:40，相差11小时4分"), .unknown)
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 第10项已听取并记录；当前在淘宝商品页，可继续完成后续事项"), .unknown)
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 拼多多首个商品¥19.9"), .unknown)
+        XCTAssertEqual(AgentLoop.parseCoaching("WAY: 在支付宝详情页向上滑到“评分与评论”看评分和评分人数"),
+                       .way("在支付宝详情页向上滑到“评分与评论”看评分和评分人数"))
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"
