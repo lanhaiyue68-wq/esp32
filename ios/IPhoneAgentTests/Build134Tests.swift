@@ -376,4 +376,19 @@ import XCTest
         XCTAssertTrue(kept.hasPrefix("甲") && kept.hasSuffix("这一眼"))
         XCTAssertEqual(AgentLoop.tracedPrompt("短"), "短")
     }
+
+    /// D32, D33 (y5 on 135): what a part found is a note; the check knows that another page's price is no contradiction.
+    func testWhatAPartFoundIsNoted() {
+        XCTAssertEqual(AgentLoop.partResultNote(part: "第39项：The calculation is recorded — open 計算機",
+                                                found: "第39项：(12345 × 678 − 9876) ÷ 3.5 = 2,388,581.14"),
+                       "第39项：(12345 × 678 − 9876) ÷ 3.5 = 2,388,581.14")
+        XCTAssertEqual(AgentLoop.partResultNote(part: "第11项：2027年2月的星期一已记录", found: "2027年2月共有4个星期一：1、8、15、22日。"),
+                       "第11项：2027年2月共有4个星期一：1、8、15、22日。")
+        XCTAssertEqual(AgentLoop.partResultNote(part: "打开设置看电量", found: "电量 98%"), "电量 98%")
+        XCTAssertNil(AgentLoop.partResultNote(part: "第3项：x", found: ""))
+        XCTAssertNil(AgentLoop.partResultNote(part: "第3项：x", found: "已完成。"))
+        let prompt = AgentLoop.checkPrompt(goal: "帮我做这49件事：…", today: "", answer: "7. 淘宝12元", did: "", notes: [],
+                                           sent: [], parts: 49)
+        XCTAssertTrue(prompt.contains("no contradiction"), prompt)
+    }
 }
