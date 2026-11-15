@@ -144,6 +144,7 @@ extension Pointer: Gestures {}
     private var untypedSearches = 0  // searches refused because nothing was typed (twice at most per run)
     private var blindLooks = 0
     private(set) var takeover = 0
+    private var refusalRedirectAt = -1   // D35: the look whose refused reply already went to Codex
     private var stepsInPart = 0, rescued = false, troubles = 0
     /// 124 over the cloud 11-12 (g05): every type was refused, the part stalled, a new plan was made, and again, for ten
     /// minutes and ~290 steps with nothing on the screen moving. New plans in a row with nothing noted or finished between
@@ -2142,9 +2143,16 @@ extension Pointer: Gestures {}
                     if error is BoardTimeout || error is DeviceError {
                         // An unacknowledged action may have completed. Observe its result before replanning;
                         // reset tracking, but never replay the original relative move/click/text.
-                        if phone?.device.connected == true { try await phone?.device.abort() }
-                        try await screen?.requireFrame(after: nil)
-                        try await phone?.reset()
+                        do {
+                            if phone?.device.connected == true { try await phone?.device.abort() }
+                            try await screen?.requireFrame(after: nil)
+                            try await phone?.reset()
+                        } catch let e where Self.isLinkLoss(e, screenLive: screen?.live) {
+                            // D34, y6 on 135: the board's BLE dropped for 3 s mid-swipe; this look threw "开发板已断开"
+                            // past the run's own wait, and a run of 50 things ended at 47 minutes. The next look waits.
+                            DebugLog.write("run: the board or mirror dropped (\(e.localizedDescription)); the next look waits for it")
+                            continue
+                        }
                     }
                     do { try await replan(stuck: true) }
                     catch let e where ModelRequestFailure.isNetworkDown(e) {
@@ -3814,6 +3822,15 @@ extension Pointer: Gestures {}
 
     static let takeoverSteps = 15   // steps Codex drives after a stall, until its part is done
 
+    /// D35: the model service's stock refusal (short, no THINK/DO): "抱歉，您的问题我无法识别", "你好，这个问题我无法回答",
+    /// "抱歉，没有找到相关的结果", "你好，我无法给到相关内容". The service would not take the prompt; the model did not answer.
+    static func serviceRefused(_ reply: String) -> Bool {
+        let t = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count <= 40, !t.contains("DO"), !t.contains("THINK") else { return false }
+        return t.range(of: #"^(抱歉|很抱歉|对不起|你好|您好)[，,。！!\s]*.*(无法|没有找到|未找到|不能|不便)"#,
+                       options: .regularExpression) != nil
+    }
+
     /// What the executor is told about its part (nothing for a plan of one part or a fixed plan).
     private var partFocus: String {
         guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
@@ -4374,6 +4391,15 @@ extension Pointer: Gestures {}
                 if driving {  // Codex answered with no action: Doubao goes on rather than Codex being asked again and again
                     (takeover, plannerLeads) = (0, false)
                     DebugLog.write("takeover: Codex's reply held no action; the executor goes on")
+                    return try await nextActions()
+                }
+                // D35, y6 on 135: once a note held a news line naming a state leader (read off a memo), Doubao's service
+                // answered 13 looks with its stock refusal ("抱歉，您的问题我无法识别"), three tries each, and every one
+                // became a stuck plan. The service would not read this look: Codex takes this one step.
+                if Self.serviceRefused(text), planner != nil, refusalRedirectAt != steps.count {
+                    refusalRedirectAt = steps.count
+                    takeover = max(takeover, 1)
+                    DebugLog.write("actor: the model service would not read this look (\(text.prefix(30))); Codex takes this step")
                     return try await nextActions()
                 }
                 prompt += "\n\nYour previous reply could not be parsed (\(String(error.localizedDescription.prefix(160))))."

@@ -391,4 +391,16 @@ import XCTest
                                            sent: [], parts: 49)
         XCTAssertTrue(prompt.contains("no contradiction"), prompt)
     }
+
+    /// D34, D35 (y6 on 135): a dropped board is a link loss; the service's stock refusal is not the model's reply.
+    func testAServiceRefusalAndADroppedBoardAreNoFailures() {
+        for t in ["抱歉，您的问题我无法识别", "你好，这个问题我无法回答", "抱歉，没有找到相关的结果", "你好，我无法给到相关内容"] {
+            XCTAssertTrue(AgentLoop.serviceRefused(t), t)
+        }
+        for t in ["THINK: 抱歉无法\nDO: back", "DO: done 抱歉", "好的",
+                  "抱歉，屏幕上没有找到发送按钮，我需要先返回上一页再找找看这个按钮在哪里吧，然后再试一次"] {
+            XCTAssertFalse(AgentLoop.serviceRefused(t), t)
+        }
+        XCTAssertTrue(AgentLoop.isLinkLoss(VideoReadinessError.boardDisconnected, screenLive: true))
+    }
 }
