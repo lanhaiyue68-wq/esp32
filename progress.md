@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-15 23:10 135 回歸跑完；136 本機寫好（版本 136，未推）
+- 135 地獄級（q135a 回「是」y1–y6、q135b 回「否」z1–z6）：y1–y5 成功，y6 因板子 BLE 斷 3 秒失敗；z1–z6 都照規則問了、沒裝、整個任務結束。
+- 136 新增（明細 docs/build136-summary.md）：D23–D31、F 學習入口、客戶場景規則 A B C G，加上 D32 部分結果存成筆記、D33 完成檢查不拿別頁比、D34 板子短暫斷線不結束、D35 豆包審核拒答改由 Codex 走這一步、安裝詢問用簡體名。
+- 下一步：使用者點頭後推 136（交接見 E:/AgentStorage/agent-handoff/HANDOFF.md 23:10）。
+
 ## 2026-11-15 14:50 135 已編譯（IPA 在桌面，等安裝回歸）
 - 使用者 14:46 同意推：build135-ci（200c18b＋CI commit 3eacbca）推 private，run 43682371003 成功；IPA E:/桌面/Lan-Agent-build135-unsigned.ipa（CFBundleVersion 135，主程式／鍵盤／動態島皆 135；SHA256 95f44a0b…27bf）。
 
