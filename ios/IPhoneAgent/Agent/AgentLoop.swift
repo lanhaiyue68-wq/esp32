@@ -1441,7 +1441,10 @@ extension Pointer: Gestures {}
         let kept = text.count <= 6000 ? text
             : String(text.prefix(2500)) + "\n…（中间省略\(text.count - 5000)字）…\n" + String(text.suffix(2500))
         return "往上读到的聊天记录（\(screens) 屏，从旧到新" + (until.isEmpty ? "" : "，读到“\(until)”为止")
-            + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字）：\n" + kept
+            + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字"
+            // D46, y5 on 136: the run found 133真人测试一 under 昨天下午1:20, then "corrected" it to the time line below
+            // it (2:34): in WeChat a time line heads the messages under it.
+            + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的）：\n" + kept
     }
 
     /// D38, s6 on 136: a read up 测试群 named only 学威 as a sender ("其余无法逐条归属"): the owner's own messages carry no

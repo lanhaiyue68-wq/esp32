@@ -300,6 +300,7 @@ import XCTest
         XCTAssertEqual(AgentLoop.readUpMerge([newest, older]), ["昨天 晚上9:30", "C1比价做完", "下午3:52", "Y1全部做完", "Y1温差小"])
         let note = AgentLoop.readUpNote(["a", "b"], screens: 2, until: "11月14日")
         XCTAssertTrue(note.hasPrefix("往上读到的聊天记录（2 屏，从旧到新，读到“11月14日”为止；行首“（我）”"), note)
+        XCTAssertTrue(note.contains("单独一行的时间是它下面那些消息的发送时间"))  // D46
         XCTAssertLessThan(AgentLoop.readUpNote([String(repeating: "字", count: 9000)], screens: 40, until: "").count, 6200)
         XCTAssertEqual(try Actions.parseCommand("readup 11月14日")["until"]?.str, "11月14日")
         XCTAssertEqual(try Actions.parseCommand("readup")["action"]?.str, "readup")
