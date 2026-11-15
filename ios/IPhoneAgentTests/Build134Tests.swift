@@ -414,4 +414,12 @@ import XCTest
         XCTAssertEqual(AgentLoop.candidateCount("算 2 的 30 次方"), 0)
         XCTAssertEqual(AgentLoop.stepBudget(plan: "", base: 40, goal: "打开微信看看消息"), 40)
     }
+
+    /// D37 (s3 on 136): WeChat's pickers and settings pages are no chat; the reason reaches the owner in Chinese.
+    func testAPickerIsNoChat() {
+        for t in ["新聊天", "选择联系人", "设置备注和标签", "聊天成员(3)", "群成员（5）"] { XCTAssertTrue(AgentLoop.notAChat(t), t) }
+        for t in ["测试群", "测试群(5)", "验证群", "文件传输助手", "设置备注的小王"] { XCTAssertFalse(AgentLoop.notAChat(t), t) }
+        XCTAssertEqual(CloudBridge.failureWords("about to send into the wrong place: the chat at the top is “新聊天”"),
+                       "要发消息的地方不是题目说的那个聊天，为了不发错停下了")
+    }
 }

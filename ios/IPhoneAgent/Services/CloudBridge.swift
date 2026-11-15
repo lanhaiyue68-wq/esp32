@@ -319,6 +319,8 @@ import Foundation
             ("is not on this phone", "这台手机没有装这个 App"), ("not_approved", "消息没有获批准，没有发送"),
             ("stopped", "任务被停止了"), ("timed out", "超时了还没做完"),
             ("nothing got on", "卡住了，换了几种做法都没有进展"),
+            // s3 on 136: "失败：about to send into the wrong place: the chat at the top is “新聊天”…" reached the owner in English.
+            ("send into the wrong place", "要发消息的地方不是题目说的那个聊天，为了不发错停下了"),
             // 123 over the cloud 11-12: Doubao's account ran out ("LLM HTTP 403: AccountOverdueError").
             ("accountoverdue", "模型服务账户欠费，请先充值再试"),
         ]

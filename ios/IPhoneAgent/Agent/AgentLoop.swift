@@ -1448,6 +1448,15 @@ extension Pointer: Gestures {}
     private var approvedTexts: Set<String> = []
     static let notApprovedAnswer = "没有发送：这条消息未获批准。"
 
+    /// D37: a page title that is a picker or a settings page, where nothing typed reaches anyone (WeChat's own words).
+    static func notAChat(_ title: String) -> Bool {
+        let t = AppNames.hans(title).trimmingCharacters(in: .whitespacesAndNewlines)
+        let pages = ["新聊天", "发起群聊", "选择联系人", "选择成员", "选择群成员", "添加成员", "删除成员", "群成员", "聊天成员",
+                     "聊天信息", "设置备注和标签", "备注", "群聊名称", "修改群聊名称", "我在本群的昵称", "通讯录", "添加朋友",
+                     "朋友资料", "资料设置", "新消息通知", "设置"]
+        return pages.contains { t == $0 || (t.hasPrefix($0) && t.dropFirst($0.count).allSatisfy { "()（）0123456789 ".contains($0) }) }
+    }
+
     static let wrongPlaceReason = "Not sent: this is not where the goal says to send. Go to the conversation the goal names "
         + "(back to the list, or search for it), then type and send there. Seen: "
 
@@ -2859,6 +2868,14 @@ extension Pointer: Gestures {}
                    Self.goalNamesChat(title, task: task) {
                     DebugLog.write("send: \(title) is on screen, not the app last opened: a message, approval first")
                     (localHere, chatOnScreen) = (false, true)
+                }
+                // D37, s3 on 136: a member's name typed into 新聊天's search, then 完成, was "about to send into the wrong
+                // place: the chat at the top is 新聊天", twice, and making a group failed. A picker or a settings page
+                // (新聊天, 选择联系人, 设置备注和标签…) is no chat: what is typed there goes to no one.
+                if sending, !chatOnScreen, let title = (screen?.frame ?? planned.shot).flatMap({ WatchReport.navigationTitle(in: $0) }),
+                   Self.notAChat(title) {
+                    DebugLog.write("send: \(title) is a picker or settings page, not a chat: no message")
+                    localHere = true
                 }
                 // 130 over the cloud 11-13 (fourth round, g4): with the app in front not known, the note's first line
                 // "第4组记录" (the goal: 第一行写“第4组记录”) and its Return were taken for a message to the wrong place,
