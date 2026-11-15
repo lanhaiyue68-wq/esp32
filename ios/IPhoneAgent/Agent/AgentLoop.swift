@@ -1119,13 +1119,20 @@ extension Pointer: Gestures {}
     /// otherwise. Notes the run itself wrote (the cart's count, a listen's transcript) and ones the answer holds are left out.
     static func completedAnswer(_ answer: String, notes: [String], task: String) -> String? {
         let wanted = goalParts(task)
-        let told = Set(numberedItems(answer).map { $0.n }).count
+        let toldItems = Set(numberedItems(answer).map { $0.n }), told = toldItems.count
         // D25, 135 (y1): the answer stopped at item 28 of 49, over half, and the notes of 29–49 were not added. A goal of
         // 10+ things gets them once three or more of its things are missing from the answer.
         guard wanted >= 3, told * 2 < wanted || (wanted >= 10 && told <= wanted - 3) else { return nil }
         let said = typedKey(answer)
         var added: [String] = [], keys: Set<String> = []
-        for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") {
+        // D42, y1 on 136: the answer gave 44 of 49 things and 7300 characters of notes went after it, nearly all of them
+        // things it had already given in other words, and the ways learned on the way. Past half, only the notes of things
+        // the answer lacks go after it; a learned way never does (it is for the next run, not the owner).
+        for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") && !note.hasPrefix("新学到的做法") {
+            if told * 2 >= wanted {
+                let items = noteItems(note)
+                guard !items.isEmpty, !items.isSubset(of: toldItems) else { continue }
+            }
             let k = typedKey(note)
             guard !k.isEmpty, !said.contains(k), !keys.contains(k) else { continue }
             keys.insert(k)
@@ -1133,6 +1140,22 @@ extension Pointer: Gestures {}
         }
         guard !added.isEmpty else { return nil }
         return answer + "\n本次记录的全部结果：\n" + added.joined(separator: "\n")
+    }
+
+    /// The goal's things a note is about: its "第N项".
+    static func noteItems(_ note: String) -> Set<Int> {
+        guard let re = try? NSRegularExpression(pattern: #"第\s*(\d{1,3})\s*[项項]"#) else { return [] }
+        let ns = note as NSString
+        return Set(re.matches(in: note, range: NSRange(location: 0, length: ns.length)).compactMap { Int(ns.substring(with: $0.range(at: 1))) })
+    }
+
+    /// D41, y1 on 136: "未能完成：1. 第21项：The first data cable’s name and price are recorded - open 淘宝, …（stuck: 1 new
+    /// plans in a row and nothing got on）" went into the owner's answer: the plan's own words, in English. The note keeps
+    /// the thing's number and says why in Chinese; a part with no number keeps its words.
+    static func failedPartNote(_ part: String, why: String) -> String {
+        let reason = CloudBridge.failureWords(why)
+        guard let head = part.range(of: #"第\s*\d{1,3}\s*[项項]"#, options: .regularExpression) else { return part + "（" + reason + "）" }
+        return part[head].replacingOccurrences(of: " ", with: "") + "（" + reason + "）"
     }
 
     /// The answer, with any item that now tells of this run's own sent messages (keys from typedKey, 4+ characters) while
@@ -3756,7 +3779,7 @@ extension Pointer: Gestures {}
         }
         guard Self.goalParts(task) >= 3, itemFailsLeft > 0 else { return false }  // one thing: the run stops as before
         itemFailsLeft -= 1
-        let what = parts.count >= 2 && partIndex < parts.count ? parts[partIndex] + "（" + why + "）" : why
+        let what = parts.count >= 2 && partIndex < parts.count ? Self.failedPartNote(parts[partIndex], why: why) : CloudBridge.failureWords(why)
         let line = "未能完成：" + String(what.prefix(160))
         if !notes.contains(line) { notes.append(line) }
         _ = closeFailedPart(why, by: nil)

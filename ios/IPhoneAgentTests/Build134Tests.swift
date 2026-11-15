@@ -445,4 +445,19 @@ import XCTest
         XCTAssertEqual(AppPlaces.names(page).map(\.text), ["JD"])
         XCTAssertNotNil(AppPlaces.searchPill(in: page))
     }
+
+    /// D41/D42, y1 on 136: a failed part is noted by its number, in Chinese; past half, only the missing things' notes are added.
+    func testAFailedPartIsNotedInChineseAndOnlyMissingThingsAreAdded() {
+        XCTAssertEqual(AgentLoop.failedPartNote("1. 第21项：The first data cable’s name and price are recorded - open 淘宝",
+                                                why: "stuck: 1 new plans in a row and nothing got on"),
+                       "第21项（卡住了，换了几种做法都没有进展）")
+        XCTAssertEqual(AgentLoop.failedPartNote("Open 微信", why: "kept tapping a spot that does nothing"),
+                       "Open 微信（一直点一个没反应的地方，没能做完）")
+        let goal = (1...20).map { "\($0). 第\($0)件事" }.joined(separator: "；")
+        let answer = (1...16).map { "\($0). 结果\($0)" }.joined(separator: "；")
+        let notes = ["第3项：深圳日出6:36", "新学到的做法：点返回", "深圳最高27°", "第18项：2的30次方 = 1073741824", "未能完成：第19项（卡住了）"]
+        let full = AgentLoop.completedAnswer(answer, notes: notes, task: goal) ?? ""
+        XCTAssertTrue(full.contains("第18项") && full.contains("第19项"), full)
+        XCTAssertFalse(full.contains("第3项") || full.contains("新学到") || full.contains("深圳最高"), full)
+    }
 }
