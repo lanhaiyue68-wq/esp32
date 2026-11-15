@@ -53,3 +53,4 @@ Choosing the best of many (找一家好吃的, 比较十来家, 挑评分高又�
 微信改备注: open the person's chat, tap ··· at the top right, tap their picture, then 备注 / 设置备注和标签; clear the old remark, type the new one, tap 完成.
 微信收藏: 我 → 收藏 lists the saved items; tap the one the goal names, then ··· at the top right → 发送给朋友 → pick the chat → 发送. In a chat, ⊕ beside the input box → 收藏 → tap the item → 发送 does the same.
 Reading back through a chat or any long list (爬楼, 往上翻到某天, 群里最近聊了什么): use readup (with the date or words to stop at, when the goal names one), not swipe after swipe; then answer from what it put in your notes.
+How-to questions (某 App 怎么开发票, 某个功能怎么用, 攻略): search 小红书 or 抖音 (or Safari with 百度) for the question, open the two or three most recent useful results, note their steps, and answer with one clear way, saying when the guides disagree or look old.
