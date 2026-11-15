@@ -43,6 +43,29 @@ struct LLMError: LocalizedError {
     static var requests = 0
     var onProgress: ((ModelResponseProgress) -> Void)?
     static let tokenParams = ["max_tokens", "max_completion_tokens"]
+    /// D25: the most output a server took (learned from its 400 about the limit), per model; asks stay under it.
+    static var tokenCeiling: [String: Int] = [:]
+    /// D25: the 30000-token room of a big goal's final answer streams for longer than the 60 s of the usual session.
+    private lazy var longSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 240
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+
+    /// D25: a 400 about the output limit ("max_tokens must be less than or equal to 16384"): the largest number in it under
+    /// what was asked (at least 1000), or 8192 when it names none; nil for any other 400.
+    static func ceiling(from error: String, asked: Int) -> Int? {
+        let e = error.lowercased()
+        let aboutTokens = e.contains("max_tokens") || e.contains("max_completion_tokens") || e.contains("max_output_tokens")
+            || (e.contains("maximum") && e.contains("token"))
+        guard aboutTokens, asked > 1000 else { return nil }
+        let numbers = e.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+            .filter { $0 >= 1000 && $0 < asked }
+        return numbers.max() ?? min(8192, asked - 1)
+    }
 
     let model: String
     let baseURL: URL
@@ -114,6 +137,11 @@ struct LLMError: LocalizedError {
                 (tokenParam, auto) = ("max_completion_tokens", false)
                 (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
             }
+            if status == 400, let ceiling = Self.ceiling(from: errorText, asked: min(maxTokens, Self.tokenCeiling[model] ?? maxTokens)) {
+                Self.tokenCeiling[model] = ceiling
+                DebugLog.write("llm: \(model) takes at most \(ceiling) output tokens; asking again with that")
+                (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
+            }
         } catch {
             DebugLog.write(String(format: "llm ✗ %@ after %.1f s: %@", model, now() - started, error.localizedDescription))
             throw error
@@ -162,14 +190,15 @@ struct LLMError: LocalizedError {
     private func post(_ body: [String: Any], maxTokens: Int, started: Double) async throws
         -> (Int, ChatResult?, String) {
         var body = body
-        body[tokenParam] = maxTokens
+        let asked = min(maxTokens, Self.tokenCeiling[model] ?? maxTokens)
+        body[tokenParam] = asked
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (bytes, response) = try await session.bytes(for: request)
+        let (bytes, response) = try await (asked > 4000 ? longSession : session).bytes(for: request)
         let responseSeconds = now() - started
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""

@@ -277,7 +277,21 @@ import XCTest
         XCTAssertTrue(full.contains("第15项：淘宝¥9.9") && full.contains("第18项"), full)
         let nearlyAll = (1...18).map { "\($0). 结果\($0)" }.joined(separator: "；")
         XCTAssertNil(AgentLoop.completedAnswer(nearlyAll, notes: ["第19项：x"], task: goal), "two missing: as it was")
-        XCTAssertGreaterThan(AgentLoop.bigGoalTokens, AgentLoop.maxTokens["actor"] ?? 0)
+        XCTAssertEqual(AgentLoop.bigGoalTokens, 30000, "user 11-15: 上限擡高到3萬")
+        XCTAssertEqual(LLMClient.ceiling(from: "max_tokens must be less than or equal to 16384", asked: 30000), 16384)
+        XCTAssertEqual(LLMClient.ceiling(from: "Invalid max_tokens value, the valid range is [1, 16384]", asked: 30000), 16384)
+        XCTAssertEqual(LLMClient.ceiling(from: "max_tokens is too large", asked: 30000), 8192, "no number: 8192")
+        XCTAssertNil(LLMClient.ceiling(from: "image too large", asked: 30000), "another 400")
+    }
+
+    /// D26, 135 (y1): 温差小 went out, and "never sent Y1温差大" made the run send that too.
+    func testOneOfTwoMessagesIsEnough() {
+        let goal = "27. 如果深圳今天最高温比首尔高10度以上，就在微信测试群发“Y1温差大”，否则发“Y1温差小”；48. 在微信测试群发“Y1全部做完”"
+        XCTAssertEqual(AgentLoop.eitherMessages(goal), [["Y1温差大", "Y1温差小"]])
+        XCTAssertEqual(AgentLoop.eitherPartnerSent("Y1温差大", task: goal, sent: ["Y1温差小"]), "Y1温差小")
+        XCTAssertNil(AgentLoop.eitherPartnerSent("Y1温差大", task: goal, sent: []))
+        XCTAssertNil(AgentLoop.unsentGoalReason(task: goal, sent: ["Y1温差小", "Y1全部做完"], answer: ""))
+        XCTAssertNotNil(AgentLoop.unsentGoalReason(task: goal, sent: ["Y1温差小"], answer: ""), "全部做完 is still owed")
     }
 
     /// 134: whole prompts filled the trace in ~15 minutes.

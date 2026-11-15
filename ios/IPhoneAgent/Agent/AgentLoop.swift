@@ -421,7 +421,9 @@ extension Pointer: Gestures {}
     /// Awaited before every look and every gesture (the app holds the run while its own UI is in front).
     var gate: (() async throws -> Void)?
     static let maxTokens = ["planner": 1500, "actor": 1000]
-    static let bigGoalTokens = 3500  // D25: a goal of 10+ things (its plan and its answer list every thing)
+    // D25: a goal of 10+ things (its plan and its answer list every thing). User 11-15: "上限擡高到3萬吧". A server that
+    // takes less says so in a 400, and LLMClient asks again under its limit.
+    static let bigGoalTokens = 30000
     private var job: Task<Void, Never>?
     var onFinish: (() -> Void)?
     /// Paused for the board to come back (a line for the UI), or nil when going on.
@@ -907,6 +909,34 @@ extension Pointer: Gestures {}
         return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { typedKey(ns.substring(with: $0.range(at: 1))) }
     }
 
+    /// D26, 135 over the cloud 11-15 (y1): "如果深圳…高10度以上，就在微信测试群发“Y1温差大”，否则发“Y1温差小”": 温差小 went out,
+    /// the done check (every quoted message) refused the answer twice for "never sent Y1温差大", and the run sent that too.
+    /// Messages the goal gives as one or the other (…发“A”…否则/不然/或者…发“B”), as typedKey keys.
+    static func eitherMessages(_ task: String) -> [[String]] {
+        let t = AppNames.hans(task)
+        guard let re = try? NSRegularExpression(pattern: #"发(?:送)?\s*[“"「]([^”"」]{1,40})[”"」][^；;。]{0,30}?(?:否则|不然|要不然|或者|反之)[^；;。“"「]{0,20}?发(?:送)?\s*[“"「]([^”"」]{1,40})[”"」]"#)
+        else { return [] }
+        let ns = t as NSString
+        return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map {
+            [typedKey(ns.substring(with: $0.range(at: 1))), typedKey(ns.substring(with: $0.range(at: 2)))]
+        }
+    }
+
+    /// The other one of an either-or pair, already sent, when `text` holds one of the pair; nil otherwise.
+    static func eitherPartnerSent(_ text: String, task: String, sent: Set<String>) -> String? {
+        for pair in eitherMessages(task) {
+            for m in pair where text.contains(m) {
+                if let other = pair.first(where: { $0 != m && wasSent($0, sent, task: task) }) { return other }
+            }
+        }
+        return nil
+    }
+
+    static func eitherReason(_ sent: String) -> String {
+        "Refused: the goal asks for one of two messages, and “\(sent)” was already sent. Do not send the other one; go on "
+            + "with the next thing."
+    }
+
     /// The texts the goal says to write somewhere (写“…”, 写上 / 写入, a note's first line), as typedKey keys.
     static func goalWrites(_ task: String) -> [String] {
         let t = AppNames.hans(task)
@@ -918,7 +948,8 @@ extension Pointer: Gestures {}
     /// 130 over the cloud 11-13 (q130b g5): "8. 已在微信测试群发送G5买东西做完" — nothing was typed or sent; only a watch run
     /// (endAfterSend) checked its message. A message the goal asks for that this run never sent, unless the answer says so.
     static func unsentGoalReason(task: String, sent: Set<String>, answer: String) -> String? {
-        let missing = goalMessages(task).filter { !wasSent($0, sent, task: task) && !ownsNotDone(answer, about: [$0]) }
+        let missing = goalMessages(task).filter { !wasSent($0, sent, task: task) && !ownsNotDone(answer, about: [$0])
+            && eitherPartnerSent($0, task: task, sent: sent) == nil }  // D26
         guard !missing.isEmpty else { return nil }
         // 131 over the cloud 11-13 (g4): "G4全部做完" from an earlier day was in the group; told this, the model went 备忘录 ↔
         // 微信 (each time it saw the old bubble it took the message as sent) until the loop guard stopped it.
@@ -967,7 +998,7 @@ extension Pointer: Gestures {}
     /// What the answer cannot have from this run, in the owner's words: apps never opened, messages never sent.
     static func unverifiedNote(task: String, steps: [JObject], sent: Set<String>) -> String? {
         let apps = unvisitedApps(task: task, steps: steps)
-        let messages = goalMessages(task).filter { !wasSent($0, sent, task: task) }
+        let messages = goalMessages(task).filter { !wasSent($0, sent, task: task) && eitherPartnerSent($0, task: task, sent: sent) == nil }
         var parts: [String] = []
         if !apps.isEmpty { parts.append("本次没有打开" + apps.joined(separator: "、") + "，相关项目没有做") }
         if !messages.isEmpty { parts.append("没有发出" + messages.map { "“\($0)”" }.joined(separator: "、")) }
@@ -2653,6 +2684,11 @@ extension Pointer: Gestures {}
                 if name == "type", let sent = sentMatch,
                    keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
+                    return false
+                }
+                if name == "type", Self.inChatApp(steps, task: task),  // D26: one of an either-or pair is out already
+                   let partner = Self.eitherPartnerSent(typedNow, task: task, sent: messageSent) {
+                    record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.eitherReason(partner))])
                     return false
                 }
                 if name == "type", keyboardGuard, let shown = screen?.frame {
