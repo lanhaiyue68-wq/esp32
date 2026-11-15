@@ -1393,7 +1393,18 @@ extension Pointer: Gestures {}
         let text = lines.joined(separator: "\n")
         let kept = text.count <= 6000 ? text
             : String(text.prefix(2500)) + "\n…（中间省略\(text.count - 5000)字）…\n" + String(text.suffix(2500))
-        return "往上读到的聊天记录（\(screens) 屏，从旧到新" + (until.isEmpty ? "" : "，读到“\(until)”为止") + "）：\n" + kept
+        return "往上读到的聊天记录（\(screens) 屏，从旧到新" + (until.isEmpty ? "" : "，读到“\(until)”为止")
+            + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字）：\n" + kept
+    }
+
+    /// D38, s6 on 136: a read up 测试群 named only 学威 as a sender ("其余无法逐条归属"): the owner's own messages carry no
+    /// name in WeChat, only their side. A row on the right (starting past a quarter of the width, ending near the right
+    /// edge) is marked as the owner's; a long one of the owner's that starts further left is left unmarked, never a
+    /// wrong mark.
+    static func readUpLine(_ row: [CandidatePicker.Piece]) -> String {
+        let text = row.map { $0.text }.joined(separator: " ")
+        guard let minX = row.map({ $0.box.minX }).min(), let maxX = row.map({ $0.box.maxX }).max() else { return text }
+        return minX >= 0.25 && maxX >= 0.78 ? "（我）" + text : text
     }
 
     /// D18: the words read while a finger was held that are gone once it let go (a chart's value under the finger,
@@ -4528,8 +4539,7 @@ extension Pointer: Gestures {}
             var screens: [[String]] = [], last: [String] = []
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
-                let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88)
-                    .map { row in row.map { $0.text }.joined(separator: " ") }
+                let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88).map(Self.readUpLine)
                 if i > 0, rows == last { break }  // the top: nothing moved
                 screens.append(rows)
                 last = rows

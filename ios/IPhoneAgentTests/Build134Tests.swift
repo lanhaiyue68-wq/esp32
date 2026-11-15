@@ -299,7 +299,7 @@ import XCTest
         let newest = ["下午3:52", "Y1全部做完", "Y1温差小"], older = ["昨天 晚上9:30", "C1比价做完", "下午3:52"]
         XCTAssertEqual(AgentLoop.readUpMerge([newest, older]), ["昨天 晚上9:30", "C1比价做完", "下午3:52", "Y1全部做完", "Y1温差小"])
         let note = AgentLoop.readUpNote(["a", "b"], screens: 2, until: "11月14日")
-        XCTAssertTrue(note.hasPrefix("往上读到的聊天记录（2 屏，从旧到新，读到“11月14日”为止）"), note)
+        XCTAssertTrue(note.hasPrefix("往上读到的聊天记录（2 屏，从旧到新，读到“11月14日”为止；行首“（我）”"), note)
         XCTAssertLessThan(AgentLoop.readUpNote([String(repeating: "字", count: 9000)], screens: 40, until: "").count, 6200)
         XCTAssertEqual(try Actions.parseCommand("readup 11月14日")["until"]?.str, "11月14日")
         XCTAssertEqual(try Actions.parseCommand("readup")["action"]?.str, "readup")
@@ -421,5 +421,16 @@ import XCTest
         for t in ["测试群", "测试群(5)", "验证群", "文件传输助手", "设置备注的小王"] { XCTAssertFalse(AgentLoop.notAChat(t), t) }
         XCTAssertEqual(CloudBridge.failureWords("about to send into the wrong place: the chat at the top is “新聊天”"),
                        "要发消息的地方不是题目说的那个聊天，为了不发错停下了")
+    }
+
+    /// D38 (s6 on 136): the owner's own messages, on the right with no name, are marked in a read up a chat.
+    func testTheOwnersOwnMessagesAreMarked() {
+        typealias P = CandidatePicker.Piece
+        XCTAssertEqual(AgentLoop.readUpLine([P(text: "Y5全部做完", box: CGRect(x: 0.6, y: 0.3, width: 0.24, height: 0.03))]),
+                       "（我）Y5全部做完")
+        XCTAssertEqual(AgentLoop.readUpLine([P(text: "workbuddy这个远程控制可以啊", box: CGRect(x: 0.17, y: 0.4, width: 0.5, height: 0.03))]),
+                       "workbuddy这个远程控制可以啊")
+        XCTAssertEqual(AgentLoop.readUpLine([P(text: "11月14日 下午3:20", box: CGRect(x: 0.36, y: 0.2, width: 0.28, height: 0.02))]),
+                       "11月14日 下午3:20")
     }
 }
