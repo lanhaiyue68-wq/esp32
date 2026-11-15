@@ -834,7 +834,10 @@ extension Pointer: Gestures {}
         // 130 over the cloud 11-13 (q130b g5): on 淘宝's cart the executor "remembered" items 5-8 as done and noted made-up
         // results for them (拼多多 ¥13.9, a message never sent), then typed them into the note: what a note or typing
         // says is no visit. The app opened, and what the model thought while acting in it, are.
-        let acted: Set<String> = ["open", "tap", "type", "note", "swipe", "key", "hold", "listen", "press", "back", "home", "wait", "path"]
+        // D22, 134 真人单句 11-15 (h06): 京东 was not on the phone ("open failed"); the answer said 没装 as the goal asked,
+        // and "never went into 京东" refused it three times: the run failed. An app this run found absent was looked for.
+        let acted: Set<String> = ["open", "open failed", "tap", "type", "note", "swipe", "key", "hold", "listen", "press", "back",
+                                  "home", "wait", "path"]
         var said: [String] = []
         // Fourth round (g8): the thought of "open 美团" said "now items 16 (美团) and 17 (时钟)"; Clock was never opened and its
         // answer made up. An open's thought is the plan ahead: only the app it opened counts.
@@ -1808,6 +1811,37 @@ extension Pointer: Gestures {}
         return dy > 0 ? 1 : -1
     }
 
+    /// D22, 134 真人单句 11-15 (h08): 行事曆's month view scrolls up and down; it was swiped left 40 times ("still November
+    /// 2026") and the run ran out of steps. Three swipes the same way in a row that changed nothing: a fourth is refused.
+    static func swipesGoNowhere(_ steps: [JObject], next: JObject) -> Bool {
+        guard let way = swipeWay(next) else { return false }
+        var dead = 0
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" {
+                guard swipeWay(s) == way, s["changed"] == .bool(false) else { return false }
+                dead += 1
+                if dead >= 3 { return true }
+            } else if observedActions.contains(a) {
+                return false
+            }
+        }
+        return false
+    }
+
+    /// The way a swipe goes along its longer axis (150+ of 1000): "up", "down", "left" or "right"; nil for a short one.
+    static func swipeWay(_ s: JObject) -> String? {
+        guard s["action"]?.str == "swipe", let x1 = s["x1"]?.double, let y1 = s["y1"]?.double,
+              let x2 = s["x2"]?.double, let y2 = s["y2"]?.double else { return nil }
+        let (dx, dy) = (x2 - x1, y2 - y1)
+        guard max(abs(dx), abs(dy)) >= 150 else { return nil }
+        return abs(dx) > abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down")
+    }
+
+    static let deadSwipeReason = "Refused: three swipes this way in a row changed nothing on the screen: this view does not "
+        + "move that way. Try the other direction or axis (a calendar's months scroll up and down), a control on the screen "
+        + "(an arrow, a tab, a date, 今天), or another way to the goal."
+
     static let scrollTurnsLimit = 3
     static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
         + "been seen. Do not scroll it again. Go on with what the goal needs next, or answer from what you saw."
@@ -2675,6 +2709,15 @@ extension Pointer: Gestures {}
                         return try await changeOfPlan(planned.shot, "kept asking to scroll a page already seen whole")
                     }
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.scrollBackReason)])
+                    return false
+                }
+                if name == "swipe", Self.swipesGoNowhere(steps, next: act) {  // D22
+                    roundRefused += 1
+                    if roundRefused >= Self.refusalsInARow {
+                        roundRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept swiping a view that does not move that way")
+                    }
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadSwipeReason)])
                     return false
                 }
                 if name == "tap", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {

@@ -241,6 +241,21 @@ import XCTest
         XCTAssertFalse(AppPlaces.looksLikeHome(today))
     }
 
+    /// D22, 134 真人单句 (h06, h08).
+    func testAnAbsentAppWasLookedForAndDeadSwipesStop() {
+        let absent: [JObject] = [["action": .str("open failed"), "app": .str("京东"), "reason": .str("京东 is not on this phone")]]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "京东上搜一下鼠标垫，第一个多少钱？手机上没有京东就直接告诉我没装", steps: absent), [])
+        func swipe(_ x1: Double, _ x2: Double, changed: Bool) -> JObject {
+            ["action": .str("swipe"), "x1": .num(x1), "y1": .num(450), "x2": .num(x2), "y2": .num(450), "changed": .bool(changed)]
+        }
+        let left = swipe(850, 150, changed: false)
+        XCTAssertTrue(AgentLoop.swipesGoNowhere([left, left, left], next: swipe(850, 150, changed: false)))
+        XCTAssertFalse(AgentLoop.swipesGoNowhere([left, left, swipe(850, 150, changed: true)], next: left), "the last one moved")
+        XCTAssertFalse(AgentLoop.swipesGoNowhere([left, left, left], next: ["action": .str("swipe"), "x1": .num(500), "y1": .num(700),
+                                                                            "x2": .num(500), "y2": .num(300)]), "the other axis")
+        XCTAssertEqual(AgentLoop.swipeWay(["action": .str("swipe"), "x1": .num(500), "y1": .num(700), "x2": .num(500), "y2": .num(300)]), "up")
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"
