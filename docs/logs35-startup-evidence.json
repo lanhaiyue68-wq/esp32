@@ -1,0 +1,51 @@
+{
+  "archive_sha256": "804cbee98a8036867c0c3c4a053fe9fbb250ad36f888b6cde06b257d79a3f67c",
+  "baseline_source_build": "72",
+  "build73_video_or_startup_changes": false,
+  "new_runs": [
+    {
+      "run": "20261027-050511",
+      "model_calls": 0,
+      "startup_seconds": 33.251,
+      "error": "cannot start: 屏幕镜像已连接，但当前画面无法解码。请在控制中心停止镜像，再重新选择 Lan Agent，等预览出现后再开始。",
+      "decoded_ms": 138312,
+      "latest_board_ms": 156717,
+      "frame_age_s": 26.144856214523315,
+      "decode_broken": false,
+      "decoder_note": ""
+    },
+    {
+      "run": "20261027-050554",
+      "model_calls": 0,
+      "startup_seconds": 13.48,
+      "error": "cannot start: 确认镜像画面超时。请等几秒再开始；如果一直这样，请在控制中心停止镜像，再重新选择 Lan Agent。",
+      "decoded_ms": 126401,
+      "latest_board_ms": 176096,
+      "frame_age_s": 62.124353885650635,
+      "decode_broken": false,
+      "decoder_note": ""
+    },
+    {
+      "run": "20261027-050614",
+      "model_calls": 0,
+      "startup_seconds": null,
+      "error": "未记录结束，随后App重新启动；不能据此断言系统崩溃",
+      "decoded_ms": null,
+      "latest_board_ms": null,
+      "frame_age_s": null,
+      "decode_broken": null,
+      "decoder_note": null
+    },
+    {
+      "run": "20261027-050638",
+      "model_calls": 0,
+      "startup_seconds": 71.569,
+      "error": "cannot start: the board did not answer 'snap' within 30 s",
+      "decoded_ms": 216957,
+      "latest_board_ms": 284540,
+      "frame_age_s": 73.08993291854858,
+      "decode_broken": false,
+      "decoder_note": ""
+    }
+  ]
+}
