@@ -403,4 +403,15 @@ import XCTest
         }
         XCTAssertTrue(AgentLoop.isLinkLoss(VideoReadinessError.boardDisconnected, screenLive: true))
     }
+
+    /// D36 (s2 on 136): comparing the first 10 places is 10 things' worth of steps.
+    func testComparingTenCandidatesGetsTheirSteps() {
+        let goal = "用高德地图找附近评分4.5分以上的川菜馆，比较前10家的店名、评分、评价数、人均价格和距离，最后推荐三家"
+        XCTAssertEqual(AgentLoop.candidateCount(goal), 10)
+        XCTAssertEqual(AgentLoop.stepBudget(plan: "", base: 40, goal: goal), 200)
+        XCTAssertEqual(AgentLoop.candidateCount("帮我找十来家酒店比一比"), 10)
+        XCTAssertEqual(AgentLoop.candidateCount("在抖音推荐页看前三个视频"), 3)
+        XCTAssertEqual(AgentLoop.candidateCount("算 2 的 30 次方"), 0)
+        XCTAssertEqual(AgentLoop.stepBudget(plan: "", base: 40, goal: "打开微信看看消息"), 40)
+    }
 }

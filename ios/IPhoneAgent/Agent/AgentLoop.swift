@@ -3407,11 +3407,25 @@ extension Pointer: Gestures {}
         aimNext && unsent != nil && (1...2).contains(sendCorrections) && act["action"] == .str("tap") && Self.sends(act)
     }
 
+    /// D36, s2 on 136 (高德: 比较前10家川菜馆, 看评价可不可疑, 推荐三家): one thing of the goal, so the steps of one; the run
+    /// ran out at the 9th place's reviews. A goal that goes through N candidates (前10家, 十来个, 4篇) counts as N things.
+    static func candidateCount(_ goal: String) -> Int {
+        let pattern = #"(?:前|比较|对比|比一比|挑|找|看|查)\s*(\d{1,2}|十来|十几|二十|十|[两二三四五六七八九])\s*(?:家|个|款|篇|条|间|套|部|只|件|座)"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        let g = AppNames.hans(goal), ns = g as NSString
+        let words = ["十来": 10, "十几": 12, "二十": 20, "十": 10, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
+                     "八": 8, "九": 9]
+        return re.matches(in: g, range: NSRange(location: 0, length: ns.length)).reduce(0) { best, m in
+            let v = ns.substring(with: m.range(at: 1))
+            return max(best, min(Int(v) ?? words[v] ?? 0, 30))
+        }
+    }
+
     /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
     /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 240: 122 over the cloud 11-12, goals
     /// of 9 to 15 parts ran out at 100 (4 of 5 failures of the big ones), each part taking 10 to 15 steps.
     static func stepBudget(plan: String, base: Int, goal: String = "") -> Int {
-        let parts = max(Self.parts(of: plan).count, goalParts(goal))
+        let parts = max(Self.parts(of: plan).count, goalParts(goal), candidateCount(goal))
         guard parts >= 2 else { return base }
         // 133 over the cloud 11-14 (y1–y6): goals of 50 things had 240 steps, under 5 a thing. Past 20 things each
         // gets 12 more (at most 600).
