@@ -1120,9 +1120,7 @@ extension Pointer: Gestures {}
     static func completedAnswer(_ answer: String, notes: [String], task: String) -> String? {
         let wanted = goalParts(task)
         let toldItems = Set(numberedItems(answer).map { $0.n }), told = toldItems.count
-        // D25, 135 (y1): the answer stopped at item 28 of 49, over half, and the notes of 29–49 were not added. A goal of
-        // 10+ things gets them once three or more of its things are missing from the answer.
-        guard wanted >= 3, told * 2 < wanted || (wanted >= 10 && told <= wanted - 3) else { return nil }
+        guard fewThingsTold(answer, task: task) else { return nil }
         let said = typedKey(answer)
         var added: [String] = [], keys: Set<String> = []
         // D42, y1 on 136: the answer gave 44 of 49 things and 7300 characters of notes went after it, nearly all of them
@@ -1140,6 +1138,32 @@ extension Pointer: Gestures {}
         }
         guard !added.isEmpty else { return nil }
         return answer + "\n本次记录的全部结果：\n" + added.joined(separator: "\n")
+    }
+
+    /// Whether an answer leaves out many of a goal's numbered things: under half of them, or (D25, 135 y1: it stopped at
+    /// item 28 of 49) three or more of a goal of 10+.
+    static func fewThingsTold(_ answer: String, task: String) -> Bool {
+        let wanted = goalParts(task), told = Set(numberedItems(answer).map { $0.n }).count
+        return wanted >= 3 && (told * 2 < wanted || (wanted >= 10 && told <= wanted - 3))
+    }
+
+    static let wholeAnswerPrompt = """
+    You write the final report of a phone task for the phone's owner, in Simplified Chinese only (no English). The goal \
+    lists numbered things. From the run's notes (in the order they were written; a later note on the same thing is newer \
+    and fuller) and its answer so far, write one line per thing of the goal, numbered as in the goal ("1. …"): its result, \
+    or "未完成：" and why. Use only what the notes and the answer say, and copy every value (number, price, time, name) \
+    exactly as written there; never guess one. Write nothing before line 1 and nothing after the last line.
+    """
+
+    /// D44: the whole answer written by Codex from the notes; nil without a planner, on an error, or when it still leaves
+    /// many things out.
+    private func wholeAnswer(_ answer: String) async -> String? {
+        guard let planner, !notes.isEmpty else { return nil }
+        let text = "Goal: \(task)\n\nNotes:\n" + notes.joined(separator: "\n") + "\n\nAnswer so far:\n" + answer
+        guard let reply = try? await planner.chat(system: Self.wholeAnswerPrompt, text: text, image: nil,
+                                                 maxTokens: Self.bigGoalTokens, temperature: 0) else { return nil }
+        let whole = AppNames.hans(reply.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        return whole.isEmpty || Self.fewThingsTold(whole, task: task) ? nil : whole
     }
 
     /// The goal's things a note is about: its "第N项".
@@ -2607,6 +2631,14 @@ extension Pointer: Gestures {}
             // executor planned, and the run ended with the last part's answer only ("第11项完成…"): the other nineteen
             // results were in its notes but not in the answer. An answer that covers under half of a goal's things gets
             // what this run noted added after it.
+            // D44, y2 on 136: the last part's answer told item 47 of 49 only, and 7000 characters of notes went after it as
+            // they were (one thing three times over, a failed part in English). Codex first writes the whole answer from
+            // the notes; they are added as they are only when it cannot.
+            if name == "done", endsTask, let answer = act["answer"]?.str, Self.fewThingsTold(answer, task: task),
+               let whole = await wholeAnswer(answer) {
+                DebugLog.write("done: the answer covers few of the goal's things; Codex wrote the whole answer from the notes")
+                act["answer"] = .str(whole)
+            }
             if name == "done", endsTask, let answer = act["answer"]?.str,
                let full = Self.completedAnswer(answer, notes: notes, task: task) {
                 DebugLog.write("done: the answer covers few of the goal's things; what this run noted is added")
@@ -3602,6 +3634,26 @@ extension Pointer: Gestures {}
                   calendar.component(.day, from: date) == d else { continue }
             if date.timeIntervalSince(today) < -183 * 86_400, let next = calendar.date(byAdding: .year, value: 1, to: date) { date = next }
             add(date)
+        }
+        // D45, y2 on 136 (item 31): "用计算器和日历算出从今天起第100天是几月几号、星期几" was left 未完成. The day N days on is
+        // worked out here too: "第N天" from today both ways (today as day 1, or N days on), "N天后" N days on.
+        let weekday = { (d: Date) in zh[calendar.component(.weekday, from: d) - 1] }
+        if let nth = try? NSRegularExpression(pattern: #"今天(?:起|开始|開始|算起)?\s*的?\s*第\s*(\d{1,4})\s*天"#) {
+            for m in nth.matches(in: goal, range: NSRange(location: 0, length: ns.length)) {
+                guard let n = Int(ns.substring(with: m.range(at: 1))), n > 0,
+                      let first = calendar.date(byAdding: .day, value: n - 1, to: now),
+                      let on = calendar.date(byAdding: .day, value: n, to: now) else { continue }
+                let line = "day \(n) from today is \(f.string(from: first)) (\(weekday(first))) counting today as day 1, "
+                    + "\(f.string(from: on)) (\(weekday(on))) counting \(n) days on"
+                if !said.contains(line) { said.append(line) }
+            }
+        }
+        if let after = try? NSRegularExpression(pattern: #"(\d{1,4})\s*天(?:后|後|以后|以後|之后|之後)"#) {
+            for m in after.matches(in: goal, range: NSRange(location: 0, length: ns.length)) {
+                guard let n = Int(ns.substring(with: m.range(at: 1))), n > 0,
+                      let on = calendar.date(byAdding: .day, value: n, to: now) else { continue }
+                add(on)
+            }
         }
         return said.isEmpty ? "" : " Dates in the goal: " + said.joined(separator: "; ") + "."
     }

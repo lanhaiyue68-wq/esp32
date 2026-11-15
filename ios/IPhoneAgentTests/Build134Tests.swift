@@ -470,4 +470,22 @@ import XCTest
         XCTAssertTrue(kept.hasPrefix("THINK: ok") && kept.count < 400, kept)
         XCTAssertEqual(LLMClient.goingRound("答案" + String(repeating: "。", count: 3500)), "答案")
     }
+
+    /// D44, y2 on 136: an answer of item 47 alone, for a goal of 49, leaves out many things; one of 47 does not.
+    func testAnAnswerOfOneThingLeavesMuchOut() {
+        let goal = "帮我做这49件事：" + (1...49).map { "\($0). 第\($0)件事" }.joined(separator: "；")
+        XCTAssertTrue(AgentLoop.fewThingsTold("第47项完成：已在测试群发送“Y2全部做完”", task: goal))
+        XCTAssertFalse(AgentLoop.fewThingsTold((1...47).map { "\($0). 结果\($0)" }.joined(separator: "\n"), task: goal))
+        XCTAssertTrue(AgentLoop.wholeAnswerPrompt.contains("Simplified Chinese"))
+    }
+
+    /// D45, y2 on 136 (item 31): the day 100 days on from today is worked out on the phone, both ways of counting.
+    func testTheHundredthDayIsWorkedOut() {
+        let cal = Calendar(identifier: .gregorian)
+        let today = cal.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 10))!
+        let facts = AgentLoop.dateFacts(in: "31. 用计算器和日历算出从今天起第100天是几月几号、星期几", today: today, calendar: cal)
+        XCTAssertTrue(facts.contains("2027-02-23, Tuesday (星期二) counting today as day 1"), facts)
+        XCTAssertTrue(facts.contains("2027-02-24, Wednesday (星期三) counting 100 days on"), facts)
+        XCTAssertTrue(AgentLoop.dateFacts(in: "100天后是几号", today: today, calendar: cal).contains("2027-02-24, Wednesday (星期三) 100 days from today"))
+    }
 }
