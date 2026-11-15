@@ -35,3 +35,7 @@ z1、z2、z3（q135b，回答「否」）：z1 攜程（748 秒）、z2 京東�
 
 - 單元測試：Build134Tests.swift 的 testTheGoalsSumsAreWorkedOut、testACutAnswerGetsTheRestOfTheNotes、testOneOfTwoMessagesIsEnough；算式抽取已用 Python 對全部題庫模擬（只抓到真正的算式）。
 - 版本號已改成 136（ios/Config/Shared.xcconfig）；新介面程式（OwnerJobs、TeachViews、DemoRecorder 錄屏）推前已逐行核對 API 與成員。
+
+## 136 上的回歸（11-15 23:50 起，chain136.sh：q136s → r136s，再 q135a → r136a、q135b → r136b）
+
+- s0（D23 證實有效）：問「手机上没有“京东”，要下载安装吗？」→ 是 → 新計畫第 1 部分就去 App Store 搜京东、點獲取、等裝好、打開、同意首開條款 → 搜「保温杯」時京东要求登入 → 照規則停下說明（249 秒）。135 同情況是直接跳去做別的。
