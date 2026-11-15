@@ -294,6 +294,17 @@ import XCTest
         XCTAssertNotNil(AgentLoop.unsentGoalReason(task: goal, sent: ["Y1温差小"], answer: ""), "全部做完 is still owed")
     }
 
+    /// D27, user 11-15 (爬楼): a read up a chat, screen by screen, comes out oldest first, each line once.
+    func testAReadUpTheChatComesOutOldestFirst() throws {
+        let newest = ["下午3:52", "Y1全部做完", "Y1温差小"], older = ["昨天 晚上9:30", "C1比价做完", "下午3:52"]
+        XCTAssertEqual(AgentLoop.readUpMerge([newest, older]), ["昨天 晚上9:30", "C1比价做完", "下午3:52", "Y1全部做完", "Y1温差小"])
+        let note = AgentLoop.readUpNote(["a", "b"], screens: 2, until: "11月14日")
+        XCTAssertTrue(note.hasPrefix("往上读到的聊天记录（2 屏，从旧到新，读到“11月14日”为止）"), note)
+        XCTAssertLessThan(AgentLoop.readUpNote([String(repeating: "字", count: 9000)], screens: 40, until: "").count, 6200)
+        XCTAssertEqual(try Actions.parseCommand("readup 11月14日")["until"]?.str, "11月14日")
+        XCTAssertEqual(try Actions.parseCommand("readup")["action"]?.str, "readup")
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

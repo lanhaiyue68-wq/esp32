@@ -16,12 +16,13 @@ enum Actions {
         "type": ["text"], "key": ["combo"], "done": ["answer"], "fail": ["reason"],
         "home": [], "back": [], "wait": [], "replan": [], "open": ["app"], "note": ["text"], "press": ["text"],
         "listen": ["seconds"], "hold": ["x", "y"],
+        "readup": ["until"],  // D27: read back up a chat by itself (爬楼), to the words given or the top
     ]
     /// Build 121 over the cloud 11-11: asked to copy a WeChat message, both models wrote a long press their own way
     /// (touch_and_hold, a swipe that stays put) and the run failed on "no valid action" three times.
     static let aliases = ["touch_and_hold": "hold", "long_press": "hold", "longpress": "hold", "long-press": "hold",
                           "press_and_hold": "hold", "hold_press": "hold"]
-    static let textArgs: Set<String> = ["text", "combo", "answer", "reason", "app"]
+    static let textArgs: Set<String> = ["text", "combo", "answer", "reason", "app", "until"]
 
     /// One DO line, e.g. "tap 152 362" -> {"action": "tap", "x": 152, "y": 362}.
     static func parseCommand(_ line: String) throws -> JObject {

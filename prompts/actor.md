@@ -91,6 +91,10 @@ Actions:
                              shows are read, for up to SECONDS (5-180); the text comes back in your notes. Open the
                              video, let it play from the start and leave it on screen first. Use it for a video's
                              spoken words (口播文案) or to sum a video up)
+  readup [TEXT]             (in a chat or any long list: scrolls up by itself screen after screen and reads every line
+                             on the way, up to 40 screens, stopping at TEXT (a date such as 11月14日, or words) or at
+                             the top; all of it comes back in your notes, oldest first. Use it to read back through a
+                             chat (爬楼) instead of swiping and noting screen by screen)
   note TEXT                 (keeps what you just read, a price, a title, a name, for later: your notes stay with you
                              across screens and apps. Give it with the next action as soon as you read something the
                              goal will need; never go back to read again what your notes hold)

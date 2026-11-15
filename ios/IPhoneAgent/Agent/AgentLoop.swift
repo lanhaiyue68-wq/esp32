@@ -842,7 +842,7 @@ extension Pointer: Gestures {}
         // D22, 134 真人单句 11-15 (h06): 京东 was not on the phone ("open failed"); the answer said 没装 as the goal asked,
         // and "never went into 京东" refused it three times: the run failed. An app this run found absent was looked for.
         let acted: Set<String> = ["open", "open failed", "tap", "type", "note", "swipe", "key", "hold", "listen", "press", "back",
-                                  "home", "wait", "path"]
+                                  "home", "wait", "path", "readup"]
         var said: [String] = []
         // Fourth round (g8): the thought of "open 美团" said "now items 16 (美团) and 17 (时钟)"; Clock was never opened and its
         // answer made up. An open's thought is the plan ahead: only the app it opened counts.
@@ -1351,6 +1351,28 @@ extension Pointer: Gestures {}
 
     /// At most this many new plans for things left when a plan runs out (D16).
     static let continuationLimit = 8
+
+    /// D27: screens readup goes up at most (a chat's day or two).
+    static let readUpScreens = 40
+
+    /// D27: a read up a chat, oldest first: each screen's rows not seen on the screens below it go before what came
+    /// before (a screen further up shows older messages). `screens` are in the order read, newest first.
+    static func readUpMerge(_ screens: [[String]]) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for rows in screens {
+            let fresh = rows.filter { !$0.isEmpty && seen.insert(AppPlaces.normalized($0)).inserted }
+            out = fresh + out
+        }
+        return out
+    }
+
+    /// D27: the note a readup leaves; a long read keeps its first and last 2500 characters.
+    static func readUpNote(_ lines: [String], screens: Int, until: String) -> String {
+        let text = lines.joined(separator: "\n")
+        let kept = text.count <= 6000 ? text
+            : String(text.prefix(2500)) + "\n…（中间省略\(text.count - 5000)字）…\n" + String(text.suffix(2500))
+        return "往上读到的聊天记录（\(screens) 屏，从旧到新" + (until.isEmpty ? "" : "，读到“\(until)”为止") + "）：\n" + kept
+    }
 
     /// D18: the words read while a finger was held that are gone once it let go (a chart's value under the finger,
     /// "下午3:00 25°"), in reading order, at most 16 pieces.
@@ -2582,7 +2604,7 @@ extension Pointer: Gestures {}
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
                 // Home and wait do not use coordinates or the current focus. Animation cannot make their target stale.
-                if i == 0, !["home", "wait", "listen"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
+                if i == 0, !["home", "wait", "listen", "readup"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
                    Vision.changed(seen, screen?.frame, ignore: spots, caret: true) {
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
@@ -3297,7 +3319,8 @@ extension Pointer: Gestures {}
         return (now() - started) * 1000
     }
 
-    private static let observedActions: Set<String> = ["tap", "swipe", "back", "home", "key", "type", "path", "circle", "compose", "open"]
+    private static let observedActions: Set<String> = ["tap", "swipe", "back", "home", "key", "type", "path", "circle", "compose", "open",
+                                                       "readup"]
     /// Planner and guard records never erase the result of the last actual gesture.
     private var lastObservedAction: JObject? {
         steps.last { Self.observedActions.contains($0["action"]?.str ?? "") && $0["performed"] != .bool(false) }
@@ -4016,6 +4039,7 @@ extension Pointer: Gestures {}
             case "press": return "pressed the keys " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
             case "listen": return "listened to the video and read its subtitles (the text is in the notes)"
+            case "readup": return "read back up the chat (what it read is in the notes)"
             case "hold": return "long-pressed at (\(s["x"]?.int ?? 0), \(s["y"]?.int ?? 0))"
             case "key" where sends(s): return "pressed enter"
             // Over USB 11-10 拼多多 was opened by its icon on the Home Screen, and the check said it never was: that tap
@@ -4316,6 +4340,24 @@ extension Pointer: Gestures {}
                 listenedAll = true
                 notes.append(Self.videoLoopedNote)
             }
+        case "readup":
+            // D27, user 11-15 (客户场景: 微信群或个人聊天记录爬楼): reading back through a chat was a swipe and a model call a
+            // screen. Up to readUpScreens screens are scrolled and read on the phone, the text only, until the words
+            // given or the top (nothing moves), and what was read goes into the notes oldest first.
+            let until = AppNames.hans(a["until"]?.str ?? "").filter { !$0.isWhitespace }
+            var screens: [[String]] = [], last: [String] = []
+            for i in 0..<Self.readUpScreens {
+                guard let frame = await freshFrame() else { break }
+                let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88)
+                    .map { row in row.map { $0.text }.joined(separator: " ") }
+                if i > 0, rows == last { break }  // the top: nothing moved
+                screens.append(rows)
+                last = rows
+                if !until.isEmpty, rows.contains(where: { AppNames.hans($0).filter { !$0.isWhitespace }.contains(until) }) { break }
+                try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
+                await screen?.settled()
+            }
+            notes.append(Self.readUpNote(Self.readUpMerge(screens), screens: screens.count, until: a["until"]?.str ?? ""))
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
             try await phone.drag(pts.map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)
