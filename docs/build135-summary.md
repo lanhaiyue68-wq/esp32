@@ -35,6 +35,7 @@
 版本號 135（7e66ba5）。單元測試：Build134Tests.swift 內 Build135Tests／Build135LearningTests／Build135FixesTests，Build117Tests 改橫向滑動、Build123Tests 日期事實相容。
 
 - 下單、付款界線不變：買東西仍停在確認訂單頁。
+- 使用者 11-15 決定：題目寫明「沒裝就寫沒裝、不要下載任何App」時，D2 照樣先問要不要下載（否 → 任務結束），不照題目跳過。135 回歸題庫 q135y／q135y2 因此避開京東、閒魚、攜程。
 - 測試工具：cloudq.py 對 `install_app` 依每題 `"install": "approve"|"reject"` 回答，預設 reject（任務結束）。題庫裡含京東、閒魚、攜程的題，在 135 上會在那一項結束，除非該題設 `"install": "approve"`。
 - 單元測試：Build134Tests.swift 裡的 Build135Tests、Build134Tests 的螢幕使用時間測試已改成新行為。
 - 單元測試（11-15 新視窗）：Build135FixesTests 加 testThingsLeftOfABigGoalAreFound（D16）、testARoundThatNotedSomethingIsNoRound（D17、D19）、testWhatShowedOnlyWhileHeldIsTold（D18）；正則已用 Python 對 y3／y4 實際步驟紀錄模擬（y3 剩 35 項、y4 剩 16 項，與實際相符）。
