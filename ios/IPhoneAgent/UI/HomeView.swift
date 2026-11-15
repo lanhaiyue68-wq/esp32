@@ -30,6 +30,7 @@ struct HomeView: View {
                     RecordingPanel(recorder: recorder)
                 }
                 if app.installAsk != nil { InstallPanel(app: app) }
+                if app.publishAsk != nil { PublishPanel(app: app) }
                 if app.help != nil { HelpPanel(app: app) }
                 if let stage = app.recovering { RecoveryPanel(app: app, stage: stage) }
                 if agent.running || app.runMood != nil { liveSection }

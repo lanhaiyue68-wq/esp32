@@ -50,6 +50,31 @@ struct InstallPanel: View {
     }
 }
 
+/// D28, user 11-15: what a run filled in (a video's title, cover, topics) is published only when the owner says so.
+struct PublishPanel: View {
+    @ObservedObject var app: AppModel
+
+    var body: some View {
+        Section {
+            Label { Text(verbatim: app.publishAsk ?? "") } icon: {
+                Image(systemName: "paperplane.circle.fill").foregroundStyle(Palette.warning)
+            }
+            .font(.body.weight(.semibold))
+            Text(verbatim: "先到手机上看看填的标题、封面和话题。不发布的话这个平台就停在发布前，其他的照做。")
+                .font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: Space.s) {
+                Button { app.answerPublish(true) } label: { Label { Text(verbatim: "发布") } icon: { Image(systemName: "paperplane.fill") } }
+                    .buttonStyle(.borderedProminent).tint(Palette.ok)
+                Button(role: .destructive) { app.answerPublish(false) } label: { Text(verbatim: "不发布") }
+                    .buttonStyle(.bordered)
+            }
+            .controlSize(.regular)
+        } header: {
+            Text(verbatim: "发布前确认")
+        }
+    }
+}
+
 /// "Needs your help": why, and Take over / Continue / Skip / Stop (the same as the Live Activity).
 struct HelpPanel: View {
     @ObservedObject var app: AppModel

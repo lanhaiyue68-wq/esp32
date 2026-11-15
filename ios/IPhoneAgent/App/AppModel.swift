@@ -58,6 +58,8 @@ import UIKit
     let live = LiveActivityController()
     let notifier = Notifier()
     private(set) lazy var recorder = DemoRecorder(app: self)
+    /// D29: the owner's monthly jobs (Settings › 定时任务).
+    let schedules = ScheduleBook()
     var mockJob: Task<Void, Never>?
     @Published var mockMirroring = false
     var moodReset: Task<Void, Never>?
@@ -65,6 +67,9 @@ import UIKit
     /// An app the task needs is not on the phone: its name while the user is asked whether to install it.
     @Published var installAsk: String?
     var installWait: CheckedContinuation<Bool, Never>?
+    /// D28: the question while the user is asked whether to publish (发布) what a run filled in.
+    @Published var publishAsk: String?
+    var publishWait: CheckedContinuation<Bool, Never>?
     var currentIntent: SavedTask?
     var lastTask = ""
     var runStarted = Date()
@@ -181,6 +186,7 @@ import UIKit
             keepAwake.start()
         }
         connectCloud()
+        startSchedules()  // D29: monthly jobs
 
         let say: (String) -> Void = { [weak self] in self?.say($0) }
         board.log = say

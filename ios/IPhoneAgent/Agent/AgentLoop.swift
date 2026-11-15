@@ -1689,6 +1689,10 @@ extension Pointer: Gestures {}
     var askInstall: ((String) async -> Bool?)?
     /// Apps asked about in this run (once each), and apps looked for a second time before "not on this phone".
     private var installAsked: Set<String> = []
+    /// D28, user 11-15: before 发布 in a video or post app the owner is asked (the cloud's approval, or a panel here);
+    /// nil: nobody to ask (a WeChat watch run), and nothing is published. Apps this run may publish in, or was told not to.
+    var askPublish: ((String) async -> Bool?)?
+    private var publishAllowed: Set<String> = [], publishDeclined: Set<String> = []
     private var lookedAgain: Set<String> = []
     /// What the run is told once the owner said yes. Never a password: Apple asks the owner for that on the phone.
     static func installNote(_ app: String) -> String {
@@ -1958,6 +1962,7 @@ extension Pointer: Gestures {}
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
         (installAsked, lookedAgain) = ([], [])
+        (publishAllowed, publishDeclined) = ([], [])
         (coached, tryingTip) = ([], nil)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
@@ -2903,6 +2908,31 @@ extension Pointer: Gestures {}
                     }
                     approvedTexts.insert(Self.typedKey(text))
                 }
+                // D28, user 11-15: publishing shows to everyone: the owner is asked before 发布, once per app a run, always
+                // (a task from the cloud through its approval, one started here with a panel). No: that app is left
+                // filled in and unpublished, and the run goes on with the rest. Nobody to ask: nothing is published.
+                let tapAt = CGPoint(x: (act["x"]?.double ?? 0) / 1000, y: (act["y"]?.double ?? 0) / 1000)
+                let tapApp = Self.appInFront(steps, startedIn: startApp)
+                if name == "tap", !publishAllowed.contains(tapApp ?? ""),
+                   Self.publishTap(act, label: Self.labelAt(tapAt, in: readRows), app: tapApp) {
+                    if Self.forbids(task, "发布") || publishDeclined.contains(tapApp ?? "") {
+                        record(planned.shot, ["action": .str("refused"), "reason": .str(Self.publishDeclinedReason)])
+                        return false
+                    }
+                    record(planned.shot, ["action": .str("waiting approval"), "reason": .str("publish in " + (tapApp ?? "?") + "?")])
+                    let yes = await askPublish?(Self.publishQuestion(tapApp)) ?? false
+                    try Task.checkCancellation()
+                    if yes == true {
+                        publishAllowed.insert(tapApp ?? "")
+                    } else {
+                        publishDeclined.insert(tapApp ?? "")
+                        let line = "\(tapApp ?? "这个 App")：内容已填好，机主选择不发布，没有点发布"
+                        if !notes.contains(line) { notes.append(line) }
+                        record(planned.shot, ["action": .str("refused"), "reason": .str(Self.publishDeclinedReason)])
+                        gotOn()
+                        return false
+                    }
+                }
                 // #17 (122, 11-11): a like, a follow or a 收藏 shows to others like a message, and went unasked. A tap the
                 // model says does one is refused in a goal that says not to, and waits for approval in a task from the cloud.
                 if name == "tap", let what = Self.publicTap(act) {
@@ -3386,6 +3416,36 @@ extension Pointer: Gestures {}
         AppNames.hans(task).range(of: #"(不要|不用|不必|别|勿|禁止|不能)[^，,。；;！!？?\n]{0,30}"# + what, options: .regularExpression) != nil
     }
 
+    /// D28: the words on the screen where a tap lands (0-1 point), or nil.
+    static func labelAt(_ p: CGPoint, in rows: [[CandidatePicker.Piece]]) -> String? {
+        rows.joined().first { $0.box.insetBy(dx: -0.012, dy: -0.012).contains(p) }?.text
+    }
+
+    /// D28, user 11-15 (one video to 抖音, 快手, 小红书, 视频号, YouTube, TikTok…): a tap that would publish: on a button
+    /// reading 发布 / 发表 / Post…, or one the model says is the publish button, in an app that publishes (any app when the
+    /// button's words say so).
+    static func publishTap(_ act: JObject, label: String?, app: String?) -> Bool {
+        guard act["action"]?.str == "tap" else { return false }
+        let words = ["发布", "发表", "发布作品", "发布笔记", "发布视频", "立即发布", "确认发布", "发布动态", "post", "publish",
+                     "上传视频", "upload"]
+        let shown = label.map { AppNames.hans($0).lowercased().filter { !$0.isWhitespace } } ?? ""
+        if words.contains(shown) { return true }
+        let publisher = ["抖音", "快手", "小红书", "微信", "视频号", "youtube", "tiktok", "微博", "哔哩哔哩", "b站", "西瓜视频", "今日头条"]
+        guard let app, publisher.contains(where: { AppNames.hans(app).lowercased().contains($0) }) else { return false }
+        var t = AppNames.hans(((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased())
+        t = t.replacingOccurrences(of: #"(不要|不用|避免|别|勿|以免|先不|暂不|don't|do not|avoid|not |without|before)[^，,。.；;]*"#,
+                                   with: " ", options: .regularExpression)
+        return t.range(of: #"点(击)?(右下角|底部|右上角)?的?(发布|发表)|(发布|发表)按钮|tap (the )?(post|publish)|(post|publish) button"#,
+                       options: .regularExpression) != nil
+    }
+
+    static func publishQuestion(_ app: String?) -> String {
+        "“\(app ?? "这个 App")”的内容已经填好，要发布吗？"
+    }
+
+    static let publishDeclinedReason = "Refused: the owner said not to publish here. Leave this page as it is (do not tap the "
+        + "publish button), note that it was filled in and not published, and go on with the rest of the goal."
+
     static let emptyPartReason = "This part asks to find something out, but nothing was written down for it. Write what you "
         + "found with note (or note that it could not be found and why), then finish the part."
 
@@ -3801,7 +3861,20 @@ extension Pointer: Gestures {}
         // Build 117 on the phone: the check worked a weekday out wrong from a forecast. The next two days are given too.
         let day = { (n: Int) in f.string(from: Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: date) ?? date) }
         return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))." + dateFacts(in: goal)
-            + mathFacts(in: goal)
+            + mathFacts(in: goal) + invoiceFacts(in: goal)
+    }
+
+    /// D29, user 11-15 (每月申请发票): for a goal about 发票, the owner's invoice details from Settings › 发票资料; "" for any
+    /// other goal.
+    static func invoiceFacts(in goal: String, profile: InvoiceProfile = .load()) -> String {
+        guard AppNames.hans(goal).contains("发票") else { return "" }
+        guard !profile.title.isEmpty else {
+            return " The owner has not filled in 发票资料 in Lan Agent's settings: where an invoice form needs 抬头 or 税号, leave "
+                + "that one not done and say the owner should fill in 发票资料 first."
+        }
+        return " The owner's invoice details (Lan Agent settings › 发票资料), to fill in exactly as given: 抬头类型 \(profile.kind); 抬头 "
+            + profile.title + (profile.taxID.isEmpty ? "" : "; 税号 " + profile.taxID)
+            + (profile.email.isEmpty ? "" : "; 邮箱 " + profile.email) + "."
     }
 
     /// D24, 135 over the cloud 11-15 (y1 item 30): "(12345 × 678 − 9876) ÷ 3.5" was keyed as 12345 × 678 − 9876 ÷ 3.5 =

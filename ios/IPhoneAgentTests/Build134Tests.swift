@@ -305,6 +305,47 @@ import XCTest
         XCTAssertEqual(try Actions.parseCommand("readup")["action"]?.str, "readup")
     }
 
+    /// D28, user 11-15: the owner is asked before 发布.
+    func testAPublishTapIsSeen() {
+        let tap: JObject = ["action": .str("tap"), "x": .num(860), "y": .num(930), "thought": .str("标题和话题都填好了，点击右下角的发布按钮")]
+        XCTAssertTrue(AgentLoop.publishTap(tap, label: "发布", app: "抖音"))
+        XCTAssertTrue(AgentLoop.publishTap(tap, label: nil, app: "小红书"), "the model says it is the publish button")
+        XCTAssertTrue(AgentLoop.publishTap(["action": .str("tap"), "x": .num(1), "y": .num(1)], label: "Post", app: nil))
+        let notYet: JObject = ["action": .str("tap"), "x": .num(500), "y": .num(500), "thought": .str("先不要点发布，先选封面")]
+        XCTAssertFalse(AgentLoop.publishTap(notYet, label: "选封面", app: "抖音"))
+        XCTAssertFalse(AgentLoop.publishTap(tap, label: nil, app: "备忘录"), "not an app that publishes")
+        XCTAssertTrue(AgentLoop.publishQuestion("快手").contains("要发布吗"))
+    }
+
+    /// D29, user 11-15: monthly jobs and the owner's invoice details.
+    func testMonthlyJobsAndInvoiceDetails() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let at = { (m: Int, d: Int, h: Int) in cal.date(from: DateComponents(year: 2026, month: m, day: d, hour: h))! }
+        var job = ScheduledJob(task: "申请发票", day: 1, hour: 9, minute: 0, lastRun: at(11, 15, 12))
+        XCTAssertFalse(job.isDue(at: at(11, 30, 12), calendar: cal), "ran this month already")
+        XCTAssertTrue(job.isDue(at: at(12, 1, 10), calendar: cal), "next month's time has come")
+        XCTAssertFalse(job.isDue(at: at(12, 1, 8), calendar: cal), "not yet 9:00")
+        job.enabled = false
+        XCTAssertFalse(job.isDue(at: at(12, 2, 10), calendar: cal))
+        XCTAssertEqual(ScheduledJob(task: "x", day: 31, hour: 9, minute: 0).dueDate(in: at(2, 10, 0), calendar: cal),
+                       at(2, 28, 9), "day kept within 28")
+        let profile = InvoiceProfile(kind: "单位", title: "蓝海乐科技有限公司", taxID: "91440300MA5XXXXXXX", email: "fp@example.com")
+        let facts = AgentLoop.invoiceFacts(in: "在麦当劳申请上个月的发票", profile: profile)
+        XCTAssertTrue(facts.contains("蓝海乐科技有限公司") && facts.contains("91440300MA5XXXXXXX") && facts.contains("fp@example.com"), facts)
+        XCTAssertEqual(AgentLoop.invoiceFacts(in: "看深圳天气", profile: profile), "")
+        XCTAssertTrue(AgentLoop.invoiceFacts(in: "开发票", profile: InvoiceProfile()).contains("not filled in"))
+    }
+
+    /// F, user 11-15: what the owner teaches, as the model puts it.
+    func testATaughtWayIsRead() {
+        let tip = TeachTip.parse("APP: 丰巢\nWHEN: 取件码页面要授权手机号\nWAY: 点“拒绝”，改从“我的”里看取件码\nSAY: 明白了，下次先拒绝授权再找取件码。")
+        XCTAssertEqual(tip.app, "丰巢")
+        XCTAssertTrue(tip.isLesson)
+        XCTAssertEqual(tip.say, "明白了，下次先拒绝授权再找取件码。")
+        XCTAssertFalse(TeachTip.parse("APP:\nWAY:\nSAY: 学到了三条做法。").isLesson, "a question answered, nothing to keep")
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

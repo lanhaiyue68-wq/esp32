@@ -24,6 +24,14 @@ struct SettingsView: View {
                     NavigationLink { CloudSettingsView(cloud: app.cloud) } label: {
                         row("云端任务", "cloud", .teal, value: app.cloud.enabled ? app.cloud.state : "已关闭")
                     }
+                    // D29, user 11-15: invoice details for 发票 tasks, and jobs run once a month.
+                    NavigationLink { ScheduleSettingsView(book: app.schedules) } label: {
+                        row("定时任务", "calendar.badge.clock", .purple,
+                            value: app.schedules.jobs.isEmpty ? nil : "\(app.schedules.jobs.count)")
+                    }
+                    NavigationLink { InvoiceSettingsView() } label: {
+                        row("发票资料", "doc.text", .orange, value: InvoiceProfile.load().title.isEmpty ? "未填写" : nil)
+                    }
                     CalibrationRow(app: app, calibrator: app.calibrator, pointer: app.pointer, feed: app.feed)
                     Button { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) } label: {
                         HStack {

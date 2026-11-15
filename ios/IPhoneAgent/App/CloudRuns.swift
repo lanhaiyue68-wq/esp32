@@ -12,7 +12,12 @@ extension AppModel {
             guard let self else { return }
             // User 11-15: an app the task needs and the phone lacks is asked about through the cloud (install_app).
             let install: (String) async -> Bool? = { [weak self] app in await self?.cloud.askInstall(app, for: task.id) }
-            Task { await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false, askInstall: install) }
+            // D28: publishing too, always asked (whether or not the task's messages wait for approval).
+            let publish: (String) async -> Bool? = { [weak self] q in await self?.cloud.askPublish(q, for: task.id) }
+            Task {
+                await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false, askInstall: install,
+                               askPublish: publish)
+            }
         }
         cloud.outcome = { [weak self] task in
             guard let self, self.agent.task == task.instruction else {

@@ -28,6 +28,17 @@ private struct LearningContent: View {
 
     var body: some View {
         List {
+            // F, user 11-15: the owner teaches by a screen recording, or by a screenshot and words.
+            Section {
+                NavigationLink { TeachView(app: app, book: book) } label: {
+                    Label { Text(verbatim: "教我怎么做（截图＋说明）") } icon: { Image(systemName: "bubble.left.and.text.bubble.right") }
+                }
+                VideoLearnRow(recorder: app.recorder)
+            } header: {
+                Text(verbatim: "教它做事")
+            } footer: {
+                Text(verbatim: "上传一段你自己完整操作一遍的录屏（iPhone 的屏幕录制），我推出每一步给你检查，存成以后照着做的路径。")
+            }
             Section {
                 Toggle("Learn from operation feedback", isOn: $enabled)
                 LabeledContent("Automatic lessons", value: "\(book.lessons.filter { $0.auto == true }.count)")

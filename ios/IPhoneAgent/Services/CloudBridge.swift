@@ -197,6 +197,11 @@ import Foundation
         await waitApproval(id, ["action": "install_app", "app": app, "text": "手机上没有“\(app)”，要下载安装吗？"])
     }
 
+    /// D28, user 11-15: before 发布 in a video or post app the owner is asked, always. No answer in 10 minutes is a no.
+    func askPublish(_ question: String, for id: String) async -> Bool {
+        await waitApproval(id, ["action": "publish_post", "text": question])
+    }
+
     private func waitApproval(_ id: String, _ request: [String: Any]) async -> Bool {
         await report(id, ["status": "waiting_approval", "approval_request": request])
         let until = now() + Self.approvalWait

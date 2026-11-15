@@ -70,6 +70,10 @@ for item in queue:
                 # "reject" (the default: the task ends, as the owner asked on 11-15)
                 if (task.get('approval_request') or {}).get('action') == 'install_app':
                     verdict = item.get('install', 'reject')
+                # build 136 (D28): "publish_post" asks before 发布; tests stop before publishing (user 11-15), so the default
+                # is "reject" unless an item says "publish": "approve"
+                if (task.get('approval_request') or {}).get('action') == 'publish_post':
+                    verdict = item.get('publish', 'reject')
                 call('POST', f'/api/v1/tasks/{tid}/{verdict}')
                 answered.add((text, task.get('approval_seq')))
                 time.sleep(2)

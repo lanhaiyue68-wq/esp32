@@ -17,7 +17,7 @@ extension AppModel {
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
              frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false, keyboardGuard: Bool = false,
              learnedRoutes: Bool = true, approveSend: ((String) async -> Bool)? = nil, askHelp: Bool = true,
-             askInstall: ((String) async -> Bool?)? = nil) async {
+             askInstall: ((String) async -> Bool?)? = nil, askPublish: ((String) async -> Bool?)? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -40,6 +40,9 @@ extension AppModel {
         // on the phone. A WeChat watch run (keyboardGuard) has nobody at the phone: it notes the app as missing.
         let here: ((String) async -> Bool?)? = askHelp && !keyboardGuard ? { [weak self] app in await self?.askInstallHere(app) } : nil
         agent.askInstall = askInstall ?? here
+        // D28: publishing is asked about the same way; a run with nobody to ask publishes nothing.
+        let publishHere: ((String) async -> Bool?)? = askHelp && !keyboardGuard ? { [weak self] q in await self?.askPublishHere(q) } : nil
+        agent.askPublish = askPublish ?? publishHere
         await startAgent(task)
     }
 
@@ -193,6 +196,7 @@ extension AppModel {
         stopWatch(String(localized: "stopped by you"))  // a stop from anywhere also ends WeChat watch
         answerHelp(.stop)
         answerInstall(false)
+        answerPublish(false)
         mockJob?.cancel()
         agent.stop()
         try? await Task.sleep(nanoseconds: 100_000_000)  // let a gesture in flight finish its own release
@@ -400,6 +404,23 @@ extension AppModel {
         live.update(mood: .listening, step: moveCount, line: line, phase: .help, status: .help)
         notifier.post(.install, title: line, body: "打开 Lan Agent 选择“下载”或“不下载”（不下载就结束这个任务）。", run: runID)
         return await withCheckedContinuation { installWait = $0 }
+    }
+
+    /// D28: what a run filled in is about to be published: ask here (panel on Home, Live Activity, notification) and wait.
+    func askPublishHere(_ question: String) async -> Bool {
+        publishAsk = question
+        live.update(mood: .listening, step: moveCount, line: question, phase: .help, status: .help)
+        notifier.post(.install, title: question, body: "打开 Lan Agent 选择“发布”或“不发布”。", run: runID)
+        return await withCheckedContinuation { publishWait = $0 }
+    }
+
+    func answerPublish(_ yes: Bool) {
+        guard let wait = publishWait else { return }
+        publishWait = nil
+        publishAsk = nil
+        notifier.clearHelp()
+        live.update(mood: .thinking, step: moveCount, line: yes ? "发布…" : "不发布，接着做别的", phase: .running, status: .looking)
+        wait.resume(returning: yes)
     }
 
     func answerInstall(_ yes: Bool) {

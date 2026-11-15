@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import UIKit
 
@@ -87,18 +88,64 @@ import UIKit
         let frames = (1...max(keyframes, 1)).map { folder.appendingPathComponent(String(format: "k%03d.jpg", $0)) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !frames.isEmpty else { error = String(localized: "No screen changes were captured."); return }
-        let picked = Self.sample(frames, Self.maxFrames)
+        await finish(Self.sample(frames, Self.maxFrames), folder: folder, run: "rec-" + folder.lastPathComponent)
+    }
+
+    /// The keyframes into a draft in the review editor (a live demonstration or a screen recording).
+    private func finish(_ picked: [URL], folder: URL, run: String) async {
         do {
             let reply = MockMode.on ? try await Self.mockReply() : try await infer(picked)
             let draft = Self.draft(reply, frames: picked, folder: folder)
             draft.saveEdits()
             app.notifier.post(.done, title: String(localized: "Intent draft ready"),
-                              body: String(localized: "\(draft.steps.count) steps. Check the yellow ones."),
-                              run: "rec-" + folder.lastPathComponent)
+                              body: String(localized: "\(draft.steps.count) steps. Check the yellow ones."), run: run)
             app.review = draft
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// F, user 11-15 (学习入口: 主人录屏完整操作一遍，上传给 App 学路径): a screen recording picked from Photos is learned like a
+    /// live demonstration: a keyframe each time the picture changes (looked at every 0.5 s), then the same review.
+    func learn(fromVideo url: URL) async {
+        guard !recording, !inferring else { return }
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        let dir = Self.root.appendingPathComponent("video-" + f.string(from: Date()))
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        error = nil
+        inferring = true
+        let bg = UIApplication.shared.beginBackgroundTask(withName: "learn video")
+        defer { inferring = false; UIApplication.shared.endBackgroundTask(bg) }
+        let frames = await Self.videoKeyframes(of: url, into: dir)
+        try? FileManager.default.removeItem(at: url)  // the copy Photos handed over
+        guard !frames.isEmpty else { error = "录屏里没有读到画面变化。"; return }
+        await finish(Self.sample(frames, Self.videoFrames), folder: dir, run: "video-" + dir.lastPathComponent)
+    }
+
+    static let videoFrames = 16
+
+    /// A video's frames, every `step` seconds, kept when the picture changed (at most `limit`).
+    static func videoKeyframes(of url: URL, into dir: URL, step: Double = 0.5, limit: Int = 90) async -> [URL] {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration), duration.seconds.isFinite, duration.seconds > 0 else { return [] }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 900, height: 1950)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.1, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.1, preferredTimescale: 600)
+        var out: [URL] = [], last: Data?, t = 0.0
+        while t <= duration.seconds, out.count < limit {
+            if let shot = try? await generator.image(at: CMTime(seconds: t, preferredTimescale: 600)),
+               let jpeg = UIImage(cgImage: shot.image).jpegData(compressionQuality: 0.6), Vision.changed(last, jpeg) {
+                last = jpeg
+                let file = dir.appendingPathComponent(String(format: "k%03d.jpg", out.count + 1))
+                if (try? jpeg.write(to: file)) != nil { out.append(file) }
+            }
+            t += step
+        }
+        return out
     }
 
     private func infer(_ frames: [URL]) async throws -> String {
