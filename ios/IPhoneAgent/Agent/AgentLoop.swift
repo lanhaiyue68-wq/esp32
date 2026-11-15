@@ -421,6 +421,7 @@ extension Pointer: Gestures {}
     /// Awaited before every look and every gesture (the app holds the run while its own UI is in front).
     var gate: (() async throws -> Void)?
     static let maxTokens = ["planner": 1500, "actor": 1000]
+    static let bigGoalTokens = 3500  // D25: a goal of 10+ things (its plan and its answer list every thing)
     private var job: Task<Void, Never>?
     var onFinish: (() -> Void)?
     /// Paused for the board to come back (a line for the UI), or nil when going on.
@@ -706,8 +707,10 @@ extension Pointer: Gestures {}
         do {
             let quoted = lessons?.relevant(to: task).filter { system.contains($0.text) } ?? []
             lessons?.markUsed(quoted, run: trace?.dir?.lastPathComponent ?? lessonRun, task: task)
-            reply = try await llm.chat(system: system, text: prompt, image: frame,
-                                       maxTokens: Self.maxTokens[role] ?? 1000, temperature: temperature)
+            // D25, 135 over the cloud 11-15 (y1): the final answer of 49 things stopped at item 28 ("…差价"), cut at the
+            // actor's 1000 tokens. A goal of 10+ things gets room for its whole answer.
+            let room = Self.goalParts(task) >= 10 ? Self.bigGoalTokens : (Self.maxTokens[role] ?? 1000)
+            reply = try await llm.chat(system: system, text: prompt, image: frame, maxTokens: room, temperature: temperature)
         } catch {
             guard retryTimeout, ModelRequestFailure.isTimeout(error), !Task.isCancelled else { throw error }
             DebugLog.write("model request timed out (\(role)); retrying once with a fresh screen")
@@ -1063,7 +1066,10 @@ extension Pointer: Gestures {}
     /// otherwise. Notes the run itself wrote (the cart's count, a listen's transcript) and ones the answer holds are left out.
     static func completedAnswer(_ answer: String, notes: [String], task: String) -> String? {
         let wanted = goalParts(task)
-        guard wanted >= 3, Set(numberedItems(answer).map { $0.n }).count * 2 < wanted else { return nil }
+        let told = Set(numberedItems(answer).map { $0.n }).count
+        // D25, 135 (y1): the answer stopped at item 28 of 49, over half, and the notes of 29–49 were not added. A goal of
+        // 10+ things gets them once three or more of its things are missing from the answer.
+        guard wanted >= 3, told * 2 < wanted || (wanted >= 10 && told <= wanted - 3) else { return nil }
         let said = typedKey(answer)
         var added: [String] = [], keys: Set<String> = []
         for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") {

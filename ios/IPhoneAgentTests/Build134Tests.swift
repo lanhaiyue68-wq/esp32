@@ -269,6 +269,17 @@ import XCTest
         XCTAssertTrue(AgentLoop.installFirst("京东").contains("不适用于“京东”"), "D23: the owner's yes wins over 不要下载")
     }
 
+    /// D25, 135 (y1): the answer stopped at item 28 of 49; over half, so the notes of 29–49 were not added.
+    func testACutAnswerGetsTheRestOfTheNotes() {
+        let goal = (1...20).map { "\($0). 第\($0)件事" }.joined(separator: "；")
+        let cut = (1...12).map { "\($0). 结果\($0)" }.joined(separator: "；") + "；13. 差价"
+        let full = AgentLoop.completedAnswer(cut, notes: ["第15项：淘宝¥9.9", "第18项：2的30次方 = 1073741824"], task: goal) ?? ""
+        XCTAssertTrue(full.contains("第15项：淘宝¥9.9") && full.contains("第18项"), full)
+        let nearlyAll = (1...18).map { "\($0). 结果\($0)" }.joined(separator: "；")
+        XCTAssertNil(AgentLoop.completedAnswer(nearlyAll, notes: ["第19项：x"], task: goal), "two missing: as it was")
+        XCTAssertGreaterThan(AgentLoop.bigGoalTokens, AgentLoop.maxTokens["actor"] ?? 0)
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"
