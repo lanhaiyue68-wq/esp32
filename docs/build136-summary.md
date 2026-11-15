@@ -34,4 +34,4 @@ z1、z2、z3（q135b，回答「否」）：z1 攜程（748 秒）、z2 京東�
 135 上已證實有效：D20（系統搜尋多等，日誌 `Search's results looked for 1.3 s more` 後 Safari、備忘錄都打開）、D16（y1、y2 都 49 項全部有結果，134 同題只約 23 項；y3 日誌看到計畫跑完後缺 31 項→重排→缺 15 項→重排→缺 1 項）。y3 又被「沒發 Y3溫差小」擋了 3 次（D26 會修）。
 
 - 單元測試：Build134Tests.swift 的 testTheGoalsSumsAreWorkedOut、testACutAnswerGetsTheRestOfTheNotes、testOneOfTwoMessagesIsEnough；算式抽取已用 Python 對全部題庫模擬（只抓到真正的算式）。
-- 版本號還是 135，推 136 時再改 ios/Config/Shared.xcconfig 的 CURRENT_PROJECT_VERSION。
+- 版本號已改成 136（ios/Config/Shared.xcconfig）；新介面程式（OwnerJobs、TeachViews、DemoRecorder 錄屏）推前已逐行核對 API 與成員。
