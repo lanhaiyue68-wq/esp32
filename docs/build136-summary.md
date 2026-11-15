@@ -18,7 +18,9 @@
 | D29 | H 發票：設定 › 發票資料（抬頭類型、抬頭、稅號、郵箱），提到「發票」的任務會帶上；設定 › 定時任務：每月幾號幾點自動跑一個任務（無人值守：不停下等人、不發布、不下載）；附「每月申請發票」示例；開票流程規則 | aa51242 |
 | F | 學習入口：學習頁「上傳錄屏，學會這個操作」（從相簿選錄屏→每 0.5 秒取畫面變化→Codex 推步驟→審核→存路徑）；「教我怎麼做」對話窗：截圖＋說明→整理成 App 經驗→點「記住」才存 | aa51242 |
 
-135 上已證實有效：D20（系統搜尋多等，日誌 `Search's results looked for 1.3 s more` 後 Safari、備忘錄都打開）、D16（y1 49 項全部有結果，134 同題只約 23 項）。
+| D30 | y2：卡點學習存下的「做法」混進這次的結果與進度（「日落卡已顯示日出6:36、日落17:40」「第10項已聽取並記錄；當前在淘寶商品頁」），之後每個提到該 App 的任務都會帶上。含時間、價格、百分比、第N項或「已完成／當前在」的做法不存；135 已存下的這類經驗也不再給之後的任務。計算機找不到 √：規則寫明在科學計算機（左下角計算機符號 → 科學） | adda3dc、ba1e234 |
+
+135 上已證實有效：D20（系統搜尋多等，日誌 `Search's results looked for 1.3 s more` 後 Safari、備忘錄都打開）、D16（y1、y2 都 49 項全部有結果，134 同題只約 23 項）。
 
 - 單元測試：Build134Tests.swift 的 testTheGoalsSumsAreWorkedOut、testACutAnswerGetsTheRestOfTheNotes、testOneOfTwoMessagesIsEnough；算式抽取已用 Python 對全部題庫模擬（只抓到真正的算式）。
 - 版本號還是 135，推 136 時再改 ios/Config/Shared.xcconfig 的 CURRENT_PROJECT_VERSION。
