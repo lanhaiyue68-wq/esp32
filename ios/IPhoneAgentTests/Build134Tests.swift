@@ -256,6 +256,19 @@ import XCTest
         XCTAssertEqual(AgentLoop.swipeWay(["action": .str("swipe"), "x1": .num(500), "y1": .num(700), "x2": .num(500), "y2": .num(300)]), "up")
     }
 
+    /// D24, 135 (y1 item 30): the bracket was keyed last and 8,367,… was noted; the goal's sums are worked out on the phone.
+    func testTheGoalsSumsAreWorkedOut() {
+        let goal = "30. 用计算器算 (12345 × 678 − 9876) ÷ 3.5，保留两位小数；38. 用计算器算 √2 × 1000；41. 用计算器算 2 的 30 次方"
+        let facts = AgentLoop.mathFacts(in: goal)
+        XCTAssertTrue(facts.contains("(12345 × 678 − 9876) ÷ 3.5 = 2388581.142857"), facts)
+        XCTAssertTrue(facts.contains("√2 × 1000 = 1414.213562"), facts)
+        XCTAssertTrue(facts.contains("2 的 30 次方 = 1073741824"), facts)
+        XCTAssertEqual(AgentLoop.mathFacts(in: "在日历看2026-12-25和2026/12/25分别是星期几（只有北京就记0）"), "", "dates are no sums")
+        XCTAssertEqual(AgentLoop.sumValue("(365-28)×24"), 8088)
+        XCTAssertNil(AgentLoop.sumValue("(1+2"))
+        XCTAssertTrue(AgentLoop.installFirst("京东").contains("不适用于“京东”"), "D23: the owner's yes wins over 不要下载")
+    }
+
     /// 134: whole prompts filled the trace in ~15 minutes.
     func testATracedPromptKeepsItsHeadAndTail() {
         let long = String(repeating: "甲", count: 400) + String(repeating: "乙", count: 5000) + "这一眼"

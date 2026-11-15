@@ -1633,11 +1633,18 @@ extension Pointer: Gestures {}
     private var lookedAgain: Set<String> = []
     /// What the run is told once the owner said yes. Never a password: Apple asks the owner for that on the phone.
     static func installNote(_ app: String) -> String {
-        "机主同意下载安装“\(app)”：打开 App Store，搜索“\(app)”，在结果里找名字和开发者都对的那个 App，点“获取”（或云朵图标）。"
+        "机主同意下载安装“\(app)”：这一次下载是机主刚刚亲自同意的，目标里的“不要下载或更新任何App”这一次不适用于“\(app)”，先装好再做别的项目。"
+            + "打开 App Store，搜索“\(app)”，在结果里找名字和开发者都对的那个 App，点“获取”（或云朵图标）。"
             + "如果要输入 Apple ID 密码、要按两下侧边按钮或刷脸确认，就停在那里用 wait 等机主在手机上确认，绝对不要输入密码。"
             + "按钮变成“打开”就是装好了：打开它，首次打开的条款点同意、权限只给要用到的，然后接着做原来的事。不要买 App 内的东西。"
     }
     static func installDeclined(_ app: String) -> String { "手机上没有“\(app)”，机主选择不下载，任务结束" }
+    /// D23, 135 over the cloud 11-15 (y1 16:31): the owner said yes to 京东, and the new plan went on to WeChat and the
+    /// calculator: the goal's "不要下载或更新任何App" won over the note. The install is the new plan's first part.
+    static func installFirst(_ app: String) -> String {
+        "安装“\(app)”：机主刚刚同意下载，目标里“不要下载或更新任何App”这一次不适用于“\(app)”。打开 App Store，搜索“\(app)”，点“获取”，"
+            + "等按钮变成“打开”后打开它；装好以后再接着做目标里用到“\(app)”的那一项和其余各项。"
+    }
 
     /// Apple's own apps: a failed open of one is Search failing, never something to download (134 y1: 行事曆).
     static func builtInApp(_ app: String) -> Bool {
@@ -2891,7 +2898,7 @@ extension Pointer: Gestures {}
                             if !notes.contains(line) { notes.append(line) }
                             record(planned.shot, ["action": .str("install approved"), "app": .str(absent.name), "reason": .str(line)])
                             gotOn()
-                            try await replan(stuck: true)
+                            try await replan(stuck: true, first: Self.installFirst(absent.name))
                             return false
                         case false?:
                             noHelp = true  // the owner said no: the task ends here, with no pause for help
@@ -3729,6 +3736,105 @@ extension Pointer: Gestures {}
         // Build 117 on the phone: the check worked a weekday out wrong from a forecast. The next two days are given too.
         let day = { (n: Int) in f.string(from: Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: date) ?? date) }
         return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))." + dateFacts(in: goal)
+            + mathFacts(in: goal)
+    }
+
+    /// D24, 135 over the cloud 11-15 (y1 item 30): "(12345 × 678 − 9876) ÷ 3.5" was keyed as 12345 × 678 − 9876 ÷ 3.5 =
+    /// and 8,367,… was noted (2,388,581.14). The goal's sums are worked out on the phone and given with the date facts, so
+    /// a calculator result that differs shows the keys were wrong. "" when the goal has none.
+    static func mathFacts(in goal: String) -> String {
+        var facts: [String] = []
+        let allowed = Set("0123456789. ()（）×*÷/+-−√")
+        var runs: [String] = [], current = ""
+        for ch in goal {
+            if allowed.contains(ch) { current.append(ch) } else { runs.append(current); current = "" }
+        }
+        runs.append(current)
+        for raw in runs {
+            var s = raw.trimmingCharacters(in: .whitespaces)
+            // a bracket of the words around it (a note in （…）) is not part of the sum
+            while let c = s.first, "()（）".contains(c), !sumBalanced(s) { s.removeFirst(); s = s.trimmingCharacters(in: .whitespaces) }
+            while let c = s.last, "()（）".contains(c), !sumBalanced(s) { s.removeLast(); s = s.trimmingCharacters(in: .whitespaces) }
+            guard s.count >= 3, s.contains(where: { "×*÷/√−".contains($0) }), s.contains(where: { $0.isASCII && $0.isNumber }),
+                  s.range(of: #"^\d{2,4}/\d{1,2}(/\d{1,2})?$"#, options: .regularExpression) == nil,  // a date, 2026/12/25
+                  sumBalanced(s), let value = sumValue(s), value.isFinite, !facts.contains(where: { $0.hasPrefix(s + " =") })
+            else { continue }
+            facts.append(s + " = " + sumPlain(value))
+        }
+        if let re = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)\s*的\s*(\d{1,2})\s*次方"#) {
+            let ns = goal as NSString
+            for m in re.matches(in: goal, range: NSRange(location: 0, length: ns.length)) {
+                guard let b = Double(ns.substring(with: m.range(at: 1))), let e = Double(ns.substring(with: m.range(at: 2))) else { continue }
+                let line = ns.substring(with: m.range) + " = " + sumPlain(pow(b, e))
+                if !facts.contains(line) { facts.append(line) }
+            }
+        }
+        guard !facts.isEmpty else { return "" }
+        return " Sums in the goal, worked out on the phone (a calculator result that differs means the keys were wrong: key a "
+            + "bracketed part first and press = before the rest): " + facts.joined(separator: "; ") + "."
+    }
+
+    static func sumBalanced(_ s: String) -> Bool {
+        var depth = 0
+        for c in s {
+            if c == "(" || c == "（" { depth += 1 } else if c == ")" || c == "）" { depth -= 1 }
+            if depth < 0 { return false }
+        }
+        return depth == 0
+    }
+
+    /// + − × ÷ with brackets and √ (a minus sign may be - or −); nil for anything else.
+    static func sumValue(_ s: String) -> Double? {
+        var reader = SumReader(s)
+        guard let v = reader.sum(), reader.atEnd else { return nil }
+        return v
+    }
+
+    static func sumPlain(_ v: Double) -> String {
+        if abs(v) < 1e15, abs(v - v.rounded()) < 1e-9 { return String(Int64(v.rounded())) }
+        var t = String(format: "%.6f", v)
+        while t.hasSuffix("0") { t.removeLast() }
+        return t
+    }
+
+    private struct SumReader {
+        let chars: [Character]
+        var i = 0
+        init(_ s: String) { chars = Array(s.filter { !$0.isWhitespace }) }
+        var atEnd: Bool { i == chars.count }
+        func peek() -> Character? { i < chars.count ? chars[i] : nil }
+        mutating func sum() -> Double? {
+            guard var v = product() else { return nil }
+            while let c = peek(), c == "+" || c == "-" || c == "−" {
+                i += 1
+                guard let r = product() else { return nil }
+                v = c == "+" ? v + r : v - r
+            }
+            return v
+        }
+        mutating func product() -> Double? {
+            guard var v = factor() else { return nil }
+            while let c = peek(), c == "×" || c == "*" || c == "÷" || c == "/" {
+                i += 1
+                guard let r = factor() else { return nil }
+                v = c == "×" || c == "*" ? v * r : v / r
+            }
+            return v
+        }
+        mutating func factor() -> Double? {
+            guard let c = peek() else { return nil }
+            if c == "√" { i += 1; return factor().map { $0.squareRoot() } }
+            if c == "-" || c == "−" { i += 1; return factor().map { -$0 } }
+            if c == "(" || c == "（" {
+                i += 1
+                guard let v = sum(), let close = peek(), close == ")" || close == "）" else { return nil }
+                i += 1
+                return v
+            }
+            var digits = ""
+            while let d = peek(), d.isASCII, d.isNumber || d == "." { digits.append(d); i += 1 }
+            return Double(digits)
+        }
     }
 
     /// Over USB 11-09, 5 of 14 "done" were wrong: a Pinduoduo price from an app never opened, a message never sent, the 17th
@@ -3897,7 +4003,7 @@ extension Pointer: Gestures {}
             + recipe.lines.map { "- " + $0 }.joined(separator: "\n")
     }
 
-    func replan(stuck: Bool = false, rest: [Int] = []) async throws {
+    func replan(stuck: Bool = false, rest: [Int] = [], first: String? = nil) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
         var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))"
         // D16: a new plan of a goal of 10+ things names the things left, so it does not stop at the next few.
@@ -3919,6 +4025,9 @@ extension Pointer: Gestures {}
                 prompt += "\n\nAlready done and checked on the screen (never redo): " + doneParts.joined(separator: " | ")
                     + "\nPlan only what is left."
             }
+        }
+        if let first {  // D23: what must come before anything else (an install the owner just allowed)
+            prompt += "\n\nThe new plan's part 1, before any other part: " + first
         }
         if !left.isEmpty {
             prompt += "\n\n" + Self.itemsLeftLine(left)
