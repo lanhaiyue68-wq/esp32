@@ -433,4 +433,16 @@ import XCTest
         XCTAssertEqual(AgentLoop.readUpLine([P(text: "11月14日 下午3:20", box: CGRect(x: 0.36, y: 0.2, width: 0.28, height: 0.02))]),
                        "11月14日 下午3:20")
     }
+
+    /// D40, user 11-16: 京东 reads "JD" on a Traditional phone; the Search pill names no page.
+    func testJDAndThePillOnAHomePage() {
+        XCTAssertEqual(AppNames.searchName("京东", language: "zh-Hant-TW"), "JD")
+        XCTAssertEqual(AppNames.searchName("京东", language: "zh-Hans-CN"), "京东")
+        XCTAssertTrue(AppNames.variants("京东").contains("JD"))
+        XCTAssertTrue(AppNames.variants("京东").contains("京東"))
+        let page = [[CandidatePicker.Piece(text: "JD", box: CGRect(x: 0.12, y: 0.09, width: 0.06, height: 0.02))],
+                    [CandidatePicker.Piece(text: "Q搜尋", box: CGRect(x: 0.44, y: 0.82, width: 0.11, height: 0.02))]]
+        XCTAssertEqual(AppPlaces.names(page).map(\.text), ["JD"])
+        XCTAssertNotNil(AppPlaces.searchPill(in: page))
+    }
 }

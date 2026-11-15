@@ -100,6 +100,7 @@ enum AppPlaces {
         rows.flatMap { $0 }.filter { piece in
             let text = piece.text.filter { !$0.isWhitespace }
             return (1...12).contains(text.count) && (0.1...0.86).contains(piece.box.midY) && !text.allSatisfy { $0.isNumber || $0 == "°" }
+                && !isPill(piece)  // D40: the Search pill is on every page, it names none
         }
     }
 
@@ -214,11 +215,12 @@ enum AppPlaces {
 
     /// The Search pill above the dock (iOS 16+), by its label.
     static func searchPill(in rows: [[CandidatePicker.Piece]]) -> CGPoint? {
-        rows.flatMap { $0 }.first { piece in
-            let text = normalized(piece.text)  // its magnifier can be read as a letter in front ("Q 搜尋")
-            return text.count <= 8 && ["搜索", "搜尋", "search"].contains { text.hasSuffix($0) }
-                && piece.box.midY > 0.7 && abs(piece.box.midX - 0.5) < 0.12
-        }.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        rows.flatMap { $0 }.first(where: isPill).map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+    private static func isPill(_ piece: CandidatePicker.Piece) -> Bool {
+        let text = normalized(piece.text)  // its magnifier can be read as a letter in front ("Q 搜尋")
+        return text.count <= 8 && ["搜索", "搜尋", "search"].contains { text.hasSuffix($0) }
+            && piece.box.midY > 0.7 && abs(piece.box.midX - 0.5) < 0.12
     }
 
     /// Lan Agent's keyboard, read: it has no letter keys for CandidatePicker to see.
@@ -258,7 +260,9 @@ enum AppNames {
         "提醒事项": ("提醒事項", "Reminders"), "电话": ("電話", "Phone"), "邮件": ("郵件", "Mail"),
         "音乐": ("音樂", "Music"), "钱包": ("錢包", "Wallet"), "健康": (nil, "Health"), "翻译": ("翻譯", "Translate"),
         "指南针": ("指南針", "Compass"), "图书": ("書籍", "Books"), "播客": ("Podcast", "Podcasts"),
-        "通讯录": ("聯絡人", "Contacts"), "微信": (nil, "WeChat"), "浏览器": (nil, "Safari"), "录音机": ("語音備忘錄", "Voice Memos")]
+        "通讯录": ("聯絡人", "Contacts"), "微信": (nil, "WeChat"), "浏览器": (nil, "Safari"), "录音机": ("語音備忘錄", "Voice Memos"),
+        // D40: on the Traditional phone of 11-16 京东 reads "JD" under its icon; Search for 京東 found nothing, 4 s each time.
+        "京东": ("JD", "JD")]
 
     static func hant(_ s: String) -> String { s.applyingTransform(StringTransform(rawValue: "Hans-Hant"), reverse: false) ?? s }
     static func hans(_ s: String) -> String { s.applyingTransform(StringTransform(rawValue: "Hant-Hans"), reverse: false) ?? s }
@@ -369,6 +373,18 @@ extension AppModel {
                 DebugLog.write("open \(name): not on page \(target + 1) this time; Search this time, the page is kept")
             }
             try await pointer.goHome()
+        }
+        // D40, user 11-16 ("我不是給他把軟件都放一個頁面了嗎"): on 136, D23 installed 京东 and iOS put it on a page of its own;
+        // the Home Screen came back to that page every time, it had only JD on it, no page was known, and all 177 opens of
+        // y1 went through Search (10-19 s each, against ~7 s by the icon). A Home Screen page that no read knows means the
+        // pages changed: read them again (at most every 10 minutes), then go to the app's page.
+        if AppPlaces.looksLikeHome(rows), !AppPlaces.names(rows).isEmpty, AppPlaces.page(showing: rows) == nil,
+           AppPlaces.mayReadAgain(every: AppPlaces.rereadAfterMiss) {
+            AppPlaces.readAgainNow()
+            DebugLog.write("open \(name): the Home Screen page in front is one no read knows; reading the pages again")
+            try await mapHomeScreen()
+            try await pointer.goHome()
+            if AppPlaces.page(of: name) != nil { return try await openAppNow(name) }
         }
         // User 11-12: "爲什麽現在打開抖音還是搜索，爲什麽不是點桌面". The pages were read once (11-09); 抖音 was on none read
         // then and went through Search every time (13–26 s, against ~6 s by its icon), though it was on a page. An app
