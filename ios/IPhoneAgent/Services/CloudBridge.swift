@@ -323,7 +323,7 @@ import Foundation
             ("accountoverdue", "模型服务账户欠费，请先充值再试"),
         ]
         if let hit = known.first(where: { r.lowercased().contains($0.0) }) { return hit.1 }
-        if r.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) { return r }
+        if r.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) { return r.hasSuffix("。") ? String(r.dropLast()) : r }  // y6 on 135: "…再开始。。已查到"
         return r.isEmpty ? "没能做完" : "没能做完（\(r.prefix(80))）"
     }
 
