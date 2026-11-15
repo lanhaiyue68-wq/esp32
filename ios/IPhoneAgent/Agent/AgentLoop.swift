@@ -3735,8 +3735,7 @@ extension Pointer: Gestures {}
                 // D30, 135 over the cloud 11-15 (y2): "深圳天气页的日落卡已显示日出6:36、日落17:40" and "第10项已听取并记录；当前在
                 // 淘宝商品页" were kept as ways, and every later task in that app would get them. A way is a method: one that
                 // tells this run's values (a time, a price, a percentage, an item number) or its progress is not kept.
-                let runFact = tag == "WAY:" && text.range(of: #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\s*\d+\s*[项項]|已(完成|听取|聽取|记录|記錄|读取|讀取|显示|顯示|打开|打開)|当前在|當前在"#,
-                                                         options: .regularExpression) != nil
+                let runFact = tag == "WAY:" && text.range(of: runFactPattern, options: .regularExpression) != nil
                 return text.isEmpty || spot || runFact ? .unknown : make(String(text.prefix(160)))
             }
             if upper.hasPrefix("NONE") { return .unknown }

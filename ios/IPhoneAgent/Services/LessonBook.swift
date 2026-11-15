@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 
+/// D30, 135 over the cloud 11-15 (y2): what a way for an app must not tell: a run's values (a time, a price, a
+/// percentage, an item number) or its progress (已完成, 当前在…).
+let runFactPattern = #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\s*\d+\s*[项項]|已(完成|听取|聽取|记录|記錄|读取|讀取|显示|顯示|打开|打開)|当前在|當前在"#
+
 /// What the user taught in Review, kept as their own sentences and handed to the planner and the actor on
 /// every later run of a similar task, whatever app it is in. One wrong run is fine; the same mistake twice
 /// is not. Human lessons: step notes, steps the user added, accepted AI hints. A note that starts with
@@ -393,7 +397,9 @@ import Foundation
         guard enabled else { return [] }
         let t = AppNames.hans(text).lowercased()
         let found = lessons.filter { l in
-            guard let app = l.app, l.disabled != true else { return false }
+            // D30: a tip that tells a past run's values or progress (135 kept some) is not given to later tasks.
+            guard let app = l.app, l.disabled != true,
+                  l.text.range(of: runFactPattern, options: .regularExpression) == nil else { return false }
             return AppNames.variants(app).map { AppNames.hans($0).lowercased() }.contains { !$0.isEmpty && t.contains($0) }
         }
         return Array(found.sorted { a, b in
