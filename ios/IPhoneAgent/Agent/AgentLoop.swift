@@ -1062,6 +1062,27 @@ extension Pointer: Gestures {}
                 if Int(ns.substring(with: n)) != days { out = out.replacingCharacters(in: n, with: String(days)) as NSString }
             }
         }
+        // D31, 135 over the cloud 11-15 (y4): "2027年春节为2027年2月6日；从今天2026年11月15日到那天还有225天" (83): "那天" is the
+        // date said last before it in the same item (never one of the item before: the search stops at an item's number).
+        let thatDay = #"(?:从|自|從)?\s*(?:今天)?\s*(?:"# + d + #")?\s*(?:到|至|距离|距離|距|离|離)\s*(?:那天|那一天|当天|當天)[^，。；;\d]{0,12}?(?:还有|還有|还剩|有|共|是)?\s*(\d{1,4})\s*天"#
+        if let re = try? NSRegularExpression(pattern: thatDay), let dates = try? NSRegularExpression(pattern: d),
+           let heads = try? NSRegularExpression(pattern: #"(?:^|[；;。\n])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#) {
+            let ns = out
+            for m in re.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)).reversed() {
+                if ns.substring(with: m.range).contains("含") || ns.substring(with: m.range).contains("包括") { continue }
+                var from = max(0, m.range.location - 120)
+                if let head = heads.matches(in: ns as String, range: NSRange(location: from, length: m.range.location - from)).last {
+                    from = head.range.location + head.range.length
+                }
+                let before = NSRange(location: from, length: max(0, m.range.location - from))
+                let start: Date? = m.range(at: 2).location != NSNotFound ? date(ns, m, at: 1, calendar: calendar, near: today) : today
+                guard let said = dates.matches(in: ns as String, range: before).last, let a = startOfDay(start, calendar),
+                      let b = startOfDay(date(ns, said, at: 1, calendar: calendar, near: a), calendar),
+                      let days = calendar.dateComponents([.day], from: a, to: b).day, days >= 0 else { continue }
+                let n = m.range(at: 4)
+                if Int(ns.substring(with: n)) != days { out = out.replacingCharacters(in: n, with: String(days)) as NSString }
+            }
+        }
         return out as String
     }
 

@@ -346,6 +346,19 @@ import XCTest
         XCTAssertFalse(TeachTip.parse("APP:\nWAY:\nSAY: 学到了三条做法。").isLesson, "a question answered, nothing to keep")
     }
 
+    /// D31, 135 (y4): "从今天…到那天还有225天", 那天 being 2027年2月6日 said just before (83 days).
+    func testACountToThatDayIsPutRight() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let today = cal.date(from: DateComponents(year: 2026, month: 11, day: 14))!
+        XCTAssertEqual(AgentLoop.rightDayCounts("第22项：2027年春节为2027年2月6日（农历正月初一）；从今天2026年11月15日到那天还有225天。",
+                                                today: today, calendar: cal),
+                       "第22项：2027年春节为2027年2月6日（农历正月初一）；从今天2026年11月15日到那天还有83天。")
+        XCTAssertEqual(AgentLoop.rightDayCounts("春节是2027年2月6日，距那天还有90天", today: today, calendar: cal), "春节是2027年2月6日，距那天还有84天")
+        XCTAssertEqual(AgentLoop.rightDayCounts("21. 2026年12月25日是星期五；22. 从今天到那天还有10天", today: today, calendar: cal),
+                       "21. 2026年12月25日是星期五；22. 从今天到那天还有10天", "another item's date is not 那天")
+    }
+
     /// D30, 135 (y2): this run's values and progress were kept as ways for the app.
     func testARunsResultIsNoWay() {
         XCTAssertEqual(AgentLoop.parseCoaching("WAY: 深圳天气页的日落卡已显示日出6:36、日落17:40，相差11小时4分"), .unknown)
