@@ -460,4 +460,14 @@ import XCTest
         XCTAssertTrue(full.contains("第18项") && full.contains("第19项"), full)
         XCTAssertFalse(full.contains("第3项") || full.contains("新学到") || full.contains("深圳最高"), full)
     }
+
+    /// D43, y1 on 136: a reply going round and round is cut where the repeats start; a long reply that moves on is not.
+    func testAReplyGoingRoundIsCut() {
+        let long = (1...700).map { "第\($0)项" }.joined()
+        XCTAssertNil(LLMClient.goingRound(long))
+        let loop = "THINK: ok\nDO: done 结果" + String(repeating: "abc def ghi jkl mno pqr stu vwx yz 0123456789. ", count: 200)
+        let kept = LLMClient.goingRound(loop) ?? ""
+        XCTAssertTrue(kept.hasPrefix("THINK: ok") && kept.count < 400, kept)
+        XCTAssertEqual(LLMClient.goingRound("答案" + String(repeating: "。", count: 3500)), "答案")
+    }
 }

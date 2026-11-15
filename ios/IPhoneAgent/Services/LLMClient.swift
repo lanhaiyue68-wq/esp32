@@ -219,6 +219,7 @@ struct LLMError: LocalizedError {
         var result = ChatResult(text: "", firstToken: nil, total: 0)
         result.responseSeconds = responseSeconds
         var reportedReceiving = false
+        var length = 0, checkedAt = 0
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -237,9 +238,35 @@ struct LLMError: LocalizedError {
             guard let piece = delta?["content"] as? String, !piece.isEmpty else { continue }
             if result.firstToken == nil { result.firstToken = now() - started }
             result.text += piece
+            length += piece.count
+            if length - checkedAt >= 1500 {
+                checkedAt = length
+                if let kept = Self.goingRound(result.text) {
+                    DebugLog.write("llm: the reply goes round and round (\(length) characters); cut there")
+                    result.text = kept
+                    result.finishReason = "loop"
+                    break
+                }
+            }
         }
         result.rawChars = result.text.count
         return (status, result, "")
+    }
+
+    /// D43, y1 on 136: one of Doubao's replies ran on for 169 s and 107035 characters, up to the 30000-token ceiling of a
+    /// big goal (D25), and the step waited for all of it. A reply of 3000+ characters whose last 200 already came twice
+    /// before (or that is one or two characters over and over) is going round: what came before the repeats is kept.
+    static func goingRound(_ text: String) -> String? {
+        guard text.count >= 3000 else { return nil }
+        let tail = String(text.suffix(200))
+        let body = text.startIndex..<text.index(text.endIndex, offsetBy: -200)
+        if Set(tail).count <= 3 {
+            let mark = String(tail.prefix(20))
+            return text.range(of: mark).map { String(text[..<$0.lowerBound]) } ?? String(text[body])
+        }
+        guard let first = text.range(of: tail, range: body),
+              text.range(of: tail, range: first.upperBound..<body.upperBound) != nil else { return nil }
+        return String(text[..<first.upperBound])
     }
 
     /// choices[0].message of a non-streamed reply.
