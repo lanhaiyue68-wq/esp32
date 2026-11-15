@@ -3015,17 +3015,19 @@ extension Pointer: Gestures {}
                         // User 11-15: "手机没有JD这时候会反馈给我是否下载JD，然后我说是就去下载…我说否就结束这个任务".
                         installAsked.insert(absent.name)
                         record(planned.shot, ["action": .str("waiting approval"), "reason": .str("install " + absent.name + "?")])
-                        switch await askInstall(absent.name) {
+                        // z3 on 135: the owner was asked about “閒魚”, the phone's own label: what the owner reads is Simplified.
+                        let app = AppNames.hans(absent.name)
+                        switch await askInstall(app) {
                         case true?:
-                            let line = Self.installNote(absent.name)
+                            let line = Self.installNote(app)
                             if !notes.contains(line) { notes.append(line) }
-                            record(planned.shot, ["action": .str("install approved"), "app": .str(absent.name), "reason": .str(line)])
+                            record(planned.shot, ["action": .str("install approved"), "app": .str(app), "reason": .str(line)])
                             gotOn()
-                            try await replan(stuck: true, first: Self.installFirst(absent.name))
+                            try await replan(stuck: true, first: Self.installFirst(app))
                             return false
                         case false?:
                             noHelp = true  // the owner said no: the task ends here, with no pause for help
-                            record(planned.shot, ["action": .str("fail"), "reason": .str(Self.installDeclined(absent.name))])
+                            record(planned.shot, ["action": .str("fail"), "reason": .str(Self.installDeclined(app))])
                             return true
                         case nil:
                             record(planned.shot, ["action": .str("open failed"), "app": .str(absent.name), "reason": .str(absent.name + Self.openFailedReason)])
