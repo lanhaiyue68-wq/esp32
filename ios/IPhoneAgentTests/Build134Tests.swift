@@ -591,6 +591,20 @@ import XCTest
         XCTAssertNil(AgentLoop.bounce(tap(56, 89), after: taobao + then))
         XCTAssertNil(AgentLoop.bounce(tap(56, 89), after: taobao + [["action": .str("thing skipped")]]))
     }
+
+    /// D53, y4 on 136 (item 27): after two swipes with nothing noted, what was said while scrolling is shown again.
+    func testWhatWasSaidWhileScrollingIsShownAgain() {
+        func swipe(_ thought: String) -> JObject {
+            ["action": .str("swipe"), "x1": .int(40), "y1": .int(800), "x2": .int(40), "y2": .int(350), "thought": .str(thought)]
+        }
+        let open: JObject = ["action": .str("tap"), "x": .int(284), "y": .int(493)]
+        let hint = AgentLoop.scrollingHint([open, swipe("關於本機 shows 機型名稱 iPhone 13 mini"), swipe("容量 256GB is shown")])
+        XCTAssertTrue(hint?.contains("iPhone 13 mini") == true && hint?.contains("256GB") == true, hint ?? "nil")
+        XCTAssertTrue(hint?.contains("note TEXT") == true)
+        XCTAssertNil(AgentLoop.scrollingHint([open, swipe("a")]), "one swipe")
+        XCTAssertNil(AgentLoop.scrollingHint([swipe("a"), ["action": .str("note"), "text": .str("第24项：…")], swipe("b")]),
+                     "noted since")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

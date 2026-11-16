@@ -2064,6 +2064,25 @@ extension Pointer: Gestures {}
             + "then go on."
     }
 
+    /// D53, y4 on 136 (item 27): on 關於本機 seven swipes in a row with nothing noted, and the thing was skipped as swiping;
+    /// y3 the same page, three turns. What the model said while scrolling is shown to it again after two swipes with no
+    /// note, so a value it saw on an earlier screen is written down instead of scrolled back to.
+    static func scrollingHint(_ steps: [JObject]) -> String? {
+        var said: [String] = [], swipes = 0
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" {
+                swipes += 1
+                if let t = s["thought"]?.str, !t.isEmpty, said.count < 4 { said.insert(String(t.prefix(160)), at: 0) }
+            } else if a == "note" || observedActions.contains(a) { break }
+            if swipes >= 12 { break }
+        }
+        guard swipes >= 2, !said.isEmpty else { return nil }
+        return "What you said while scrolling this page: " + said.map { "“\($0)”" }.joined(separator: " ")
+            + " If any of it is a value the goal asks for, write it down now with note TEXT together with your next action "
+            + "(your thoughts are not kept; a value seen on an earlier screen is not scrolled back to)."
+    }
+
     static let scrollTurnsLimit = 3
     static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
         + "been seen. Do not scroll it again. Go on with what the goal needs next, or answer from what you saw."
@@ -4480,7 +4499,8 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
+        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
+            + (Self.scrollingHint(steps).map { "\n\n" + $0 } ?? "") + "\n\nNext action?"
         let driving = (plannerLeads || takeover > 0 || actorClosed) && planner != nil
         if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
