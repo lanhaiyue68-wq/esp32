@@ -573,6 +573,14 @@ import XCTest
         XCTAssertFalse(AgentLoop.codexLeaves(codexTap, opener: back), "only a move that leaves")
         XCTAssertTrue(AgentLoop.openerReason.contains("go back further"))
     }
+
+    /// D51, y5 on 136: items 23, 24 and 25 noted in 20 steps of one part were counted as a stalled part and a thing skipped.
+    func testANoteOfANewThingIsThePartGettingOn() {
+        XCTAssertTrue(AgentLoop.newThingNoted("第24项：淘宝搜索“数据线”按价格从低到高排序后，第一个商品…", before: [23]))
+        XCTAssertFalse(AgentLoop.newThingNoted("第23项：网易头条新闻正文第一句话…（更正）", before: [23]), "the same thing again")
+        XCTAssertFalse(AgentLoop.newThingNoted("未能完成：第25项（一直点一个没反应的地方）", before: []))
+        XCTAssertFalse(AgentLoop.newThingNoted("新学到的做法：先回到首页", before: []))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

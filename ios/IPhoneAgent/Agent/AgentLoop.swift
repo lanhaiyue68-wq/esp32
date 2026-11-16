@@ -1189,6 +1189,11 @@ extension Pointer: Gestures {}
         return Set(re.matches(in: note, range: NSRange(location: 0, length: ns.length)).compactMap { Int(ns.substring(with: $0.range(at: 1))) })
     }
 
+    /// D51: the note is about a thing of the goal no earlier note was about (not a 未能完成 line).
+    static func newThingNoted(_ note: String, before: Set<Int>) -> Bool {
+        !note.hasPrefix("未能完成") && !noteItems(note).subtracting(before).isEmpty
+    }
+
     /// D41, y1 on 136: "未能完成：1. 第21项：The first data cable’s name and price are recorded - open 淘宝, …（stuck: 1 new
     /// plans in a row and nothing got on）" went into the owner's answer: the plan's own words, in English. The note keeps
     /// the thing's number and says why in Chinese; a part with no number keeps its words.
@@ -2410,8 +2415,13 @@ extension Pointer: Gestures {}
         timing.llmMs = (replied[0].act["think_s"]?.double ?? 0) * 1000
         for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
             if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) {
+                let before = notes.reduce(into: Set<Int>()) { $0.formUnion(Self.noteItems($1)) }
                 notes.append(text)
                 (stallsNoProgress, refusalsNoProgress) = (0, 0)
+                // D51, y5 on 136: the plan's part 1 was item 23; items 23, 24 and 25 were noted in 20 steps without a
+                // "part done", the part counted as stalled and a thing was skipped (four times in y5; 29, 32 and 37 were
+                // noted and still reported 未能完成). A note of a thing not noted before is the part getting on.
+                if Self.newThingNoted(text, before: before) { (stepsInPart, troubles) = (0, 0) }
                 gotOn()
             }
             record(planned.shot, planned.act)
