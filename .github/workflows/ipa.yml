@@ -81,8 +81,20 @@ jobs:
         if: env.RUN_TESTS == 'true'
         run: |
           set -o pipefail
-          sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')
-          echo "simulator: $sim"
+          # 138, 11-16: the same runner image ran the tests at 12:30 and at 12:52 said "The iOS 27.2 simulator runtime is not
+          # available" for the iPhone it took, and no test ran. The iPhone is taken from the runtime of the simulator SDK
+          # when there is one, and a missing runtime is waited for once.
+          os=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          pick() { grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//'; }
+          sim=$(xcrun simctl list devices available | awk -v h="-- iOS $os --" '$0==h{f=1;next} /^--/{f=0} f' | pick || true)
+          if [ -n "$sim" ]; then
+            dest="platform=iOS Simulator,name=$sim,OS=$os"
+          else
+            sim=$(xcrun simctl list devices available | pick || true)
+            dest="platform=iOS Simulator,name=$sim"
+          fi
+          echo "simulator: $dest"
+          xcrun simctl list runtimes || true
           status=0
           # Builds 120 and 121, 11-11: on this slower runner one whole-agent run in TapAccuracyTests hangs past every
           # timeout, a different one each time a test before it is skipped (three so far; each passes in seconds on the
@@ -91,10 +103,19 @@ jobs:
           if [ "$GITHUB_REPOSITORY" = "winesettbumpas609-boop/esp32-iphone-agent-build" ]; then
             skip=(-skip-testing:IPhoneAgentTests/TapAccuracyTests)
           fi
-          xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent "${skip[@]}" \
-            -destination "platform=iOS Simulator,name=$sim" -destination-timeout 90 -derivedDataPath build-sim \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 90 -maximum-test-execution-time-allowance 120 \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log || status=$?
+          run_tests() {
+            xcodebuild test -project IPhoneAgent.xcodeproj -scheme IPhoneAgent "${skip[@]}" \
+              -destination "$dest" -destination-timeout 90 -derivedDataPath build-sim \
+              -test-timeouts-enabled YES -default-test-execution-time-allowance 90 -maximum-test-execution-time-allowance 120 \
+              CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log
+          }
+          run_tests || status=$?
+          if [ "$status" != 0 ] && grep -q "simulator runtime is not available" test.log; then
+            echo "---- the simulator runtime was not there; waiting a minute and trying once more"
+            sleep 60; xcrun simctl list runtimes || true
+            status=0
+            run_tests || status=$?
+          fi
           tail -40 test.log
           echo "---- failures (assertion lines kept even when the log is long)"
           grep -E "error: |Test Case .* failed|Failing tests:|^\s+[A-Za-z0-9]+Tests\.test" test.log | head -80 || true
