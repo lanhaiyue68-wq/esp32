@@ -696,6 +696,25 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D73, z2 on 137: a Codex answer that hangs is given up well before 15 minutes, and not before a slow one is in.
+    func testACodexAnswerHasADeadline() {
+        XCTAssertGreaterThanOrEqual(ChatGPTPlus.answerDeadline, 120)
+        XCTAssertLessThanOrEqual(ChatGPTPlus.answerDeadline, 240)
+    }
+
+    /// D72, z2 on 137: a run that stops early sends back what each part's "done" found, not only the separate notes.
+    func testAStoppedRunSendsBackWhatEachPartFound() {
+        let steps: [JObject] = [
+            ["action": .str("note"), "text": .str("第1项：草莓酱爱咖啡版，点赞792")],
+            ["action": .str("part done"), "part": .int(1)],
+            ["action": .str("part done"), "part": .int(2), "found": .str("第6项：免拼购买价39.9元，179人好评")],
+            ["action": .str("part done"), "part": .int(3), "found": .str("第1项：草莓酱爱咖啡版，点赞792")],
+            ["action": .str("fail"), "reason": .str("手机上没有“携程”，机主选择不下载，任务结束")],
+        ]
+        XCTAssertEqual(CloudBridge.foundNotes(steps), ["第1项：草莓酱爱咖啡版，点赞792", "第6项：免拼购买价39.9元，179人好评"])
+        XCTAssertTrue(CloudBridge.outcome(of: steps).answer.contains("已查到：第1项：草莓酱爱咖啡版，点赞792；第6项：免拼购买价39.9元"))
+    }
+
     /// D71, y6 on 137: a feed that keeps playing does not stop the swipe to the next video, nor opening an app.
     func testAPlayingFeedDoesNotStopTheSwipeToTheNextVideo() {
         XCTAssertTrue(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(300)]))

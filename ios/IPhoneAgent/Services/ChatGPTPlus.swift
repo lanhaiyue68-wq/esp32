@@ -252,8 +252,13 @@ enum ChatGPTPlus {
     }
 
     /// Answers are never asked for twice: no disk cache (iOS's disk-write report of 11-09 showed CFNetwork's cache database).
+    /// D73, z2 on 137: one Codex answer hung for 901 s (item 20 stood still 15 minutes) and ended in "网络连接已中断";
+    /// the 30 s idle limit never fired. The slowest of about 17,000 answers on 137 took 40 s; a whole answer gets 180 s.
+    static let answerDeadline: TimeInterval = 180
+
     private static let answers: URLSession = {
         let config = URLSessionConfiguration.default
+        config.timeoutIntervalForResource = answerDeadline
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)

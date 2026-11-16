@@ -4459,11 +4459,12 @@ extension Pointer: Gestures {}
             }
         }
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
-        if let line = Self.partResultNote(part: parts[partIndex], found: String((act["answer"]?.str ?? "").prefix(600))),
-           !notes.contains(line) {
-            notes.append(line)
-        }
-        record(shot, ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")])
+        let line = Self.partResultNote(part: parts[partIndex], found: String((act["answer"]?.str ?? "").prefix(600)))
+        if let line, !notes.contains(line) { notes.append(line) }
+        // D72: what the part found goes on its record, so a run that stops later still sends it back (foundNotes).
+        var done: JObject = ["action": .str("part done"), "part": .int(n), "by": .str(act["by"]?.str ?? "actor")]
+        if let line { done["found"] = .str(line) }
+        record(shot, done)
         if let tip = tryingTip { lessons?.tipResult(tip, worked: true); tryingTip = nil }  // the way learned worked
         gotOn()
         (stallsNoProgress, refusalsNoProgress) = (0, 0)

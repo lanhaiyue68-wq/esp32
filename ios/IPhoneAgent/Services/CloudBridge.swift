@@ -322,8 +322,11 @@ import Foundation
     /// What a run wrote down with note, in order, each once.
     nonisolated static func foundNotes(_ steps: [JObject]) -> [String] {
         var found: [String] = []
-        for s in steps where s["action"]?.str == "note" {
-            let text = (s["text"]?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // D72, z2 on 137: Codex drove the run and gave most results with its "done" of each part (第6项 the 拼多多 price,
+        // 第8项 the nearest station…); the run stopped at 第27项 (携程 not installed, not to be installed), and the answer
+        // held only the separate notes: 12 of 26 items. A part's "done" carries what it found too.
+        for s in steps where ["note", "part done"].contains(s["action"]?.str ?? "") {
+            let text = ((s["action"]?.str == "note" ? s["text"] : s["found"])?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty, !found.contains(text) { found.append(text) }
         }
         return found
