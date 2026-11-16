@@ -111,6 +111,9 @@ import Foundation
     var mask: (Data) async -> Data = { $0 }
     private var hotSince: [String: Double] = [:]
     static let coolingLimit = 300.0
+    /// D61: tasks whose run could not start, and how often each was put off for it.
+    private var startRetries: [String: Int] = [:]
+    static let startRetryLimit = 3
 
     private func take(_ task: CloudTask) async {
         if let last = finished[task.id] {  // §9.4 idempotency: done before, say so again
@@ -155,6 +158,17 @@ import Foundation
             return
         }
         let result = outcome(task)
+        // D61, s9 on 137: right after s8 left 抖音's camera on, iOS said "serious" and held the app for 6-18 s at a time; the
+        // next task was taken, its run could not start (screen capture not ready), and it was reported failed ("任务没有
+        // 开始"). A run that never began is put off like a busy phone, at most startRetryLimit times for each task.
+        if result.error == "did_not_start", startRetries[task.id, default: 0] < Self.startRetryLimit {
+            startRetries[task.id, default: 0] += 1
+            current = nil
+            DebugLog.write("cloud: task \(task.id) did not start; put off (\(startRetries[task.id, default: 0]) of \(Self.startRetryLimit))")
+            await report(task.id, ["status": "retry_pending", "error_code": "capability_unavailable",
+                                   "detail": "the run could not start (the screen was not ready); it is taken again"])
+            return
+        }
         var event: [String: Any] = ["status": result.status, "result": ["answer": result.answer, "steps": result.steps]]
         if let error = result.error { event["error_code"] = error }
         if task.screenshot, let jpeg = lastScreen() { event["screenshot_jpeg_base64"] = await mask(jpeg).base64EncodedString() }

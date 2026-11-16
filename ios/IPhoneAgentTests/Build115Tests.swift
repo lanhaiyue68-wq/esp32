@@ -77,6 +77,19 @@ import XCTest
         XCTAssertEqual(cloud.events, ["retry_pending"])
     }
 
+    /// D61, s9 on 137: a run that never began (the screen not ready) is put off, not reported failed, at most 3 times.
+    func testARunThatCouldNotStartIsPutOff() async {
+        let cloud = FakeCloud()
+        cloud.nextTask = task
+        let b = bridge(cloud)
+        b.start = { _, _ in }
+        b.running = { false }
+        b.outcome = { _ in CloudBridge.Outcome(status: "failed", answer: "失败：任务没有开始", error: "did_not_start", steps: 0) }
+        for _ in 0..<10 { await b.tick() }
+        XCTAssertEqual(cloud.events.filter { $0 == "retry_pending" }.count, CloudBridge.startRetryLimit, "\(cloud.events)")
+        XCTAssertEqual(cloud.events.last, "failed", "\(cloud.events)")
+    }
+
     func testTheCloudCanCancelAndThePhoneCanTurnItOff() async {
         let cloud = FakeCloud()
         cloud.nextTask = task
