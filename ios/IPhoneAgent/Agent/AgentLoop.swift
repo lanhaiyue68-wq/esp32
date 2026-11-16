@@ -3119,7 +3119,10 @@ extension Pointer: Gestures {}
                 // names, in a goal that posts nothing, is not a message.
                 // 126 over the cloud 11-12 (g5): "第5组记录" typed in 備忘錄 and its Return waited for approval as a message;
                 // s03's fix (125) had kept it out of the wrong-place check only. In an app that sends nothing, nothing waits.
-                if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"), !Self.inLocalApp(steps),
+                // D58, s8 on 137: "137发布测试" (标题写…) was found to be what the goal writes, not a message, and its approval
+                // was asked all the same ("about to send", no destination) on 抖音's camera screen: the check below looked at
+                // the app only. What was settled above (a note's line, a picker, a title) waits for nothing.
+                if let text = unsent, let approveSend, Self.sends(act) || act["learned"] == .str("send"), !localHere,
                    Self.needsApproval(text, task: task, chatApp: Self.inChatApp(steps, task: task)), !approvedTexts.contains(Self.typedKey(text)) {
                     var shown = text  // what the approval shows: a paste, as read off the screen (B4)
                     if text == Self.pastePlaceholder, let before = pasteFrame, let current = screen?.frame ?? planned.shot {
