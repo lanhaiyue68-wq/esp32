@@ -527,6 +527,26 @@ import XCTest
         rest.wake()
         XCTAssertTrue(rest.resting, "a real failure is not woken")
     }
+
+    /// D48, y3 on 136 (item 24): the refusal of a scroll back quotes what Doubao said it saw on the page, to be noted.
+    func testARefusedScrollBackQuotesWhatWasSeen() {
+        func swipe(_ y1: Int, _ y2: Int, _ thought: String) -> JObject {
+            ["action": .str("swipe"), "x1": .int(40), "y1": .int(y1), "x2": .int(40), "y2": .int(y2), "thought": .str(thought)]
+        }
+        let steps: [JObject] = [
+            ["action": .str("tap"), "x": .int(284), "y": .int(493), "thought": .str("點進關於本機")],
+            swipe(800, 350, "The 關於本機 page shows 機型名稱 iPhone 13 mini; I need 總容量"),
+            swipe(300, 750, "The page shows 容量 256GB, but the model name row is above"),
+            swipe(800, 300, "已读到机型名称 iPhone 13 mini；总容量还没显示"),
+        ]
+        XCTAssertTrue(AgentLoop.scrollsBackAgain(steps, next: swipe(300, 750, "")))
+        let reason = AgentLoop.scrollBackRefusal(steps + [["action": .str("refused"), "reason": .str("x")]])
+        XCTAssertTrue(reason.hasPrefix(AgentLoop.scrollBackReason))
+        XCTAssertTrue(reason.contains("iPhone 13 mini") && reason.contains("256GB"), reason)
+        XCTAssertTrue(reason.contains("with note"), reason)
+        XCTAssertFalse(reason.contains("點進關於本機"), "only what was said while scrolling")
+        XCTAssertEqual(AgentLoop.scrollBackRefusal([["action": .str("tap")]]), AgentLoop.scrollBackReason)
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

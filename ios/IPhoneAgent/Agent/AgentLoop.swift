@@ -2017,6 +2017,24 @@ extension Pointer: Gestures {}
         + "move that way. Try the other direction or axis (a calendar's months scroll up and down), a control on the screen "
         + "(an arrow, a tab, a date, 今天), or another way to the goal."
 
+    /// D48, y3 on 136 (item 24): on 關於本機 Doubao said "shows 機型名稱 iPhone 13 mini", scrolled, said "shows 容量 256GB, the
+    /// model name is above", and scrolled back, three times, never writing either down; the turn back was refused and the
+    /// thing skipped. Its thoughts are not shown to it again: the refusal quotes what it said it saw, to be noted now.
+    static func scrollBackRefusal(_ steps: [JObject]) -> String {
+        var said: [String] = []
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" {
+                if let t = s["thought"]?.str, !t.isEmpty { said.insert(String(t.prefix(160)), at: 0) }
+            } else if observedActions.contains(a) { break }
+            if said.count >= 4 { break }
+        }
+        guard !said.isEmpty else { return scrollBackReason }
+        return scrollBackReason + " What you said you saw while scrolling it: " + said.map { "“\($0)”" }.joined(separator: " ")
+            + " Write down now, with note, each value the goal asks for that you saw there (your thoughts are not kept); "
+            + "then go on."
+    }
+
     static let scrollTurnsLimit = 3
     static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
         + "been seen. Do not scroll it again. Go on with what the goal needs next, or answer from what you saw."
@@ -2905,7 +2923,7 @@ extension Pointer: Gestures {}
                         roundRefused = 0
                         return try await changeOfPlan(planned.shot, "kept asking to scroll a page already seen whole")
                     }
-                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.scrollBackReason)])
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.scrollBackRefusal(steps))])
                     return false
                 }
                 if name == "swipe", Self.swipesGoNowhere(steps, next: act) {  // D22
