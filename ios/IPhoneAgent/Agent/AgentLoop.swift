@@ -2274,6 +2274,9 @@ extension Pointer: Gestures {}
                     // stalled, then three new plans. In a goal of 10 things or more, 30 steps with nothing found, sent
                     // or finished skip the thing (~4 minutes).
                     stepsSinceProgress += 1
+                    if steps.dropFirst(recordsBefore).contains(where: { Self.typedNewText($0, earlier: steps.prefix(recordsBefore)) }) {
+                        stepsSinceProgress = 0
+                    }
                     if presetPlan.isEmpty, Self.goalParts(task) >= 10, stepsSinceProgress >= Self.bigGoalPatience,
                        try await skipStuckThing(nil, "no result in \(stepsSinceProgress) steps") {
                         continue
@@ -4203,8 +4206,18 @@ extension Pointer: Gestures {}
         stepsSinceProgress = 0
     }
 
-    /// Steps since something was last found, sent or finished (gotOn).
+    /// Steps since something was last found, sent or finished (gotOn), or new text was written (typedNewText).
     private var stepsSinceProgress = 0
+
+    /// D78, y2 on 138 (item 46): writing 45 results into a memo is a type and a return a line. 30 steps of new lines went
+    /// in, the thing was skipped as "no result in 30 steps" and the owner was told 第46项 未能完成; the memo was finished
+    /// later, after three new plans. Text not typed before, of 20 characters or more, is the work getting on; a search
+    /// typed again, or a short one, is not.
+    static func typedNewText(_ step: JObject, earlier: ArraySlice<JObject>) -> Bool {
+        let clean = { (s: JObject) in (s["text"]?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard step["action"]?.str == "type", clean(step).count >= 20 else { return false }
+        return !earlier.contains { $0["action"]?.str == "type" && clean($0) == clean(step) }
+    }
     static let bigGoalPatience = 30
 
     /// Key presses (typedKey of the press text) since something was last found or finished.

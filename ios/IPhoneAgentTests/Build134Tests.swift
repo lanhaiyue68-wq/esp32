@@ -697,6 +697,29 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D78, y2 on 138 (item 46): new lines written into a memo are the work getting on; the same text again is not.
+    func testWritingNewLinesIsGettingOn() {
+        let line = "23. 2027年2月有4个星期一：1日、8日、15日、22日。"
+        let typed: JObject = ["action": .str("type"), "text": .str(line)]
+        let earlier: [JObject] = [["action": .str("type"), "text": .str("22. 深圳citywalk前4篇笔记标题已记下。")], ["action": .str("key")]]
+        XCTAssertTrue(AgentLoop.typedNewText(typed, earlier: earlier[...]))
+        XCTAssertFalse(AgentLoop.typedNewText(typed, earlier: (earlier + [typed])[...]), "typed before")
+        XCTAssertFalse(AgentLoop.typedNewText(["action": .str("type"), "text": .str("保温杯")], earlier: earlier[...]), "a search")
+        XCTAssertFalse(AgentLoop.typedNewText(["action": .str("note"), "text": .str(line)], earlier: earlier[...]))
+    }
+
+    /// D77, y2 on 138: an empty line under "结果如下：" does not end the answer; the numbered results under it are kept.
+    func testAnEmptyLineInsideAnAnswerKeepsWhatFollows() throws {
+        let reply = "THINK: 现在按编号整理全部结果汇报。\nDO: done 已完成全部49项任务的整理与汇报，结果如下：\n\n1. 深圳AQI 35，体感24℃。\n"
+            + "2. 第一个数据线¥2.16。\n\n3. 支付宝评分4.5\n```"
+        let acts = try Actions.parseActions(reply)
+        XCTAssertEqual(acts.count, 1)
+        XCTAssertEqual(acts[0]["answer"]?.str, "已完成全部49项任务的整理与汇报，结果如下： 1. 深圳AQI 35，体感24℃。；2. 第一个数据线¥2.16。；3. 支付宝评分4.5")
+        let two = try Actions.parseActions("THINK: 好\nDO: done 好了\n\nDO: tap 100 200")
+        XCTAssertEqual(two.count, 2, "the next label still ends it")
+        XCTAssertEqual(two[0]["answer"]?.str, "好了")
+    }
+
     /// D76, y1 on 138 (item 39): a date a note found gets its days from today worked out, as a date the goal names does.
     func testADateANoteFoundIsCountedFromToday() {
         var cal = Calendar(identifier: .gregorian)

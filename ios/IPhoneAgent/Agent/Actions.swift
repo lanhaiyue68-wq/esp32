@@ -84,11 +84,15 @@ enum Actions {
     /// A done whose answer runs on over several lines (a forecast, a list): the lines under it that start no label are
     /// part of it. Build 116 over the cloud 11-10: "我的位置（龙岗区）的預報：" reached the cloud alone, the three days under
     /// it were dropped. They are joined into the one DO line, after a colon by a space, otherwise by "；".
+    /// D77, y2 on 138: the last answer was "已完成全部49项任务的整理与汇报，结果如下：", an empty line, then the 49 results;
+    /// the empty line ended the answer, the 49 were dropped and the owner got the run's raw notes instead. Only the next
+    /// label ends an answer: an empty line or a ``` fence inside it is left out.
     static func joinedAnswers(_ text: String) -> String {
         var out: [String] = []
         var inDone = false
         for line in text.components(separatedBy: "\n") {
             let t = line.trimmingCharacters(in: .whitespaces)
+            if inDone, t.isEmpty || t.hasPrefix("```") { continue }
             if t.range(of: #"^(THINK|ZH|DO)\s*[:：]"#, options: .regularExpression) != nil {
                 inDone = t.range(of: #"^DO\s*[:：]\s*done(\s|$)"#, options: [.regularExpression, .caseInsensitive]) != nil
                 out.append(line)
