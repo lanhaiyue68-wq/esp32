@@ -99,7 +99,7 @@ enum AppPlaces {
     static func names(_ rows: [[CandidatePicker.Piece]]) -> [CandidatePicker.Piece] {
         rows.flatMap { $0 }.filter { piece in
             let text = piece.text.filter { !$0.isWhitespace }
-            return (1...12).contains(text.count) && (0.1...0.86).contains(piece.box.midY) && !text.allSatisfy { $0.isNumber || $0 == "°" }
+            return (1...12).contains(text.count) && (0.08...0.86).contains(piece.box.midY) && !text.allSatisfy { $0.isNumber || $0 == "°" }
                 && !isPill(piece)  // D40: the Search pill is on every page, it names none
         }
     }

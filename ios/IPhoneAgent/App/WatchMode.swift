@@ -454,7 +454,7 @@ enum WatchSettings {
     /// ("unsupported keyboard text"), the send ran out of steps three times and the messages went unanswered
     /// (logs(13): "抱歉刚才没及时回复你～"). nil when nothing is left.
     static func typeable(_ text: String) -> String? {
-        let swaps: [Character: String] = ["～": "", "~": "", "〜": "", "…": "。", "—": "，", "–": "，", "·": "", "@": "", "＠": "",
+        let swaps: [Character: String] = ["°": "度", "～": "", "~": "", "〜": "", "…": "。", "—": "，", "–": "，", "·": "", "@": "", "＠": "",
                                           "「": "“", "」": "”", "『": "“", "』": "”", "【": "（", "】": "）", "《": "“", "》": "”"]
         let keyed = Set("，。！？：；（）、“”‘’")
         var out = ""

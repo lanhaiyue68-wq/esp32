@@ -795,8 +795,9 @@ extension Pointer: Gestures {}
     /// An app the goal names that this run never went into cannot have given a result. nil = may finish.
     /// `answer`: an app the answer itself says was not done (a part with the app and 未完成 / 没做 / skipped) is not
     /// counted, so an honest answer can finish.
-    static func unvisitedReason(task: String, steps: [JObject], answer: String = "") -> String? {
-        let missing = unvisitedApps(task: task, steps: steps).filter { !Self.ownsNotDone(answer, about: [$0]) }
+    /// `startedIn`: the app the run began in (the watch's check in 微信会话 never opens 微信; its executor need not name it).
+    static func unvisitedReason(task: String, steps: [JObject], answer: String = "", startedIn: String? = nil) -> String? {
+        let missing = unvisitedApps(task: task, steps: steps).filter { !Self.ownsNotDone(answer, about: [$0]) && $0 != startedIn }
         guard !missing.isEmpty else { return nil }
         return "This run never went into " + missing.joined(separator: "、") + ": whatever the answer says about them is not "
             + "from this run. Open each of them now and read it there, or answer that those parts were not done."
@@ -2692,7 +2693,7 @@ extension Pointer: Gestures {}
             var unvisited: String?  // only for a task given in words (not the watch's fixed ways)
             if name == "done", endsTask, presetPlan.isEmpty, !keyboardGuard {
                 let answer = act["answer"]?.str ?? ""
-                unvisited = Self.unvisitedReason(task: task, steps: steps, answer: answer)
+                unvisited = Self.unvisitedReason(task: task, steps: steps, answer: answer, startedIn: startApp)
                 if unvisited == nil, endAfterSend == nil {
                     unvisited = Self.unsentGoalReason(task: task, sent: sentTexts, answer: answer)  // sent, not only approved
                 }
