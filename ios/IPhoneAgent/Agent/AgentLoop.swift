@@ -880,12 +880,18 @@ extension Pointer: Gestures {}
 
     /// Actions that move the screen somewhere (a back-and-forth is made of these).
     private static let moving: Set<String> = ["tap", "swipe", "back", "home", "key"]
+    /// D52: steps after which earlier moves are no part of a back-and-forth.
+    private static let bounceEnds: Set<String> = ["open", "part done", "thing skipped"]
 
     /// The plan closes a back-and-forth: the last moves went A, B, A and this one is B again (enter a chat, go back,
     /// enter, go back). Each of them changes the screen, so `repeating` never sees it. Returns A.
     static func bounce(_ act: JObject, after steps: [JObject]) -> JObject? {
         guard moving.contains(act["action"]?.str ?? "") else { return nil }
-        let moves = Array(steps.filter { moving.contains($0["action"]?.str ?? "") }.suffix(3))
+        // D52, y4 on 136 (item 3): 淘宝's item ended with back (56 89) and taps at (247 765) twice; 微信 was opened for the
+        // next item and its back at (56 89) closed "a back-and-forth" with 淘宝's taps: refused three times, the item
+        // skipped. Moves before an app opened, a part done or a thing skipped are another screen's.
+        let start = steps.lastIndex { bounceEnds.contains($0["action"]?.str ?? "") }.map { $0 + 1 } ?? steps.startIndex
+        let moves = Array(steps[start...].filter { moving.contains($0["action"]?.str ?? "") }.suffix(3))
         guard moves.count == 3, sameSpot(act, moves[1]), sameSpot(moves[2], moves[0]), !sameSpot(moves[0], moves[1])
         else { return nil }
         return moves[0]

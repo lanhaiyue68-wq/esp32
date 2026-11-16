@@ -581,6 +581,16 @@ import XCTest
         XCTAssertFalse(AgentLoop.newThingNoted("未能完成：第25项（一直点一个没反应的地方）", before: []))
         XCTAssertFalse(AgentLoop.newThingNoted("新学到的做法：先回到首页", before: []))
     }
+
+    /// D52, y4 on 136 (item 3): 微信's back after an item in 淘宝 ended is no back-and-forth with 淘宝's taps.
+    func testMovesInTheLastAppAreNoBackAndForthInTheNext() {
+        func tap(_ x: Int, _ y: Int) -> JObject { ["action": .str("tap"), "x": .int(x), "y": .int(y)] }
+        let taobao = [tap(247, 765), tap(56, 89), tap(246, 765)]
+        XCTAssertNotNil(AgentLoop.bounce(tap(56, 89), after: taobao), "in one app it is a back-and-forth")
+        let then: [JObject] = [["action": .str("part done")], ["action": .str("open"), "app": .str("微信")]]
+        XCTAssertNil(AgentLoop.bounce(tap(56, 89), after: taobao + then))
+        XCTAssertNil(AgentLoop.bounce(tap(56, 89), after: taobao + [["action": .str("thing skipped")]]))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
