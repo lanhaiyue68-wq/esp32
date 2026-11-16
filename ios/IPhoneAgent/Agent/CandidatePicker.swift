@@ -46,6 +46,15 @@ enum CandidatePicker {
                                     "鍵盤設置", "键盘设定", "keyboardsettings"]
 
     /// The keyboard menu is open: one of its menu-only rows shows.
+    /// D84, y5 on 138 (item 43): Lan Agent's own keyboard, known by its status line ("Lan Agent 輸入法…", "連不上 Lan
+    /// Agent…", "Lan Agent 已填入…") and its 空格 key, both in the lower part of the screen.
+    static func ourKeyboardShown(rows: [[Piece]]) -> Bool {
+        let low = rows.filter { ($0.map(\.box.minY).min() ?? 0) >= 0.55 }.map { bare($0.map(\.text).joined()).lowercased() }
+        // Without Full Access it says so and never asks: not waited for.
+        return low.contains { $0.contains("lanagent") } && low.contains { $0.contains("空格") }
+            && !low.contains { $0.contains("完整取用") }
+    }
+
     static func keyboardMenuOpen(rows: [[Piece]]) -> Bool {
         rows.contains { row in keyboardMenuWords.contains { bare(row.map(\.text).joined()).lowercased().hasPrefix($0) } }
     }

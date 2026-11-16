@@ -82,14 +82,20 @@ final class KeyboardViewController: UIInputViewController {
         busy = true
         exchange(KeyboardLink.line(.next)) { [weak self] reply in
             guard let self else { return }
+            // D84, y5 on 138: one unanswered ask (iOS held Lan Agent for a few seconds) left "連不上" up for good, and
+            // Codex read it and gave the item up. The line says so only while asks go unanswered.
             guard let reply, let job = KeyboardLink.job(reply) else {
-                if reply == nil { self.status.text = "連不上 Lan Agent（請先打開 Lan Agent）" }
+                if reply == nil {
+                    self.status.text = "暫時連不上 Lan Agent（沒打開請先打開）"
+                } else if self.status.text?.hasPrefix("暫時連不上") == true {
+                    self.status.text = "Lan Agent 輸入法：等待要打的字…"
+                }
                 self.busy = false
                 return
             }
             self.textDocumentProxy.insertText(job.text)
             if job.enter { self.textDocumentProxy.insertText("\n") }
-            self.status.text = "已填入：\(job.text.prefix(20))"
+            self.status.text = "Lan Agent 已填入：\(job.text.prefix(20))"
             self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
         }
     }

@@ -697,6 +697,27 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D84, y5 on 138 (item 43): Lan Agent's own keyboard is known on screen by its status line and its keys.
+    func testOurKeyboardIsKnownOnScreen() {
+        typealias P = CandidatePicker.Piece
+        let keys = [P(text: "下一個", box: CGRect(x: 0.1, y: 0.78, width: 0.12, height: 0.02)),
+                    P(text: "空格", box: CGRect(x: 0.34, y: 0.78, width: 0.07, height: 0.02)),
+                    P(text: "搜尋", box: CGRect(x: 0.82, y: 0.78, width: 0.07, height: 0.02))]
+        let ours: [[P]] = [
+            [P(text: "Python教程毛", box: CGRect(x: 0.15, y: 0.07, width: 0.3, height: 0.03))],
+            [P(text: "連不上 Lan Agent（請先打開 Lan Agent）", box: CGRect(x: 0.13, y: 0.73, width: 0.74, height: 0.02))],
+            keys,
+        ]
+        XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: ours))
+        XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Lan Agent 已填入：猫", box: CGRect(x: 0.3, y: 0.73, width: 0.4, height: 0.02))], keys]))
+        XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "空格", box: CGRect(x: 0.4, y: 0.95, width: 0.1, height: 0.02))]]),
+                       "the system keyboard")
+        XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Lan Agent 真好用", box: CGRect(x: 0.2, y: 0.3, width: 0.4, height: 0.02))], keys]),
+                       "a chat line high on the screen is not the keyboard")
+        XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "請到 設定 › 一般 › 鍵盤 › Lan Agent 打開「允許完整取用」", box: CGRect(x: 0.1, y: 0.73, width: 0.8, height: 0.04))], keys]),
+                       "without Full Access it never asks")
+    }
+
     /// D83, y4 on 138 (item 27): what was said while scrolling is noted by the run under the part's item.
     func testWhatWasSaidWhileScrollingIsNoted() {
         let a = "The 關於本機 page shows 機型名稱 iPhone 13 mini; total capacity is not visible, so I swipe up to find it."

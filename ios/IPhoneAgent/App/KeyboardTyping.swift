@@ -15,6 +15,18 @@ extension AppModel {
     /// is the app's own control (WeChat's voice button), so nothing is tapped and the caller focuses the field first.
     func showLanAgentKeyboard(tries: Int = 3, appear: Double = 2.5) async -> Bool {
         if keyboardBridge.onScreen() { return true }
+        // D84, y5 on 138 (item 43): iOS held Lan Agent for 5–8 s at a time (y6: 63 times in 43 minutes, thermal serious),
+        // so Lan Agent's keyboard, on screen, got no answer and said "連不上 Lan Agent"; it was not taken for a keyboard,
+        // the text went in as pinyin (猫 came out 毛), and Codex read "連不上" and gave the item up. Our keyboard on
+        // screen gets 8 s to ask again before anything else is tried.
+        if let frame = await freshFrame(),
+           CandidatePicker.ourKeyboardShown(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.55, bottom: 1)) {
+            if await lanAgentKeyboardUp(within: 8) {
+                DebugLog.write("keyboard: Lan Agent's keyboard was on screen and asked again")
+                return true
+            }
+            DebugLog.write("keyboard: Lan Agent's keyboard is on screen and did not ask for 8 s")
+        }
         // Live test 11-08: Search's keyboard came up after the opener's 0.8 s, "no keyboard on screen" was decided at
         // once, and "open 时钟" failed with 時鐘 ready to type. A keyboard (or its menu) gets `appear` s to show.
         let deadline = now() + appear
