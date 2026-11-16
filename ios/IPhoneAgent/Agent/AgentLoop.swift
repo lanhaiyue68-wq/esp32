@@ -3800,8 +3800,25 @@ extension Pointer: Gestures {}
     /// its weekday worked out here, not by the model.
     /// 134 over the cloud 11-15: dates without a year (12月25日) and the days from today too (y6 counted 99 for 84).
     static func dateFacts(in goal: String, today: Date = Date(), calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        let said = dateLines(in: goal, today: today, calendar: calendar)
+        return said.isEmpty ? "" : " Dates in the goal: " + said.joined(separator: "; ") + "."
+    }
+
+    /// D76, y1 on 138 (item 39): 2027年春节 was found to be 2027年2月6日 and the days to it were to be counted on the
+    /// calculator. The actor noted "共88天" before it pressed a key (it is 81), then keyed 17 + 30 + 31 + 31 + 6 and never
+    /// read the result, and the check let 88 stand: the date was in no goal. A date the notes found gets its weekday and
+    /// its days from today worked out here too, the latest 20.
+    static func foundDateFacts(_ notes: [String], goal: String, today: Date = Date(),
+                               calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        let known = Set(dateLines(in: goal, today: today, calendar: calendar))
+        let found = dateLines(in: notes.joined(separator: "\n"), today: today, calendar: calendar).filter { !known.contains($0) }
+        return found.isEmpty ? "" : " Dates the notes found, worked out on the phone (a count of days or a weekday that "
+            + "differs is wrong): " + found.suffix(20).joined(separator: "; ") + "."
+    }
+
+    static func dateLines(in goal: String, today: Date = Date(), calendar: Calendar = Calendar(identifier: .gregorian)) -> [String] {
         guard let re = try? NSRegularExpression(pattern: #"(\d{4})\s*(?:年|-|/|\.)\s*(\d{1,2})\s*(?:月|-|/|\.)\s*(\d{1,2})"#),
-              let bare = try? NSRegularExpression(pattern: #"(?<![\d年/.\-])(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]"#) else { return "" }
+              let bare = try? NSRegularExpression(pattern: #"(?<![\d年/.\-])(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]"#) else { return [] }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = calendar
@@ -3854,7 +3871,7 @@ extension Pointer: Gestures {}
                 add(on)
             }
         }
-        return said.isEmpty ? "" : " Dates in the goal: " + said.joined(separator: "; ") + "."
+        return said
     }
 
     /// The numbered lines of a plan ("1. ...", "2) ...", "3、..."), trimmed.
@@ -4237,14 +4254,14 @@ extension Pointer: Gestures {}
 
     /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
     /// answer, the 18th, and the run went on to "today is 2025-06-03" and its step limit.
-    static func todayLine(_ date: Date = Date(), goal: String = "") -> String {
+    static func todayLine(_ date: Date = Date(), goal: String = "", found: [String] = []) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd, EEEE"
         // Build 117 on the phone: the check worked a weekday out wrong from a forecast. The next two days are given too.
         let day = { (n: Int) in f.string(from: Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: date) ?? date) }
         return "Today is \(f.string(from: date)). Tomorrow is \(day(1)); the day after is \(day(2))." + dateFacts(in: goal)
-            + mathFacts(in: goal) + invoiceFacts(in: goal)
+            + (found.isEmpty ? "" : foundDateFacts(found, goal: goal, today: date)) + mathFacts(in: goal) + invoiceFacts(in: goal)
     }
 
     /// D29, user 11-15 (每月申请发票): for a goal about 发票, the owner's invoice details from Settings › 发票资料; "" for any
@@ -4376,7 +4393,7 @@ extension Pointer: Gestures {}
     }
 
     private func checkPrompt(_ answer: String) -> String {
-        Self.checkPrompt(goal: task, today: Self.todayLine(goal: task), answer: answer, did: Self.whatItDid(steps), notes: notes,
+        Self.checkPrompt(goal: task, today: Self.todayLine(goal: task, found: notes), answer: answer, did: Self.whatItDid(steps), notes: notes,
                          sent: sent, parts: max(parts.count, Self.goalParts(task)))
     }
 
@@ -4597,7 +4614,7 @@ extension Pointer: Gestures {}
 
     func replan(stuck: Bool = false, rest: [Int] = [], first: String? = nil) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
-        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))"
+        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task, found: notes))"
         // D16: a new plan of a goal of 10+ things names the things left, so it does not stop at the next few.
         let left = rest.isEmpty && stuck && presetPlan.isEmpty
             ? Self.itemsLeft(task: task, told: notes + doneParts, sent: messageSent) : rest
@@ -4673,7 +4690,7 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
+        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task, found: notes))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
             + (Self.scrollingHint(steps).map { "\n\n" + $0 } ?? "") + "\n\nNext action?"
         let driving = (plannerLeads || takeover > 0 || actorClosed) && planner != nil
         if takeover > 0 { takeover -= 1 }

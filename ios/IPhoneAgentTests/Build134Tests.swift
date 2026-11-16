@@ -697,6 +697,21 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D76, y1 on 138 (item 39): a date a note found gets its days from today worked out, as a date the goal names does.
+    func testADateANoteFoundIsCountedFromToday() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        let today = cal.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 0, minute: 5))!
+        let goal = "用 Safari 查2027年春节是几月几号，再用计算器算从今天（以日历为准）到那天还有多少天；在日历看2026年12月25日是星期几"
+        let notes = ["第39项：2027年春节为2027年2月6日（星期六），除夕为2月5日（星期五）", "第1项：2026年12月25日是星期五"]
+        let said = AgentLoop.foundDateFacts(notes, goal: goal, today: today, calendar: cal)
+        XCTAssertTrue(said.contains("2027-02-06, Saturday (星期六) 81 days from today"), said)
+        XCTAssertTrue(said.contains("2027-02-05, Friday (星期五) 80 days from today"), said)
+        XCTAssertFalse(said.contains("2026-12-25"), "the goal's own date is said once, with the goal's")
+        XCTAssertEqual(AgentLoop.foundDateFacts([], goal: goal, today: today, calendar: cal), "")
+        XCTAssertTrue(AgentLoop.dateFacts(in: goal, today: today, calendar: cal).hasPrefix(" Dates in the goal: 2026-12-25"))
+    }
+
     /// D75, s7 on 138: "设置步骤" is the steps to set something up, not the Settings app.
     func testSettingStepsNameNoApp() {
         let task = "在小红书搜“iPhone 定时关机 快捷指令”，打开前三篇笔记，整理出一份设置步骤；看看每篇是什么时候发的"
