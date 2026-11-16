@@ -489,4 +489,52 @@ import XCTest
         XCTAssertTrue(facts.contains("2027-02-24, Wednesday (星期三) counting 100 days on"), facts)
         XCTAssertTrue(AgentLoop.dateFacts(in: "100天后是几号", today: today, calendar: cal).contains("2027-02-24, Wednesday (星期三) 100 days from today"))
     }
+
+    /// D47, z5/z6 on 136: Doubao's account was overdue (HTTP 403 AccountOverdueError) and two runs of 50 things ended.
+    func testAnOverdueExecutorHandsTheRunToCodex() async {
+        XCTAssertTrue(ModelRequestFailure.accountClosed(#"LLM HTTP 403: {"error":{"code":"AccountOverdueError","message":"x"}}"#))
+        XCTAssertTrue(ModelRequestFailure.accountClosed("LLM HTTP 401: invalid key"))
+        XCTAssertFalse(ModelRequestFailure.accountClosed("LLM HTTP 429: rate limit"))
+        XCTAssertFalse(ModelRequestFailure.accountClosed("网络连接已中断。"))
+        let actor = OverdueModel()
+        let planner = FakeModel { $0 == 1 ? "1. look" : "THINK: finished\nDO: done 好了" }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: planner, trace: nil)
+        agent.showMock(task: "查", plan: "", steps: [], running: false)
+        await agent.run()
+        let kinds = agent.steps.map { $0["action"]?.str ?? "?" }
+        XCTAssertEqual(kinds.last, "done", "\(kinds)")
+        XCTAssertFalse(kinds.contains("error"), "\(kinds)")
+        XCTAssertTrue(kinds.contains("executor closed"), "\(kinds)")
+        XCTAssertEqual(actor.calls, 1, "Doubao is not asked again in this run")
+    }
+
+    /// D47: Codex resting for one dropped connection is asked again when Doubao answers that its account cannot be used.
+    func testCodexRestingForTheNetworkIsAskedAgainWhenDoubaoIsOverdue() async throws {
+        let rest = PlusRest()
+        var calls = 0
+        let tokens = ChatGPTPlus.Tokens(idToken: "i", accessToken: "a", refreshToken: "r", accountID: "x")
+        let plus = PlusChat(model: "m", fallback: OverdueModel(), tokens: { tokens }, save: { _ in },
+                            ask: { _, _, _, _, _ in
+                                calls += 1
+                                if calls == 1 { throw URLError(.networkConnectionLost) }
+                                return (ChatGPTPlus.Answer(text: "plan", model: "m", firstTokenMs: 1, totalMs: 2, quota: [:]), tokens)
+                            }, rest: rest)
+        let reply = try await plus.chat(system: "s", text: "t", image: nil, maxTokens: 1, temperature: 0)
+        XCTAssertEqual(reply.text, "plan")
+        XCTAssertEqual(calls, 2)
+        XCTAssertFalse(rest.resting)
+        rest.failed("请求超时。")
+        rest.wake()
+        XCTAssertTrue(rest.resting, "a real failure is not woken")
+    }
+}
+
+/// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
+@MainActor private final class OverdueModel: ChatModel {
+    let model = "doubao"
+    private(set) var calls = 0
+    func chat(system: String, text: String, image: Data?, maxTokens: Int, temperature: Double) async throws -> ChatResult {
+        calls += 1
+        throw LLMError(message: #"LLM HTTP 403: {"error":{"code":"AccountOverdueError","message":"overdue"}}"#)
+    }
 }

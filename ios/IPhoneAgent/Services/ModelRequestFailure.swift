@@ -20,6 +20,16 @@ enum ModelRequestFailure {
         return false
     }
 
+    /// D47, 136 over the cloud 11-16 (z5, z6): Doubao answered HTTP 403 AccountOverdueError on every call. Asking it again
+    /// does nothing until the owner pays or fixes the key: an overdue account, a wrong key, or a model not opened.
+    static func isAccountClosed(_ error: Error) -> Bool {
+        accountClosed(error.localizedDescription)
+    }
+
+    static func accountClosed(_ message: String) -> Bool {
+        ["AccountOverdue", "HTTP 401", "AuthenticationError", "insufficient_quota", "ModelNotOpen"].contains { message.contains($0) }
+    }
+
     static func message(_ error: Error) -> String {
         if isTimeout(error) {
             return String(localized: "The model request timed out before it finished. Try again or choose a specific vision model instead of automatic routing.")

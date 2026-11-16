@@ -491,6 +491,8 @@ extension Pointer: Gestures {}
     /// What a paste would put in (UIPasteboard, set by AppModel): it is held for approval like typed text.
     var pasteboard: () -> String? = { nil }
     private var pasteHopOff = false  // a hop got lost once in this run: the rest of it types
+    /// D47: the executor's account answered that it cannot be used (overdue, wrong key): Codex drives the rest of the run.
+    private var actorClosed = false
     private var lastTap: CGPoint?    // the last tap (0-1), the input box when a type follows
     /// WeChat watch send: the target chat's row (0-1) when this frame is the chat list showing it once; nil otherwise.
     var rowTarget: ((Data) -> CGPoint?)?
@@ -715,6 +717,17 @@ extension Pointer: Gestures {}
             let room = Self.goalParts(task) >= 10 ? Self.bigGoalTokens : (Self.maxTokens[role] ?? 1000)
             reply = try await llm.chat(system: system, text: prompt, image: frame, maxTokens: room, temperature: temperature)
         } catch {
+            if !Task.isCancelled, llm === actor, let planner, planner !== llm, ModelRequestFailure.isAccountClosed(error) {
+                // D47, 136 over the cloud 11-16 (z5, z6): Doubao answered 403 AccountOverdueError and two runs of 50 things
+                // ended; a short task meanwhile went on with Codex after a replan. Codex drives the rest of this run.
+                if !actorClosed {
+                    actorClosed = true
+                    DebugLog.write("actor: \(llm.model)'s account cannot be used (\(error.localizedDescription.prefix(80))); "
+                                   + "Codex drives the rest of this run")
+                    record(nil, ["action": .str("executor closed"), "reason": .str(String(error.localizedDescription.prefix(200)))])
+                }
+                return try await ask(role, planner, system, prompt, temperature: temperature, retryTimeout: retryTimeout, pinned: pinned)
+            }
             guard retryTimeout, ModelRequestFailure.isTimeout(error), !Task.isCancelled else { throw error }
             DebugLog.write("model request timed out (\(role)); retrying once with a fresh screen")
             onDoing?(.retrying)
@@ -2031,6 +2044,7 @@ extension Pointer: Gestures {}
     func run() async {
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
+        actorClosed = false
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         sendCorrections = 0
         quietSinceSend = 0
@@ -4408,7 +4422,7 @@ extension Pointer: Gestures {}
             }
         }
         var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)\n\nNext action?"
-        let driving = (plannerLeads || takeover > 0) && planner != nil
+        let driving = (plannerLeads || takeover > 0 || actorClosed) && planner != nil
         if takeover > 0 { takeover -= 1 }
         if endAfterSend != nil, !sentTexts.isEmpty, unsent == nil { prompt += "\n\n" + Self.sendVerificationReason }
         if let controls, let shown = screen?.frame {
@@ -4510,7 +4524,7 @@ extension Pointer: Gestures {}
             reply = text
             var acts: [JObject]
             do { acts = try Actions.parseActions(text) } catch {
-                if driving {  // Codex answered with no action: Doubao goes on rather than Codex being asked again and again
+                if driving, !actorClosed {  // Codex answered with no action: Doubao goes on rather than Codex being asked again and again
                     (takeover, plannerLeads) = (0, false)
                     DebugLog.write("takeover: Codex's reply held no action; the executor goes on")
                     return try await nextActions()

@@ -87,6 +87,22 @@ import Foundation
     }
 
     func chat(system: String, text: String, image: Data?, maxTokens: Int, temperature: Double) async throws -> ChatResult {
+        do {
+            return try await chatOnce(system: system, text: text, image: image, maxTokens: maxTokens, temperature: temperature)
+        } catch where !Task.isCancelled && ModelRequestFailure.isAccountClosed(error) {
+            // D47, 136 over the cloud 11-16 (z5, z6): one dropped connection put Codex to rest for a minute; Doubao, whose
+            // account was overdue, planned meanwhile and two runs of 50 things ended. Doubao's answer shows the network is
+            // up: an account resting only for the network is asked again at once.
+            let waking = accounts.filter { $0.rest.offlineOnly && $0.tokens() != nil }
+            guard !waking.isEmpty else { throw error }
+            waking.forEach { $0.rest.wake() }
+            DebugLog.write("plus planner: \(fallback.model)'s account cannot be used (\(error.localizedDescription.prefix(60))); "
+                           + "the network is up, so Codex is asked again")
+            return try await chatOnce(system: system, text: text, image: image, maxTokens: maxTokens, temperature: temperature)
+        }
+    }
+
+    private func chatOnce(system: String, text: String, image: Data?, maxTokens: Int, temperature: Double) async throws -> ChatResult {
         let say = accounts[0].rest.onFailure  // RunSession tells the user through account 1's (the shared one)
         let named = accounts.count > 1 && accounts.dropFirst().contains { $0.tokens() != nil }
         var failed: [String] = []  // accounts that failed on this call
@@ -188,8 +204,10 @@ import Foundation
         if networkDown {
             lastError = message
             until = now() + Self.offlineRest
+            offlineOnly = true
             return Self.offlineRest
         }
+        offlineOnly = false
         failures += 1
         lastError = message
         let seconds = Self.restSeconds(failures: failures, message: message)
@@ -198,7 +216,12 @@ import Foundation
         return seconds
     }
 
-    func succeeded() { failures = 0; lastError = ""; until = 0 }
+    func succeeded() { failures = 0; lastError = ""; until = 0; offlineOnly = false }
+
+    /// D47: resting only because the network dropped once (nothing Codex said).
+    private(set) var offlineOnly = false
+    /// The network is back (another model answered): the rest for it is over.
+    func wake() { if offlineOnly { until = 0 } }
 
     /// 131 over the cloud 11-13 (user: "账号1有问题，这种情况你让他自动切2"): account 1 answered "the 'gpt-6.1-terra' model
     /// is not supported when using Codex with a ChatGPT account" and was asked again every 2-10 minutes before account 2;
