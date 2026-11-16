@@ -697,6 +697,58 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D83, y4 on 138 (item 27): what was said while scrolling is noted by the run under the part's item.
+    func testWhatWasSaidWhileScrollingIsNoted() {
+        let a = "The 關於本機 page shows 機型名稱 iPhone 13 mini; total capacity is not visible, so I swipe up to find it."
+        let b = "I'm on the 關於本機 page. The total capacity shows 256 GB, but the model name is above the visible area."
+        let steps: [JObject] = [
+            ["action": .str("tap"), "thought": .str("I tap 關於本機.")],
+            ["action": .str("swipe"), "thought": .str(a)],
+            ["action": .str("swipe"), "thought": .str(b)],
+            ["action": .str("swipe"), "thought": .str(a)],
+            ["action": .str("note"), "text": .str("第27项：总容量为256GB。")],
+            ["action": .str("refused"), "reason": .str("Refused: this page was already scrolled")],
+        ]
+        XCTAssertEqual(AgentLoop.seenWhileScrollingNote(steps, part: "2. 第27项：Read the model name and total capacity"),
+                       "第27项（滚动页面时看到，原话）：" + a + " " + b)
+        XCTAssertEqual(AgentLoop.seenWhileScrollingNote(steps, part: nil), "（滚动页面时看到，原话）：" + a + " " + b)
+        XCTAssertEqual(AgentLoop.seenWhileScrollingNote(steps, part: "1. 第21–30项：x"), "（滚动页面时看到，原话）：" + a + " " + b)
+        XCTAssertNil(AgentLoop.seenWhileScrollingNote([["action": .str("tap")]], part: nil))
+    }
+
+    /// D81, y4 on 138 (item 40): a thing that asks for a message is not done by a note of what was read on the way.
+    func testAThingThatSendsIsDoneWhenItsMessageWent() {
+        let items = (1...12).map { n in
+            n == 10 ? "10. 如果深圳今天最高温比首尔高10度以上，就在微信测试群发“Y4温差大”，否则发“Y4温差小”" : "\(n). 查第\(n)样东西"
+        }
+        let task = "帮我做这12件事：" + items.joined(separator: "；")
+        let told = (1...9).map { "第\($0)项：有" } + ["第11项：有", "第12项：有", "第10项：首尔今日最高温14°，最低温10°"]
+        XCTAssertEqual(AgentLoop.itemsLeft(task: task, told: told, sent: []), [10])
+        XCTAssertEqual(AgentLoop.itemsLeft(task: task, told: told, sent: [AgentLoop.typedKey("Y4温差大")]), [])
+        XCTAssertEqual(AgentLoop.itemsLeft(task: task, told: told + ["第10项未完成：微信发送被拒"], sent: []), [])
+        XCTAssertEqual(AgentLoop.itemsLeft(task: task, told: Array(told.dropLast()) + ["第10项：温差14度；第11项：有"], sent: []), [10],
+                       "what is said of 10 ends at 11's head")
+        XCTAssertEqual(AgentLoop.itemsLeft(task: task, told: Array(told.dropLast()) + ["第10项：条件不满足，不发"], sent: []), [])
+    }
+
+    /// D82, y4 on 138: parts whose items were noted inside an earlier part are passed; the plan's last part is not.
+    func testPartsNotedOnTheWayArePassed() {
+        let task = "帮我做这12件事：" + (1...11).map { "\($0). 查第\($0)样东西" }.joined(separator: "；") + "；12. 把结果告诉我"
+        let parts = ["1. 第8项：x", "2. 第9项：x", "3. 第10项：x", "4. 第11项：x", "5. 第12项：x"]
+        let told = (1...7).map { "第\($0)项：有" } + ["第8项：有", "第9项：有", "第10项：有"]
+        XCTAssertEqual(AgentLoop.partsNoted(parts, from: 1, task: task, told: told, sent: []), 2, "9 and 10 noted; 11 is not")
+        XCTAssertEqual(AgentLoop.partsNoted(parts, from: 3, task: task, told: told, sent: []), 0)
+        let all = (1...12).map { "第\($0)项：有" }
+        XCTAssertEqual(AgentLoop.partsNoted(parts, from: 1, task: task, told: all, sent: []), 3, "the last part stays")
+        XCTAssertEqual(AgentLoop.partsNoted(["1. 第8项：x", "2. Open 微信", "3. 第10项：x"], from: 1, task: task, told: all, sent: []), 0,
+                       "a part with no item number is not passed")
+        XCTAssertEqual(AgentLoop.partItems("3. 第21–30项：x"), Array(21...30))
+        XCTAssertEqual(AgentLoop.partItems("3. 第43项：x"), [43])
+        XCTAssertNil(AgentLoop.partItems("Open 微信"))
+        let small = "帮我做3件事：1. a；2. b；3. c"
+        XCTAssertEqual(AgentLoop.partsNoted(["1. 第1项：a", "2. 第2项：b", "3. 第3项：c"], from: 0, task: small, told: ["第1项：有"], sent: []), 0)
+    }
+
     /// D79, y3 on 138 (item 1): "距<today>还有81天" counts from today to the date said before it; it is not 0.
     func testADayCountFromTodayRunsToTheDateSaidBefore() {
         var cal = Calendar(identifier: .gregorian)

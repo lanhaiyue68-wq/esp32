@@ -1458,25 +1458,71 @@ extension Pointer: Gestures {}
               let head = try? NSRegularExpression(pattern: #"(?:^\s*(?:\d{1,2}\s*[.、．]\s*)?|[；;。\n]\s*|->\s*|未能完成[：:]\s*(?:\d{1,2}\s*[.、．]\s*)?)第\s*(\d{1,2})\s*[项項]"#),
               let send = try? NSRegularExpression(pattern: #"发\s*[“"「]([^”"」]{2,20})[”"」]"#) else { return [] }
         var said = Set<Int>()
+        var saidOf: [Int: String] = [:]
         for text in told {
             let ns = AppNames.hans(text) as NSString
-            for m in head.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)) {
+            let heads = head.matches(in: ns as String, range: NSRange(location: 0, length: ns.length))
+            for (i, m) in heads.enumerated() {
                 guard let n = Int(ns.substring(with: m.range(at: 1))) else { continue }
                 // D80: "第24项待后续记录" is an item put off, not a result.
                 let clause = ns.substring(from: m.range.location + m.range.length).prefix(while: { !"；;。\n".contains($0) })
                 if clause.range(of: #"待后续|后续再|后续记录|后续补|待补|稍后|之后再|待记录"#, options: .regularExpression) != nil { continue }
                 said.insert(n)
+                let from = m.range.location + m.range.length
+                let to = i + 1 < heads.count ? heads[i + 1].range.location : ns.length
+                saidOf[n, default: ""] += ns.substring(with: NSRange(location: from, length: max(0, to - from))) + "\n"
             }
         }
         return items.compactMap { item -> Int? in
             let body = String(goal[item.body]).trimmingCharacters(in: .whitespaces)
-            if said.contains(item.n) || body.contains("告诉我") || body.hasPrefix("检查") { return nil }
+            if body.contains("告诉我") || body.hasPrefix("检查") { return nil }
             let ns = body as NSString
             let asked = send.matches(in: body, range: NSRange(location: 0, length: ns.length))
                 .map { typedKey(ns.substring(with: $0.range(at: 1))) }
             if asked.contains(where: { key in sent.contains { $0.contains(key) } }) { return nil }
+            // D81, y4 on 138 (item 40): "如果深圳今天最高温比首尔高10度以上，就在微信测试群发“Y4温差大”，否则发“Y4温差小”" had
+            // the note "第40项：首尔今日最高温14°，最低温10°" on the way; a stuck plan took 40 for done and left it out,
+            // "Y4全部做完" went out first, and 温差大 was sent only after it. A thing that asks for a message is done when
+            // the message went out, or a note says it is not to go or could not.
+            if said.contains(item.n), asked.isEmpty || notSending(saidOf[item.n] ?? "") { return nil }
             return item.n
         }
+    }
+
+    /// D81: a note on a thing that asks for a message, saying it is not sent: given up, or not to be sent.
+    static func notSending(_ said: String) -> Bool {
+        said.range(of: #"未能|未完成|没完成|没做成|做不成|无法|失败|跳过|不发|无需发|不用发|不需要发|不必发|未发|没发|没有发|不满足|拒绝|被拒|没装|未安装"#,
+                   options: .regularExpression) != nil
+    }
+
+    /// The goal's items a part of a plan is over: its run (partItemRange), or the one it starts with ("3. 第43项：…").
+    static func partItems(_ part: String) -> [Int]? {
+        if let run = partItemRange(part) { return Array(run) }
+        guard let re = try? NSRegularExpression(pattern: #"^\s*(?:\d{1,2}\s*[.)、．]\s*)?第\s*(\d{1,3})\s*[项項]"#),
+              let m = re.firstMatch(in: part, range: NSRange(part.startIndex..., in: part)),
+              let n = Range(m.range(at: 1), in: part).flatMap({ Int(part[$0]) }) else { return nil }
+        return [n]
+    }
+
+    /// D82, y4 on 138: the executor did items 42, 43 and 44 inside part 2 (第42项) and finished it; part 3 (第43项) was
+    /// already noted, so nothing it did there was new, the part "was not getting on" at 20 steps, 43 was put down as
+    /// 未能完成, and a stuck plan and 15 minutes went on the closing note. How many parts from `from` on are over items
+    /// that all have their result already; the plan's last part is never among them (its done ends the plan as before).
+    static func partsNoted(_ parts: [String], from: Int, task: String, told: [String], sent: Set<String>) -> Int {
+        let goal = AppNames.hans(task)
+        let items = numberedItems(goal)
+        guard items.count >= 10 else { return 0 }
+        let left = Set(itemsLeft(task: task, told: told, sent: sent))
+        let results = Set(items.filter { item in
+            let body = String(goal[item.body]).trimmingCharacters(in: .whitespaces)
+            return !body.contains("告诉我") && !body.hasPrefix("检查")
+        }.map(\.n))
+        var k = 0
+        while from + k < parts.count - 1, let mine = partItems(parts[from + k]),
+              mine.allSatisfy({ results.contains($0) && !left.contains($0) }) {
+            k += 1
+        }
+        return k
     }
 
     /// Numbers as runs: [7, 8, 9, 11, 17, 18, 19] → "7–9, 11, 17–19".
@@ -2179,6 +2225,27 @@ extension Pointer: Gestures {}
         return "What you said while scrolling or holding on this page: " + said.map { "“\($0)”" }.joined(separator: " ")
             + " If any of it is a value the goal asks for, write it down now with note TEXT together with your next action "
             + "(your thoughts are not kept; a value seen on an earlier screen is not scrolled back to)."
+    }
+
+    /// D83, y4 on 138 (item 27), the fourth time on 關於本機 (D19, D48, D53): Doubao said "shows 機型名稱 iPhone 13 mini"
+    /// twice while scrolling, noted only "第27项：总容量为256GB", was refused the turn back twice with its words quoted and
+    /// still wrote nothing; a stuck plan took 27 for done and the owner got "型号名称未能可靠记录". When the turn back is
+    /// refused, the run notes what was said while scrolling, word for word, under the part's item.
+    static func seenWhileScrollingNote(_ steps: [JObject], part: String?) -> String? {
+        var seen: [String] = []
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" || a == "hold" {
+                let t = (s["thought"]?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { seen.append(String(t.prefix(160))) }
+            } else if observedActions.contains(a) { break }
+            if seen.count >= 4 { break }
+        }
+        var said: [String] = []
+        for t in seen.reversed() where !said.contains(t) { said.append(t) }
+        guard !said.isEmpty else { return nil }
+        let item = part.flatMap(partItems).flatMap { $0.count == 1 ? $0[0] : nil }
+        return (item.map { "第\($0)项" } ?? "") + "（滚动页面时看到，原话）：" + said.joined(separator: " ")
     }
 
     static let scrollTurnsLimit = 3
@@ -3104,6 +3171,11 @@ extension Pointer: Gestures {}
                 if name == "swipe", Self.scrollsBackAgain(steps, next: act) {
                     // D19, 134 over the cloud 11-15 (y5): 设置 › 关于本机 scrolled down, up, down; the turn back up to 型号名称
                     // was then refused 20 times. Three refusals are a change of plan, as with a round of taps (D17).
+                    if let line = Self.seenWhileScrollingNote(steps, part: parts.count >= 2 && partIndex < parts.count ? parts[partIndex] : nil),
+                       !notes.contains(line) {
+                        notes.append(line)
+                        record(nil, ["action": .str("note"), "text": .str(line), "by": .str("run")])
+                    }
                     roundRefused += 1
                     if roundRefused >= Self.refusalsInARow {
                         roundRefused = 0
@@ -4534,8 +4606,20 @@ extension Pointer: Gestures {}
         gotOn()
         (stallsNoProgress, refusalsNoProgress) = (0, 0)
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
+        skipPartsNoted()
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
+    }
+
+    /// D82: the parts next whose items were all noted on the way are done (partsNoted).
+    private func skipPartsNoted() {
+        let k = Self.partsNoted(parts, from: partIndex, task: task, told: notes + doneParts, sent: messageSent)
+        for _ in 0..<k {
+            doneParts.append(parts[partIndex] + " -> 已在前面记录")
+            record(nil, ["action": .str("part done"), "part": .int(partIndex + 1), "reason": .str("its items were noted on the way")])
+            partIndex += 1
+        }
+        if k > 0 { DebugLog.write("parts: \(k) already noted on the way; part \(partIndex + 1) is next") }
     }
 
     /// D71, y6 on 137: on 抖音's and 视频号's playing feeds every look differs, and the stale-plan guard dropped the swipe to
@@ -4597,6 +4681,7 @@ extension Pointer: Gestures {}
         record(nil, ["action": .str("part failed"), "part": .int(partIndex + 1)])
         gotOn()
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
+        skipPartsNoted()
         if by == "planner" { takeover = 0 }
         return nextPartText
     }
