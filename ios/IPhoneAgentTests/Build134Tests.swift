@@ -697,6 +697,32 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D79, y3 on 138 (item 1): "距<today>还有81天" counts from today to the date said before it; it is not 0.
+    func testADayCountFromTodayRunsToTheDateSaidBefore() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        let today = cal.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 3))!
+        let wrong = "1. 2027年春节是2027年2月6日，星期六；距2026年11月17日还有0天。\n2. 拼多多29.4元"
+        XCTAssertEqual(AgentLoop.rightDayCounts(wrong, today: today, calendar: cal),
+                       "1. 2027年春节是2027年2月6日，星期六；距2026年11月17日还有81天。\n2. 拼多多29.4元")
+        let right = "1. 2027年春节是2027年2月6日，星期六；距2026年11月17日还有81天。"
+        XCTAssertEqual(AgentLoop.rightDayCounts(right, today: today, calendar: cal), right)
+        XCTAssertEqual(AgentLoop.rightDayCounts("2. 距2026年11月17日还有5天", today: today, calendar: cal), "2. 距2026年11月17日还有5天",
+                       "no date before it in the item: left alone")
+        XCTAssertEqual(AgentLoop.rightDayCounts("距离2027年2月6日还有88天", today: today, calendar: cal), "距离2027年2月6日还有81天")
+    }
+
+    /// D80, y3 on 138: a part keeps its own number before its run of items; an item put off is no result.
+    func testAPartNumberedInThePlanStillHasItsRun() {
+        XCTAssertEqual(AgentLoop.partItemRange("3. 第21–30项：Complete the conditional WeChat message"), 21...30)
+        XCTAssertEqual(AgentLoop.partItemRange("1. 第1–10项：Record the requested dates"), 1...10)
+        XCTAssertNil(AgentLoop.partItemRange("5. 第46项：A new note contains items 1–45"))
+        let task = "帮我做这30件事：" + (1...30).map { "\($0). 查第\($0)样东西" }.joined(separator: "；")
+        let told = ["第21项：已发送", "3. 第21–30项：x -> 第21–30项已完成：第21项已发送；第24项待后续记录；第25项下水径253米；第28项待后续记录"]
+        let left = AgentLoop.itemsLeft(task: task, told: told, sent: []).filter { (21...30).contains($0) }
+        XCTAssertEqual(left, [22, 23, 24, 26, 27, 28, 29, 30])
+    }
+
     /// D78, y2 on 138 (item 46): new lines written into a memo are the work getting on; the same text again is not.
     func testWritingNewLinesIsGettingOn() {
         let line = "23. 2027年2月有4个星期一：1日、8日、15日、22日。"

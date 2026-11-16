@@ -1089,6 +1089,17 @@ extension Pointer: Gestures {}
     /// 133 over the cloud 11-14 (y6): "从2026-11-14到2027-02-06春节还有99天"; it is 84. A count of days the answer gives
     /// between two dates (从/自 A 到/至 B … N 天) or from today (距/离 B 还有 N 天) is checked with the calendar and put
     /// right. A count that says it holds both ends (含, 包括) is left alone.
+    /// The date said last before `location` in the same item (the search stops at an item's number), a datePattern match.
+    static func lastDateSaid(in ns: NSString, before location: Int) -> NSTextCheckingResult? {
+        guard let dates = try? NSRegularExpression(pattern: datePattern),
+              let heads = try? NSRegularExpression(pattern: #"(?:^|[；;。\n])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#) else { return nil }
+        var from = max(0, location - 120)
+        if let head = heads.matches(in: ns as String, range: NSRange(location: from, length: location - from)).last {
+            from = head.range.location + head.range.length
+        }
+        return dates.matches(in: ns as String, range: NSRange(location: from, length: max(0, location - from))).last
+    }
+
     static func rightDayCounts(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
         let d = datePattern
         let between = #"(?:从|自|從)\s*"# + d + #"\s*(?:到|至)\s*"# + d + #"[^，。；;\d]{0,12}?(?:共|有|是|相差|差|还有|還有|还剩)?\s*(\d{1,4})\s*天"#
@@ -1102,7 +1113,17 @@ extension Pointer: Gestures {}
                 if whole.contains("含") || whole.contains("包括") { continue }
                 let start = startOfDay(two ? date(ns, m, at: 1, calendar: calendar, near: today) : Optional(today), calendar)
                 guard let a = start, let b = startOfDay(date(ns, m, at: two ? 4 : 1, calendar: calendar, near: a), calendar),
-                      let days = calendar.dateComponents([.day], from: a, to: b).day else { continue }
+                      var days = calendar.dateComponents([.day], from: a, to: b).day else { continue }
+                // D79, y3 on 138 (item 1): "2027年春节是2027年2月6日，星期六；距2026年11月17日还有81天" (today the 17th) was "put
+                // right" to 0 days; the check refused it three times, each new answer was put "right" again, and the owner
+                // got 0. A day 距 names that is today or gone is where the count starts: it runs to the date said last before
+                // it in the same item, or the count is left alone.
+                if !two, days <= 0 {
+                    guard let said = lastDateSaid(in: ns, before: m.range.location),
+                          let to = startOfDay(date(ns, said, at: 1, calendar: calendar, near: b), calendar),
+                          let fromIt = calendar.dateComponents([.day], from: b, to: to).day, fromIt > 0 else { continue }
+                    days = fromIt
+                }
                 let n = m.range(at: two ? 7 : 4)
                 if Int(ns.substring(with: n)) != days { out = out.replacingCharacters(in: n, with: String(days)) as NSString }
             }
@@ -1440,7 +1461,11 @@ extension Pointer: Gestures {}
         for text in told {
             let ns = AppNames.hans(text) as NSString
             for m in head.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)) {
-                if let n = Int(ns.substring(with: m.range(at: 1))) { said.insert(n) }
+                guard let n = Int(ns.substring(with: m.range(at: 1))) else { continue }
+                // D80: "第24项待后续记录" is an item put off, not a result.
+                let clause = ns.substring(from: m.range.location + m.range.length).prefix(while: { !"；;。\n".contains($0) })
+                if clause.range(of: #"待后续|后续再|后续记录|后续补|待补|稍后|之后再|待记录"#, options: .regularExpression) != nil { continue }
+                said.insert(n)
             }
         }
         return items.compactMap { item -> Int? in
@@ -4530,12 +4555,16 @@ extension Pointer: Gestures {}
     }
 
     /// D69: the run of goal items a part is over ("第10–21项：…" → 10...21); nil for a part of one item.
+    /// D80, y3 on 138: a plan's parts keep their own number ("3. 第21–30项：…"), so the range was never found and D69 never
+    /// ran: the executor said "第21–30项已完成：…第24项待后续记录；…第28项待后续记录；…", part 3 was done, and 24 and 28 were
+    /// never started. The part's own number goes before the range.
     static func partItemRange(_ part: String) -> ClosedRange<Int>? {
-        guard let r = part.range(of: #"^\s*第\s*\d{1,3}\s*[–—\-~～至到]\s*(?:第\s*)?\d{1,3}\s*[项項]"#, options: .regularExpression)
-        else { return nil }
-        let n = part[r].split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
-        guard n.count == 2, n[0] < n[1], n[1] - n[0] <= 40 else { return nil }
-        return n[0]...n[1]
+        guard let re = try? NSRegularExpression(pattern: #"^\s*(?:\d{1,2}\s*[.)、．]\s*)?第\s*(\d{1,3})\s*[–—\-~～至到]\s*(?:第\s*)?(\d{1,3})\s*[项項]"#),
+              let m = re.firstMatch(in: part, range: NSRange(part.startIndex..., in: part)),
+              let a = Range(m.range(at: 1), in: part).flatMap({ Int(part[$0]) }),
+              let b = Range(m.range(at: 2), in: part).flatMap({ Int(part[$0]) }),
+              a < b, b - a <= 40 else { return nil }
+        return a...b
     }
 
     static func itemsLeftInPartReason(_ missing: [Int]) -> String {
