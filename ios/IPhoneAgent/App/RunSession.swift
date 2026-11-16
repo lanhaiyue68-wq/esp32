@@ -17,7 +17,8 @@ extension AppModel {
              reference: String = "", outgoing: ((String) -> String?)? = nil, plan: String = "", stepLimit: Int? = nil, fastText: Bool = false, returnSends: Bool = false,
              frameCompletion: ((Data) -> String?)? = nil, directStart: Bool = false, keyboardGuard: Bool = false,
              learnedRoutes: Bool = true, approveSend: ((String) async -> Bool)? = nil, askHelp: Bool = true,
-             askInstall: ((String) async -> Bool?)? = nil, askPublish: ((String) async -> Bool?)? = nil) async {
+             askInstall: ((String) async -> Bool?)? = nil, askPublish: ((String) async -> Bool?)? = nil,
+             askVerify: ((String) async -> Bool?)? = nil) async {
         guard !startingAgent, !agent.running, !recorder.recording else { return }
         startingAgent = true
         defer { startingAgent = false }
@@ -43,6 +44,9 @@ extension AppModel {
         // D28: publishing is asked about the same way; a run with nobody to ask publishes nothing.
         let publishHere: ((String) async -> Bool?)? = askHelp && !keyboardGuard ? { [weak self] q in await self?.askPublishHere(q) } : nil
         agent.askPublish = askPublish ?? publishHere
+        // D59: a security check is the owner's to do by hand, asked the same way; a run with nobody to ask notes it.
+        let verifyHere: ((String) async -> Bool?)? = askHelp && !keyboardGuard ? { [weak self] q in await self?.askVerifyHere(q) } : nil
+        agent.askVerify = askVerify ?? verifyHere
         await startAgent(task)
     }
 
@@ -197,6 +201,7 @@ extension AppModel {
         answerHelp(.stop)
         answerInstall(false)
         answerPublish(false)
+        answerVerify(false)
         mockJob?.cancel()
         agent.stop()
         try? await Task.sleep(nanoseconds: 100_000_000)  // let a gesture in flight finish its own release
@@ -412,6 +417,32 @@ extension AppModel {
         live.update(mood: .listening, step: moveCount, line: question, phase: .help, status: .help)
         notifier.post(.install, title: question, body: "打开 Lan Agent 选择“发布”或“不发布”。", run: runID)
         return await withCheckedContinuation { publishWait = $0 }
+    }
+
+    /// D59: a security check (滑块, 拼图) is on screen: the owner is asked to do it by hand (panel on Home, Live Activity,
+    /// notification). No answer in 10 minutes is a no: the thing is left as not done and the run goes on.
+    func askVerifyHere(_ question: String) async -> Bool {
+        verifyAsk = question
+        live.update(mood: .listening, step: moveCount, line: question, phase: .help, status: .help)
+        notifier.post(.install, title: "需要你亲手完成安全验证", body: question, run: runID)
+        let timeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.verifyWaitSeconds * 1_000_000_000)
+            if !Task.isCancelled { self?.answerVerify(false) }
+        }
+        defer { timeout.cancel() }
+        return await withCheckedContinuation { verifyWait = $0 }
+    }
+
+    static let verifyWaitSeconds: UInt64 = 600
+
+    func answerVerify(_ done: Bool) {
+        guard let wait = verifyWait else { return }
+        verifyWait = nil
+        verifyAsk = nil
+        notifier.clearHelp()
+        live.update(mood: .thinking, step: moveCount, line: done ? "验证完成，接着做" : "这一项记为未完成，接着做别的", phase: .running,
+                    status: .looking)
+        wait.resume(returning: done)
     }
 
     func answerPublish(_ yes: Bool) {

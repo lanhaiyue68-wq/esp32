@@ -14,9 +14,11 @@ extension AppModel {
             let install: (String) async -> Bool? = { [weak self] app in await self?.cloud.askInstall(app, for: task.id) }
             // D28: publishing too, always asked (whether or not the task's messages wait for approval).
             let publish: (String) async -> Bool? = { [weak self] q in await self?.cloud.askPublish(q, for: task.id) }
+            // D59: a security check (滑块, 拼图) is the owner's to do by hand, asked the same way.
+            let verify: (String) async -> Bool? = { [weak self] q in await self?.cloud.askVerify(q, for: task.id) }
             Task {
                 await self.run(task.instruction, approveSend: task.approval ? approve : nil, askHelp: false, askInstall: install,
-                               askPublish: publish)
+                               askPublish: publish, askVerify: verify)
             }
         }
         cloud.outcome = { [weak self] task in

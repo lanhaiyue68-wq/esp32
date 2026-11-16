@@ -74,6 +74,10 @@ for item in queue:
                 # is "reject" unless an item says "publish": "approve"
                 if (task.get('approval_request') or {}).get('action') == 'publish_post':
                     verdict = item.get('publish', 'reject')
+                # build 138 (D59): "human_verify" asks the owner to do a security check by hand; nobody does it in an
+                # unattended run, so the default is "reject" (the thing is left not done) unless an item says "verify": "approve"
+                if (task.get('approval_request') or {}).get('action') == 'human_verify':
+                    verdict = item.get('verify', 'reject')
                 call('POST', f'/api/v1/tasks/{tid}/{verdict}')
                 answered.add((text, task.get('approval_seq')))
                 time.sleep(2)

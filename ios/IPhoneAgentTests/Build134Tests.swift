@@ -626,6 +626,29 @@ import XCTest
         XCTAssertEqual(try Actions.parseCommand(#"fail 京东要求登录\n未查到价格"#)["reason"]?.str, "京东要求登录\n未查到价格")
         XCTAssertEqual(try Actions.parseCommand(#"type C:\new\notes"#)["text"]?.str, #"C:\new\notes"#, "typed text stays literal")
     }
+
+    /// D59, user 11-16: a security check is the owner's to do by hand; the run goes on after it, or notes the thing not done.
+    func testASecurityCheckIsLeftToTheOwner() async throws {
+        XCTAssertEqual(try Actions.parseCommand("verify 淘宝")["app"]?.str, "淘宝")
+        XCTAssertTrue(AgentLoop.verifyQuestion("淘宝").contains("亲手完成"))
+        func run(_ answer: Bool?) async -> AgentLoop {
+            let actor = FakeModel { $0 == 1 ? "THINK: 出现了滑块验证\nDO: verify 淘宝" : "THINK: 验证没了\nDO: done 第一个是9.9元" }
+            let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: nil, trace: nil)
+            agent.askVerify = { _ in answer }
+            agent.showMock(task: "查一下保温杯第一个多少钱", plan: "", steps: [], running: false)
+            await agent.run()
+            return agent
+        }
+        let done = await run(true)
+        let kinds = done.steps.map { $0["action"]?.str ?? "?" }
+        XCTAssertTrue(kinds.contains("needs verification") && kinds.contains("verified by owner"), "\(kinds)")
+        XCTAssertEqual(kinds.last, "done", "\(kinds)")
+        for answer in [false, nil] as [Bool?] {
+            let left = await run(answer)
+            XCTAssertEqual(left.steps.last?["action"]?.str, "fail", "\(answer as Any)")
+            XCTAssertTrue(left.steps.last?["reason"]?.str?.contains("人工安全验证") == true, "\(answer as Any)")
+        }
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

@@ -1843,6 +1843,19 @@ extension Pointer: Gestures {}
     /// nil: nobody to ask (a WeChat watch run), and nothing is published. Apps this run may publish in, or was told not to.
     var askPublish: ((String) async -> Bool?)?
     private var publishAllowed: Set<String> = [], publishDeclined: Set<String> = []
+    /// D59, user 11-16: a security check (滑块, 拼图) is done by the owner by hand: true done, false not done, nil nobody to
+    /// ask (a WeChat watch run). Set per run by RunSession; asked at most verifyLimit times a run.
+    var askVerify: ((String) async -> Bool?)?
+    private var verifyAsked = 0
+    static let verifyLimit = 3
+
+    static func verifyQuestion(_ app: String) -> String {
+        "“\(app)”要人工安全验证（滑块或拼图），请到手机上亲手完成，完成后点“已完成”；不处理的话这一项记为未完成，其他的照做。"
+    }
+
+    static func verifyFailReason(_ app: String, asked: Bool) -> String {
+        app + "要求人工安全验证（滑块或拼图），" + (asked ? "机主没有完成" : "没有人能处理") + "，按规则不自动处理"
+    }
     private var lookedAgain: Set<String> = []
     /// What the run is told once the owner said yes. Never a password: Apple asks the owner for that on the phone.
     static func installNote(_ app: String) -> String {
@@ -2142,6 +2155,7 @@ extension Pointer: Gestures {}
         var failures = 0
         (pasteHopOff, lastTap, typedInto, inkSeen, deadTaps, returnSent) = (false, nil, nil, nil, [], false)
         actorClosed = false
+        verifyAsked = 0
         (noKeyboard, aimNext, sentTexts, unsent, boxCleared, typedBase) = (0, false, [], nil, false, [:])
         sendCorrections = 0
         quietSinceSend = 0
@@ -2623,6 +2637,26 @@ extension Pointer: Gestures {}
                 act["action"] = .str("done")
                 act["answer"] = .str(answer)
                 act["reason"] = nil
+            }
+            // D59, user 11-16: 淘宝 showed a slider puzzle in y1 on 137 and the thing was skipped. A security check is never
+            // solved by the run: the owner is asked to do it by hand on the phone (the cloud's approval, or a panel here),
+            // and the run goes on from the screen it leaves. No answer, a no, or nobody to ask: the thing is not done.
+            if act["action"]?.str == "verify" {
+                let named = AppNames.hans(act["app"]?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let app = named.isEmpty ? (Self.appInFront(steps, startedIn: startApp) ?? "这个应用") : named
+                record(planned.shot, ["action": .str("needs verification"), "app": .str(app)])
+                var done: Bool?
+                if verifyAsked < Self.verifyLimit { done = await askVerify?(Self.verifyQuestion(app)) }
+                verifyAsked += 1
+                try Task.checkCancellation()
+                if done == true {
+                    record(nil, ["action": .str("verified by owner"), "app": .str(app)])
+                    await screen?.settled()
+                    gotOn()
+                    (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
+                    return false
+                }
+                act = ["action": .str("fail"), "reason": .str(Self.verifyFailReason(app, asked: done != nil))]
             }
             let name = act["action"]?.str ?? ""
             var justSent: String?

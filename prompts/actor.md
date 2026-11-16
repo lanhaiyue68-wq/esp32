@@ -91,6 +91,8 @@ Actions:
                              shows are read, for up to SECONDS (5-180); the text comes back in your notes. Open the
                              video, let it play from the start and leave it on screen first. Use it for a video's
                              spoken words (口播文案) or to sum a video up)
+  verify APP                (a security check is on screen: 滑块, 拼图, 点选文字, "verify you are human": the owner
+                             does it by hand; never drag or tap it yourself)
   readup [TEXT]             (in a chat or any long list: scrolls up by itself screen after screen and reads every line
                              on the way, up to 40 screens, stopping at TEXT (a date such as 11月14日, or words) or at
                              the top; all of it comes back in your notes, oldest first. Use it to read back through a

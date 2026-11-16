@@ -70,6 +70,9 @@ import UIKit
     /// D28: the question while the user is asked whether to publish (发布) what a run filled in.
     @Published var publishAsk: String?
     var publishWait: CheckedContinuation<Bool, Never>?
+    /// D59: the question while the owner is asked to do a security check (滑块, 拼图) by hand.
+    @Published var verifyAsk: String?
+    var verifyWait: CheckedContinuation<Bool, Never>?
     var currentIntent: SavedTask?
     var lastTask = ""
     var runStarted = Date()

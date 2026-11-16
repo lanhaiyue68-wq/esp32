@@ -75,6 +75,31 @@ struct PublishPanel: View {
     }
 }
 
+/// D59, user 11-16: a security check (滑块, 拼图) is never solved by the run: the owner does it by hand, then says so here.
+struct VerifyPanel: View {
+    @ObservedObject var app: AppModel
+
+    var body: some View {
+        Section {
+            Label { Text(verbatim: app.verifyAsk ?? "") } icon: {
+                Image(systemName: "hand.raised.circle.fill").foregroundStyle(Palette.warning)
+            }
+            .font(.body.weight(.semibold))
+            Text(verbatim: "切到那个应用，亲手拖滑块或拼好拼图，验证页消失后回来点“已完成”。10 分钟没回应就把这一项记为未完成。")
+                .font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: Space.s) {
+                Button { app.answerVerify(true) } label: { Label { Text(verbatim: "已完成") } icon: { Image(systemName: "checkmark") } }
+                    .buttonStyle(.borderedProminent).tint(Palette.ok)
+                Button(role: .destructive) { app.answerVerify(false) } label: { Text(verbatim: "不处理") }
+                    .buttonStyle(.bordered)
+            }
+            .controlSize(.regular)
+        } header: {
+            Text(verbatim: "需要人工验证")
+        }
+    }
+}
+
 /// "Needs your help": why, and Take over / Continue / Skip / Stop (the same as the Live Activity).
 struct HelpPanel: View {
     @ObservedObject var app: AppModel

@@ -202,6 +202,12 @@ import Foundation
         await waitApproval(id, ["action": "publish_post", "text": question])
     }
 
+    /// D59, user 11-16: a security check (滑块, 拼图) is for the owner: "approved" means they did it by hand on the phone.
+    /// No answer in 10 minutes is a no: the thing is left as not done.
+    func askVerify(_ question: String, for id: String) async -> Bool {
+        await waitApproval(id, ["action": "human_verify", "text": question])
+    }
+
     private func waitApproval(_ id: String, _ request: [String: Any]) async -> Bool {
         await report(id, ["status": "waiting_approval", "approval_request": request])
         let until = now() + Self.approvalWait

@@ -17,6 +17,7 @@ enum Actions {
         "home": [], "back": [], "wait": [], "replan": [], "open": ["app"], "note": ["text"], "press": ["text"],
         "listen": ["seconds"], "hold": ["x", "y"],
         "readup": ["until"],  // D27: read back up a chat by itself (爬楼), to the words given or the top
+        "verify": ["app"],  // D59: a security check (滑块, 拼图) is on screen: the owner does it by hand
     ]
     /// Build 121 over the cloud 11-11: asked to copy a WeChat message, both models wrote a long press their own way
     /// (touch_and_hold, a swipe that stays put) and the run failed on "no valid action" three times.
