@@ -237,7 +237,11 @@ extension Pointer: Gestures {}
         let items = ((try? NSRegularExpression(pattern: #"(?<!\d)(\d{1,2})[\.、．]"#))?
             .matches(in: text, range: NSRange(location: 0, length: ns.length)) ?? [])
             .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
-        if let last = items.max() { marks += ["第\(last)项完成", "第\(last)项已完成", "item\(last)done", "item\(last)isdone"] }
+        // D68, y4 on 137: the part "第46项：… including the outcome of item 44." was closed by "第44项已完成，现在打开备忘录":
+        // the 44. of its last words was taken for its number. A part that starts with its number is that number.
+        let own = text.range(of: #"^\s*(?:第\s*)?\d{1,3}\s*(?:[项項]|[.、．](?!\d))"#, options: .regularExpression)
+            .flatMap { Int(text[$0].filter(\.isNumber)) }
+        if let last = own ?? items.max() { marks += ["第\(last)项完成", "第\(last)项已完成", "item\(last)done", "item\(last)isdone"] }
         return marks.contains { t.contains($0) }
     }
 
@@ -1042,11 +1046,15 @@ extension Pointer: Gestures {}
             guard let n = Int(ns.substring(with: m.range(at: 1))), let r = Range(m.range, in: text) else { return nil }
             return (n, r)
         }
-        // A list goes up one by one from 1 (a note may be one item of it, any number); a 1 starts it again.
-        var items: [(Int, Range<String.Index>)] = []
+        // A list goes up one by one from 1 (a note may be one item of it, any number); a 1 starts another. D67, y4 on 137:
+        // item 13 of Codex's whole answer held its own list ("前4篇笔记标题：1. … 2. … 4. …"), the count started again there
+        // and stopped at 4, and the answer of 49 lines was thrown away for the raw notes. The longest list is the answer's;
+        // an item goes on the latest list it follows (14 after the inner 4 goes on after 13).
+        var lists: [[(Int, Range<String.Index>)]] = []
         for h in heads {
-            if h.0 == 1 { items = [h] } else if items.isEmpty || h.0 == items[items.count - 1].0 + 1 { items.append(h) }
+            if h.0 != 1, let i = lists.lastIndex(where: { $0[$0.count - 1].0 + 1 == h.0 }) { lists[i].append(h) } else { lists.append([h]) }
         }
+        let items = lists.reduce([(Int, Range<String.Index>)]()) { $1.count >= $0.count ? $1 : $0 }
         return items.enumerated().map { (i, h) -> (n: Int, body: Range<String.Index>) in
             let end = i + 1 < items.count ? items[i + 1].1.lowerBound : text.endIndex
             return (n: h.0, body: h.1.upperBound..<end)
@@ -1152,7 +1160,9 @@ extension Pointer: Gestures {}
         // D42, y1 on 136: the answer gave 44 of 49 things and 7300 characters of notes went after it, nearly all of them
         // things it had already given in other words, and the ways learned on the way. Past half, only the notes of things
         // the answer lacks go after it; a learned way never does (it is for the next run, not the owner).
-        for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") && !note.hasPrefix("新学到的做法") {
+        // D67, y4 on 137: 40 screens of 测试群 read back went to the owner as they were. What a readup read is for the run.
+        for note in notes where !note.hasPrefix("购物车：") && !note.hasPrefix("听到和字幕") && !note.hasPrefix("新学到的做法")
+            && !note.hasPrefix("往上读到的聊天记录") {
             if told * 2 >= wanted {
                 let items = noteItems(note)
                 guard !items.isEmpty, !items.isSubset(of: toldItems) else { continue }
@@ -1189,7 +1199,11 @@ extension Pointer: Gestures {}
         guard let reply = try? await planner.chat(system: Self.wholeAnswerPrompt, text: text, image: nil,
                                                  maxTokens: Self.bigGoalTokens, temperature: 0) else { return nil }
         let whole = AppNames.hans(reply.text.trimmingCharacters(in: .whitespacesAndNewlines))
-        return whole.isEmpty || Self.fewThingsTold(whole, task: task) ? nil : whole
+        if whole.isEmpty || Self.fewThingsTold(whole, task: task) {
+            DebugLog.write("done: Codex's whole answer not used: \(whole.count) characters, items \(Self.numberedItems(whole).map { $0.n }.prefix(60))")
+            return nil
+        }
+        return whole
     }
 
     /// The goal's things a note is about: its "第N项".

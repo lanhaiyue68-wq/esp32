@@ -701,6 +701,25 @@ import XCTest
         XCTAssertTrue(line.hasPrefix("核对更正") && line.contains("11月17日"))
     }
 
+    /// D67, y4 on 137: an item that holds its own numbered list does not cut the answer's count short.
+    func testAListInsideAnItemDoesNotEndTheAnswer() {
+        let lines = (1...20).map { $0 == 13 ? "13. 前4篇笔记标题：1. 自从iPhone拍照；2. 17是不是最难用；3. 气到发帖；4. 苹果17p" : "\($0). 结果\($0)" }
+        XCTAssertEqual(AgentLoop.numberedItems(lines.joined(separator: "\n")).map { $0.n }, Array(1...20))
+        XCTAssertFalse(AgentLoop.fewThingsTold(lines.joined(separator: "\n"), task: (1...20).map { "\($0). 查一下" }.joined(separator: "；")))
+        XCTAssertEqual(AgentLoop.numberedItems("说明 3. 无关 1. 甲 2. 乙 3. 丙").map { $0.n }, [1, 2, 3])
+        let readup = "往上读到的聊天记录（40 屏，从旧到新）：\n（我）Y1全部做完"
+        let full = AgentLoop.completedAnswer("1. 甲", notes: [readup, "第2项：乙"], task: "1. 查甲；2. 查乙；3. 查丙；4. 查丁")
+        XCTAssertTrue(full?.contains("第2项：乙") == true && full?.contains("往上读到") == false, full ?? "nil")
+    }
+
+    /// D68, y4 on 137: a part is closed by its own number, not by one in its last words.
+    func testAPartIsClosedByItsOwnNumber() {
+        let part = "第46项：A new “Y4组记录” note contains the previous results - open 備忘錄, including the outcome of item 44."
+        XCTAssertFalse(AgentLoop.saysPartDone("第44项已完成，现在打开备忘录新建“Y4组记录”笔记。", part: 2, text: part))
+        XCTAssertTrue(AgentLoop.saysPartDone("第46项已完成，现在打开微信。", part: 2, text: part))
+        XCTAssertTrue(AgentLoop.saysPartDone("第18项完成。", part: 5, text: "18. 新建一条备忘录，下面写第1到第17项的结果"))
+    }
+
     /// D60, y1 on 137 (item 10): back, the back arrow and back again that all left 测试群 where it was are no back-and-forth.
     func testMovesThatChangedNothingAreNoBackAndForth() {
         let back: JObject = ["action": .str("back")], arrow: JObject = ["action": .str("tap"), "x": .int(55), "y": .int(88)]
