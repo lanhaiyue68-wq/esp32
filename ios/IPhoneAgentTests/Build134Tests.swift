@@ -652,6 +652,55 @@ import XCTest
         }
     }
 
+    /// D64, y3 on 137 (item 9): function keys are one key, AC clears all, and keys the screen reading missed are typed.
+    func testCalculatorFunctionKeysArePressedAsKeys() {
+        func key(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            .init(text: t, box: CGRect(x: x - 0.03, y: y - 0.015, width: 0.06, height: 0.03))
+        }
+        let pad = [key("xY", 0.58, 0.34), key("2x", 0.89, 0.34), key("AC", 0.38, 0.62), key("2", 0.38, 0.82)]
+        func shown(_ s: [AgentLoop.KeyStep]?) -> [String] {
+            (s ?? []).map { step -> String in
+                switch step {
+                case .type(let t): return t
+                case .tap(let p): return String(format: "tap %.2f %.2f", Double(p.x), Double(p.y))
+                }
+            }
+        }
+        XCTAssertEqual(AgentLoop.keyTokens("AC 30 2x", keys: ["2X"]), ["AC", "3", "0", "2x"])
+        XCTAssertEqual(AgentLoop.keyTokens("2 xʸ 30 ="), ["2", "xʸ", "3", "0", "="])
+        XCTAssertEqual(AgentLoop.keyTokens("128x0.85="), ["1", "2", "8", "x", "0", ".", "8", "5", "="], "x between numbers is ×")
+        XCTAssertTrue(AgentLoop.namesFunctionKey("AC 30 2x"))
+        XCTAssertFalse(AgentLoop.namesFunctionKey("AC 128 × 0.85 ="))
+        XCTAssertEqual(AgentLoop.keyLabel("xʸ"), AgentLoop.keyLabel("xY"))
+        XCTAssertNil(AgentLoop.typedKeys(AgentLoop.keyTokens("2 xʸ 30 =")), "xʸ has no key of its own")
+        XCTAssertEqual(shown(AgentLoop.mixedKeys("2 xʸ 30 =", in: pad)), ["2", "tap 0.58 0.34", "30="])
+        XCTAssertEqual(shown(AgentLoop.mixedKeys("AC 30 2x", in: pad)), ["esc", "esc", "30", "tap 0.89 0.34"])
+        XCTAssertNil(AgentLoop.mixedKeys("2 √ 2 =", in: pad), "√ was not read and the keyboard has none")
+        XCTAssertNil(AgentLoop.mixedKeys("2 + 2 =", in: pad), "all typed: nothing to tap")
+    }
+
+    /// D62, y3 on 137 (item 41): in a goal of many things a stall of swipes gets a new plan before the thing is skipped.
+    func testAStallOfSwipesGetsCodexBeforeTheThingIsSkipped() {
+        XCTAssertEqual(AgentLoop.stallsToSkip(bigGoal: true, swiping: true), 2)
+        XCTAssertEqual(AgentLoop.stallsToSkip(bigGoal: true, swiping: false), 1)
+        XCTAssertEqual(AgentLoop.stallsToSkip(bigGoal: false, swiping: true), AgentLoop.stallLimit)
+    }
+
+    /// D63, y3 on 137: the coach is shown what the app rules say of the app it is stuck in.
+    func testTheCoachIsToldWhatIsKnownOfTheApp() {
+        let rules = "Calendar (日曆/日历), month view: the months scroll up and down, never sideways.\nWeChat: chats."
+        XCTAssertTrue(AgentLoop.appRuleLines("日曆", rules: rules).contains("scroll up and down"))
+        XCTAssertFalse(AgentLoop.appRuleLines("日曆", rules: rules).contains("WeChat"))
+        XCTAssertEqual(AgentLoop.appRuleLines("小红书", rules: rules), "")
+        XCTAssertTrue(AgentLoop.appRuleLines("行事曆").contains("sideways"), "the real rules name 日历")
+    }
+
+    /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    func testWhatTheCheckFoundWrongIsKeptInTheNotes() {
+        let line = AgentLoop.objectionNote("第20项把明天说成11月18日（周三），实际明天是11月17日（周二）。")
+        XCTAssertTrue(line.hasPrefix("核对更正") && line.contains("11月17日"))
+    }
+
     /// D60, y1 on 137 (item 10): back, the back arrow and back again that all left 测试群 where it was are no back-and-forth.
     func testMovesThatChangedNothingAreNoBackAndForth() {
         let back: JObject = ["action": .str("back")], arrow: JObject = ["action": .str("tap"), "x": .int(55), "y": .int(88)]

@@ -384,7 +384,8 @@ let runFactPattern = #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\
         let tips = appTips(for: task)
         if !tips.isEmpty {
             out += "\n\nWays that work in these apps, learned when an earlier run got stuck there (✓ = times it worked since). "
-                + "Use them first for that kind of step:\n"
+                + "Use them first for that kind of step; one that goes against the app notes in your instructions is wrong "
+                + "(the notes win):\n"
                 + tips.map { "- " + $0.text + (($0.wins ?? 0) > 0 ? " ✓\($0.wins ?? 0)" : "") }.joined(separator: "\n")
         }
         return out

@@ -80,9 +80,9 @@ import XCTest
     // MARK: Calculator
 
     func testPressTypesWhatAKeypadTakesOnTheKeyboard() {
-        XCTAssertEqual(AgentLoop.typedKeys(AgentLoop.keyTokens("AC 128 × 0.85 =")), ["esc", "128*0.85="])
+        XCTAssertEqual(AgentLoop.typedKeys(AgentLoop.keyTokens("AC 128 × 0.85 =")), ["esc", "esc", "128*0.85="])
         XCTAssertEqual(AgentLoop.typedKeys(AgentLoop.keyTokens("40.74 − 32.9 =")), ["40.74-32.9="])
-        XCTAssertEqual(AgentLoop.typedKeys(AgentLoop.keyTokens("AC 9 ÷ 3 =")), ["esc", "9/3="])
+        XCTAssertEqual(AgentLoop.typedKeys(AgentLoop.keyTokens("AC 9 ÷ 3 =")), ["esc", "esc", "9/3="])
         XCTAssertNil(AgentLoop.typedKeys(["±"]), "a key the keyboard has not: tapped")
         XCTAssertNil(AgentLoop.typedKeys(AgentLoop.keyTokens("SEND")))
     }

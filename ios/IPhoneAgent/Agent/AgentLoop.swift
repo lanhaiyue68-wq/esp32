@@ -2269,8 +2269,9 @@ extension Pointer: Gestures {}
                                                         + " not getting on: \(stepsInPart) steps, \(troubles) failed, swiping \(swiping)")])
                             troubles = 0
                             stallsNoProgress += 1
-                            // A goal of 10 things or more skips the thing at its first stall (134 y2, above).
-                            if stallsNoProgress >= (Self.goalParts(task) >= 10 ? 1 : Self.stallLimit) {
+                            // A goal of 10 things or more skips the thing at its first stall (134 y2, above); D62: one of
+                            // swipes gets a new plan first.
+                            if stallsNoProgress >= Self.stallsToSkip(bigGoal: Self.goalParts(task) >= 10, swiping: swiping) {
                                 let why = "stuck: \(stallsNoProgress) new plans in a row and nothing got on"
                                 if try await skipStuckThing(nil, why) { continue }
                                 record(nil, ["action": .str("fail"), "reason": .str(why)])
@@ -2846,6 +2847,8 @@ extension Pointer: Gestures {}
                     if let wrong, !stands {
                         checksLeft -= 1
                         rejectedAnswer = act["answer"]?.str
+                        let line = Self.objectionNote(wrong)
+                        if !notes.contains(line) { notes.append(line) }
                         record(planned.shot, ["action": .str("done rejected"), "reason": .str(wrong)])
                         return false
                     }
@@ -3853,6 +3856,11 @@ extension Pointer: Gestures {}
                            ["天气", "weather"], ["计算器", "计算机", "calculator"], ["时钟", "clock"], ["备忘录", "notes"],
                            ["日历", "行事历", "calendar"], ["京东"], ["小红书"]]
     static let troubleLimit = 3     // or this many steps that plainly failed
+
+    /// D62, y3 on 137 (item 41): one turn of four sideways swipes on 日曆 after one swipe up made five in a row; the goal of
+    /// 49 things skipped the thing at that first stall, and Codex never looked (日曆's months scroll up and down). In a
+    /// goal of 10 things or more a stall of swipes gets one new plan, Codex driving; any other stall skips the thing at once.
+    static func stallsToSkip(bigGoal: Bool, swiping: Bool) -> Int { bigGoal ? (swiping ? 2 : 1) : stallLimit }
     static let swipesInARow = 5     // or this many swipes in a row (a wheel: 14 wrong swipes, then one tap by Codex)
 
     /// A step that plainly failed: it changed nothing, or was refused, or a stroke left no ink.
@@ -4027,6 +4035,19 @@ extension Pointer: Gestures {}
 
     enum Coaching: Equatable { case way(String), blocked(String), unknown }
 
+    /// D63, y3 on 137: the coach, not shown what is known of 日曆, gave "swipe the month grid left for later months" (its
+    /// months scroll up and down); the way was kept, a later step got on and counted it as worked, and item 41 swiped
+    /// left until it was skipped. The lines of the app rules that name the app go with the stuck steps.
+    static func appRuleLines(_ app: String, rules: String = Prompts.appRules, limit: Int = 2000) -> String {
+        let names = AppNames.variants(app).map { AppNames.hans($0).lowercased() }.filter { $0.count >= 2 }
+        guard !names.isEmpty else { return "" }
+        let lines = rules.split(whereSeparator: \.isNewline).map(String.init).filter { line in
+            let l = AppNames.hans(line).lowercased()
+            return names.contains { l.contains($0) }
+        }
+        return String(lines.joined(separator: "\n").prefix(limit))
+    }
+
     static let coachPrompt = """
     You coach an AI agent that operates an iPhone for its owner with a mouse pointer. It is stuck on one thing of a \
     longer goal. From the steps it tried and the screen now (the image), find why it did not work and what the right \
@@ -4072,8 +4093,10 @@ extension Pointer: Gestures {}
             if s["changed"] == .bool(false) { line += " (screen did not change)" }
             return line
         }
+        let known = Self.appRuleLines(app)
         let prompt = "Goal: \(task)\n\nThe stuck thing: \(part)\nApp in front: \(app)\nWhy it stopped: \(why)\n\nLast steps:\n"
             + tried.joined(separator: "\n")
+            + (known.isEmpty ? "" : "\n\nWhat is known of this app (a way against it is wrong):\n" + known)
         do {
             let (reply, _, _) = try await ask("planner", planner, Self.coachPrompt, prompt)
             DebugLog.write("coach: \(reply.replacingOccurrences(of: "\n", with: " ").prefix(200))")
@@ -4416,6 +4439,10 @@ extension Pointer: Gestures {}
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
     }
+
+    /// D65, y3 on 137 (item 20): the check said tomorrow is 11月17日 (周二), not 11月18日; the note on the phone was put
+    /// right, and the answer written from the run's notes at the end said 11月18日 again. The objection is kept as a note.
+    static func objectionNote(_ wrong: String) -> String { "核对更正（以此为准，改掉前面相应的记录）：" + String(wrong.prefix(300)) }
 
     /// A fail right after a refused one, with nothing done since, is the same item again (c3, 132): free twice in a row.
     static func failIsRepeat(refusedAt: Double, lastActed: Double, free: Int) -> Bool {
@@ -4815,7 +4842,11 @@ extension Pointer: Gestures {}
             guard let shown = screen?.frame else { throw DeviceError(message: "no screen to find the keys on") }
             // Over USB 11-10 Calculator took typed sums at once (128*0.85= gave 108.8, esc cleared it), while reading its
             // keys found 9 of 19 labels and three cloud tasks gave up there. Typed first; the read keys only if nothing changed.
-            if let typed = Self.typedKeys(Self.keyTokens(a["text"]?.str ?? "")) {
+            let text = a["text"]?.str ?? ""
+            // D64: "2x" may be the 2ˣ key: the screen's keys are read first to tell.
+            var read: [CandidatePicker.Piece]? = nil
+            if Self.namesFunctionKey(text) { read = await CandidatePicker.rowsOffMain(in: shown, top: 0.1, bottom: 1).flatMap { $0 } }
+            if let typed = Self.typedKeys(Self.keyTokens(text, keys: Set((read ?? []).map { Self.keyLabel($0.text) }))) {
                 for piece in typed {
                     if piece == "esc" { try await phone.key("esc") } else { try await phone.type(piece) }
                 }
@@ -4825,14 +4856,28 @@ extension Pointer: Gestures {}
                 }
                 DebugLog.write("press: typing changed nothing; tapping the keys")
             }
-            let rows = await CandidatePicker.rowsOffMain(in: shown, top: 0.1, bottom: 1)
-            let found = Self.keySpots(a["text"]?.str ?? "", in: rows.flatMap { $0 })
-            guard found.missing.isEmpty, !found.spots.isEmpty else {
-                throw KeysNotOnScreen(missing: found.missing, seen: Self.keysSeen(rows.flatMap { $0 }))
-            }
-            for spot in found.spots {
-                try await phone.tap(Double(spot.x), Double(spot.y), aim: false)
-                try? await Task.sleep(nanoseconds: 120_000_000)
+            var pieces = read ?? []
+            if read == nil { pieces = await CandidatePicker.rowsOffMain(in: shown, top: 0.1, bottom: 1).flatMap { $0 } }
+            let found = Self.keySpots(text, in: pieces)
+            if found.missing.isEmpty, !found.spots.isEmpty {
+                for spot in found.spots {
+                    try await phone.tap(Double(spot.x), Double(spot.y), aim: false)
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                }
+            } else if Self.typedKeys(Self.keyTokens(text, keys: Set(pieces.map { Self.keyLabel($0.text) }))) == nil,
+                      let mixed = Self.mixedKeys(text, in: pieces) {
+                // D64: keys the screen reading missed (0, =) but the keyboard has are typed; the function keys tapped.
+                DebugLog.write("press: typed what the keyboard has, tapped the rest")
+                for step in mixed {
+                    switch step {
+                    case .type(let run): if run == "esc" { try await phone.key("esc") } else { try await phone.type(run) }
+                    case .tap(let spot):
+                        try await phone.tap(Double(spot.x), Double(spot.y), aim: false)
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                    }
+                }
+            } else {
+                throw KeysNotOnScreen(missing: found.missing, seen: Self.keysSeen(pieces))
             }
         case "home": try await phone.goHome()
         case "back": try await phone.goBack()
