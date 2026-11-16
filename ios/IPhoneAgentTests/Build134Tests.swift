@@ -649,6 +649,14 @@ import XCTest
             XCTAssertTrue(left.steps.last?["reason"]?.str?.contains("人工安全验证") == true, "\(answer as Any)")
         }
     }
+
+    /// D60, y1 on 137 (item 10): back, the back arrow and back again that all left 测试群 where it was are no back-and-forth.
+    func testMovesThatChangedNothingAreNoBackAndForth() {
+        let back: JObject = ["action": .str("back")], arrow: JObject = ["action": .str("tap"), "x": .int(55), "y": .int(88)]
+        func dead(_ s: JObject) -> JObject { var d = s; d["changed"] = .bool(false); return d }
+        XCTAssertNotNil(AgentLoop.bounce(arrow, after: [back, arrow, back]), "moves that changed the screen")
+        XCTAssertNil(AgentLoop.bounce(arrow, after: [dead(back), dead(arrow), dead(back)]))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

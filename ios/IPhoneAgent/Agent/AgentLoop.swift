@@ -892,7 +892,10 @@ extension Pointer: Gestures {}
         // next item and its back at (56 89) closed "a back-and-forth" with 淘宝's taps: refused three times, the item
         // skipped. Moves before an app opened, a part done or a thing skipped are another screen's.
         let start = steps.lastIndex { bounceEnds.contains($0["action"]?.str ?? "") }.map { $0 + 1 } ?? steps.startIndex
-        let moves = Array(steps[start...].filter { moving.contains($0["action"]?.str ?? "") }.suffix(3))
+        // D60, y1 on 137 (item 10): 微信 opened on 测试群; back, the back arrow, back again all left it where it was, and the
+        // third was refused as "a back-and-forth already gone through" (then Codex's twice): the thing was skipped. A move
+        // that changed nothing is no half of a back-and-forth (a dead tap has its own guard).
+        let moves = Array(steps[start...].filter { moving.contains($0["action"]?.str ?? "") && $0["changed"] != .bool(false) }.suffix(3))
         guard moves.count == 3, sameSpot(act, moves[1]), sameSpot(moves[2], moves[0]), !sameSpot(moves[0], moves[1])
         else { return nil }
         return moves[0]
