@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-16 20:52（臺北）138 已編譯（IPA 在桌面，等安裝回歸）
+- 使用者同意推：build138-ci（21323a9 版本 138＋CI commit 6c71328）推成 build114 main，run 43867081019：App 編過、IPA 上傳；單元測試只有 D59 testASecurityCheckIsLeftToTheOwner 失敗（測試沒給 planner，一開始排計畫就丟「no planner model」，不是 App 的問題），本機已改成 directStart（856b863，未推，D59 這個測試還沒真正跑過）。
+- IPA E:/桌面/Lan-Agent-build138-unsigned.ipa（主程式／鍵盤／動態島 CFBundleVersion 皆 138；SHA256 d52df386911ed4ad95da12840547af0bbd3be641bb67adcc2e2f290dc560da46，與 CI 的 ipa.sha256 相同）；137 的 IPA 已送回收筒。
+- 下一步：使用者裝 138（先替豆包充值）→ 重跑地獄級（y 組 q135a、z 組改用 q135y2.json）、客戶場景、真人單句，驗 D56–D73；D59 測試修正跟下一次推送一起跑。
+
 ## 2026-11-16 20:26（臺北）137 回歸全部跑完；138 本機寫好（D53b、D56–D73，未推）
 - 真人單句 q134h 21 題 20 成功（h06 京東要登入）；客戶場景 s0–s9 6 成功（s0 京東要登入、s5 微信收藏是空的、s8 停在發布前確認、s9 沒開始）；地獄級 y1–y6 五題成功、y2 中途取消；z1–z6 照規則在攜程／閒魚「不下載」時結束。
 - 豆包 11-16 19:01（臺北）起 HTTP 403 AccountOverdueError（欠費），之後由 Codex 代做；需要機主充值。
