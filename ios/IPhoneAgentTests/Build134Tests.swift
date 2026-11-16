@@ -618,6 +618,14 @@ import XCTest
         XCTAssertFalse(AgentLoop.isChatTimeLine("Y3验证2:32"), "a message with a time in it")
         XCTAssertFalse(AgentLoop.readUpNote(["a"], screens: 1, until: "b").contains("程序按时间行算出"))
     }
+
+    /// D57, s2 on 137: an answer with its line breaks written out ("\\n") gets real ones; typed text keeps them as they are.
+    func testWrittenOutLineBreaksInAnAnswerAreBreaks() throws {
+        XCTAssertEqual(try Actions.parseCommand(#"done 以下是前10家：\n\n1. 老四川大排档\n2. 川味烧烤"#)["answer"]?.str,
+                       "以下是前10家：\n\n1. 老四川大排档\n2. 川味烧烤")
+        XCTAssertEqual(try Actions.parseCommand(#"fail 京东要求登录\n未查到价格"#)["reason"]?.str, "京东要求登录\n未查到价格")
+        XCTAssertEqual(try Actions.parseCommand(#"type C:\new\notes"#)["text"]?.str, #"C:\new\notes"#, "typed text stays literal")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

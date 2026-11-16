@@ -35,7 +35,12 @@ enum Actions {
             // A JSON string keeps code indentation, literal quotes and escaped newlines in one DO line.
             // Plain legacy commands remain literal: a path containing \n must not become a newline.
             let decoded = raw.hasPrefix("\"") ? try? JSONDecoder().decode(String.self, from: Data(raw.utf8)) : nil
-            let text = decoded ?? raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            var text = decoded ?? raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            // D57, s2 on 137: Codex's answer of ten restaurants came as one DO line with "\n\n" written out, and the owner's
+            // answer showed the backslashes. An answer or a reason is prose, never a path: written-out line breaks are breaks.
+            if decoded == nil, ["answer", "reason"].contains(first) {
+                text = text.replacingOccurrences(of: "\\r\\n", with: "\n").replacingOccurrences(of: "\\n", with: "\n")
+            }
             return ["action": .str(name), first: .str(text)]
         }
         let tokens = matches(#"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"#, in: rest)
