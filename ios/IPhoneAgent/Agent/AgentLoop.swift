@@ -382,6 +382,8 @@ extension Pointer: Gestures {}
     /// How many notes there were when the current part began, and the last part whose "done" was sent back once for
     /// having nothing written down (B8).
     private var notesAtPart = 0, emptyPartRefused = -1
+    /// D69: the part whose items were found not all written down, and how often its "done" was sent back.
+    private var rangeRefused = (part: -1, times: 0)
     /// The screen just before the last paste (B4: what the paste put in is read against it).
     private var pasteFrame: Data?
     /// Opens of the app the run is already in, refused (once a run).
@@ -2202,6 +2204,7 @@ extension Pointer: Gestures {}
         (coached, tryingTip) = ([], nil)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
         sentPlaces = [:]
+        rangeRefused = (-1, 0)
         approvedTexts = []
         checksLeft = 2
         rejectedAnswer = nil
@@ -4216,6 +4219,7 @@ extension Pointer: Gestures {}
     In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
     An app counts as opened when a step opened it, or tapped its icon (a tap that says it opens the app).
     Simplified and traditional Chinese of the same words are the same (压力测试 = 壓力測試). A value that moves by itself (a live price, a time, a count) may differ a little from the screen now: that is not wrong.
+    A message that was to carry the time at the top of the screen carries the time when it was typed; the screen's time now is later (the run went on), so a message sent an hour ago with an earlier time is right.
     A line "程序按时间行算出" in the notes is worked out by the program from the chat itself (a time line heads the messages under it): it is right; never say NO against it.
     A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
     """
@@ -4440,6 +4444,19 @@ extension Pointer: Gestures {}
             record(shot, ["action": .str("part not done"), "part": .int(n), "reason": .str(Self.emptyPartReason)])
             return true
         }
+        // D69, y5 on 137: a stuck replan put items 10–21 into one part; the executor did 10–15, 20, 21 (and 28), said
+        // "当前部分（第10–21项）全部完成" with a made-up line for the rest (16 "定位服务关闭", 18 and 19 "已记录"), and 16–19 were
+        // never started. A part over a run of items is done when each of them is in a note written on the way (what was
+        // found, or why it could not be); what the "done" itself says of them does not count. Sent back twice at most.
+        if let run = Self.partItemRange(parts[partIndex]), rangeRefused.part != partIndex || rangeRefused.times < 2 {
+            let missing = Self.itemsLeft(task: task, told: notes + doneParts, sent: messageSent).filter { run.contains($0) }
+            if !missing.isEmpty {
+                rangeRefused = (partIndex, rangeRefused.part == partIndex ? rangeRefused.times + 1 : 1)
+                DebugLog.write("part \(n) not done: nothing noted for items \(missing)")
+                record(shot, ["action": .str("part not done"), "part": .int(n), "reason": .str(Self.itemsLeftInPartReason(missing))])
+                return true
+            }
+        }
         doneParts.append(found.isEmpty ? parts[partIndex] : parts[partIndex] + " -> " + found)
         if let line = Self.partResultNote(part: parts[partIndex], found: String((act["answer"]?.str ?? "").prefix(600))),
            !notes.contains(line) {
@@ -4452,6 +4469,20 @@ extension Pointer: Gestures {}
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
+    }
+
+    /// D69: the run of goal items a part is over ("第10–21项：…" → 10...21); nil for a part of one item.
+    static func partItemRange(_ part: String) -> ClosedRange<Int>? {
+        guard let r = part.range(of: #"^\s*第\s*\d{1,3}\s*[–—\-~～至到]\s*(?:第\s*)?\d{1,3}\s*[项項]"#, options: .regularExpression)
+        else { return nil }
+        let n = part[r].split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard n.count == 2, n[0] < n[1], n[1] - n[0] <= 40 else { return nil }
+        return n[0]...n[1]
+    }
+
+    static func itemsLeftInPartReason(_ missing: [Int]) -> String {
+        "Not done: nothing is written down yet for " + missing.map { "第\($0)项" }.joined(separator: "、")
+            + ". Do them now in order and note each one headed with its item (or why it cannot be done); then finish the part."
     }
 
     /// D65, y3 on 137 (item 20): the check said tomorrow is 11月17日 (周二), not 11月18日; the note on the phone was put

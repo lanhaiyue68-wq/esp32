@@ -696,6 +696,21 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D69, y5 on 137: a part over a run of items is not done while some of them have nothing written down.
+    func testAPartOverARunOfItemsNeedsEachOfThem() {
+        XCTAssertEqual(AgentLoop.partItemRange("第10–21项：各项结果或无法完成的原因已逐项记下 — 依次完成淘宝订单数"), 10...21)
+        XCTAssertEqual(AgentLoop.partItemRange("第22-34项：各项结果"), 22...34)
+        XCTAssertNil(AgentLoop.partItemRange("第24项：The cheapest-sorted first data cable"))
+        XCTAssertNil(AgentLoop.partItemRange("第46项：A new note contains items 1–45"))
+        let task = "帮我做这25件事：" + (1...25).map { "\($0). 查第\($0)样东西" }.joined(separator: "；")
+        let notes = ["第10项：待付款0", "第11项：4个星期一", "第12项：已发送", "第13项：粉丝8921万", "第14项：只有北京",
+                     "第15项：仪仗兵", "第20项：下水径256米", "第21项：25°"]
+        let left = AgentLoop.itemsLeft(task: task, told: notes, sent: []).filter { (10...21).contains($0) }
+        XCTAssertEqual(left, [16, 17, 18, 19])
+        XCTAssertTrue(AgentLoop.itemsLeftInPartReason(left).hasPrefix("Not done: nothing is written down yet for 第16项、第17项、第18项、第19项."))
+        XCTAssertTrue(AgentLoop.doneCheck.contains("carries the time when it was typed"))
+    }
+
     func testWhatTheCheckFoundWrongIsKeptInTheNotes() {
         let line = AgentLoop.objectionNote("第20项把明天说成11月18日（周三），实际明天是11月17日（周二）。")
         XCTAssertTrue(line.hasPrefix("核对更正") && line.contains("11月17日"))
