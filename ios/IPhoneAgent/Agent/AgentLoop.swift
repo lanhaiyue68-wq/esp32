@@ -2118,14 +2118,16 @@ extension Pointer: Gestures {}
         var said: [String] = [], swipes = 0
         for s in steps.reversed() {
             let a = s["action"]?.str ?? ""
-            if a == "swipe" {
+            // y2 on 137 (item 24): 天氣's chart was held six times ("tomorrow 3 p.m. is 26°") with nothing noted, and the
+            // thing was skipped: a hold that reads a value counts as looking, like a swipe.
+            if a == "swipe" || a == "hold" {
                 swipes += 1
                 if let t = s["thought"]?.str, !t.isEmpty, said.count < 4 { said.insert(String(t.prefix(160)), at: 0) }
             } else if a == "note" || observedActions.contains(a) { break }
             if swipes >= 12 { break }
         }
         guard swipes >= 2, !said.isEmpty else { return nil }
-        return "What you said while scrolling this page: " + said.map { "“\($0)”" }.joined(separator: " ")
+        return "What you said while scrolling or holding on this page: " + said.map { "“\($0)”" }.joined(separator: " ")
             + " If any of it is a value the goal asks for, write it down now with note TEXT together with your next action "
             + "(your thoughts are not kept; a value seen on an earlier screen is not scrolled back to)."
     }

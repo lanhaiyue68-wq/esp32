@@ -600,6 +600,8 @@ import XCTest
         XCTAssertTrue(hint?.contains("iPhone 13 mini") == true && hint?.contains("256GB") == true, hint ?? "nil")
         XCTAssertTrue(hint?.contains("note TEXT") == true)
         XCTAssertNil(AgentLoop.scrollingHint([open, swipe("a")]), "one swipe")
+        let hold: JObject = ["action": .str("hold"), "x": .int(580), "y": .int(462), "thought": .str("tomorrow 3 p.m. is 26°")]
+        XCTAssertTrue(AgentLoop.scrollingHint([open, hold, hold])?.contains("26°") == true, "holds that read a value count too")
         XCTAssertNil(AgentLoop.scrollingHint([swipe("a"), ["action": .str("note"), "text": .str("第24项：…")], swipe("b")]),
                      "noted since")
     }
