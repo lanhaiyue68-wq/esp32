@@ -89,14 +89,14 @@ import Foundation
     func chat(system: String, text: String, image: Data?, maxTokens: Int, temperature: Double) async throws -> ChatResult {
         do {
             return try await chatOnce(system: system, text: text, image: image, maxTokens: maxTokens, temperature: temperature)
-        } catch where !Task.isCancelled && ModelRequestFailure.isAccountClosed(error) {
+        } catch let closed where !Task.isCancelled && ModelRequestFailure.isAccountClosed(closed) {
             // D47, 136 over the cloud 11-16 (z5, z6): one dropped connection put Codex to rest for a minute; Doubao, whose
             // account was overdue, planned meanwhile and two runs of 50 things ended. Doubao's answer shows the network is
             // up: an account resting only for the network is asked again at once.
             let waking = accounts.filter { $0.rest.offlineOnly && $0.tokens() != nil }
-            guard !waking.isEmpty else { throw error }
+            guard !waking.isEmpty else { throw closed }
             waking.forEach { $0.rest.wake() }
-            DebugLog.write("plus planner: \(fallback.model)'s account cannot be used (\(error.localizedDescription.prefix(60))); "
+            DebugLog.write("plus planner: \(fallback.model)'s account cannot be used (\(closed.localizedDescription.prefix(60))); "
                            + "the network is up, so Codex is asked again")
             return try await chatOnce(system: system, text: text, image: image, maxTokens: maxTokens, temperature: temperature)
         }
