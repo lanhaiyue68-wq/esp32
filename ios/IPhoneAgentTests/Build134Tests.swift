@@ -560,6 +560,19 @@ import XCTest
         _ = try? await agent.step()
         XCTAssertEqual(hops, 2, "several lines cannot be typed: the trip is tried again")
     }
+
+    /// D50, y3 on 136 (item 7): Codex leaving a screen the run keeps coming back to is let through; the executor alone is not.
+    func testCodexLeavingAScreenTheRunKeepsComingBackToIsLetThrough() {
+        let opener: JObject = ["action": .str("tap"), "x": .int(875), "y": .int(925)]
+        var back: JObject = ["action": .str("tap"), "x": .int(55), "y": .int(88)]
+        XCTAssertFalse(AgentLoop.codexLeaves(back, opener: opener), "the executor alone is still refused (traces(33))")
+        back["by"] = .str("planner")
+        XCTAssertTrue(AgentLoop.codexLeaves(back, opener: opener))
+        var codexTap = opener
+        codexTap["by"] = .str("planner")
+        XCTAssertFalse(AgentLoop.codexLeaves(codexTap, opener: back), "only a move that leaves")
+        XCTAssertTrue(AgentLoop.openerReason.contains("go back further"))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

@@ -107,6 +107,8 @@ extension Pointer: Gestures {}
     /// Any other move ends it; refusing `stop` three times hands the run to the user.
     private var bounceGuard: (stop: JObject, other: JObject)?
     private var bounceRefused = 0
+    /// D50: the guard holds the tap that opened the screen (the leave was let through), not the leave.
+    private var bounceOpener = false
     /// "done" claims turned down because this run has not made what the task asks for (see unmadeResult).
     private var doneRejected = 0
     /// D16: new plans made for a goal of 10+ things whose plan ran out with things not done (see itemsLeft), and what
@@ -574,6 +576,7 @@ extension Pointer: Gestures {}
         lastStale = nil
         bounceGuard = nil
         bounceRefused = 0
+        bounceOpener = false
         doneRejected = 0
         continuations = 0
         continuedAt = nil
@@ -1913,6 +1916,21 @@ extension Pointer: Gestures {}
         return samples == 0 ? nil : Double(inked) / Double(samples)
     }
 
+    /// D50, y3 on 136 (item 7): on 淘宝's search results a tap at the bottom right (taken for 我的淘宝) opened a 满意度调研
+    /// page; back, the tap again, and every back after that was refused (the actor's twice, then Codex's, driving after a
+    /// new plan): the run was held on the survey and the thing skipped. When Codex, looking afresh, also leaves a screen
+    /// the run keeps coming back to, it leaves, and the tap that opened it is refused instead. A leave the executor asks
+    /// for alone is still refused (traces(33): the chat it left was the right one).
+    static func codexLeaves(_ act: JObject, opener: JObject) -> Bool {
+        act["by"]?.str == "planner" && leaves(act) && !leaves(opener)
+    }
+
+    /// D50: the tap that opened a screen the run left twice over.
+    static let openerReason = "Refused: this tap opened a screen you then left, twice over: here it does not do what you "
+        + "think (it is not the control you want, or it opens something else, such as an ad or a survey). Do not tap it "
+        + "again on this page: read the labels for the right control, or go back further first (to the app's home, where "
+        + "its tabs are)."
+
     static let loopReason = "this move starts again a back-and-forth this run already went through twice; the move that "
         + "left was the mistake. Stay on this screen and do the task here. If what the goal asks for is already done, answer done."
 
@@ -2571,23 +2589,27 @@ extension Pointer: Gestures {}
                 }
                 // traces(33): enter the chat, decide the avatar is wrong, go back, enter, go back... twice is enough.
                 // The leaving move (back) is the one refused, so the run stays where it can do the task.
-                if let guarded = bounceGuard, Self.sameSpot(guarded.stop, act) {
+                if let guarded = bounceGuard, Self.sameSpot(guarded.stop, act), !bounceOpener, Self.codexLeaves(act, opener: guarded.other) {
+                    (bounceGuard, bounceRefused, bounceOpener) = ((stop: guarded.other, other: act), 0, true)
+                    DebugLog.write("loop: Codex, looking afresh, leaves too; the tap that opened this screen is refused from now on")
+                } else if let guarded = bounceGuard, Self.sameSpot(guarded.stop, act) {
                     bounceRefused += 1
                     if bounceRefused >= 3 {
-                        (bounceGuard, bounceRefused) = (nil, 0)
+                        (bounceGuard, bounceRefused, bounceOpener) = (nil, 0, false)
                         return try await changeOfPlan(planned.shot, "kept going back and forth between two screens")
                     }
-                    record(planned.shot, ["action": .str("loop"), "reason": .str(Self.loopReason)])
+                    record(planned.shot, ["action": .str("loop"), "reason": .str(bounceOpener ? Self.openerReason : Self.loopReason)])
                     return false
                 }
                 if bounceGuard == nil, let first = Self.bounce(act, after: steps) {
-                    if Self.leaves(act) {  // this move restarts the circle: refuse it now
+                    if Self.leaves(act), !Self.codexLeaves(act, opener: first) {  // this move restarts the circle: refuse it now
                         bounceGuard = (stop: act, other: first)
                         bounceRefused = 1
                         record(planned.shot, ["action": .str("loop"), "reason": .str(Self.loopReason)])
                         return false
                     }
-                    bounceGuard = (stop: first, other: act)  // go ahead, but not back again
+                    bounceGuard = (stop: first, other: act)  // go ahead, but not back again (D50: Codex leaving: not in again)
+                    bounceOpener = Self.leaves(act)
                     DebugLog.write("loop: back and forth twice; going on, the move back is refused from now on")
                 }
             }
@@ -3206,7 +3228,7 @@ extension Pointer: Gestures {}
                 spots += pointerPath(act)
                 pointerAt = spots.last!
                 if let guarded = bounceGuard, !Self.sameSpot(guarded.stop, act), !Self.sameSpot(guarded.other, act) {
-                    (bounceGuard, bounceRefused) = (nil, 0)  // the run moved on from the back-and-forth
+                    (bounceGuard, bounceRefused, bounceOpener) = (nil, 0, false)  // the run moved on from the back-and-forth
                 }
             }
             record(planned.shot, act)
@@ -3855,7 +3877,7 @@ extension Pointer: Gestures {}
                 tryingTip = lessons?.learnAppTip(app: app, goal: part, text: way, run: trace?.dir?.lastPathComponent ?? "run")
                 let line = "新学到的做法：" + way
                 if !notes.contains(line) { notes.append(line) }
-                (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
+                (bounceGuard, bounceRefused, circleRefused, bounceOpener) = (nil, 0, 0, false)
                 (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
                 record(shot, ["action": .str("learned way"), "app": .str(app), "reason": .str(way)])
                 try await replan(stuck: true)
@@ -3873,7 +3895,7 @@ extension Pointer: Gestures {}
         let line = "未能完成：" + String(what.prefix(160))
         if !notes.contains(line) { notes.append(line) }
         _ = closeFailedPart(why, by: nil)
-        (bounceGuard, bounceRefused, circleRefused) = (nil, 0, 0)
+        (bounceGuard, bounceRefused, circleRefused, bounceOpener) = (nil, 0, 0, false)
         (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
         record(shot, ["action": .str("thing skipped"), "reason": .str(why + ". " + Self.oneThingFailedReason)])
         try await replan(stuck: true)
@@ -4000,7 +4022,7 @@ extension Pointer: Gestures {}
     /// Something was found or finished: coming back to a screen from here is the work, not a circle. A task of several
     /// parts goes back and forth by nature, and the guard stopped runs with the first part done (e01, f02, f06 on 11-09).
     private func gotOn() {
-        (departures, circleRefused, bounceGuard, bounceRefused, deadRefused) = ([], 0, nil, 0, 0)
+        (departures, circleRefused, bounceGuard, bounceRefused, deadRefused, bounceOpener) = ([], 0, nil, 0, 0, false)
         pressRuns = [:]
         stepsSinceProgress = 0
     }
