@@ -636,6 +636,7 @@ import XCTest
         func run(_ answer: Bool?) async -> AgentLoop {
             let actor = FakeModel { $0 == 1 ? "THINK: 出现了滑块验证\nDO: verify 淘宝" : "THINK: 验证没了\nDO: done 第一个是9.9元" }
             let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: nil, trace: nil)
+            agent.directStart = true  // no planner: the actor works from the screen (138 CI: without it, "no planner model")
             agent.askVerify = { _ in answer }
             agent.showMock(task: "查一下保温杯第一个多少钱", plan: "", steps: [], running: false)
             await agent.run()
