@@ -407,7 +407,7 @@ extension AppModel {
         case .absent:
             try await pointer.goHome()
             return false
-        case .unusable: return try await openFromPages(name)
+        case .unusable: return try await openFromPages(name, lastResort: true)  // D74: nothing after it
         }
     }
 
@@ -453,19 +453,36 @@ extension AppModel {
     }
 
     /// Only when Search would not work (no keyboard came): the pages to the right up to the App Library, then to the left.
-    private func openFromPages(_ name: String) async throws -> Bool {
+    private func openFromPages(_ name: String, lastResort: Bool = false) async throws -> Bool {
         try await pointer.goHome()
-        for next in [true, false] {
+        var (sawHome, readFailed) = (false, false)
+        paging: for next in [true, false] {
             for _ in 0..<6 {
                 try await swipePage(next: next)
-                guard let rows = await homeRows(top: 0.02) else { return false }
+                guard let rows = await homeRows(top: 0.02) else { readFailed = true; break paging }
                 if let spot = AppPlaces.label(name, in: rows), !AppPlaces.inLibrary(rows) {
                     return try await tapIcon(spot, name: name, on: "a page, paging")
                 }
+                if AppPlaces.looksLikeHome(rows) || AppPlaces.inLibrary(rows) { sawHome = true }
                 if AppPlaces.inLibrary(rows) || !AppPlaces.looksLikeHome(rows) { break }  // the App Library, or Today's widgets
             }
         }
+        // D74, h06 on 138: Codex tapped JD on the Home Screen and 京东 opened; it then said "open 京东", home did not come
+        // back (its search box was taken for a search screen six times over), Search took no name, and the pages "read"
+        // were 京东's own: the app was "not on this phone", the owner was asked to install it, and the task ended. Only
+        // pages that were read and looked like the Home Screen say an app is not there.
+        guard !lastResort || Self.absentFromPages(sawHome: sawHome, readFailed: readFailed) else {
+            throw DeviceError(message: Self.noHomeToLookIn(name))
+        }
         return false
+    }
+
+    static func absentFromPages(sawHome: Bool, readFailed: Bool) -> Bool { sawHome && !readFailed }
+
+    static func noHomeToLookIn(_ name: String) -> String {
+        name + " did not open this time: the Home Screen did not come up to look for it (Search took no name, and no Home "
+            + "Screen page was read), which does not mean it is not on this phone. If it is the app in front, go on in it; "
+            + "otherwise go home and open it again."
     }
 
     /// True once the app has left the Home Screen: a tap that missed reported success, and the model then found itself on

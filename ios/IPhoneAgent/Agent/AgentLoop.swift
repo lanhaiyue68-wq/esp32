@@ -2347,7 +2347,9 @@ extension Pointer: Gestures {}
                         // of several things the thing is left 未能完成 and the run goes on (a few times at most).
                         let what = error.localizedDescription.components(separatedBy: " did not open this time").first ?? ""
                         let why = error.localizedDescription.contains(" did not open this time")
-                            ? what + " 这次打不开（系统搜索里找不到它）" : "连续出错：" + String(error.localizedDescription.prefix(80))
+                            ? what + (error.localizedDescription.contains("Home Screen did not come up") ? " 这次打不开（回不到主屏幕）"
+                                                                                                      : " 这次打不开（系统搜索里找不到它）")
+                            : "连续出错：" + String(error.localizedDescription.prefix(80))
                         if (try? await skipStuckThing(nil, why)) == true {
                             failures = 0
                             continue

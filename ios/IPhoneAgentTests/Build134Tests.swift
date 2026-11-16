@@ -697,6 +697,16 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D74, h06 on 138: an app is not on the phone only by Home Screen pages that were read; no Home Screen is no answer.
+    func testNoHomeScreenSaysNothingOfWhetherAnAppIsThere() {
+        XCTAssertTrue(AppModel.absentFromPages(sawHome: true, readFailed: false))
+        XCTAssertFalse(AppModel.absentFromPages(sawHome: false, readFailed: false), "京东's own pages were all it saw")
+        XCTAssertFalse(AppModel.absentFromPages(sawHome: true, readFailed: true), "a page could not be read")
+        let said = AppModel.noHomeToLookIn("京东")
+        XCTAssertTrue(said.hasPrefix("京东 did not open this time"))
+        XCTAssertTrue(said.contains("does not mean it is not on this phone"))
+    }
+
     /// D73, z2 on 137: a Codex answer that hangs is given up well before 15 minutes, and not before a slow one is in.
     func testACodexAnswerHasADeadline() {
         XCTAssertGreaterThanOrEqual(ChatGPTPlus.answerDeadline, 120)
