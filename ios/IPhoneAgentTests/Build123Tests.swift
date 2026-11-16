@@ -78,7 +78,7 @@ import XCTest
         let watch = WatchSettings.phoneTaskResult(action: "fail", answer: nil, attempted: [], reason: "step limit reached",
                                                   notes: ["北京 13°"])
         XCTAssertTrue(watch.hasPrefix("部分失败："), watch)
-        XCTAssertTrue(watch.contains("已查到：北京 13°"), watch)
+        XCTAssertTrue(watch.contains("已查到：北京 13度"), watch)  // 137: ° cannot be typed by the board; 度 can
     }
 
     /// B8: a part that reads something is not done with nothing written down.

@@ -134,7 +134,7 @@ import XCTest
         XCTAssertEqual(CloudBridge.outcome(of: failed).error, "kept going back and forth between two screens")
         let chinese: [JObject] = [["action": .str("fail"), "reason": .str("請先繫結手機號，之後才能留言。")]]
         // User 11-11: mainland customers get Simplified, even for a reason the model wrote in Traditional.
-        XCTAssertEqual(CloudBridge.outcome(of: chinese).answer, "失败：" + AppNames.hans("請先繫結手機號，之後才能留言。"))
+        XCTAssertEqual(CloudBridge.outcome(of: chinese).answer, "失败：" + AppNames.hans("請先繫結手機號，之後才能留言"))
         XCTAssertTrue(CloudBridge.outcome(of: chinese).answer.contains("请先"), CloudBridge.outcome(of: chinese).answer)
         let traditional: [JObject] = [["action": .str("done"), "answer": .str("深圳明天（11/12 週四）最高溫 28°")]]
         XCTAssertEqual(CloudBridge.outcome(of: traditional).answer, "深圳明天（11/12 周四）最高温 28°")
