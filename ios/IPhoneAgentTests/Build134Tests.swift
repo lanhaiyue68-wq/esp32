@@ -605,6 +605,21 @@ import XCTest
         XCTAssertNil(AgentLoop.scrollingHint([swipe("a"), ["action": .str("note"), "text": .str("第24项：…")], swipe("b")]),
                      "noted since")
     }
+
+    /// D54, 136 y3–y6: a message's send time is the nearest time line above it, worked out by the program, not a model.
+    func testTheSendTimeOfAMessageIsWorkedOutFromTheTimeLineAboveIt() {
+        let lines = ["昨天清晨6:43", "Z5全部做完", "昨天下午1:20", "（我）133真人测试一", "昨天下午2:34", "Y1温差大"]
+        XCTAssertEqual(AgentLoop.sentTimes(of: "133真人测试一", in: lines), ["昨天下午1:20"])
+        let note = AgentLoop.readUpNote(lines, screens: 5, until: "133真人测试一")
+        XCTAssertTrue(note.contains("程序按时间行算出：“133真人测试一”的发送时间是“昨天下午1:20”"), note)
+        let twice = lines + ["今天上午8:13", "133真人测试一"]
+        XCTAssertEqual(AgentLoop.sentTimes(of: "133真人测试一", in: twice), ["昨天下午1:20", "今天上午8:13"])
+        XCTAssertTrue(AgentLoop.readUpNote(twice, screens: 5, until: "133真人测试一").contains("共读到2条"))
+        XCTAssertTrue(AgentLoop.isChatTimeLine("11月14日 下午3:30"))
+        XCTAssertTrue(AgentLoop.isChatTimeLine("凌晨12:20"))
+        XCTAssertFalse(AgentLoop.isChatTimeLine("Y3验证2:32"), "a message with a time in it")
+        XCTAssertFalse(AgentLoop.readUpNote(["a"], screens: 1, until: "b").contains("程序按时间行算出"))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

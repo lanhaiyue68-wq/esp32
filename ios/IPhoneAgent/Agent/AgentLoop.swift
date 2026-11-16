@@ -1471,7 +1471,37 @@ extension Pointer: Gestures {}
             + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字"
             // D46, y5 on 136: the run found 133真人测试一 under 昨天下午1:20, then "corrected" it to the time line below
             // it (2:34): in WeChat a time line heads the messages under it.
-            + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的）：\n" + kept
+            + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的）：\n" + kept + sentTimesLine(of: until, in: lines)
+    }
+
+    /// D54, 136 (user 11-16: "这个可以让codex来判断啊，咋会犯这样的低级错误"): when 133真人测试一 was sent was answered 昨天下午1:20
+    /// (y3, y4), "corrected" by the check to the time line under it (y5), and 11:26 PM off a search (y6). Which time line heads
+    /// a message is not left to a model: the nearest time line above each line holding the text, worked out here.
+    static func sentTimes(of target: String, in lines: [String]) -> [String] {
+        let wanted = target.trimmingCharacters(in: .whitespaces)
+        guard !wanted.isEmpty else { return [] }
+        var heading: String?, found: [String] = []
+        for line in lines {
+            let bare = line.trimmingCharacters(in: .whitespaces)
+            if isChatTimeLine(bare) { heading = bare } else if bare.contains(wanted) { found.append(heading ?? "") }
+        }
+        return found
+    }
+
+    /// A line that is only a chat's time label: 昨天下午1:20, 凌晨12:20, 11月14日 下午3:30, 星期六 晚上7:03, 2025年12月8日 9:05.
+    static func isChatTimeLine(_ line: String) -> Bool {
+        line.range(of: #"^(\d{4}年)?(\d{1,2}月\d{1,2}日)?\s*(昨天|前天|今天|星期[一二三四五六日天]|周[一二三四五六日天])?\s*"#
+                   + #"(凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|半夜)?\s*\d{1,2}:\d{2}$"#, options: .regularExpression) != nil
+    }
+
+    /// The read's last line: the send times worked out for the text it read up to ("" when the text was not read).
+    static func sentTimesLine(of target: String, in lines: [String]) -> String {
+        let times = sentTimes(of: target, in: lines)
+        guard !times.isEmpty else { return "" }
+        let shown = times.map { $0.isEmpty ? "（上方没有读到时间行）" : "“\($0)”" }
+        let what = times.count == 1 ? "“\(target)”的发送时间是" + shown[0]
+            : "共读到\(times.count)条“\(target)”，发送时间从旧到新依次是" + shown.joined(separator: "、") + "（最下面一条最新）"
+        return "\n程序按时间行算出：" + what + "。照抄这个时间，不要自己再推算。"
     }
 
     /// D38, s6 on 136: a read up 测试群 named only 学威 as a sender ("其余无法逐条归属"): the owner's own messages carry no
@@ -4106,6 +4136,7 @@ extension Pointer: Gestures {}
     In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
     An app counts as opened when a step opened it, or tapped its icon (a tap that says it opens the app).
     Simplified and traditional Chinese of the same words are the same (压力测试 = 壓力測試). A value that moves by itself (a live price, a time, a count) may differ a little from the screen now: that is not wrong.
+    A line "程序按时间行算出" in the notes is worked out by the program from the chat itself (a time line heads the messages under it): it is right; never say NO against it.
     A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
     """
 
