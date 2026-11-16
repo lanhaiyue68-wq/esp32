@@ -3367,7 +3367,10 @@ extension Pointer: Gestures {}
             }
             return DebugLog.write("type: typed as pinyin and seen in the field")
         }
-        if Pasteboard.needed(text) || Pasteboard.prefersExact(text), !pasteHopOff {
+        // D49, y3 on 136: one hop got lost at 18:49 (Lan Agent not reached after 2 switches); 20 minutes later the
+        // memo of all results (several lines) could only be pasted and was not written. Text that cannot be typed
+        // tries the hop again.
+        if Pasteboard.needed(text) || Pasteboard.prefersExact(text), !pasteHopOff || Pasteboard.requiresPaste(text) {
             let hop = await pasteHop?(text) ?? (Pasteboard.put(text) ? .filled : .refused)
             if hop == .lost {
                 // 126 over the cloud 11-12 (g2): the trip through Lan Agent did not come back, the run paused, and a task

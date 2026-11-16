@@ -547,6 +547,19 @@ import XCTest
         XCTAssertFalse(reason.contains("點進關於本機"), "only what was said while scrolling")
         XCTAssertEqual(AgentLoop.scrollBackRefusal([["action": .str("tap")]]), AgentLoop.scrollBackReason)
     }
+
+    /// D49, y3 on 136 (item 46): after one lost paste trip, text that can only be pasted (several lines) tries the trip again.
+    func testTextThatCanOnlyBePastedTriesTheTripAgain() async throws {
+        let actor = FakeModel { n in n == 1 ? "DO: type 你好" : #"DO: type "Y3组记录\n1. 春节""# }
+        let agent = AgentLoop(phone: FakeGestures(), screen: FakeScreen(), actor: actor, planner: actor, trace: nil)
+        agent.fastText = true; agent.pinyinMisses = 2
+        var hops = 0
+        agent.pasteHop = { _ in hops += 1; return .lost }
+        _ = try? await agent.step()
+        XCTAssertEqual(hops, 1)
+        _ = try? await agent.step()
+        XCTAssertEqual(hops, 2, "several lines cannot be typed: the trip is tried again")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
