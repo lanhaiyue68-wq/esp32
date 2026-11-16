@@ -696,6 +696,15 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D71, y6 on 137: a feed that keeps playing does not stop the swipe to the next video, nor opening an app.
+    func testAPlayingFeedDoesNotStopTheSwipeToTheNextVideo() {
+        XCTAssertTrue(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(300)]))
+        XCTAssertTrue(AgentLoop.staleProof(["action": .str("open"), "app": .str("抖音")]))
+        XCTAssertFalse(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(900), "y1": .int(500), "x2": .int(200), "y2": .int(520)]))
+        XCTAssertFalse(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(700)]))
+        XCTAssertFalse(AgentLoop.staleProof(["action": .str("tap"), "x": .int(500), "y": .int(500)]))
+    }
+
     /// D69, y5 on 137: a part over a run of items is not done while some of them have nothing written down.
     func testAPartOverARunOfItemsNeedsEachOfThem() {
         XCTAssertEqual(AgentLoop.partItemRange("第10–21项：各项结果或无法完成的原因已逐项记下 — 依次完成淘宝订单数"), 10...21)

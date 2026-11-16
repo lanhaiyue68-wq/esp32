@@ -2895,7 +2895,8 @@ extension Pointer: Gestures {}
                 try await gate?()
                 try await screen?.requireFrame(after: nil)
                 // Home and wait do not use coordinates or the current focus. Animation cannot make their target stale.
-                if i == 0, !["home", "wait", "listen", "readup"].contains(name), act["home_recovery"] != .bool(true), seen != screen?.frame,
+                if i == 0, !["home", "wait", "listen", "readup"].contains(name), !Self.staleProof(act),
+                   act["home_recovery"] != .bool(true), seen != screen?.frame,
                    Vision.changed(seen, screen?.frame, ignore: spots, caret: true) {
                     staleRun += 1
                     // Coordinates read off a screen that moved under them are never sent. But some screens never hold
@@ -4469,6 +4470,22 @@ extension Pointer: Gestures {}
         (partIndex, stepsInPart, notesAtPart) = (partIndex + 1, 0, notes.count)
         if act["by"]?.str == "planner" { takeover = 0 }
         return partIndex < parts.count
+    }
+
+    /// D71, y6 on 137: on 抖音's and 视频号's playing feeds every look differs, and the stale-plan guard dropped the swipe to
+    /// the next video four and five times in a row (item 20 never got past its first video; both times a stuck replan
+    /// followed); seven opens of an app were dropped as well. An app is opened by its name, a back swipe starts at the edge,
+    /// and a long up-or-down swipe scrolls whatever moved under it: none of them aims at a spot that can move.
+    static func staleProof(_ act: JObject) -> Bool {
+        switch act["action"]?.str {
+        case "open", "back": return true
+        case "swipe":
+            let p = pointerPath(act)
+            guard p.count == 2 else { return false }
+            let (dx, dy) = (abs(p[1].x - p[0].x), abs(p[1].y - p[0].y))
+            return dy >= 0.2 && dy > 2 * dx
+        default: return false
+        }
     }
 
     /// D69: the run of goal items a part is over ("第10–21项：…" → 10...21); nil for a part of one item.
