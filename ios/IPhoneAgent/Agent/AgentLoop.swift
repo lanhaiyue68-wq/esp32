@@ -855,10 +855,18 @@ extension Pointer: Gestures {}
             + "something does stop it, say what in the answer."
     }
 
+    /// D75, s7 on 138: "整理出一份设置步骤" (the steps to set it up, read in 小红书) was taken for the Settings app, which
+    /// this run "never went into": its answer was refused three times and the run failed (137 passed only because a
+    /// thought happened to say 设置). 设置 as setting something up (设置步骤, 怎么设置, 设置成) names no app.
+    static func withoutSettingUp(_ goal: String) -> String {
+        goal.replacingOccurrences(of: #"(怎么|如何|怎样)设置|设置(?=步骤|方法|教程|流程|过程|技巧|指南|攻略|好|成|为)"#,
+                                  with: " ", options: .regularExpression)
+    }
+
     static func unvisitedApps(task: String, steps: [JObject]) -> [String] {
         if steps.contains(where: { $0["action"]?.str == "takeover" }) { return [] }  // the user did part of it by hand
-        let goal = AppNames.hans(task).lowercased().replacingOccurrences(
-            of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ", options: .regularExpression)
+        let goal = Self.withoutSettingUp(AppNames.hans(task).lowercased().replacingOccurrences(
+            of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ", options: .regularExpression))
         // Only what the model did and said while doing it: not the plan, nor this check's own words.
         // 130 over the cloud 11-13 (q130b g5): on 淘宝's cart the executor "remembered" items 5-8 as done and noted made-up
         // results for them (拼多多 ¥13.9, a message never sent), then typed them into the note: what a note or typing

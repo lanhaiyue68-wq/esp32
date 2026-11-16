@@ -697,6 +697,16 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D75, s7 on 138: "设置步骤" is the steps to set something up, not the Settings app.
+    func testSettingStepsNameNoApp() {
+        let task = "在小红书搜“iPhone 定时关机 快捷指令”，打开前三篇笔记，整理出一份设置步骤；看看每篇是什么时候发的"
+        let steps: [JObject] = [["action": .str("open"), "app": .str("小红书")]]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: steps), [])
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "怎么设置定时关机？在小红书查一下", steps: steps), [])
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "在设置的“通用-关于本机”里看型号名称", steps: steps), ["设置"])
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "在设置里看电池电量", steps: steps), ["设置"])
+    }
+
     /// D74, h06 on 138: an app is not on the phone only by Home Screen pages that were read; no Home Screen is no answer.
     func testNoHomeScreenSaysNothingOfWhetherAnAppIsThere() {
         XCTAssertTrue(AppModel.absentFromPages(sawHome: true, readFailed: false))
