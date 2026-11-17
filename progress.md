@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-18 00:11（首爾）142 編好，IPA 在桌面
+- 142＝141（D102–D107）＋38fc133（D106 列表正則改用 CJK 範圍）。build142-ci ddc41f3 推成 build114 main；run 44108998080 成功：869 個單元測試 0 失敗。
+- IPA E:/桌面/Lan-Agent-build142-unsigned.ipa（三個 bundle 皆 142；SHA256 9f846476f255d89b2d8a812f78359d1ebe270b262b4d0c5e5cf85b7cf77bce00），141 的已送回收筒。
+- 下一步：使用者裝 142 → 重跑 z 題量 D102/D105 提速；使用者配合實測 D104。
+
 ## 2026-11-17 23:56（首爾）141 編好，IPA 在桌面
 - build141-ci 5668b95 推成 build114 main；run 44105681998：App 編過、IPA 上傳；869 個單元測試 1 個失敗（D106 testAListOfNamesNeedsEveryOneAndCutTextIsRead：ICU 的 \p{Han} 含「、」，列表切成「器把深圳、上海、北京、首」）。本機 build123 38fc133 已修（CJK 範圍），未推。
 - IPA E:/桌面/Lan-Agent-build141-unsigned.ipa（三個 bundle 皆 141；SHA256 e21703aa3baf5c14be561bbfc9fcabb882019cd1b3e4a806ee30df8e75da62b8），140 的已送回收筒。
