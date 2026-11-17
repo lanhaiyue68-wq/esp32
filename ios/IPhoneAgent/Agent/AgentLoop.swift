@@ -1774,9 +1774,11 @@ extension Pointer: Gestures {}
         }
     }
 
-    /// D106: the things an item names in a list ("深圳、上海、北京、首尔、广州"); fewer than three: none.
+    /// D106: the things an item names in a list ("深圳、上海、北京、首尔、广州"); fewer than three: none. CJK ideographs by
+    /// their range: ICU's \p{Han} takes the list's own 、 too (build 141's unit test: "北京、首" came back as one name).
     static func listedNames(_ item: String) -> [String] {
-        guard let r = item.range(of: #"\p{Han}{2,4}(?:、\p{Han}{2,4}){2,}"#, options: .regularExpression) else { return [] }
+        guard let r = item.range(of: #"[\u4E00-\u9FFF]{2,4}(?:、[\u4E00-\u9FFF]{2,4}){2,}"#, options: .regularExpression)
+        else { return [] }
         return item[r].components(separatedBy: "、")
     }
 
