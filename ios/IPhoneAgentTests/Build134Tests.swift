@@ -715,6 +715,20 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D94, z3 on 139 (item 43): a span in decimal hours, after 即 or =, or with the two times said again, is put right.
+    func testASpanInDecimalHoursOrSaidAgainIsPutRight() {
+        XCTAssertEqual(AgentLoop.rightSpans("第43项：深圳今日日出6:37、日落17:39，日照时长11.02小时，即11小时1分钟。"),
+                       "第43项：深圳今日日出6:37、日落17:39，日照时长11小时2分钟，即11小时2分钟。")
+        XCTAssertEqual(AgentLoop.rightSpans("43. 深圳今日日出6:37、日落17:39，白天时长11小时1分钟（17:39−6:37=11小时1分钟）。；44. 搜一搜"),
+                       "43. 深圳今日日出6:37、日落17:39，白天时长11小时2分钟（17:39−6:37=11小时2分钟）。；44. 搜一搜")
+        let decimal = "9. 6:37到17:39，共11.03小时"
+        XCTAssertEqual(AgentLoop.rightSpans(decimal), decimal, "11.03 hours is 11 hours 2 minutes")
+        let three = "1. 6:00起床，7:00出门，9:00到，共5小时"
+        XCTAssertEqual(AgentLoop.rightSpans(three), three, "three times: which two is unclear")
+        let train = "25. G4710次，06:02出发，06:31到达；页面显示暂无余票。"
+        XCTAssertEqual(AgentLoop.rightSpans(train), train)
+    }
+
     /// D92, 138 over the cloud 11-17: a proxy on the phone itself is named when the network is down.
     func testAProxyOnThePhoneIsNamed() {
         let shadow: [String: Any] = ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 1082,

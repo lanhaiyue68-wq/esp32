@@ -1211,9 +1211,14 @@ extension Pointer: Gestures {}
     /// 11小时2分钟), the note and the closing answer kept it, and the answer only said it did not fit. In one item, a span
     /// said after exactly two clock times (共, 时长, 白天, 历时, 用时, 相隔…) is worked out from them and put right. A later
     /// time with no 上午/下午 that would come before the first is taken as afternoon.
+    /// D94, z3 on 139 (item 43): Doubao took 17:39 − 6:37 as 17.39 − 6.37 on Calculator, read 11.02 as hours and noted
+    /// "日照时长11.02小时，即11小时1分钟"; the check of the finished work went by the note and twice turned back the right
+    /// 11小时2分钟, and the answer said "17:39−6:37=11小时1分钟（…11小时2分钟为错误，已更正）". The two times said again are
+    /// still two times; a span in decimal hours, or after 即 or =, is worked out too; and every span said within 40
+    /// characters of the times, or of a span before it, is put right, not the first only.
     static func rightSpans(_ text: String) -> String {
         guard let clock = try? NSRegularExpression(pattern: #"(上午|下午|中午|晚上|傍晚|凌晨|清晨|早上|夜里|夜间)?\s*(\d{1,2})[:：](\d{2})(?!\d)"#),
-              let span = try? NSRegularExpression(pattern: #"(?:共|一共|总共|时长|历时|用时|全程|白天|白昼|日照|相隔|间隔|相差)[为是约：:\s]{0,3}(\d{1,2})\s*个?\s*小时\s*(?:(\d{1,2})\s*分钟?)?"#),
+              let span = try? NSRegularExpression(pattern: #"(?:共|一共|总共|时长|历时|用时|全程|白天|白昼|日照|相隔|间隔|相差|即|等于|=|＝)[为是约：:\s]{0,3}(\d{1,2})(?:\.(\d{1,2}))?\s*个?\s*小时\s*(?:(\d{1,2})\s*分钟?)?"#),
               let heads = try? NSRegularExpression(pattern: #"(?:^|\n|[；;])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#)
         else { return text }
         let ns = text as NSString
@@ -1234,19 +1239,28 @@ extension Pointer: Gestures {}
         for (a, b) in zip(cuts, cuts.dropFirst()) where b > a {
             let item = NSRange(location: a, length: b - a)
             let times = clock.matches(in: text, range: item)
-            guard times.count == 2, let first = minutes(times[0]), let second = minutes(times[1]) else { continue }
-            let after = times[1].range.location + times[1].range.length
-            guard let said = span.firstMatch(in: text, range: NSRange(location: after, length: b - after)),
-                  said.range.location - after <= 40,
-                  let h = part(said, 1).flatMap(Int.init) else { continue }
+            let values = times.compactMap(minutes)
+            guard values.count == times.count else { continue }
+            var distinct: [(at: Int, marked: Bool)] = []
+            for v in values where !distinct.contains(where: { $0.at == v.at }) { distinct.append(v) }
+            guard distinct.count == 2, let i = values.firstIndex(where: { $0.at == distinct[1].at }) else { continue }
+            let (first, second) = (distinct[0], distinct[1])
             var end = second.at
             if end <= first.at, !second.marked, end < 12 * 60 { end += 12 * 60 }
             var length = end - first.at
             if length <= 0 { length += 24 * 60 }
-            if h * 60 + (part(said, 2).flatMap(Int.init) ?? 0) == length { continue }
-            let from = said.range(at: 1).location
-            fixes.append((NSRange(location: from, length: said.range.location + said.range.length - from),
-                          "\(length / 60)小时" + (length % 60 > 0 ? "\(length % 60)分钟" : "")))
+            let after = times[i].range.location + times[i].range.length
+            var anchors = times[i...].map { $0.range.location + $0.range.length }
+            for said in span.matches(in: text, range: NSRange(location: after, length: b - after)) {
+                guard anchors.contains(where: { (0...40).contains(said.range.location - $0) }),
+                      let h = part(said, 1).flatMap(Int.init) else { continue }
+                anchors.append(said.range.location + said.range.length)
+                let tenths = part(said, 2).flatMap { Double("0." + $0) }.map { Int(($0 * 60).rounded()) } ?? 0
+                if h * 60 + tenths + (part(said, 3).flatMap(Int.init) ?? 0) == length { continue }
+                let from = said.range(at: 1).location
+                fixes.append((NSRange(location: from, length: said.range.location + said.range.length - from),
+                              "\(length / 60)小时" + (length % 60 > 0 ? "\(length % 60)分钟" : "")))
+            }
         }
         let out = NSMutableString(string: text)
         for (range, with) in fixes.reversed() { out.replaceCharacters(in: range, with: with) }
@@ -2788,7 +2802,8 @@ extension Pointer: Gestures {}
                     planned.act["text"] = .str(text)
                     DebugLog.write("note: a weekday, a count of days or a span was wrong; put right")
                 }
-                if !notes.contains(text), let shown = calcResultMissing(text) {
+                // D94: what was said holds the Calculator's number, even when a span in it was put right.
+                if !notes.contains(text), let shown = calcResultMissing(said) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.calcNoteReason(shown))])
                     DebugLog.write("note: refused; Calculator shows \(shown) and the note has no such number")
                     continue
@@ -3460,6 +3475,16 @@ extension Pointer: Gestures {}
                     }
                 }
                 if let wrong = wrongSpot {
+                    // D93, z3 on 138: Z3验证11:07 was typed, its Return blocked as the wrong place, and it stayed in 验证群's
+                    // box; at 13:22, with no task running and nothing pressed by Lan Agent, it went out. What was typed for a
+                    // message that is not sent is cleared at once, as a draft not approved is: nothing is left in a box
+                    // for a later tap to send.
+                    if unsent != nil {
+                        try? await phone?.key("cmd+a")
+                        try? await phone?.key("backspace")
+                        unsent = nil
+                        DebugLog.write("send: blocked; what was typed is cleared from the box")
+                    }
                     sendBlocks += 1
                     if sendBlocks >= 2 {
                         sendBlocks = 0
