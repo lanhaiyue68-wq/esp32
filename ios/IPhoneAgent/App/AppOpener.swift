@@ -76,6 +76,19 @@ enum AppPlaces {
     static func noteOpened(_ name: String) { for v in AppNames.variants(name) { opened.insert(normalized(v)) } }
     static func wasOpened(_ name: String) -> Bool { AppNames.variants(name).contains { opened.contains(normalized($0)) } }
 
+    /// D105, z6 on 140: WeChat's icon at (0.617, 0.722) was tapped 32 times in 19 opens and none opened it (from the
+    /// corner the pointer landed off it, and with frames at 0.8–1.3 fps it was not seen to be put right); Search opened it
+    /// every time: 19 opens took 506 s, 26.6 s each, against 7–9 s for the other apps. An app whose icon was tapped twice
+    /// for nothing is opened by Search first from then on (until the app starts again), and by its icon once more if
+    /// Search does not.
+    private static var iconMissed: Set<String> = []
+    static func noteIcon(_ name: String, missed: Bool) {
+        for v in AppNames.variants(name) {
+            if missed { iconMissed.insert(normalized(v)) } else { iconMissed.remove(normalized(v)) }
+        }
+    }
+    static func iconWasMissed(_ name: String) -> Bool { AppNames.variants(name).contains { iconMissed.contains(normalized($0)) } }
+
     /// A place that turned out wrong goes, alone: reading all the pages again cost 30-55 s each time, for WeChat, which is
     /// on no page at all (three times over USB 11-09). Next time Search is the way.
     static func forget(_ name: String) {
@@ -321,6 +334,14 @@ extension AppModel {
             guard let read = await homeRows(top: 0.02) else { return try await bySearch(name) }
             rows = read
         }
+        // D105: an icon tapped twice for nothing before: Search first.
+        if AppPlaces.iconWasMissed(name) {
+            DebugLog.write("open \(name): its icon was missed before; Search first")
+            if try await bySearch(name) { return true }
+            AppPlaces.noteIcon(name, missed: false)
+            guard let read = await homeRows(top: 0.02) else { return false }
+            rows = read
+        }
         // D21, 134 over the cloud 11-15 (z6): home never came (the Today View), and the page in front was its Screen Time
         // widget, which lists 天氣, WeChat, 行事曆 by name: "open 微信: the page in front" tapped WeChat there and opened
         // Settings › Screen Time, eleven times. A name is tapped as an icon only on a page that looks like the Home Screen.
@@ -504,6 +525,7 @@ extension AppModel {
             }
             DebugLog.write("open \(name): still on the Home Screen after the tap")
         }
+        AppPlaces.noteIcon(name, missed: true)
         return false
     }
 

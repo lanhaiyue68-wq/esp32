@@ -715,6 +715,18 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D105: an app whose icon was tapped twice for nothing is opened by Search first, under any of its names.
+    func testAnIconMissedIsOpenedBySearchFirst() {
+        AppPlaces.noteIcon("微信", missed: false)
+        XCTAssertFalse(AppPlaces.iconWasMissed("WeChat"))
+        AppPlaces.noteIcon("微信", missed: true)
+        XCTAssertTrue(AppPlaces.iconWasMissed("WeChat"))
+        XCTAssertTrue(AppPlaces.iconWasMissed("微信"))
+        XCTAssertFalse(AppPlaces.iconWasMissed("淘宝"))
+        AppPlaces.noteIcon("WeChat", missed: false)
+        XCTAssertFalse(AppPlaces.iconWasMissed("微信"))
+    }
+
     /// D104: a message during a task is asked about: 先做 stops the task for it, 等会 keeps it after; the answer is no task.
     func testANewMessageDuringATaskIsAskedAboutFirst() {
         for now in ["先做", "先做吧", "现在做", "马上", "好", "好的，先做", "可以", "嗯", "先做我这个，做完再做外卖", "OK"] {
