@@ -137,6 +137,8 @@ extension Pointer: Gestures {}
     private var calcNoteRefused: String?
     /// D100: the goal's items a note on a sum in brackets was refused for (once each).
     private var bracketRefused: Set<Int> = []
+    /// D107: the goal's items a note with text cut short on the screen was refused for (once each; 0: a note with no item).
+    private var cutRefused: Set<Int> = []
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -1762,9 +1764,46 @@ extension Pointer: Gestures {}
             // the note "第40项：首尔今日最高温14°，最低温10°" on the way; a stuck plan took 40 for done and left it out,
             // "Y4全部做完" went out first, and 温差大 was sent only after it. A thing that asks for a message is done when
             // the message went out, or a note says it is not to go or could not.
+            // D106, z6 on 140 (item 14): "用计算器把深圳、上海、北京、首尔、广州今天的最高温加起来再除以5" counted as
+            // noted on "第14项深圳今日最高28°C" alone; the part closed and the other four were never looked up. An item
+            // that names three things or more in a list is noted once each is (or once it says why it could not be).
+            if said.contains(item.n), asked.isEmpty, !notSending(saidOf[item.n] ?? ""),
+               !namesAllTold(body, in: saidOf[item.n] ?? "") { return item.n }
             if said.contains(item.n), asked.isEmpty || notSending(saidOf[item.n] ?? "") { return nil }
             return item.n
         }
+    }
+
+    /// D106: the things an item names in a list ("深圳、上海、北京、首尔、广州"); fewer than three: none.
+    static func listedNames(_ item: String) -> [String] {
+        guard let r = item.range(of: #"\p{Han}{2,4}(?:、\p{Han}{2,4}){2,}"#, options: .regularExpression) else { return [] }
+        return item[r].components(separatedBy: "、")
+    }
+
+    /// Whether what was noted for an item names each thing its list names. The list's first and last words may carry a
+    /// word of the sentence ("把深圳", "广州今天"): their first or last two characters do.
+    static func namesAllTold(_ item: String, in told: String) -> Bool {
+        let names = listedNames(AppNames.hans(item))
+        guard names.count >= 3 else { return true }
+        let t = AppNames.hans(told)
+        return names.allSatisfy { t.contains($0) || t.contains(String($0.prefix(2))) || t.contains(String($0.suffix(2))) }
+    }
+
+    /// D107, z6 on 140: "开发商Alipay (Hangzhou) Te...（被截断）" (item 27) and a note's title "…还值得入手吗？Pho...（被截断）"
+    /// read off the search list (item 43 said to open the note, and its second comment was never read) went into the
+    /// answer cut. A note holding text cut short on the screen is refused once for its item, with the order to open it.
+    private func cutNoteMissing(_ text: String) -> String? {
+        guard Self.holdsCutText(text) else { return nil }
+        let n = Self.noteItems(text).min() ?? 0
+        guard !cutRefused.contains(n) else { return nil }
+        cutRefused.insert(n)
+        return "Refused: this note holds text cut short on the screen (… or ... where it was cut, or 被截断). Open the thing "
+            + "it is about (the note, the product, the app's page, the developer's name) and read it whole, then note it. If "
+            + "it is cut there too, note it again as it is and it is kept."
+    }
+
+    static func holdsCutText(_ text: String) -> Bool {
+        AppNames.hans(text).range(of: #"被截断|显示不全|[\p{Han}A-Za-z0-9](?:\.\.\.|…)"#, options: .regularExpression) != nil
     }
 
     /// D81: a note on a thing that asks for a message, saying it is not sent: given up, or not to be sent.
@@ -2900,6 +2939,11 @@ extension Pointer: Gestures {}
                 if text != said {
                     planned.act["text"] = .str(text)
                     DebugLog.write("note: a weekday, a count of days or a span was wrong; put right")
+                }
+                if !notes.contains(text), let why = cutNoteMissing(said) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(why)])
+                    DebugLog.write("note: refused once; it holds text cut short on the screen")
+                    continue
                 }
                 if !notes.contains(text), let why = bracketNoteMissing(said) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(why)])

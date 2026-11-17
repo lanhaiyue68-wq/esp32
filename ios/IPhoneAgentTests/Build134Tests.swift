@@ -715,6 +715,24 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D106: an item that names five cities is not noted by one of them; D107: a note cut short is refused once.
+    func testAListOfNamesNeedsEveryOneAndCutTextIsRead() {
+        XCTAssertEqual(AgentLoop.listedNames("用计算器把深圳、上海、北京、首尔、广州今天的最高温加起来再除以5"),
+                       ["器把深圳", "上海", "北京", "首尔", "广州今天"])
+        let item = "用计算器把深圳、上海、北京、首尔、广州今天的最高温加起来再除以5，保留一位小数"
+        XCTAssertFalse(AgentLoop.namesAllTold(item, in: "深圳今日最高28°C"))
+        XCTAssertTrue(AgentLoop.namesAllTold(item, in: "深圳28、上海16、北京9、首尔14、广州27，平均18.8"))
+        XCTAssertTrue(AgentLoop.namesAllTold("在淘宝搜索数据线，记下第一个商品", in: "¥2"), "no list: as before")
+        let goal = (1...12).map { $0 == 3 ? "3. " + item : "\($0). 做第\($0)件事" }.joined(separator: "；")
+        let others = (1...12).filter { $0 != 3 }.map { "第\($0)项：好" }.joined(separator: "；")
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: [others, "第3项：深圳今日最高28°C"], sent: []), [3])
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: [others, "第3项：只查到深圳28°C，其余城市无法获取"], sent: []), [],
+                       "said why it could not")
+        XCTAssertTrue(AgentLoop.holdsCutText("第27项：开发商Alipay (Hangzhou) Te...（被截断）"))
+        XCTAssertTrue(AgentLoop.holdsCutText("第2项：作者Python-小明…"))
+        XCTAssertFalse(AgentLoop.holdsCutText("第23项：2,388,581.14"))
+    }
+
     /// D105: an app whose icon was tapped twice for nothing is opened by Search first, under any of its names.
     func testAnIconMissedIsOpenedBySearchFirst() {
         AppPlaces.noteIcon("微信", missed: false)
