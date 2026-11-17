@@ -1015,14 +1015,17 @@ import Foundation
         return (dx(x) - p.0, dy(y) - p.1)
     }
 
-    struct LastClick: Equatable { var x: Double, y: Double, ux: Int, uy: Int, link: Int, time: Double }
+    struct LastClick: Equatable {
+        var x: Double, y: Double, ux: Int, uy: Int, link: Int, time: Double
+        var swiped = false  // D108: where a swipe ended, not a click: a tap there moves and looks, never clicks in place
+    }
     static let sameSpot = 0.004       // screen fraction: model coordinates on a 0-1000 grid repeat exactly
     static let clickAgainWindow = 60.0  // seconds; after longer the user may have touched or moved things
 
     /// Click again in place only when nothing has moved the pointer since the last click (its tracked position is
     /// unchanged and the board link is the same) and the target is that same spot.
     static func clickAgain(_ last: LastClick, _ x: Double, _ y: Double, units: (Int, Int), link: Int, at now: Double) -> Bool {
-        abs(last.x - x) <= sameSpot && abs(last.y - y) <= sameSpot && units == (last.ux, last.uy)
+        !last.swiped && abs(last.x - x) <= sameSpot && abs(last.y - y) <= sameSpot && units == (last.ux, last.uy)
             && link == last.link && now - last.time >= 0 && now - last.time <= clickAgainWindow
     }
 
@@ -1030,10 +1033,25 @@ import Foundation
         try await drag([CGPoint(x: x1, y: y1), CGPoint(x: x2, y: y2)], hold: hold)
     }
 
+    /// D109, user 11-18 ("上滑抖音时就正常划一下就行，你这个滑动感觉是按着慢慢走的滑动"): a model's swipe is pressed and
+    /// walked slowly, then held, so lists and pickers stop exactly there (134: one jump never moved Weather's hourly
+    /// strip). A feed of one video a screen turns by a quick stroke: a few quick moves and up at once.
+    func flick(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) async throws {
+        try await oneAtATime { try await dragNow([CGPoint(x: x1, y: y1), CGPoint(x: x2, y: y2)], hold: false, quick: true) }
+    }
+
+    static let flickSteps = 4
+
+    /// D108: a swipe goes straight from where the pointer rests, and leaves it resting at its end, when both ends are
+    /// well inside the screen (an edge's own gestures need the edge, reached from the corner as before).
+    static func swipeHops(from a: CGPoint, to b: CGPoint) -> Bool {
+        [a, b].allSatisfy { (0.08...0.92).contains(Double($0.x)) && (0.12...0.9).contains(Double($0.y)) }
+    }
+
     /// Press at the first point, move through the rest, release: one continuous stroke. hold rests at the end
     /// first, so lists and pickers stop exactly there; system gestures (home, back) need the flick.
     func drag(_ points: [CGPoint], hold: Bool = true) async throws { try await oneAtATime { try await dragNow(points, hold: hold) } }
-    private func dragNow(_ points: [CGPoint], hold: Bool) async throws {
+    private func dragNow(_ points: [CGPoint], hold: Bool, quick: Bool = false) async throws {
         guard points.count >= 2, points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
             throw DeviceError(message: "drag needs at least two finite points")
         }
@@ -1053,7 +1071,22 @@ import Foundation
         }
         let previous = startFromHome ? (0, 0) : (pos ?? (0, 0))
         let travel = hypot(Double(dx(Double(points[0].x)) - previous.0), Double(dy(Double(points[0].y)) - previous.1))
-        try await point(Double(points[0].x), Double(points[0].y), rehome: startFromHome, edgeStart: !hold && !drawing)
+        // D108, user 11-18 ("现在我看他还是从左上角出发啊"): on 142, every swipe went to the corner first, and the tap
+        // after it too. A swipe inside the screen starts straight from where the pointer rests (its start needs no
+        // aim: a list moves wherever it is pressed).
+        let start = CGPoint(x: Double(points[0].x), y: Double(points[0].y))
+        if !drawing, hold || quick, Self.swipeHops(from: start, to: points[points.count - 1]), !viaBorders(start.x, start.y),
+           let last = lastClick, let p = pos, hops < Self.nearbyHops,
+           Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
+            let (ux, uy) = hopUnits(from: last, to: start.x, start.y, units: p)
+            lastClick = nil
+            pos = nil
+            if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
+            (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
+            log(String(format: "swipe from (%.3f, %.3f): straight from where the pointer rests", start.x, start.y))
+        } else {
+            try await point(start.x, start.y, rehome: startFromHome, edgeStart: !hold && !drawing && !quick)
+        }
         // With the position unknown the next move would go home first: never with the button down.
         if pos == nil { try await moveTo(dx(Double(points[0].x)), dy(Double(points[0].y)), rehome: true) }
         try await device.send("press")
@@ -1079,7 +1112,9 @@ import Foundation
             // went as one jump (press, move -194, release) and Weather's hourly strip never moved, ten swipes in a row.
             // A swipe the model asks for (hold) goes slowly either way (a paging view still turns past half its width);
             // the quick flick is for the page turns the app makes itself (hold false: the Home Screen's pages).
-            if points.count == 2 && hold {
+            if points.count == 2 && quick {
+                try await quickMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
+            } else if points.count == 2 && hold {
                 try await pacedMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
             } else if strokeCommand != true || points.count <= 2 {
                 for p in points.dropFirst() {
@@ -1105,6 +1140,11 @@ import Foundation
                 prev = q
             }
             unitsSinceDrawHome += Int(len + travel)
+        } else if hold || quick, let p = pos, Self.swipeHops(from: start, to: points[points.count - 1]) {
+            // D108: the pointer rests where the swipe ended: the next tap or swipe may go straight from there.
+            let end = points[points.count - 1]
+            lastClick = LastClick(x: Double(end.x), y: Double(end.y), ux: p.0, uy: p.1, link: device.links,
+                                  time: Date().timeIntervalSince1970, swiped: true)
         } else {
             pos = nil
         }
@@ -1123,6 +1163,20 @@ import Foundation
         var (sx, sy) = (0, 0)
         for i in 1...n {
             let (nx, ny) = (ux * i / n, uy * i / n)
+            try await device.send("move \(nx - sx) \(ny - sy)")
+            (sx, sy) = (nx, ny)
+            pos = (x + sx, y + sy)
+        }
+        moves += 1
+    }
+
+    /// D109: a flick's stroke: a few quick moves with no pause between them, so iOS sees a fast finger.
+    private func quickMove(to tx: Int, _ ty: Int) async throws {
+        guard let (x, y) = pos else { throw DeviceError(message: "pointer position lost; no move was sent") }
+        let (ux, uy) = (tx - x, ty - y)
+        var (sx, sy) = (0, 0)
+        for i in 1...Self.flickSteps {
+            let (nx, ny) = (ux * i / Self.flickSteps, uy * i / Self.flickSteps)
             try await device.send("move \(nx - sx) \(ny - sy)")
             (sx, sy) = (nx, ny)
             pos = (x + sx, y + sy)

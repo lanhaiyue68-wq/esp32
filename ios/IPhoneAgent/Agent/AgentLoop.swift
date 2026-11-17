@@ -2153,6 +2153,15 @@ extension Pointer: Gestures {}
     /// 121 over the cloud 11-11: a learned route opens its app by the icon, and 下水径 typed in 高德 and an address
     /// typed in Safari were held as messages); a goal that names none, or names a chat app, may be in one.
     /// Whether this app sends messages (微信, 企业微信, 钉钉…).
+    /// D109: apps whose feed turns one video a screen, and a swipe there that turns it (up or down, long).
+    static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok"]
+
+    static func flicks(app: String?, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Bool {
+        guard let app else { return false }
+        let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
+        return flickApps.contains(name) && abs(y2 - y1) >= 0.25 && abs(x2 - x1) <= 0.15
+    }
+
     static func isChatApp(_ app: String) -> Bool {
         let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
         return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
@@ -5364,7 +5373,14 @@ extension Pointer: Gestures {}
             if let half = Self.textHalf(at: CGPoint(x: p("x"), y: p("y")), in: readRows) { phone.aimLoosely(half.x, half.y) }
             try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
             aimNext = false
-        case "swipe": try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
+        case "swipe":
+            // D109: up or down a feed of one video a screen (抖音, 快手): one quick stroke, as a finger does.
+            if let pointer = phone as? Pointer,
+               Self.flicks(app: Self.appInFront(steps, startedIn: startApp), p("x1"), p("y1"), p("x2"), p("y2")) {
+                try await pointer.flick(p("x1"), p("y1"), p("x2"), p("y2"))
+            } else {
+                try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
+            }
         case "hold":
             // D18, 134 over the cloud 11-15 (y4, y5): Weather's page for tomorrow shows an hour's value (下午3時) only under
             // a finger held on its chart, and every look came after the finger let go: ten minutes of swipes, then

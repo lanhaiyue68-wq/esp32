@@ -715,6 +715,23 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D108: a swipe inside the screen goes straight from where the pointer rests; one at an edge from the corner.
+    /// D109: up or down Douyin's feed is a quick stroke; elsewhere the slow walk stays.
+    func testSwipesGoStraightAndDouyinFlicks() {
+        XCTAssertTrue(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.75), to: CGPoint(x: 0.5, y: 0.3)))
+        XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.98), to: CGPoint(x: 0.5, y: 0.5)), "the home bar")
+        XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.02, y: 0.5), to: CGPoint(x: 0.6, y: 0.5)), "back from the edge")
+        XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.03), to: CGPoint(x: 0.5, y: 0.6)), "from the top edge")
+        let last = Pointer.LastClick(x: 0.5, y: 0.3, ux: 100, uy: 200, link: 1, time: 1000, swiped: true)
+        XCTAssertFalse(Pointer.clickAgain(last, 0.5, 0.3, units: (100, 200), link: 1, at: 1001), "a swipe's end is no click")
+        XCTAssertTrue(AgentLoop.flicks(app: "抖音", 0.5, 0.75, 0.5, 0.3))
+        XCTAssertTrue(AgentLoop.flicks(app: "TikTok", 0.5, 0.3, 0.5, 0.75))
+        XCTAssertFalse(AgentLoop.flicks(app: "抖音", 0.8, 0.5, 0.2, 0.5), "sideways")
+        XCTAssertFalse(AgentLoop.flicks(app: "抖音", 0.5, 0.6, 0.5, 0.5), "a short move")
+        XCTAssertFalse(AgentLoop.flicks(app: "天气", 0.5, 0.75, 0.5, 0.3), "elsewhere the slow walk")
+        XCTAssertFalse(AgentLoop.flicks(app: nil, 0.5, 0.75, 0.5, 0.3))
+    }
+
     /// D106: an item that names five cities is not noted by one of them; D107: a note cut short is refused once.
     func testAListOfNamesNeedsEveryOneAndCutTextIsRead() {
         XCTAssertEqual(AgentLoop.listedNames("用计算器把深圳、上海、北京、首尔、广州今天的最高温加起来再除以5"),
