@@ -1112,7 +1112,27 @@ import Foundation
             // went as one jump (press, move -194, release) and Weather's hourly strip never moved, ten swipes in a row.
             // A swipe the model asks for (hold) goes slowly either way (a paging view still turns past half its width);
             // the quick flick is for the page turns the app makes itself (hold false: the Home Screen's pages).
-            if points.count == 2 && quick {
+            // D110, user 11-18 ("现在滑动设定也是不流畅"): a swipe went as ~20 "move 0 -19", each a 0.13-0.2 s round trip:
+            // the pointer jerked along for ~3.5 s. The whole line goes in one stroke instead, streamed by the board at the
+            // calibration's pace (as a drawing is); a swipe then rests before lifting as before, a flick lifts at once.
+            // Firmware without stroke: the walk as before.
+            var stroked = false
+            // Up and down only: 134's sideways jump never moved Weather's hourly strip, so sideways keeps the walk.
+            let upDown = abs(Double(points[1].y - points[0].y)) >= abs(Double(points[1].x - points[0].x))
+            if points.count == 2, hold || quick, upDown || quick, strokeCommand != false, let from = pos {
+                let to = (dx(Double(points[1].x)), dy(Double(points[1].y)))
+                let deltas = Self.strokeDeltas(from: from, to: to, step: Self.swipeStrokeStep)
+                do {
+                    try await device.send("stroke " + deltas.map { "\($0.0) \($0.1)" }.joined(separator: " "))
+                    (pos, strokeCommand, stroked) = (to, true, true)
+                    moves += 1
+                } catch let e as DeviceError where e.message.contains("unknown command") {
+                    strokeCommand = false
+                }
+            }
+            if stroked {
+                // the line went in one stroke
+            } else if points.count == 2 && quick {
                 try await quickMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
             } else if points.count == 2 && hold {
                 try await pacedMove(to: dx(Double(points[1].x)), dy(Double(points[1].y)))
@@ -1168,6 +1188,22 @@ import Foundation
             pos = (x + sx, y + sy)
         }
         moves += 1
+    }
+
+    static let swipeStrokeStep = 200  // the board paces each segment itself; a stroke takes at most 40
+
+    /// D110: a straight line from one point to another as a stroke's moves, each at most `step` units on either axis.
+    static func strokeDeltas(from a: (Int, Int), to b: (Int, Int), step: Int) -> [(Int, Int)] {
+        let (ux, uy) = (b.0 - a.0, b.1 - a.1)
+        let n = max(1, Int((Double(max(abs(ux), abs(uy))) / Double(max(1, step))).rounded(.up)))
+        var out: [(Int, Int)] = []
+        var (sx, sy) = (0, 0)
+        for i in 1...n {
+            let (nx, ny) = (ux * i / n, uy * i / n)
+            out.append((nx - sx, ny - sy))
+            (sx, sy) = (nx, ny)
+        }
+        return out
     }
 
     /// D109: a flick's stroke: a few quick moves with no pause between them, so iOS sees a fast finger.

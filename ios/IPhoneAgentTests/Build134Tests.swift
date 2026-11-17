@@ -715,6 +715,19 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D110: a swipe's line is one stroke of small even moves that add up to the whole line.
+    func testASwipeIsOneSmoothStroke() {
+        let d = Pointer.strokeDeltas(from: (300, 700), to: (300, 320), step: 24)
+        XCTAssertEqual(d.count, 16)
+        XCTAssertEqual(d.reduce(0) { $0 + $1.0 }, 0)
+        XCTAssertEqual(d.reduce(0) { $0 + $1.1 }, -380)
+        XCTAssertTrue(d.allSatisfy { abs($0.1) <= 24 && abs($0.0) <= 24 })
+        let diagonal = Pointer.strokeDeltas(from: (0, 0), to: (100, -50), step: 24)
+        XCTAssertEqual(diagonal.reduce(0) { $0 + $1.0 }, 100)
+        XCTAssertEqual(diagonal.reduce(0) { $0 + $1.1 }, -50)
+        XCTAssertEqual(Pointer.strokeDeltas(from: (5, 5), to: (5, 5), step: 24).count, 1, "no move: one empty step")
+    }
+
     /// D108: a swipe inside the screen goes straight from where the pointer rests; one at an edge from the corner.
     /// D109: up or down Douyin's feed is a quick stroke; elsewhere the slow walk stays.
     func testSwipesGoStraightAndDouyinFlicks() {
