@@ -39,18 +39,23 @@ import XCTest
 
     // MARK: swipes
 
-    func testAHeldSwipeUpTheListGoesTwentyUnitsACommand() async throws {
+    /// D110 (143): a held swipe up the list goes as one stroke the board paces (it went 20 units a command, each a BLE round
+    /// trip, ~3.5 s and jerky), and still rests before the release.
+    func testAHeldSwipeUpTheListGoesAsOneStroke() async throws {
         let device = FakeDevice()
         let (p, file) = try mapped(device)
         defer { try? FileManager.default.removeItem(at: file) }
         try await p.swipe(0.04, 0.6, 0.04, 0.2, hold: true)
         let press = try XCTUnwrap(device.sent.lastIndex(of: "press"))
         let release = try XCTUnwrap(device.sent.lastIndex(of: "release"))
-        let stroke = device.sent[(press + 1)..<release]
-        XCTAssertEqual(stroke.count, 13, "260 units, 20 at a time: \(stroke)")
-        let dy = stroke.compactMap { Int($0.split(separator: " ")[2]) }
+        let between = Array(device.sent[(press + 1)..<release])
+        XCTAssertEqual(between.count, 1, "one stroke: \(between)")
+        let parts = (between.first ?? "").split(separator: " ")
+        XCTAssertEqual(parts.first, "stroke")
+        let values = parts.dropFirst().compactMap { Int($0) }
+        let dy = stride(from: 1, to: values.count, by: 2).map { values[$0] }
         XCTAssertEqual(dy.reduce(0, +), -260)
-        XCTAssertTrue(dy.allSatisfy { abs($0) <= Pointer.swipeStep })
+        XCTAssertLessThanOrEqual(values.count, 80, "the board takes 40 pairs at most")
     }
 
     /// 134 (y2, y4): one sideways jump never moved Weather's hourly strip. A held sideways swipe goes slowly too.
