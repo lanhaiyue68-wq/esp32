@@ -86,6 +86,25 @@ import XCTest
         }
     }
 
+    /// D97, z6 on 139: a command waiting its turn when the link drops fails as a lost link, not as a stop.
+    func testLinkDownFailsQueuedCommandsAsDisconnected() async {
+        let board = FakeBoard()
+        board.silent = true
+        let channel = CommandChannel(transport: board)
+        board.channel = channel
+        let inFlight = Task { @MainActor in try? await channel.send("ping") }
+        let queued = Task { @MainActor () -> Error? in
+            do { _ = try await channel.send("click"); return nil } catch { return error }
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        channel.linkDown()
+        _ = await inFlight.value
+        let error = await queued.value
+        XCTAssertNotNil(error)
+        XCTAssertFalse(error is CancellationError, "a lost link is not a stop")
+        XCTAssertTrue(error?.localizedDescription.contains("disconnected") == true)
+    }
+
     func testReplyParsing() {
         XCTAssertEqual(BoardReply.parse("12 ok"), BoardReply(id: 12, ok: true, text: ""))
         XCTAssertEqual(BoardReply.parse("3 ok 812\n"), BoardReply(id: 3, ok: true, text: "812"))

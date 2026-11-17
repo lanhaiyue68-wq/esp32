@@ -69,7 +69,11 @@ extension HIDDevice {
     /// "app <command>" lines relayed from the Mac harness.
     var onAppCommand: ((String) -> Void)?
     private var pending: [Int: CheckedContinuation<BoardReply, Error>] = [:]
-    private var epoch = 0
+    private var epoch = 0  // bumped by a stop: what was queued before it never runs
+    /// D97, z6 on 139: bumped by a dropped link. The link dropped for 2.5 s (CBError 6) while a ping held the line; the
+    /// run's next command, queued behind it, was failed as a stop (CancellationError) and the 48-item run ended as
+    /// "任务被停止了" at 10 minutes. A command queued before a dropped link fails as a lost link, which a run gets over.
+    private var linkEpoch = 0
     private var stopping = false
     private var last = 0.0, beat = 0.0
     var onTiming: ((String, Double) -> Void)?  // command name, ms
@@ -86,7 +90,7 @@ extension HIDDevice {
 
     /// The link dropped: fail everything in flight.
     func linkDown() {
-        epoch += 1
+        linkEpoch += 1
         let waiting = pending
         pending = [:]
         waiting.values.forEach { $0.resume(throwing: DeviceError(message: "board disconnected")) }
@@ -148,11 +152,12 @@ extension HIDDevice {
     /// BoardTimeout and keeps the connection; only a real CoreBluetooth disconnect fails as link lost.
     @discardableResult
     func send(_ command: String, timeout custom: Double?) async throws -> String {
-        let queuedAt = epoch
+        let queuedAt = epoch, linkAt = linkEpoch
         await lock.lock()
         defer { lock.unlock() }
         try Task.checkCancellation()
         guard queuedAt == epoch, !stopping else { throw CancellationError() }
+        guard linkAt == linkEpoch else { throw DeviceError(message: "board disconnected") }
         return try await exchange(command, timeout: custom)
     }
 
