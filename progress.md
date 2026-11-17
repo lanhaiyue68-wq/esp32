@@ -1,5 +1,11 @@
 # 当前进度
 
+## 2026-11-17 21:51（臺北 20:51）140 編好，IPA 在桌面
+- build123 版本 140（D93–D101）；build140-ci 9ea116a（＋CI commit）推成 build114 main。第一次 run 44083962495 編譯失敗：D98 一行字串被編輯腳本拆成兩行，569fc8c 修好。第二次 run 44084828974 成功：864 個單元測試 0 失敗。
+- IPA E:/桌面/Lan-Agent-build140-unsigned.ipa（三個 bundle 皆 140；SHA256 18ee4bbb2103cbf16422427333698c272d091b4847ca461e2d47799d3a403a38），139 的已送回收筒。
+- D101 豆包方舟前綴快取：ark_cache_probe.py 三輪測試定案（chat/completions 自己不吃快取；Responses 接前綴、每步存 10 分鐘、新說明第一步照舊並在旁建快取）。
+- 下一步：使用者裝 140 → 重跑 z6，日誌 grep「prefix cache:」看命中、方舟帳單看快取命中與存放兩行；再驗 D93–D100。
+
 ## 2026-11-17 14:10（臺北 13:10）139 編好，IPA 在桌面
 - build123 b62dc6b 版本 139；build139-ci afb469c（＋CI commit，每次跑單元測試）推成 build114 main。run 44020841388 成功：856 個單元測試 0 失敗，D86–D92 新測試都過。
 - IPA E:/桌面/Lan-Agent-build139-unsigned.ipa（三個 bundle 皆 139；SHA256 6f98a90f20524a8b563c3c430845d9ed6d22343a6b6a24043a68c6094da752f4），138 的已送回收筒。
