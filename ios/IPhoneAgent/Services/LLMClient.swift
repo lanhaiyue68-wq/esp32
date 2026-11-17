@@ -172,12 +172,16 @@ struct LLMError: LocalizedError {
     /// D101, user 11-17 ("能在保证不会降低出错和速度的情况下省一点"): Doubao bills every input token, and every step sends
     /// the same system prompt (the rules of all apps, ~9200 of ~20000 tokens a step). With Cache turned on for the model
     /// in the Ark console, a prefix cache bills those at a fifth (0.00016 against 0.0008 元/千 tokens). ark_cache_probe on
-    /// 11-17: 9211 of 9242 tokens from the cache, no reasoning, 1.8–2.0 s against 1.9–2.4 s. The model reads the same
-    /// words, thinking off and the same temperature as before; a step itself is not kept (store false: kept tokens are
-    /// billed by the hour). A refusal, a reply that reasoned, or two misses in a row turn it off for this client, and the
-    /// step goes the old way; a lost network is a lost network either way.
+    /// 11-17: 9211 of 9242 tokens from the cache, no reasoning, 1.8–2.0 s against 1.9–2.4 s; with a screenshot, streamed
+    /// and temperature 0, 9225 of 10530 in 2.6 s, as the old way. The model reads the same words, thinking off and the
+    /// same temperature as before. Ark refuses `store: false` with caching, so a step is kept 10 minutes only (kept
+    /// tokens are billed by the hour: ~0.00006 元 a step against ~0.006 saved). chat/completions alone never read a
+    /// cache (probe: 0 of 10530 twice, also after a Responses prefix of the same words). The first step on a system
+    /// prompt goes the old way while its cache is made beside it, so no step waits for the cache. A refusal, a reply
+    /// that reasoned, or two misses in a row turn it off for this client; a lost network is a lost network either way.
     static var prefixCaching = true
     private var prefixes: [Int: (id: String, until: Double)] = [:]
+    private var making: Set<Int> = []
     private(set) var cacheOff: String?
     private var cacheMisses = 0
 
@@ -188,19 +192,21 @@ struct LLMError: LocalizedError {
     private func prefixReply(system: String, text: String, images: [Data], maxTokens: Int, temperature: Double,
                              started: Double) async throws -> ChatResult? {
         guard cacheOff == nil, Self.cachesPrefix(baseURL: baseURL, model: model, system: system) else { return nil }
+        let key = system.hashValue
+        guard let prefix = prefixes[key], prefix.until > now() else {
+            makePrefix(system)  // beside this step, which goes the old way
+            return nil
+        }
         do {
-            for attempt in 0..<2 {
-                let id = try await prefixID(system)
-                let (status, reply, error) = try await respond(on: id, text: text, images: images, maxTokens: maxTokens,
-                                                               temperature: temperature, started: started)
-                if let reply { return checked(reply, system: system) }
-                // A prefix that ran out or is unknown is made again once; anything else turns the cache off.
-                if attempt == 0, status == 404 || error.contains("previous_response") {
-                    prefixes[system.hashValue] = nil
-                    continue
-                }
+            let (status, reply, error) = try await respond(on: prefix.id, text: text, images: images, maxTokens: maxTokens,
+                                                           temperature: temperature, started: started)
+            if let reply { return checked(reply, system: system) }
+            // A prefix that ran out or is unknown is made again; anything else turns the cache off.
+            if status == 404 || error.contains("previous_response") {
+                prefixes[key] = nil
+                makePrefix(system)
+            } else {
                 turnOff("HTTP \(status): \(error.prefix(160))")
-                return nil
             }
             return nil
         } catch let e where e is CancellationError || Task.isCancelled || ModelRequestFailure.isNetworkDown(e) {
@@ -231,11 +237,28 @@ struct LLMError: LocalizedError {
         return reply
     }
 
-    /// The cache of this system prompt, made when there is none or it runs out (it lives an hour: kept tokens are billed
-    /// by the hour).
-    private func prefixID(_ system: String) async throws -> String {
+    /// Makes the cache of this system prompt in the background (it lives an hour: kept tokens are billed by the hour).
+    /// A lost network only waits for the next step; a refusal turns the cache off.
+    private func makePrefix(_ system: String) {
         let key = system.hashValue
-        if let p = prefixes[key], p.until > now() { return p.id }
+        guard !making.contains(key) else { return }
+        making.insert(key)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.making.remove(key) }
+            do {
+                let id = try await self.prefixID(system)
+                self.prefixes[key] = (id, now() + 3600 - 120)
+            } catch let e where ModelRequestFailure.isNetworkDown(e) || e is CancellationError {
+                DebugLog.write("llm: prefix cache not made yet (\(e.localizedDescription)); next step tries again")
+            } catch {
+                self.turnOff(error.localizedDescription)
+            }
+        }
+    }
+
+    /// POST responses for the cache of this system prompt: its id.
+    private func prefixID(_ system: String) async throws -> String {
         var body: [String: Any] = ["model": model, "caching": ["type": "enabled", "prefix": true] as [String: Any],
                                    "expire_at": Int(Date().timeIntervalSince1970) + 3600,
                                    "input": [["role": "system", "content": system]]]
@@ -251,7 +274,6 @@ struct LLMError: LocalizedError {
         guard status == 200, let id = json?["id"] as? String else {
             throw LLMError(message: "prefix cache not made: HTTP \(status) \(String(decoding: data.prefix(200), as: UTF8.self))")
         }
-        prefixes[key] = (id, now() + 3600 - 120)
         DebugLog.write("llm: prefix cache made for a system prompt of \(system.count) characters")
         return id
     }
@@ -265,7 +287,8 @@ struct LLMError: LocalizedError {
         content.append(["type": "input_text", "text": text])
         let asked = min(maxTokens, Self.tokenCeiling[model] ?? maxTokens)
         var body: [String: Any] = ["model": model, "caching": ["type": "enabled"], "previous_response_id": prefix,
-                                   "store": false, "temperature": temperature, "max_output_tokens": asked, "stream": true,
+                                   "expire_at": Int(Date().timeIntervalSince1970) + 600,
+                                   "temperature": temperature, "max_output_tokens": asked, "stream": true,
                                    "input": [["role": "user", "content": content] as [String: Any]]]
         if let thinking = extra["thinking"] { body["thinking"] = thinking }
         var request = URLRequest(url: baseURL.appendingPathComponent("responses"))
@@ -472,7 +495,13 @@ struct LLMError: LocalizedError {
     /// finish_reason and usage, from whichever event carries them.
     private static func note(_ json: [String: Any], _ choice: [String: Any]?, into result: inout ChatResult) {
         if let reason = choice?["finish_reason"] as? String { result.finishReason = reason }
-        if let usage = json["usage"] as? [String: Any] { result.usage = usage.compactMapValues { $0 as? Int } }
+        if let usage = json["usage"] as? [String: Any] {
+            result.usage = usage.compactMapValues { $0 as? Int }
+            // D101: what came from a cache on the server (prompt_tokens_details), kept so the trace shows it.
+            if let cached = (usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int {
+                result.usage["cached_tokens"] = cached
+            }
+        }
     }
 
     /// Reasoning text (vLLM/DeepSeek `reasoning_content`, others `reasoning`).
