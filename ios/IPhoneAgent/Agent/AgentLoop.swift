@@ -1100,6 +1100,52 @@ extension Pointer: Gestures {}
         return dates.matches(in: ns as String, range: NSRange(location: from, length: max(0, location - from))).last
     }
 
+    /// D85, y6 on 138 (item 22): "日出清晨6:37，日落下午5:39，白昼时长11小时22分钟": Doubao worked the span out wrong (it is
+    /// 11小时2分钟), the note and the closing answer kept it, and the answer only said it did not fit. In one item, a span
+    /// said after exactly two clock times (共, 时长, 白天, 历时, 用时, 相隔…) is worked out from them and put right. A later
+    /// time with no 上午/下午 that would come before the first is taken as afternoon.
+    static func rightSpans(_ text: String) -> String {
+        guard let clock = try? NSRegularExpression(pattern: #"(上午|下午|中午|晚上|傍晚|凌晨|清晨|早上|夜里|夜间)?\s*(\d{1,2})[:：](\d{2})(?!\d)"#),
+              let span = try? NSRegularExpression(pattern: #"(?:共|一共|总共|时长|历时|用时|全程|白天|白昼|日照|相隔|间隔|相差)[为是约：:\s]{0,3}(\d{1,2})\s*个?\s*小时\s*(?:(\d{1,2})\s*分钟?)?"#),
+              let heads = try? NSRegularExpression(pattern: #"(?:^|\n|[；;])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#)
+        else { return text }
+        let ns = text as NSString
+        func part(_ m: NSTextCheckingResult, _ i: Int) -> String? {
+            m.range(at: i).location == NSNotFound ? nil : ns.substring(with: m.range(at: i))
+        }
+        func minutes(_ m: NSTextCheckingResult) -> (at: Int, marked: Bool)? {
+            guard var h = part(m, 2).flatMap(Int.init), let mm = part(m, 3).flatMap(Int.init), h <= 24, mm < 60 else { return nil }
+            let word = part(m, 1)
+            if let word, ["下午", "晚上", "傍晚", "夜里", "夜间"].contains(word), h < 12 { h += 12 }
+            if word == "中午", h < 11 { h += 12 }
+            if word == "凌晨", h == 12 { h = 0 }
+            return (h * 60 + mm, word != nil)
+        }
+        var cuts = [0] + heads.matches(in: text, range: NSRange(location: 0, length: ns.length)).map(\.range.location) + [ns.length]
+        cuts = Array(Set(cuts)).sorted()
+        var fixes: [(NSRange, String)] = []
+        for (a, b) in zip(cuts, cuts.dropFirst()) where b > a {
+            let item = NSRange(location: a, length: b - a)
+            let times = clock.matches(in: text, range: item)
+            guard times.count == 2, let first = minutes(times[0]), let second = minutes(times[1]) else { continue }
+            let after = times[1].range.location + times[1].range.length
+            guard let said = span.firstMatch(in: text, range: NSRange(location: after, length: b - after)),
+                  said.range.location - after <= 40,
+                  let h = part(said, 1).flatMap(Int.init) else { continue }
+            var end = second.at
+            if end <= first.at, !second.marked, end < 12 * 60 { end += 12 * 60 }
+            var length = end - first.at
+            if length <= 0 { length += 24 * 60 }
+            if h * 60 + (part(said, 2).flatMap(Int.init) ?? 0) == length { continue }
+            let from = said.range(at: 1).location
+            fixes.append((NSRange(location: from, length: said.range.location + said.range.length - from),
+                          "\(length / 60)小时" + (length % 60 > 0 ? "\(length % 60)分钟" : "")))
+        }
+        let out = NSMutableString(string: text)
+        for (range, with) in fixes.reversed() { out.replaceCharacters(in: range, with: with) }
+        return out as String
+    }
+
     static func rightDayCounts(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
         let d = datePattern
         let between = #"(?:从|自|從)\s*"# + d + #"\s*(?:到|至)\s*"# + d + #"[^，。；;\d]{0,12}?(?:共|有|是|相差|差|还有|還有|还剩)?\s*(\d{1,4})\s*天"#
@@ -2932,9 +2978,9 @@ extension Pointer: Gestures {}
             // 132 over the cloud 11-14 (c3): "2026年12月1日是星期日"; it is a Tuesday. A weekday the answer gives for a
             // date is checked with the calendar and put right.
             if name == "done", endsTask, let answer = act["answer"]?.str {
-                let fixed = Self.rightDayCounts(Self.rightWeekdays(answer, today: Date()), today: Date())
+                let fixed = Self.rightSpans(Self.rightDayCounts(Self.rightWeekdays(answer, today: Date()), today: Date()))
                 if fixed != answer {
-                    DebugLog.write("done: a weekday or a count of days given for a date was wrong; put right")
+                    DebugLog.write("done: a weekday, a count of days or a span between two times was wrong; put right")
                     act["answer"] = .str(fixed)
                 }
             }

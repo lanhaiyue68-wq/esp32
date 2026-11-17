@@ -697,6 +697,25 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D85, y6 on 138 (item 22): a span said after two clock times in one item is worked out and put right.
+    func testASpanBetweenTwoTimesIsPutRight() {
+        XCTAssertEqual(AgentLoop.rightSpans("22. 深圳今天日出清晨6:37，日落下午5:39；记录中的白昼时长为11小时22分钟。\n23. 首尔85%"),
+                       "22. 深圳今天日出清晨6:37，日落下午5:39；记录中的白昼时长为11小时2分钟。\n23. 首尔85%")
+        XCTAssertEqual(AgentLoop.rightSpans("第22项：深圳今天日出清晨6:37，日落下午5:39，白昼时长11小时22分钟。"),
+                       "第22项：深圳今天日出清晨6:37，日落下午5:39，白昼时长11小时2分钟。")
+        let right = "9. 深圳日出6:37，日落17:39，白天11小时2分钟。"
+        XCTAssertEqual(AgentLoop.rightSpans(right), right)
+        XCTAssertEqual(AgentLoop.rightSpans("3. 深圳今天日出6:37，日落5:39，白天共11小时2分钟。"), "3. 深圳今天日出6:37，日落5:39，白天共11小时2分钟。",
+                       "a later time with no 下午 that would come first is the afternoon")
+        let train = "25. G4710次，06:02出发，06:31到达；页面显示暂无余票。"
+        XCTAssertEqual(AgentLoop.rightSpans(train), train, "no span said")
+        XCTAssertEqual(AgentLoop.rightSpans("从9:00到17:30，共8小时"), "从9:00到17:30，共8小时30分钟")
+        let three = "1. 6:00起床，7:00出门，9:00到，共5小时"
+        XCTAssertEqual(AgentLoop.rightSpans(three), three, "three times: which two is unclear")
+        XCTAssertEqual(AgentLoop.rightSpans("1. 9:00到17:30，共8小时30分钟；2. 8:00到9:00，用时2小时"),
+                       "1. 9:00到17:30，共8小时30分钟；2. 8:00到9:00，用时1小时", "each item on its own")
+    }
+
     /// D84, y5 on 138 (item 43): Lan Agent's own keyboard is known on screen by its status line and its keys.
     func testOurKeyboardIsKnownOnScreen() {
         typealias P = CandidatePicker.Piece
