@@ -715,6 +715,17 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D102: a hop near the top clicks only where the pointer is seen on the target; elsewhere it clicks as before.
+    func testAHopNearTheTopClicksOnlyWhereThePointerIsSeen() {
+        XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.09, arrival: .onTarget, startedOver: false))
+        XCTAssertTrue(Pointer.hopNeedsCorner(y: 0.09, arrival: .unseen, startedOver: false))
+        XCTAssertTrue(Pointer.hopNeedsCorner(y: 0.12, arrival: .offTarget, startedOver: false))
+        XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.09, arrival: .unseen, startedOver: true), "already came from the corner")
+        XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.48, arrival: .unseen, startedOver: false), "lower down, as before")
+        XCTAssertTrue(Pointer.nearClock(0.12, 0.03), "the clock stays from the corner")
+        XCTAssertFalse(Pointer.nearClock(0.527, 0.089))
+    }
+
     /// D101: the prefix cache is for Doubao on Ark with a long system prompt; a Responses reply's usage is read.
     func testThePrefixCacheIsForDoubaoOnArk() {
         let ark = URL(string: "https://ark.cn-beijing.volces.com/api/v3")!

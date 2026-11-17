@@ -574,7 +574,13 @@ import Foundation
             (lastClick, pos) = (nil, nil)
         }
         clicksInPlace = 0
-        if !aim, !stale, !viaBorders(x, y), y >= Self.topBand, let last = lastClick, let p = pos, hops < Self.nearbyHops,
+        // D102, user 11-17 ("每次这个光标都要从左上角重新去点"): 139's runs, 440 taps: 298 went back to the corner first
+        // (median 4.9 s from the first move to the click, against 2.8 s for a hop), 170 of them for a target in the top
+        // band. A hop now goes there too, but near the top it clicks only where the pointer is seen on the target:
+        // unseen or off there (the reason the top band went from the corner: a hop's estimate is the worse one), it goes
+        // from the corner after all, and clicks as before. The status bar's clock (a click there stops the sharing)
+        // stays from the corner.
+        if !aim, !stale, !viaBorders(x, y), !Self.nearClock(x, y), let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
@@ -588,13 +594,22 @@ import Foundation
             // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
             // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle
             // search finds the pointer and corrects it before the click (2-4 s, only then).
-            if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
-            let clickedAt = now()
-            try await device.send("click")
-            if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
-            try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
-            try await answerIfAsked(x, y, clickedAt: clickedAt, before: before)
-            return
+            startedOver = false
+            let arrival = try await arrive(x, y, before: before, began: began)
+            if Self.hopNeedsCorner(y: y, arrival: arrival, startedOver: startedOver) {
+                log(String(format: "tap (%.3f, %.3f): hop %ld not seen on the target near the top; from the corner after all", x, y, hops))
+                (before, began) = (screen?.frame, now())
+            } else {
+                if arrival == .offTarget { try await self.aim(x, y) }
+                // D102: a hop seen on the target starts the next from a known spot; only hops not seen add up.
+                if arrival == .onTarget { hops = 0 }
+                let clickedAt = now()
+                try await device.send("click")
+                if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
+                try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+                try await answerIfAsked(x, y, clickedAt: clickedAt, before: before)
+                return
+            }
         }
         lastClick = nil
         pos = nil
@@ -721,6 +736,7 @@ import Foundation
     /// order. The corner is the one place it can be sent to for sure.
     private func startOver(_ x: Double, _ y: Double) async throws {
         pos = nil
+        startedOver = true
         if viaBorders(x, y) { try await fromBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
     }
 
@@ -734,6 +750,8 @@ import Foundation
     /// Where the last tap aimed: about where the pointer rests.
     private var lastSpot: CGPoint?
     private var cornerLook = false
+    /// D102: the arrival check went back to the corner and came again (a hop's landing is then not what is checked).
+    private var startedOver = false
     private var cornerFrame: (data: Data, at: Double)?
     /// A target this close to where the pointer rests (a landing can be 9 % off) needs the look from the corner.
     static let restsNear = 0.12
@@ -936,7 +954,13 @@ import Foundation
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
 
-    static let nearbyHops = 6      // taps from where the pointer rests before one re-homes again
+    static let nearbyHops = 6      // hops not seen on the target before one re-homes again
+
+    /// D102: a hop into the top band clicks only where the pointer was seen on the target; otherwise the tap goes from
+    /// the corner after all (not when the arrival check itself already started over from there).
+    static func hopNeedsCorner(y: Double, arrival: Arrival, startedOver: Bool) -> Bool {
+        y < topBand && arrival != .onTarget && !startedOver
+    }
     static let hopWindow = 120.0   // seconds; after longer, start from the corner
 
     /// The pointer still rests where the last click put it: nothing moved it since and the link is the same.
