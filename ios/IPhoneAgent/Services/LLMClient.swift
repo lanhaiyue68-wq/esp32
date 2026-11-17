@@ -135,7 +135,8 @@ struct LLMError: LocalizedError {
             // D101: the system prompt from Ark's prefix cache when it can be; nil: the old way.
             if let cached = try await prefixReply(system: system, text: text, images: images, maxTokens: maxTokens,
                                                   temperature: temperature, started: started) {
-                (status, result) = (200, cached)
+                status = 200
+                result = cached
             } else {
                 (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
             }

@@ -1501,8 +1501,7 @@ extension Pointer: Gestures {}
             let rest = AppNames.hans(next.text.trimmingCharacters(in: .whitespacesAndNewlines))
             guard let first = Self.numberedItems(rest).first?.n, first > last else { break }
             DebugLog.write("done: Codex's whole answer stopped at item \(last); it went on from item \(first)")
-            whole += "
-" + rest
+            whole += "\n" + rest
         }
         if whole.isEmpty || Self.fewThingsTold(whole, task: task) {
             DebugLog.write("done: Codex's whole answer not used: \(whole.count) characters, items \(Self.numberedItems(whole).map { $0.n }.prefix(60))")
