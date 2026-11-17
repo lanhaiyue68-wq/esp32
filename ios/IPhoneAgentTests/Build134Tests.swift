@@ -715,6 +715,26 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D101: the prefix cache is for Doubao on Ark with a long system prompt; a Responses reply's usage is read.
+    func testThePrefixCacheIsForDoubaoOnArk() {
+        let ark = URL(string: "https://ark.cn-beijing.volces.com/api/v3")!
+        let long = String(repeating: "规则", count: 1200)
+        XCTAssertTrue(LLMClient.cachesPrefix(baseURL: ark, model: "doubao-seed-2-1-lite-260915", system: long))
+        XCTAssertFalse(LLMClient.cachesPrefix(baseURL: ark, model: "doubao-seed-2-1-lite-260915", system: "short"))
+        XCTAssertFalse(LLMClient.cachesPrefix(baseURL: URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1")!,
+                                              model: "qwen-vl-max", system: long))
+        XCTAssertFalse(LLMClient.cachesPrefix(baseURL: URL(string: "http://test/v1")!, model: "doubao-x", system: long))
+        var r = ChatResult(text: "", firstToken: nil, total: 0)
+        let usage: [String: Any] = ["input_tokens": 9242, "output_tokens": 30, "total_tokens": 9272,
+                                    "input_tokens_details": ["cached_tokens": 9211],
+                                    "output_tokens_details": ["reasoning_tokens": 0]]
+        LLMClient.noteResponse(["usage": usage], into: &r)
+        XCTAssertEqual(r.usage["prompt_tokens"], 9242)
+        XCTAssertEqual(r.usage["cached_tokens"], 9211)
+        XCTAssertEqual(r.usage["reasoning_tokens"], 0)
+        XCTAssertEqual(r.usage["completion_tokens"], 30)
+    }
+
     /// D99, z5 on 139: "已在之前记下" for an item nothing was noted for is no record of it.
     func testAClaimOfAnEarlierRecordIsNoRecord() {
         let goal = (1...12).map { "\($0). 做第\($0)件事" }.joined(separator: "；")

@@ -132,7 +132,13 @@ struct LLMError: LocalizedError {
         DebugLog.write("llm → \(model): \(images.count) image(s) \(kb) KB, \(text.count) chars")
         var status = 0, result: ChatResult?, errorText = ""
         do {
-            (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
+            // D101: the system prompt from Ark's prefix cache when it can be; nil: the old way.
+            if let cached = try await prefixReply(system: system, text: text, images: images, maxTokens: maxTokens,
+                                                  temperature: temperature, started: started) {
+                (status, result) = (200, cached)
+            } else {
+                (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
+            }
             if status == 400 && auto && errorText.contains("max_completion_tokens") {
                 (tokenParam, auto) = ("max_completion_tokens", false)
                 (status, result, errorText) = try await post(body, maxTokens: maxTokens, started: started)
@@ -159,6 +165,178 @@ struct LLMError: LocalizedError {
                            + "thinking off in Extra body JSON, e.g. {\"enable_thinking\": false}")
         }
         return result
+    }
+
+    // MARK: D101, Ark's prefix cache
+
+    /// D101, user 11-17 ("能在保证不会降低出错和速度的情况下省一点"): Doubao bills every input token, and every step sends
+    /// the same system prompt (the rules of all apps, ~9200 of ~20000 tokens a step). With Cache turned on for the model
+    /// in the Ark console, a prefix cache bills those at a fifth (0.00016 against 0.0008 元/千 tokens). ark_cache_probe on
+    /// 11-17: 9211 of 9242 tokens from the cache, no reasoning, 1.8–2.0 s against 1.9–2.4 s. The model reads the same
+    /// words, thinking off and the same temperature as before; a step itself is not kept (store false: kept tokens are
+    /// billed by the hour). A refusal, a reply that reasoned, or two misses in a row turn it off for this client, and the
+    /// step goes the old way; a lost network is a lost network either way.
+    static var prefixCaching = true
+    private var prefixes: [Int: (id: String, until: Double)] = [:]
+    private(set) var cacheOff: String?
+    private var cacheMisses = 0
+
+    static func cachesPrefix(baseURL: URL, model: String, system: String) -> Bool {
+        prefixCaching && (baseURL.host ?? "").hasSuffix("volces.com") && model.lowercased().hasPrefix("doubao") && system.count >= 2000
+    }
+
+    private func prefixReply(system: String, text: String, images: [Data], maxTokens: Int, temperature: Double,
+                             started: Double) async throws -> ChatResult? {
+        guard cacheOff == nil, Self.cachesPrefix(baseURL: baseURL, model: model, system: system) else { return nil }
+        do {
+            for attempt in 0..<2 {
+                let id = try await prefixID(system)
+                let (status, reply, error) = try await respond(on: id, text: text, images: images, maxTokens: maxTokens,
+                                                               temperature: temperature, started: started)
+                if let reply { return checked(reply, system: system) }
+                // A prefix that ran out or is unknown is made again once; anything else turns the cache off.
+                if attempt == 0, status == 404 || error.contains("previous_response") {
+                    prefixes[system.hashValue] = nil
+                    continue
+                }
+                turnOff("HTTP \(status): \(error.prefix(160))")
+                return nil
+            }
+            return nil
+        } catch let e where e is CancellationError || Task.isCancelled || ModelRequestFailure.isNetworkDown(e) {
+            throw e
+        } catch {
+            turnOff(error.localizedDescription)
+            return nil
+        }
+    }
+
+    private func turnOff(_ why: String) {
+        cacheOff = why
+        DebugLog.write("llm: prefix cache off (\(why)); the old way from now on")
+    }
+
+    private func checked(_ reply: ChatResult, system: String) -> ChatResult {
+        let cached = reply.usage["cached_tokens"] ?? 0, input = reply.usage["prompt_tokens"] ?? 0
+        if (reply.usage["reasoning_tokens"] ?? 0) > 0 || reply.reasoningChars > 0 {
+            turnOff("the reply reasoned")
+        } else if cached == 0 {
+            cacheMisses += 1
+            prefixes[system.hashValue] = nil  // made again next time
+            if cacheMisses >= 2 { turnOff("nothing came from the cache twice in a row") }
+        } else {
+            cacheMisses = 0
+        }
+        DebugLog.write("llm: prefix cache: \(cached) of \(input) input tokens")
+        return reply
+    }
+
+    /// The cache of this system prompt, made when there is none or it runs out (it lives an hour: kept tokens are billed
+    /// by the hour).
+    private func prefixID(_ system: String) async throws -> String {
+        let key = system.hashValue
+        if let p = prefixes[key], p.until > now() { return p.id }
+        var body: [String: Any] = ["model": model, "caching": ["type": "enabled", "prefix": true] as [String: Any],
+                                   "expire_at": Int(Date().timeIntervalSince1970) + 3600,
+                                   "input": [["role": "system", "content": system]]]
+        if let thinking = extra["thinking"] { body["thinking"] = thinking }
+        var request = URLRequest(url: baseURL.appendingPathComponent("responses"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard status == 200, let id = json?["id"] as? String else {
+            throw LLMError(message: "prefix cache not made: HTTP \(status) \(String(decoding: data.prefix(200), as: UTF8.self))")
+        }
+        prefixes[key] = (id, now() + 3600 - 120)
+        DebugLog.write("llm: prefix cache made for a system prompt of \(system.count) characters")
+        return id
+    }
+
+    /// One step on the cached prefix (Responses API), streamed: (status, the reply or nil, error text).
+    private func respond(on prefix: String, text: String, images: [Data], maxTokens: Int, temperature: Double,
+                         started: Double) async throws -> (Int, ChatResult?, String) {
+        var content: [[String: Any]] = images.map {
+            ["type": "input_image", "image_url": "data:image/jpeg;base64," + $0.base64EncodedString()]
+        }
+        content.append(["type": "input_text", "text": text])
+        let asked = min(maxTokens, Self.tokenCeiling[model] ?? maxTokens)
+        var body: [String: Any] = ["model": model, "caching": ["type": "enabled"], "previous_response_id": prefix,
+                                   "store": false, "temperature": temperature, "max_output_tokens": asked, "stream": true,
+                                   "input": [["role": "user", "content": content] as [String: Any]]]
+        if let thinking = extra["thinking"] { body["thinking"] = thinking }
+        var request = URLRequest(url: baseURL.appendingPathComponent("responses"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await (asked > 4000 ? longSession : session).bytes(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
+        DebugLog.write(String(format: "llm   headers: HTTP %d %@ after %.1f s (prefix cache)", status, type, now() - started))
+        guard (200..<300).contains(status) else {
+            var raw = Data()
+            for try await b in bytes { raw.append(b) }
+            return (status, nil, String(decoding: raw, as: UTF8.self))
+        }
+        var result = ChatResult(text: "", firstToken: nil, total: 0)
+        result.responseSeconds = now() - started
+        var reported = false, ended = false
+        var length = 0, checkedAt = 0
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
+            guard let event = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any],
+                  let kind = event["type"] as? String else { continue }
+            switch kind {
+            case "response.output_text.delta":
+                guard let piece = event["delta"] as? String, !piece.isEmpty else { continue }
+                if !reported { reported = true; onProgress?(.receiving) }
+                if result.firstToken == nil { result.firstToken = now() - started }
+                result.text += piece
+                length += piece.count
+                if length - checkedAt >= 1500 {
+                    checkedAt = length
+                    if let kept = Self.goingRound(result.text) {
+                        DebugLog.write("llm: the reply goes round and round (\(length) characters); cut there")
+                        result.text = kept
+                        result.finishReason = "loop"
+                        ended = true
+                    }
+                }
+            case "response.completed", "response.incomplete":
+                Self.noteResponse(event["response"] as? [String: Any], into: &result)
+                result.finishReason = kind == "response.completed" ? "stop" : "length"
+                ended = true
+            case "response.failed", "error":
+                let response = event["response"] as? [String: Any]
+                let detail = (response?["error"] as? [String: Any]) ?? (event["error"] as? [String: Any])
+                return (500, nil, (detail?["message"] as? String) ?? kind)
+            default:
+                if kind.hasPrefix("response.reasoning"), let piece = event["delta"] as? String { result.reasoningChars += piece.count }
+            }
+            if ended { break }
+        }
+        result.rawChars = result.text.count
+        return (status, result, "")
+    }
+
+    /// The usage of a Responses reply, in the names the rest of the app reads (prompt_tokens, completion_tokens), with
+    /// cached_tokens and reasoning_tokens.
+    static func noteResponse(_ response: [String: Any]?, into result: inout ChatResult) {
+        guard let usage = response?["usage"] as? [String: Any] else { return }
+        var u: [String: Int] = [:]
+        u["prompt_tokens"] = usage["input_tokens"] as? Int
+        u["completion_tokens"] = usage["output_tokens"] as? Int
+        u["total_tokens"] = usage["total_tokens"] as? Int
+        u["cached_tokens"] = (usage["input_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int
+        u["reasoning_tokens"] = (usage["output_tokens_details"] as? [String: Any])?["reasoning_tokens"] as? Int
+        result.usage = u
     }
 
     /// The first model id from GET {base}/models.
