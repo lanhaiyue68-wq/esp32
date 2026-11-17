@@ -766,15 +766,14 @@ import XCTest
     /// D105: an app whose icon was tapped twice for nothing is opened by Search first, under any of its names.
     func testAnIconMissedIsOpenedBySearchFirst() {
         AppPlaces.noteIcon("微信", missed: false)
-        XCTAssertFalse(AppPlaces.iconWasMissed("WeChat"))
+        XCTAssertFalse(AppPlaces.takeSearchFirst("WeChat"))
         AppPlaces.noteIcon("微信", missed: true)
-        XCTAssertFalse(AppPlaces.iconWasMissed("WeChat"), "one bad open: the icon again")
-        AppPlaces.noteIcon("微信", missed: true)
-        XCTAssertTrue(AppPlaces.iconWasMissed("WeChat"))
-        XCTAssertTrue(AppPlaces.iconWasMissed("微信"))
-        XCTAssertFalse(AppPlaces.iconWasMissed("淘宝"))
-        AppPlaces.noteIcon("WeChat", missed: false)
-        XCTAssertFalse(AppPlaces.iconWasMissed("微信"))
+        XCTAssertFalse(AppPlaces.takeSearchFirst("淘宝"))
+        XCTAssertTrue(AppPlaces.takeSearchFirst("WeChat"), "missed last time: Search this time")
+        XCTAssertFalse(AppPlaces.takeSearchFirst("微信"), "and the icon again the time after: never for good")
+        AppPlaces.noteIcon("WeChat", missed: true)
+        AppPlaces.noteIcon("微信", missed: false)
+        XCTAssertFalse(AppPlaces.takeSearchFirst("微信"), "its icon opened it: no Search")
     }
 
     /// D104: a message during a task is asked about: 先做 stops the task for it, 等会 keeps it after; the answer is no task.

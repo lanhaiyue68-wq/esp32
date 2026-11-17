@@ -78,17 +78,21 @@ enum AppPlaces {
 
     /// D105, z6 on 140: WeChat's icon at (0.617, 0.722) was tapped 32 times in 19 opens and none opened it (from the
     /// corner the pointer landed off it, and with frames at 0.8–1.3 fps it was not seen to be put right); Search opened it
-    /// every time: 19 opens took 506 s, 26.6 s each, against 7–9 s for the other apps. An app whose icon was tapped twice
-    /// for nothing in two opens is opened by Search first from then on, until its icon opens it again (142's z6: one
-    /// bad open of 抖音 sent every later one through Search, 10–15 s against 6 s by its icon).
-    private static var iconMisses: [String: Int] = [:]
+    /// every time: 19 opens took 506 s, 26.6 s each, against 7–9 s for the other apps. User 11-18 ("点不中就改搜索没毛病，
+    /// 但是不要永久改搜索"; 142's z6: one bad open of 抖音 sent every later one through Search, 10–15 s against 6 s by its
+    /// icon): an app whose icon was tapped twice for nothing is opened by Search the next time only; the time after, its
+    /// icon again.
+    private static var searchNext: Set<String> = []
     static func noteIcon(_ name: String, missed: Bool) {
         for v in AppNames.variants(name) {
-            if missed { iconMisses[normalized(v), default: 0] += 1 } else { iconMisses[normalized(v)] = nil }
+            if missed { searchNext.insert(normalized(v)) } else { searchNext.remove(normalized(v)) }
         }
     }
-    static func iconWasMissed(_ name: String) -> Bool {
-        AppNames.variants(name).contains { (iconMisses[normalized($0)] ?? 0) >= 2 }
+    /// True once after an icon was missed: this open goes by Search, and the next one by the icon again.
+    static func takeSearchFirst(_ name: String) -> Bool {
+        guard AppNames.variants(name).contains(where: { searchNext.contains(normalized($0)) }) else { return false }
+        for v in AppNames.variants(name) { searchNext.remove(normalized(v)) }
+        return true
     }
 
     /// A place that turned out wrong goes, alone: reading all the pages again cost 30-55 s each time, for WeChat, which is
@@ -336,9 +340,9 @@ extension AppModel {
             guard let read = await homeRows(top: 0.02) else { return try await bySearch(name) }
             rows = read
         }
-        // D105: an icon tapped twice for nothing before: Search first.
-        if AppPlaces.iconWasMissed(name) {
-            DebugLog.write("open \(name): its icon was missed before; Search first")
+        // D105: an icon tapped twice for nothing the last time: Search this time (the icon again next time).
+        if AppPlaces.takeSearchFirst(name) {
+            DebugLog.write("open \(name): its icon was missed last time; Search this time")
             if try await bySearch(name) { return true }
             AppPlaces.noteIcon(name, missed: false)
             guard let read = await homeRows(top: 0.02) else { return false }
