@@ -1410,7 +1410,23 @@ extension Pointer: Gestures {}
         let text = "Goal: \(task)\n\nNotes:\n" + notes.joined(separator: "\n") + "\n\nAnswer so far:\n" + answer
         guard let reply = try? await planner.chat(system: Self.wholeAnswerPrompt, text: text, image: nil,
                                                  maxTokens: Self.bigGoalTokens, temperature: 0) else { return nil }
-        let whole = AppNames.hans(reply.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        var whole = AppNames.hans(reply.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        // D98, z4 on 139: Codex's whole answer stopped at item 29 of 48 (2402 characters), twice, and the owner got
+        // items 1-29 with the run's notes after them, English and all. A report cut off is asked to go on from the
+        // item after its last, at most twice, and the rest is added to it.
+        for _ in 0..<2 where !whole.isEmpty && Self.fewThingsTold(whole, task: task) {
+            let wanted = Self.goalParts(task)
+            guard let last = Self.numberedItems(whole).map(\.n).max(), last < wanted else { break }
+            let more = text + "\n\nThe report written so far stops after item \(last):\n" + whole
+                + "\n\nWrite items \(last + 1) to \(wanted) only, the same way, beginning with \"\(last + 1).\""
+            guard let next = try? await planner.chat(system: Self.wholeAnswerPrompt, text: more, image: nil,
+                                                      maxTokens: Self.bigGoalTokens, temperature: 0) else { break }
+            let rest = AppNames.hans(next.text.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard let first = Self.numberedItems(rest).first?.n, first > last else { break }
+            DebugLog.write("done: Codex's whole answer stopped at item \(last); it went on from item \(first)")
+            whole += "
+" + rest
+        }
         if whole.isEmpty || Self.fewThingsTold(whole, task: task) {
             DebugLog.write("done: Codex's whole answer not used: \(whole.count) characters, items \(Self.numberedItems(whole).map { $0.n }.prefix(60))")
             return nil

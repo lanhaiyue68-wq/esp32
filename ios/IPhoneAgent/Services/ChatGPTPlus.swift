@@ -308,6 +308,9 @@ enum ChatGPTPlus {
             if stream.done { break }
         }
         if let error = stream.error { throw Failure(message: "模型回報錯誤：\(error)") }
+        if let cut = stream.cut ?? (stream.done ? nil : "the stream ended before the reply was complete") {
+            DebugLog.write("plus: the reply stopped short (\(cut)) after \(stream.text.count) characters")
+        }
         return Answer(text: stream.text, model: model, firstTokenMs: firstTokenMs,
                       totalMs: Int(Date().timeIntervalSince(started) * 1000), quota: quota)
     }
@@ -317,6 +320,8 @@ enum ChatGPTPlus {
         private(set) var text = ""
         private(set) var done = false
         private(set) var error: String?
+        /// D98: why the reply stopped short ("max_output_tokens", …), when the stream says so.
+        private(set) var cut: String?
 
         mutating func feed(_ line: String) {
             guard line.hasPrefix("data:") else { return }
@@ -329,6 +334,10 @@ enum ChatGPTPlus {
             case "response.output_text.delta":
                 text += (event["delta"] as? String) ?? ""
             case "response.completed":
+                done = true
+            case "response.incomplete":
+                let details = (event["response"] as? [String: Any])?["incomplete_details"] as? [String: Any]
+                cut = (details?["reason"] as? String) ?? "incomplete"
                 done = true
             case "response.failed", "error":
                 let response = event["response"] as? [String: Any]

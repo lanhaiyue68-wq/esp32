@@ -715,6 +715,19 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D98, z4 on 139: a Codex reply that stops short says why.
+    func testACodexReplyCutShortSaysWhy() {
+        var sse = ChatGPTPlus.SSE()
+        sse.feed(#"data: {"type":"response.output_text.delta","delta":"1. 好"}"#)
+        sse.feed(#"data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#)
+        XCTAssertEqual(sse.text, "1. 好")
+        XCTAssertTrue(sse.done)
+        XCTAssertEqual(sse.cut, "max_output_tokens")
+        var whole = ChatGPTPlus.SSE()
+        whole.feed(#"data: {"type":"response.completed"}"#)
+        XCTAssertNil(whole.cut)
+    }
+
     /// D95, z4 on 139: a kept objection holds what the check said, not the words for the run.
     func testAnObjectionNoteHasNoWordsForTheRun() {
         let wrong = AgentLoop.wrongness("NO: 第41项天数应为81天，答案写0天")!
