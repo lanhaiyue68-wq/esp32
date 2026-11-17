@@ -744,6 +744,8 @@ import XCTest
         XCTAssertTrue(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.75), to: CGPoint(x: 0.5, y: 0.3)))
         XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.98), to: CGPoint(x: 0.5, y: 0.5)), "the home bar")
         XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.02, y: 0.5), to: CGPoint(x: 0.6, y: 0.5)), "back from the edge")
+        XCTAssertTrue(Pointer.swipeHops(from: CGPoint(x: 0.04, y: 0.6), to: CGPoint(x: 0.04, y: 0.2)), "a list from the margin")
+        XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.04, y: 0.5), to: CGPoint(x: 0.5, y: 0.5)), "sideways from the margin")
         XCTAssertFalse(Pointer.swipeHops(from: CGPoint(x: 0.5, y: 0.03), to: CGPoint(x: 0.5, y: 0.6)), "from the top edge")
         let last = Pointer.LastClick(x: 0.5, y: 0.3, ux: 100, uy: 200, link: 1, time: 1000, swiped: true)
         XCTAssertFalse(Pointer.clickAgain(last, 0.5, 0.3, units: (100, 200), link: 1, at: 1001), "a swipe's end is no click")

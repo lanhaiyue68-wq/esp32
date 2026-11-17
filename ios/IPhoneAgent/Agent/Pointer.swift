@@ -1057,8 +1057,12 @@ import Foundation
 
     /// D108: a swipe goes straight from where the pointer rests, and leaves it resting at its end, when both ends are
     /// well inside the screen (an edge's own gestures need the edge, reached from the corner as before).
+    /// 143's single sentences: all 16 swipes still went to the corner, for a list is scrolled from the margin (AgentLoop's
+    /// safeSwipe: x 40) and the margin counted as an edge. Up and down at a side margin is no edge gesture (the back
+    /// gesture goes sideways): only sideways swipes keep away from the sides.
     static func swipeHops(from a: CGPoint, to b: CGPoint) -> Bool {
-        [a, b].allSatisfy { (0.08...0.92).contains(Double($0.x)) && (0.12...0.9).contains(Double($0.y)) }
+        let xs: ClosedRange<Double> = abs(Double(b.x - a.x)) < 0.1 ? 0.03...0.97 : 0.08...0.92
+        return [a, b].allSatisfy { xs.contains(Double($0.x)) && (0.12...0.9).contains(Double($0.y)) }
     }
 
     /// Press at the first point, move through the rest, release: one continuous stroke. hold rests at the end
