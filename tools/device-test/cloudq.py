@@ -1,7 +1,25 @@
 """cloudq.py <queue.json> <out dir> [first id]: run a queue through the mock cloud over Wi-Fi, one task at a time.
 Waits for the phone to be idle; a busy reply is tried again; a message is approved only when its text is in the instruction.
 Each result and its last screen are kept in <out dir>."""
-import base64, json, os, sys, time, urllib.request
+import ast, base64, json, os, re, sys, time, urllib.request
+
+
+def fits_text(text, item):
+    """A message the instruction asks for: its quoted words exactly, or an approve_if entry exactly; the entry with a
+    time after it only where the instruction says to add the time (142's z6: "Z6全部做完12:42" was approved because it
+    contained "Z6全部做完", and went out unasked)."""
+    t = (text or '').strip()
+    if not t:
+        return False
+    words = item.get('approve_if', [])
+    if isinstance(words, str):
+        words = ast.literal_eval(words)  # some queue files keep the list as its repr
+    if t in words or ('“' + t + '”') in item['task'] or ('"' + t + '"') in item['task']:
+        return True
+    for w in words:
+        if re.fullmatch(re.escape(w) + r'\s*\d{1,2}[:：]\d{2}', t) and                 re.search('“' + re.escape(w) + '”[^；]{0,40}(时间|時間)', item['task']):
+            return True
+    return False
 sys.stdout.reconfigure(encoding='utf-8')
 BASE, TOKEN = 'http://127.0.0.1:8787', 'lan115test'
 queue, out = json.load(open(sys.argv[1], encoding='utf-8')), sys.argv[2]
@@ -62,7 +80,7 @@ for item in queue:
             pend_text = (task.get('approval_request') or {}).get('text', '')
             if task.get('approval') == 'pending' and (pend_text, task.get('approval_seq')) not in answered:
                 text = pend_text
-                fits = text and (text.strip() in item['task'] or any(w in text for w in item.get('approve_if', [])))
+                fits = fits_text(text, item)
                 dest = (task.get('approval_request') or {}).get('destination') or ''
                 fits = fits and (not dest or any(g in dest for g in ('测试群', '验证群', '測試群', '驗證群')))  # only the two test groups
                 verdict = 'approve' if fits and not item.get('reject') else 'reject'
