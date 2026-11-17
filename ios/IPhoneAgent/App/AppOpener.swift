@@ -79,15 +79,17 @@ enum AppPlaces {
     /// D105, z6 on 140: WeChat's icon at (0.617, 0.722) was tapped 32 times in 19 opens and none opened it (from the
     /// corner the pointer landed off it, and with frames at 0.8–1.3 fps it was not seen to be put right); Search opened it
     /// every time: 19 opens took 506 s, 26.6 s each, against 7–9 s for the other apps. An app whose icon was tapped twice
-    /// for nothing is opened by Search first from then on (until the app starts again), and by its icon once more if
-    /// Search does not.
-    private static var iconMissed: Set<String> = []
+    /// for nothing in two opens is opened by Search first from then on, until its icon opens it again (142's z6: one
+    /// bad open of 抖音 sent every later one through Search, 10–15 s against 6 s by its icon).
+    private static var iconMisses: [String: Int] = [:]
     static func noteIcon(_ name: String, missed: Bool) {
         for v in AppNames.variants(name) {
-            if missed { iconMissed.insert(normalized(v)) } else { iconMissed.remove(normalized(v)) }
+            if missed { iconMisses[normalized(v), default: 0] += 1 } else { iconMisses[normalized(v)] = nil }
         }
     }
-    static func iconWasMissed(_ name: String) -> Bool { AppNames.variants(name).contains { iconMissed.contains(normalized($0)) } }
+    static func iconWasMissed(_ name: String) -> Bool {
+        AppNames.variants(name).contains { (iconMisses[normalized($0)] ?? 0) >= 2 }
+    }
 
     /// A place that turned out wrong goes, alone: reading all the pages again cost 30-55 s each time, for WeChat, which is
     /// on no page at all (three times over USB 11-09). Next time Search is the way.
@@ -517,10 +519,12 @@ extension AppModel {
             if await Self.leftHome(home, within: 0.9, look: { [weak self] in self?.feed.frame.flatMap(Vision.look) }) {
                 // A whole new screen within the 0.9 s it used to wait: the app is coming up, no need to read the page.
                 await feed.settled(quiet: 0.8, least: 0.2, most: 4)
+                AppPlaces.noteIcon(name, missed: false)
                 return true
             }
             guard let rows = await homeRows(top: 0.02), AppPlaces.looksLikeHome(rows), AppPlaces.label(name, in: rows) != nil else {
                 await feed.settled(quiet: 0.8, least: 0.2, most: 4)  // an app coming up: the model looks at it once it has
+                AppPlaces.noteIcon(name, missed: false)
                 return true
             }
             DebugLog.write("open \(name): still on the Home Screen after the tap")

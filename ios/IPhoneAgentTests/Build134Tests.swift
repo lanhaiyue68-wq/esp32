@@ -768,6 +768,8 @@ import XCTest
         AppPlaces.noteIcon("微信", missed: false)
         XCTAssertFalse(AppPlaces.iconWasMissed("WeChat"))
         AppPlaces.noteIcon("微信", missed: true)
+        XCTAssertFalse(AppPlaces.iconWasMissed("WeChat"), "one bad open: the icon again")
+        AppPlaces.noteIcon("微信", missed: true)
         XCTAssertTrue(AppPlaces.iconWasMissed("WeChat"))
         XCTAssertTrue(AppPlaces.iconWasMissed("微信"))
         XCTAssertFalse(AppPlaces.iconWasMissed("淘宝"))
