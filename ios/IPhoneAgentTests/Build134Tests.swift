@@ -715,6 +715,16 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D111: a goal's message with a time added is refused unless the goal says to add the time.
+    func testAGoalsMessageIsTypedAsItIs() {
+        let goal = "帮我做这3件事：1. 在微信验证群发“Z6验证”加上现在手机顶部显示的时间（例如“Z6验证22:40”）；2. 如果深圳比首尔热就发“Z6温差大”，否则发“Z6温差小”；3. 在微信测试群发“Z6全部做完”"
+        XCTAssertEqual(AgentLoop.paddedGoalMessage("Z6全部做完12:42", task: goal), "Z6全部做完")
+        XCTAssertNil(AgentLoop.paddedGoalMessage("Z6全部做完", task: goal))
+        XCTAssertNil(AgentLoop.paddedGoalMessage("Z6验证11:46", task: goal), "the goal says to add the time")
+        XCTAssertEqual(AgentLoop.paddedGoalMessage("Z6温差大了", task: goal), "Z6温差大")
+        XCTAssertNil(AgentLoop.paddedGoalMessage("你好", task: goal))
+    }
+
     /// D110: a swipe's line is one stroke of small even moves that add up to the whole line.
     func testASwipeIsOneSmoothStroke() {
         let d = Pointer.strokeDeltas(from: (300, 700), to: (300, 320), step: 24)

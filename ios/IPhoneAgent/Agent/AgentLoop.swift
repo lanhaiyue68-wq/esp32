@@ -957,6 +957,20 @@ extension Pointer: Gestures {}
     }
 
     /// The messages the goal asks to send (发“…” / 发送“…”, not in a 不要… clause), as typedKey keys.
+    /// D111: the goal's message this text is with something added after it, unless the goal says to add the time to it
+    /// ("发“Z6验证”加上现在手机顶部显示的时间") or names the longer text too.
+    static func paddedGoalMessage(_ typed: String, task: String) -> String? {
+        let goal = AppNames.hans(task)
+        let messages = goalMessages(task)
+        guard !typed.isEmpty, !messages.contains(typed) else { return nil }
+        for m in messages where !m.isEmpty && typed.count > m.count && typed.hasPrefix(m) {
+            let quoted = "[“\"「]" + NSRegularExpression.escapedPattern(for: m) + "[”\"」][^；;]{0,40}(时间|时刻)"
+            if goal.range(of: quoted, options: .regularExpression) != nil { continue }
+            return m
+        }
+        return nil
+    }
+
     static func goalMessages(_ task: String) -> [String] {
         let t = AppNames.hans(task).replacingOccurrences(of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ",
                                                          options: .regularExpression)
@@ -3457,6 +3471,15 @@ extension Pointer: Gestures {}
                     ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow)
                         && !Self.goalSearches(task).contains(typedNow) ? typedNow : nil)
                 let titleNow = screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }
+                // D111, z6 on 142 (item 46): told the goal's "Z6全部做完" had not gone out in this run, Codex typed
+                // "Z6全部做完12:42" (item 12's "Z6验证" takes the time; 46's does not), and it went out on an approval.
+                // A goal's message with something added is refused once with the words to type.
+                if name == "type", Self.inChatApp(steps, task: task), let exact = Self.paddedGoalMessage(typedNow, task: task) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(
+                        "Refused: the goal says to send “\(exact)” exactly. Type “\(exact)” with nothing added or left out.")])
+                    DebugLog.write("type: refused; the goal's message with something added")
+                    return false
+                }
                 if name == "type", let sent = sentMatch,
                    keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], titleNow)
                     || Self.inChatApp(steps, task: task) && Self.notAGoalGroup(titleNow, task: task, steps: steps) {
