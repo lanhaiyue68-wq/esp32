@@ -26,6 +26,7 @@ extension AgentLoop {
             let p = String(part)
             guard p.count > 1 else { return [p] }
             if p.allSatisfy({ $0.isASCII && $0.isLetter }) || p.contains(where: { raised[$0] != nil }) { return [p] }
+            if rootUnder[keyLabel(p)] != nil { return [p] }  // D90: √x is one key, not √ and ×
             if p.contains(where: \.isLetter), p.contains(where: \.isNumber), keys.contains(keyLabel(p)) { return [p] }
             return p.map(String.init)
         }
@@ -62,14 +63,40 @@ extension AgentLoop {
         var spots: [CGPoint] = []
         var missing: [String] = []
         for token in keyTokens(text, keys: Set(pieces.map { keyLabel($0.text) })) {
-            let want = keyLabel(token)
-            guard let key = pieces.filter({ keyLabel($0.text) == want }).max(by: { $0.box.midY < $1.box.midY }) else {
+            guard let spot = keySpot(keyLabel(token), in: pieces) else {
                 missing.append(token)
                 continue
             }
-            spots.append(CGPoint(x: key.box.midX, y: key.box.midY))
+            spots.append(spot)
         }
         return (spots, missing)
+    }
+
+    /// The key with this label (as keyLabel spells it), the lowest of several; a root key not read, under its power key.
+    static func keySpot(_ want: String, in pieces: [CandidatePicker.Piece]) -> CGPoint? {
+        if let key = pieces.filter({ keyLabel($0.text) == want }).max(by: { $0.box.midY < $1.box.midY }) {
+            return CGPoint(x: key.box.midX, y: key.box.midY)
+        }
+        return rootKeySpot(want, in: pieces)
+    }
+
+    /// Scientific Calculator's root keys, as keyLabel spells what the model calls them, and the power key each sits under.
+    static let rootUnder: [String: String] = ["√": "X2", "√X": "X2", "2√X": "X2", "SQRT": "X2", "根号": "X2", "根號": "X2",
+                                              "平方根": "X2", "3√X": "X3", "Y√X": "XY"]
+
+    /// D90, z3 on 138 (item 5): "√2 × 1000" pressed nothing, twice: scientific Calculator's ²√x key was read as "⅔x" or
+    /// not at all (³√x as "マx", ʸ√x as "V/x"), and the item was given up: "根号键多次无法识别". Its power keys (x², x³,
+    /// xʸ) were read each time, with 2nd beside them: a root key not read by its label is the key right under its power
+    /// key, in the next row read below it, or (none read) as far below as the power key's row is from the row above.
+    static func rootKeySpot(_ want: String, in pieces: [CandidatePicker.Piece]) -> CGPoint? {
+        guard let power = rootUnder[want],
+              pieces.contains(where: { keyLabel($0.text) == "2ND" }),
+              let key = pieces.filter({ keyLabel($0.text) == power }).min(by: { $0.box.midY < $1.box.midY }) else { return nil }
+        let y = key.box.midY
+        let below = pieces.map(\.box.midY).filter { $0 > y + 0.04 && $0 < y + 0.1 }.sorted()
+        if !below.isEmpty { return CGPoint(x: key.box.midX, y: below[below.count / 2]) }
+        guard let above = pieces.map(\.box.midY).filter({ $0 < y - 0.04 && $0 > y - 0.1 }).max() else { return nil }
+        return CGPoint(x: key.box.midX, y: y + (y - above))
     }
 
     /// What a keypad's keys type on the keyboard (digits, . + - × ÷ = %, AC/C as esc), in runs; nil when a key has no
@@ -117,9 +144,8 @@ extension AgentLoop {
                 }
                 continue
             }
-            let want = keyLabel(token)
-            guard let key = pieces.filter({ keyLabel($0.text) == want }).max(by: { $0.box.midY < $1.box.midY }) else { return nil }
-            out.append(.tap(CGPoint(x: key.box.midX, y: key.box.midY)))
+            guard let spot = keySpot(keyLabel(token), in: pieces) else { return nil }
+            out.append(.tap(spot))
         }
         return out.contains { if case .tap = $0 { return true } else { return false } } ? out : nil
     }

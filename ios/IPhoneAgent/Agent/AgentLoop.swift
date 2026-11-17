@@ -222,6 +222,15 @@ extension Pointer: Gestures {}
         return re.matches(in: t, range: NSRange(location: 0, length: ns.length)).map { typedKey(ns.substring(with: $0.range(at: 1))) }
     }
 
+    /// D91, z3 on 138 (item 36): in 验证群 to read its last five messages, Doubao typed Z3验证11:07 for item 33 again
+    /// (Z3验证11:03 had gone out there at 11:04). The title was read as "（Ye）超亚死", not where it went, so it was typed;
+    /// its Return was blocked as the wrong place, and it was left in the box. A text sent already is typed again only
+    /// under the title of another group or chat the goal names: a chat title read that is none of them is no place for it.
+    static func notAGoalGroup(_ title: String?, task: String, steps: [JObject]) -> Bool {
+        guard let title, !namedGroups(task).isEmpty, !goalNamesChat(title, task: task) else { return false }
+        return chatCheck(seen: title, task: task, steps: steps) != .right
+    }
+
     static func sameMessage(_ typed: String, in sent: Set<String>) -> String? {
         guard !typed.isEmpty else { return nil }
         if sent.contains(typed) { return typed }
@@ -3270,8 +3279,10 @@ extension Pointer: Gestures {}
                     // over the box's old words it was refused 16 times. What the goal says to search is a search.
                     ?? (Self.inChatApp(steps, task: task) && sentTexts.contains(typedNow)
                         && !Self.goalSearches(task).contains(typedNow) ? typedNow : nil)
+                let titleNow = screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }
                 if name == "type", let sent = sentMatch,
-                   keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], screen?.frame.flatMap { WatchReport.navigationTitle(in: $0) }) {
+                   keyboardGuard || Self.samePlace(sentPlaces[sent] ?? [], titleNow)
+                    || Self.inChatApp(steps, task: task) && Self.notAGoalGroup(titleNow, task: task, steps: steps) {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(Self.sentAgainReason)])  // never typed
                     return false
                 }

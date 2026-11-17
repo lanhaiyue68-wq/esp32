@@ -715,6 +715,44 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D90, z3 on 138 (item 5): a root key not read by its label is pressed under its power key.
+    func testARootKeyIsFoundUnderItsPowerKey() {
+        func key(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            .init(text: t, box: CGRect(x: x - 0.03, y: y - 0.015, width: 0.06, height: 0.03))
+        }
+        // As read at 10:35:25: ²√x not read at all, ³√x as マx, ʸ√x as V/x; no × or = (typed instead).
+        let pad = [key("mc", 0.421, 0.276), key("2nd", 0.110, 0.342), key("x2", 0.267, 0.341), key("x3", 0.421, 0.342),
+                   key("xY", 0.578, 0.343), key("⅛x", 0.110, 0.413), key("マx", 0.421, 0.412), key("V/x", 0.578, 0.412),
+                   key("x！", 0.110, 0.481), key("AC", 0.383, 0.619), key("2", 0.383, 0.825)]
+        XCTAssertEqual(AgentLoop.keyTokens("2 √x × 1000 ="), ["2", "√x", "×", "1", "0", "0", "0", "="])
+        XCTAssertEqual(AgentLoop.keyTokens("AC 2 ²√x"), ["AC", "2", "²√x"])
+        guard let spot = AgentLoop.keySpot(AgentLoop.keyLabel("²√x"), in: pad) else { return XCTFail("²√x not found") }
+        XCTAssertEqual(Double(spot.x), 0.267, accuracy: 0.001)
+        XCTAssertEqual(Double(spot.y), 0.412, accuracy: 0.002)
+        XCTAssertEqual(Double(AgentLoop.keySpot("√", in: pad)?.x ?? 0), 0.267, accuracy: 0.001)
+        XCTAssertEqual(Double(AgentLoop.keySpot(AgentLoop.keyLabel("³√x"), in: pad)?.x ?? 0), 0.421, accuracy: 0.001)
+        let steps = AgentLoop.mixedKeys("2 ²√x × 1000 =", in: pad)
+        XCTAssertEqual(steps?.count, 3, "2, tap ²√x, ×1000=")
+        // Nothing read below the power keys: as far below as mc's row is above.
+        let bare = pad.filter { $0.box.midY < 0.4 }
+        XCTAssertEqual(Double(AgentLoop.keySpot("√", in: bare)?.y ?? 0), 0.406, accuracy: 0.002)
+        let plain = [key("x2", 0.267, 0.341), key("⅛x", 0.110, 0.413)]
+        XCTAssertNil(AgentLoop.keySpot("√", in: plain), "no 2nd: not scientific Calculator")
+        XCTAssertNil(AgentLoop.keySpot("√", in: pad.filter { $0.text != "x2" }), "no x² key read")
+    }
+
+    /// D91, z3 on 138 (item 36): a text sent already is not typed under a chat title that is none of the goal's groups.
+    func testASentTextIsNotTypedUnderAnotherTitle() {
+        let task = "33. 在微信验证群发“Z3验证”加上现在手机顶部显示的时间；36. 在微信验证群看最新五条消息分别是什么、谁发的"
+        XCTAssertTrue(AgentLoop.notAGoalGroup("（Ye）超亚死", task: task, steps: []))
+        XCTAssertFalse(AgentLoop.notAGoalGroup("验证群（3人）", task: task, steps: []))
+        XCTAssertFalse(AgentLoop.notAGoalGroup(nil, task: task, steps: []), "not read: samePlace refuses already")
+        XCTAssertFalse(AgentLoop.notAGoalGroup("（Ye）超亚死", task: "给张三发“你好”", steps: []), "no group named")
+        let two = "在测试群和验证群各发“Z3好”"
+        XCTAssertFalse(AgentLoop.notAGoalGroup("测试群（4人）", task: two, steps: []), "the other group named")
+        XCTAssertFalse(AgentLoop.notAGoalGroup("张三", task: "在验证群发“好”，再发给张三“好”", steps: []), "a chat the goal names")
+    }
+
     /// D88, z2 on 138: the report keeps what it copies as written, letters and all.
     func testTheReportCopiesEnglishAsWritten() {
         XCTAssertTrue(AgentLoop.wholeAnswerPrompt.contains("English letters and all"))
