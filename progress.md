@@ -1,5 +1,11 @@
 # 当前进度
 
+## 2026-11-17 11:23（臺北）138 回歸跑完；139 本機寫好 D74–D89（未推）
+- 真人單句 r138h 21 題 20 成功（h06 京東要登入）；客戶場景 r138s 10 題 5 成功（s0、s2、s5、s7、s9）；地獄級 y1–y6 六題全成功；z1、z2 成功，z3 跑 50 分鐘後「手機 120 秒沒網路」失敗，z4–z6 一開始就「網路連接已中斷」失敗（手機連得到電腦的模擬雲，但連不到豆包；USB 也斷了）。
+- 淘寶 y6 起全程要求登入＋簡訊驗證碼，相關項照規則跳過；京東要登入。11-17 y6 時 iOS 回報溫度等級 serious、一再暫停 Lan Agent，使用者確認手機不熱、照常跑。
+- 139 新增（明細 docs/build136-summary.md）：D74–D80、D81 發消息的項要真的發出、D82 前面已記的段落跳過、D83 滾動時看到的原話記下、D84 Lan Agent 鍵盤連不上時等它再問、D85 兩個時刻之間的時長、D86 計算機上的記錄要含螢幕結果、D87 某月有幾個星期幾、D88 整理答案照抄英文、D89 到節日的天數。本機 build123 5a080d8，Swift 未編、單元測試未跑。
+- 下一步：使用者點頭後推 139（Shared.xcconfig → 139，build139-ci＝build123＋CI commit，`git push --force-with-lease=main:39620d4 build114 build139-ci:main`），看 CI 編譯與單元測試；手機網路恢復、USB 重插後補跑 z3–z6。
+
 ## 2026-11-16 20:52（臺北）138 已編譯（IPA 在桌面，等安裝回歸）
 - 使用者同意推：build138-ci（21323a9 版本 138＋CI commit 6c71328）推成 build114 main，run 43867081019：App 編過、IPA 上傳；單元測試只有 D59 testASecurityCheckIsLeftToTheOwner 失敗（測試沒給 planner，一開始排計畫就丟「no planner model」，不是 App 的問題），本機已改成 directStart（856b863，未推，D59 這個測試還沒真正跑過）。
 - IPA E:/桌面/Lan-Agent-build138-unsigned.ipa（主程式／鍵盤／動態島 CFBundleVersion 皆 138；SHA256 d52df386911ed4ad95da12840547af0bbd3be641bb67adcc2e2f290dc560da46，與 CI 的 ipa.sha256 相同）；137 的 IPA 已送回收筒。
