@@ -135,6 +135,8 @@ extension Pointer: Gestures {}
     private var readRows: [[CandidatePicker.Piece]] = []
     /// D86: the Calculator result a note was last refused for (a second note on the same result is kept).
     private var calcNoteRefused: String?
+    /// D100: the goal's items a note on a sum in brackets was refused for (once each).
+    private var bracketRefused: Set<Int> = []
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -1194,6 +1196,81 @@ extension Pointer: Gestures {}
     }
 
     /// Whether a text gives a number that is the shown one rounded or cut to the places it is written with.
+    /// D100, z5 on 139 (item 31): "(12345 × 678 − 9876) ÷ 3.5" was pressed "12345 × 678 = − 9876 ÷ 3.5 =", Calculator
+    /// took ÷ before −, showed 8,367,088.2857143, and that was noted (2388581.14 is right; z4 had it). A note on an item
+    /// whose sum the goal gives in brackets must hold what the sum comes to, or it is refused once with the order to press.
+    private func bracketNoteMissing(_ text: String) -> String? {
+        let goal = AppNames.hans(task)
+        guard let n = Self.noteItems(text).min(), !bracketRefused.contains(n),
+              let item = Self.numberedItems(goal).first(where: { $0.n == n }),
+              let sum = Self.bracketSum(String(goal[item.body])), sum.value.isFinite,
+              !Self.holdsNumber(text, String(sum.value)) else { return nil }
+        bracketRefused.insert(n)
+        return "Refused: the note does not hold what " + sum.text + " comes to. Calculator works × and ÷ before + and −, so "
+            + "press what is in the brackets first and = after it, then the rest and =, and note what it then shows. "
+            + "If this note is not about this sum, note it again and it is kept."
+    }
+
+    /// A sum with brackets in a goal's item ("(12345 × 678 − 9876) ÷ 3.5") and what it comes to; nil when there is none.
+    static func bracketSum(_ item: String) -> (text: String, value: Double)? {
+        guard let r = item.range(of: #"[\d.\s+\-−×*÷/]*[（(][\d.\s+\-−×*÷/]+[)）][\d.\s+\-−×*÷/()（）]*"#, options: .regularExpression)
+        else { return nil }
+        let text = item[r].trimmingCharacters(in: .whitespaces)
+        var tokens: [String] = []
+        var number = ""
+        for c in text where !c.isWhitespace {
+            if c.isNumber || c == "." { number.append(c); continue }
+            if !number.isEmpty { tokens.append(number); number = "" }
+            switch c {
+            case "+": tokens.append("+")
+            case "-", "−": tokens.append("-")
+            case "×", "*": tokens.append("*")
+            case "÷", "/": tokens.append("/")
+            case "(", "（": tokens.append("(")
+            case ")", "）": tokens.append(")")
+            default: return nil
+            }
+        }
+        if !number.isEmpty { tokens.append(number) }
+        guard tokens.contains(where: { "+-*/".contains($0) }) else { return nil }
+        struct Reader {
+            let tokens: [String]
+            var at = 0
+            mutating func sum() -> Double? {
+                guard var v = term() else { return nil }
+                while at < tokens.count, tokens[at] == "+" || tokens[at] == "-" {
+                    let op = tokens[at]; at += 1
+                    guard let w = term() else { return nil }
+                    v = op == "+" ? v + w : v - w
+                }
+                return v
+            }
+            mutating func term() -> Double? {
+                guard var v = factor() else { return nil }
+                while at < tokens.count, tokens[at] == "*" || tokens[at] == "/" {
+                    let op = tokens[at]; at += 1
+                    guard let w = factor() else { return nil }
+                    v = op == "*" ? v * w : v / w
+                }
+                return v
+            }
+            mutating func factor() -> Double? {
+                guard at < tokens.count else { return nil }
+                let t = tokens[at]; at += 1
+                if t == "(" {
+                    guard let v = sum(), at < tokens.count, tokens[at] == ")" else { return nil }
+                    at += 1
+                    return v
+                }
+                if t == "-" { return factor().map { -$0 } }
+                return Double(t)
+            }
+        }
+        var reader = Reader(tokens: tokens)
+        guard let value = reader.sum(), reader.at == tokens.count else { return nil }
+        return (text, value)
+    }
+
     static func holdsNumber(_ text: String, _ shown: String) -> Bool {
         guard let value = Double(shown),
               let re = try? NSRegularExpression(pattern: #"-?\d+(?:\.\d+)?"#) else { return true }
@@ -1664,6 +1741,11 @@ extension Pointer: Gestures {}
                 // D80: "第24项待后续记录" is an item put off, not a result.
                 let clause = ns.substring(from: m.range.location + m.range.length).prefix(while: { !"；;。\n".contains($0) })
                 if clause.range(of: #"待后续|后续再|后续记录|后续补|待补|稍后|之后再|待记录"#, options: .regularExpression) != nil { continue }
+                // D99, z5 on 139: a part was let through on "第22项：…已在之前记下；第24项：…已在之前记下；第25项：…已在之前查看
+                // 记下", and nothing had been noted for any of them: the answer said "记录称已记下…但未提供具体内容". A
+                // claim of an earlier record is no record; an earlier note that holds one counts on its own.
+                if clause.range(of: #"(?:已在|已于)?(?:之前|前面|此前|早先)(?:已经?|已)?(?:查看)?(?:记下|记录|记好|查到|看过|查看)"#,
+                                options: .regularExpression) != nil { continue }
                 said.insert(n)
                 let from = m.range.location + m.range.length
                 let to = i + 1 < heads.count ? heads[i + 1].range.location : ns.length
@@ -2819,6 +2901,11 @@ extension Pointer: Gestures {}
                 if text != said {
                     planned.act["text"] = .str(text)
                     DebugLog.write("note: a weekday, a count of days or a span was wrong; put right")
+                }
+                if !notes.contains(text), let why = bracketNoteMissing(said) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(why)])
+                    DebugLog.write("note: refused; a sum in brackets the goal gives does not come out as noted")
+                    continue
                 }
                 // D94: what was said holds the Calculator's number, even when a span in it was put right.
                 if !notes.contains(text), let shown = calcResultMissing(said) {

@@ -715,6 +715,28 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D99, z5 on 139: "已在之前记下" for an item nothing was noted for is no record of it.
+    func testAClaimOfAnEarlierRecordIsNoRecord() {
+        let goal = (1...12).map { "\($0). 做第\($0)件事" }.joined(separator: "；")
+        let told = ["第1项：好；第2项：好；第3项：好；第4项：好；第5项：好；第6项：好；第7项：好；第8项：好；第9项：好；第10项：好",
+                    "第11项：标题和第二条评论已在之前记下；第12项：开关状态已在之前查看记下"]
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: told, sent: []), [11, 12])
+        XCTAssertEqual(AgentLoop.itemsLeft(task: goal, told: told + ["第11项：标题“好”，评论“不错”"], sent: []), [12],
+                       "an earlier note that holds it counts")
+    }
+
+    /// D100, z5 on 139 (item 31): a sum in brackets the goal gives is worked out.
+    func testASumInBracketsIsWorkedOut() {
+        let sum = AgentLoop.bracketSum("用计算器算 (12345 × 678 − 9876) ÷ 3.5，保留两位小数")
+        XCTAssertEqual(sum?.text, "(12345 × 678 − 9876) ÷ 3.5")
+        XCTAssertEqual(sum?.value ?? 0, 2388581.142857, accuracy: 0.001)
+        XCTAssertTrue(AgentLoop.holdsNumber("第31项：2,388,581.14", String(sum?.value ?? 0)))
+        XCTAssertFalse(AgentLoop.holdsNumber("第31项：计算器显示 8,367,088.2857143，保留两位小数为 8,367,088.29。", String(sum?.value ?? 0)))
+        XCTAssertEqual(AgentLoop.bracketSum("3.5 × (2 + 4)")?.value, 21)
+        XCTAssertNil(AgentLoop.bracketSum("用计算器和日历算出从今天起第100天是几月几号"))
+        XCTAssertNil(AgentLoop.bracketSum("在天气看深圳（今天）的温度"))
+    }
+
     /// D98, z4 on 139: a Codex reply that stops short says why.
     func testACodexReplyCutShortSaysWhy() {
         var sse = ChatGPTPlus.SSE()
