@@ -1300,7 +1300,9 @@ extension Pointer: Gestures {}
         // D89, z2 on 138 (item 35): "2027年春节是2027年2月6日，星期六；从2026年11月17日到春节间隔80天" (81): a feast day the item
         // gave a date for ("春节是…", "除夕为…") is that date, as 那天 is the date said last.
         let feasts = "春节|春節|除夕|元旦|元宵节|元宵|清明节|清明|端午节|端午|中秋节|中秋|国庆节|国庆|國慶|七夕|重阳节|重阳|冬至|圣诞节|圣诞|聖誕"
-        let thatDay = #"(?:从|自|從)?\s*(?:今天)?\s*(?:"# + d + #")?\s*(?:到|至|距离|距離|距|离|離)\s*(那天|那一天|当天|當天|"# + feasts
+        // D96, z4 on 139 (item 41): "2027年春节为2027年2月6日，从今天（2026年11月17日）到那天还有0天": today's date in brackets
+        // was taken for 那天. A date in brackets after 今天 is where the count starts.
+        let thatDay = #"(?:从|自|從)?\s*(?:今天)?\s*[（(]?\s*(?:"# + d + #")?\s*[)）]?\s*(?:到|至|距离|距離|距|离|離)\s*(那天|那一天|当天|當天|"# + feasts
             + #")[^，。；;\d]{0,12}?(?:还有|還有|还剩|有|共|是)?\s*(\d{1,4})\s*天"#
         if let re = try? NSRegularExpression(pattern: thatDay), let dates = try? NSRegularExpression(pattern: d),
            let heads = try? NSRegularExpression(pattern: #"(?:^|[；;。\n])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#) {
@@ -4759,9 +4761,11 @@ extension Pointer: Gestures {}
         let line = reply.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first ?? ""
         guard line.range(of: #"^NO\b"#, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
         let why = line.dropFirst(2).trimmingCharacters(in: CharacterSet(charactersIn: " :：,，-"))
-        return "A check of the finished work says: " + (why.isEmpty ? "the answer is not supported" : why)
-            + ". Fix it on the phone or correct the answer, then finish again."
+        return checkSays + (why.isEmpty ? "the answer is not supported" : why) + checkFix
     }
+
+    static let checkSays = "A check of the finished work says: "
+    static let checkFix = ". Fix it on the phone or correct the answer, then finish again."
 
     /// D32, y5 on 135: Codex drove parts to "done 第39项：(12345 × 678 − 9876) ÷ 3.5 = 2,388,581.14" and "done 第11项：2027年2月共有
     /// 4个星期一…", and that went only into the list of parts done, which a plan of one part never shows. The last part (Codex,
@@ -4867,7 +4871,15 @@ extension Pointer: Gestures {}
 
     /// D65, y3 on 137 (item 20): the check said tomorrow is 11月17日 (周二), not 11月18日; the note on the phone was put
     /// right, and the answer written from the run's notes at the end said 11月18日 again. The objection is kept as a note.
-    static func objectionNote(_ wrong: String) -> String { "核对更正（以此为准，改掉前面相应的记录）：" + String(wrong.prefix(300)) }
+    /// D95, z4 on 139: the note kept "A check of the finished work says: … Fix it on the phone or correct the answer, then
+    /// finish again." as it was, and when Codex's whole answer could not be used the notes went to the owner, English and
+    /// all. The note keeps what the check said, without the words for the run.
+    static func objectionNote(_ wrong: String) -> String {
+        var why = Substring(wrong)
+        if let r = why.range(of: checkSays) { why = why[r.upperBound...] }
+        if let r = why.range(of: checkFix) { why = why[..<r.lowerBound] }
+        return "核对更正（以此为准，改掉前面相应的记录）：" + String(why.prefix(300))
+    }
 
     /// A fail right after a refused one, with nothing done since, is the same item again (c3, 132): free twice in a row.
     static func failIsRepeat(refusedAt: Double, lastActed: Double, free: Int) -> Bool {

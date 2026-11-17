@@ -715,6 +715,22 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D95, z4 on 139: a kept objection holds what the check said, not the words for the run.
+    func testAnObjectionNoteHasNoWordsForTheRun() {
+        let wrong = AgentLoop.wrongness("NO: 第41项天数应为81天，答案写0天")!
+        XCTAssertEqual(AgentLoop.objectionNote(wrong), "核对更正（以此为准，改掉前面相应的记录）：第41项天数应为81天，答案写0天")
+        XCTAssertFalse(AgentLoop.objectionNote(wrong).contains("finish again"))
+    }
+
+    /// D96, z4 on 139 (item 41): today's date in brackets is where the count starts, not 那天.
+    func testTodaysDateInBracketsIsNotThatDay() {
+        let today = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 11, day: 17))!
+        XCTAssertEqual(AgentLoop.rightDayCounts("第41项：2027年春节为2027年2月6日，从今天（2026年11月17日）到那天还有0天。", today: today),
+                       "第41项：2027年春节为2027年2月6日，从今天（2026年11月17日）到那天还有81天。")
+        XCTAssertEqual(AgentLoop.rightDayCounts("春节为2027年2月6日，从今天2026年11月15日到那天还有225天", today: today),
+                       "春节为2027年2月6日，从今天2026年11月15日到那天还有83天", "no brackets, as before")
+    }
+
     /// D94, z3 on 139 (item 43): a span in decimal hours, after 即 or =, or with the two times said again, is put right.
     func testASpanInDecimalHoursOrSaidAgainIsPutRight() {
         XCTAssertEqual(AgentLoop.rightSpans("第43项：深圳今日日出6:37、日落17:39，日照时长11.02小时，即11小时1分钟。"),
