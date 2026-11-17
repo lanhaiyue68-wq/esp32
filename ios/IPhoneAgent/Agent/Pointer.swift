@@ -969,10 +969,23 @@ import Foundation
     private var notBanners: Set<String> = []
 
     /// The banner over the top of these rows ("title|body"), unless it was found to be part of the screen.
+    /// 142's z6: 4 waits of 6 s each, none a banner: Notes' search results and Taobao's and Pinduoduo's product titles
+    /// over their subtitles look like one, and their text read a little differently each time. A real banner's title
+    /// row has its time at the right ("现在", "2分钟前"): no time there, no banner.
     static func bannerKey(_ rows: [[CandidatePicker.Piece]], notBanners: Set<String>) -> String? {
-        guard let banner = WatchReport.banner(rows: rows) else { return nil }
+        guard bannerTimeShown(rows), let banner = WatchReport.banner(rows: rows) else { return nil }
         let key = banner.title + "|" + banner.body
         return notBanners.contains(key) ? nil : key
+    }
+
+    /// A banner's time at the right of its title row: "现在", "刚刚", "2分钟前", "now", "2m ago".
+    static func bannerTimeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        rows.joined().contains { piece in
+            piece.box.minX >= 0.72 && piece.box.midY <= bannerBand
+                && piece.text.filter({ !$0.isWhitespace }).lowercased().range(
+                    of: #"^(现在|現在|刚刚|剛剛|now|\d{1,2}(分钟|分鐘|秒|小时|小時|m|min|s|h)(前|ago)?)$"#,
+                    options: .regularExpression) != nil
+        }
     }
 
     private func clearOfBanners(_ y: Double) async throws {

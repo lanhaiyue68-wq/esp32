@@ -805,6 +805,11 @@ import XCTest
         XCTAssertEqual(key, "测试群|主人:在吗")
         XCTAssertNil(Pointer.bannerKey(banner, notBanners: [key ?? ""]), "seen to stay: the screen's own")
         XCTAssertNil(Pointer.bannerKey([row(("保温杯", 0.30, 0.09))], notBanners: []), "a search bar is no banner")
+        // 142's z6: a product's title over its subtitle, and a note found by search, have no time at the right
+        let product = [row(("长效保温保冷", 0.19, 0.075)), row(("316不锈钢内胆/轻量便携/500ml大容量", 0.19, 0.105))]
+        XCTAssertNil(Pointer.bannerKey(product, notBanners: []))
+        let ago = [row(("验证群", 0.19, 0.075), ("2分钟前", 0.80, 0.075)), row(("主人: 先做", 0.19, 0.105))]
+        XCTAssertEqual(Pointer.bannerKey(ago, notBanners: []), "验证群|主人:先做")
         XCTAssertGreaterThan(Pointer.bannerBand, 0.105)
     }
 
