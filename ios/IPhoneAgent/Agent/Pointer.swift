@@ -562,6 +562,7 @@ import Foundation
             if clicksInPlace < Self.clicksInPlaceLimit {
                 clicksInPlace += 1
                 log(String(format: "tap (%.3f, %.3f): same spot as the last click; clicking again without moving", x, y))
+                try await clearOfBanners(y)
                 let clickedAt = now()
                 try await device.send("click")
                 lastClick?.time = Date().timeIntervalSince1970
@@ -603,6 +604,7 @@ import Foundation
                 if arrival == .offTarget { try await self.aim(x, y) }
                 // D102: a hop seen on the target starts the next from a known spot; only hops not seen add up.
                 if arrival == .onTarget { hops = 0 }
+                try await clearOfBanners(y)
                 let clickedAt = now()
                 try await device.send("click")
                 if let q = pos { lastClick = LastClick(x: x, y: y, ux: q.0, uy: q.1, link: device.links, time: Date().timeIntervalSince1970) }
@@ -631,6 +633,7 @@ import Foundation
             if try await arrive(x, y, before: before, began: began) == .offTarget { try await self.aim(x, y) }
         }
         if viaBorder, let first = firstSeen { learnBorderLift(missedBy: Double(first.y) - y) }
+        try await clearOfBanners(y)
         let clickedAt = now()
         try await device.send("click")
         if let p = pos { lastClick = LastClick(x: x, y: y, ux: p.0, uy: p.1, link: device.links, time: Date().timeIntervalSince1970) }
@@ -955,6 +958,43 @@ import Foundation
     }
 
     static let nearbyHops = 6      // hops not seen on the target before one re-homes again
+
+    /// D103, user 11-17: a message's banner slides in at the top while another app is used ("不在微信的时候如果微信突然
+    /// 来了消息，这时候会有误触点进去的情况"), and a click meant for a search bar or a back arrow under it opens the
+    /// message's app instead, often on another chat. A click near the top waits (up to 6 s; a banner goes up by itself in
+    /// about 5) while one is over it, looked at in the frame just before the click. Text there that does not go in 6 s
+    /// is the app's own, and is not waited for again.
+    static let bannerBand = 0.16
+    static let bannerWait = 6.0
+    private var notBanners: Set<String> = []
+
+    /// The banner over the top of these rows ("title|body"), unless it was found to be part of the screen.
+    static func bannerKey(_ rows: [[CandidatePicker.Piece]], notBanners: Set<String>) -> String? {
+        guard let banner = WatchReport.banner(rows: rows) else { return nil }
+        let key = banner.title + "|" + banner.body
+        return notBanners.contains(key) ? nil : key
+    }
+
+    private func clearOfBanners(_ y: Double) async throws {
+        guard y < Self.bannerBand, let screen else { return }
+        let started = now()
+        var seen: String?
+        while now() - started < Self.bannerWait {
+            guard let frame = screen.frame else { return }
+            let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0, bottom: Self.bannerBand)
+            guard let key = Self.bannerKey(rows, notBanners: notBanners) else {
+                if seen != nil { log(String(format: "tap: the banner went up after %.1f s; clicking", now() - started)) }
+                return
+            }
+            if seen == nil { log("tap: a notification banner over the top (\(key.prefix(40))); waiting for it to go before clicking") }
+            seen = key
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        if let seen {
+            notBanners.insert(seen)
+            log("tap: what looked like a banner is still there after 6 s: the screen's own; clicking")
+        }
+    }
 
     /// D102: a hop into the top band clicks only where the pointer was seen on the target; otherwise the tap goes from
     /// the corner after all (not when the arrival check itself already started over from there).

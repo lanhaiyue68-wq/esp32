@@ -715,6 +715,19 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D103: a click near the top waits while a message's banner is over it; text that stays is the screen's own.
+    func testAClickNearTheTopWaitsForABanner() {
+        func row(_ pieces: (String, Double, Double)...) -> [CandidatePicker.Piece] {
+            pieces.map { CandidatePicker.Piece(text: $0.0, box: CGRect(x: $0.1, y: $0.2 - 0.01, width: 0.2, height: 0.02)) }
+        }
+        let banner = [row(("测试群", 0.19, 0.075), ("现在", 0.86, 0.075)), row(("主人: 在吗", 0.19, 0.105))]
+        let key = Pointer.bannerKey(banner, notBanners: [])
+        XCTAssertEqual(key, "测试群|主人:在吗")
+        XCTAssertNil(Pointer.bannerKey(banner, notBanners: [key ?? ""]), "seen to stay: the screen's own")
+        XCTAssertNil(Pointer.bannerKey([row(("保温杯", 0.30, 0.09))], notBanners: []), "a search bar is no banner")
+        XCTAssertGreaterThan(Pointer.bannerBand, 0.105)
+    }
+
     /// D102: a hop near the top clicks only where the pointer is seen on the target; elsewhere it clicks as before.
     func testAHopNearTheTopClicksOnlyWhereThePointerIsSeen() {
         XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.09, arrival: .onTarget, startedOver: false))
