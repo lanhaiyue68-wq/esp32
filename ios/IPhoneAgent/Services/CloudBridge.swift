@@ -347,6 +347,8 @@ import Foundation
             ("send into the wrong place", "要发消息的地方不是题目说的那个聊天，为了不发错停下了"),
             // 123 over the cloud 11-12: Doubao's account ran out ("LLM HTTP 403: AccountOverdueError").
             ("accountoverdue", "模型服务账户欠费，请先充值再试"),
+            // D92, z3 on 138: "没能做完（the phone has had no network for 120 s）" reached the owner.
+            ("no network", "手机一直连不上网络，停下了"),
         ]
         if let hit = known.first(where: { r.lowercased().contains($0.0) }) { return hit.1 }
         if r.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) { return r.hasSuffix("。") ? String(r.dropLast()) : r }  // y6 on 135: "…再开始。。已查到"

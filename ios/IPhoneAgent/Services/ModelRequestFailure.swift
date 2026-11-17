@@ -1,3 +1,4 @@
+import CFNetwork
 import Foundation
 
 enum ModelRequestFailure {
@@ -30,7 +31,38 @@ enum ModelRequestFailure {
         ["AccountOverdue", "HTTP 401", "AuthenticationError", "insufficient_quota", "ModelNotOpen"].contains { message.contains($0) }
     }
 
+    /// D92, 138 over the cloud 11-17: from 11:16 every call to Doubao and to Codex failed after 5.1 s, "网络连接已中断"
+    /// (z3 at 50 minutes, z4-z6 and every task after). The phone's traffic went through a proxy app's listener on the
+    /// phone itself (127.0.0.1:1082), and it did not answer ("Socket is not connected", 0 bytes sent). The cloud, on the
+    /// LAN, still worked: the owner saw "no network" on a phone that looked connected, and was not told what to do. With
+    /// the network down and a proxy on the phone itself, the proxy is named.
+    static func localProxy() -> String? {
+        guard let settings = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] else { return nil }
+        return localProxy(in: settings)
+    }
+
+    /// The first proxy on the phone itself (127.x, localhost, ::1) in system proxy settings, its scoped ones (a VPN's) too.
+    static func localProxy(in settings: [String: Any]) -> String? {
+        var all = [settings]
+        if let scoped = settings["__SCOPED__"] as? [String: Any] { all += scoped.values.compactMap { $0 as? [String: Any] } }
+        let kinds = [("HTTPSEnable", "HTTPSProxy", "HTTPSPort"), ("HTTPEnable", "HTTPProxy", "HTTPPort"),
+                     ("SOCKSEnable", "SOCKSProxy", "SOCKSPort")]
+        for s in all {
+            for (on, host, port) in kinds {
+                guard (s[on] as? NSNumber)?.boolValue == true, let h = s[host] as? String,
+                      h.hasPrefix("127.") || ["localhost", "::1"].contains(h.lowercased()) else { continue }
+                return (s[port] as? NSNumber).map { "\(h):\($0.intValue)" } ?? h
+            }
+        }
+        return nil
+    }
+
+    static func proxyDown(_ proxy: String) -> String {
+        "连不上模型：这台手机的网络要经过手机上的代理 App（\(proxy)），它没有响应。请打开代理 App 重新连接或换个节点，再试一次。"
+    }
+
     static func message(_ error: Error) -> String {
+        if isNetworkDown(error), let proxy = localProxy() { return proxyDown(proxy) }  // D92
         if isTimeout(error) {
             return String(localized: "The model request timed out before it finished. Try again or choose a specific vision model instead of automatic routing.")
         }

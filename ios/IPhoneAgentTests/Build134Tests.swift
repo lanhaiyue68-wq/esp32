@@ -715,6 +715,21 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D92, 138 over the cloud 11-17: a proxy on the phone itself is named when the network is down.
+    func testAProxyOnThePhoneIsNamed() {
+        let shadow: [String: Any] = ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 1082,
+                                     "HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 1082]
+        XCTAssertEqual(ModelRequestFailure.localProxy(in: shadow), "127.0.0.1:1082")
+        XCTAssertEqual(ModelRequestFailure.localProxy(in: ["__SCOPED__": ["utun6": shadow]]), "127.0.0.1:1082", "a VPN's own")
+        XCTAssertNil(ModelRequestFailure.localProxy(in: ["HTTPSEnable": 1, "HTTPSProxy": "10.0.0.2", "HTTPSPort": 8080]),
+                     "a proxy elsewhere on the network is not the phone's")
+        XCTAssertNil(ModelRequestFailure.localProxy(in: ["HTTPSEnable": 0, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 1082]))
+        XCTAssertNil(ModelRequestFailure.localProxy(in: [:]))
+        XCTAssertTrue(ModelRequestFailure.proxyDown("127.0.0.1:1082").contains("代理 App（127.0.0.1:1082）"))
+        XCTAssertEqual(CloudBridge.failureWords("the phone has had no network for 120 s"), "手机一直连不上网络，停下了")
+        XCTAssertTrue(CloudBridge.failureWords(ModelRequestFailure.proxyDown("127.0.0.1:1082")).hasPrefix("连不上模型"))
+    }
+
     /// D90, z3 on 138 (item 5): a root key not read by its label is pressed under its power key.
     func testARootKeyIsFoundUnderItsPowerKey() {
         func key(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {

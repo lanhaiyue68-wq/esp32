@@ -2600,12 +2600,15 @@ extension Pointer: Gestures {}
                     if offline {
                         offlineWaits += 1
                         if offlineWaits > Self.offlineWaitLimit {
-                            record(nil, ["action": .str("fail"), "reason": .str("the phone has had no network for \(Self.offlineWaitLimit * 5) s")])
+                            let why = ModelRequestFailure.localProxy().map(ModelRequestFailure.proxyDown)  // D92
+                                ?? "the phone has had no network for \(Self.offlineWaitLimit * 5) s"
+                            record(nil, ["action": .str("fail"), "reason": .str(why)])
                             guard try await askForHelp() else { return finish() }
                             offlineWaits = 0
                             continue
                         }
-                        DebugLog.write("run: no network (\(error.localizedDescription)); waiting 5 s, then the same step again (\(offlineWaits))")
+                        let proxy = ModelRequestFailure.localProxy().map { ", through the proxy on the phone at \($0)" } ?? ""
+                        DebugLog.write("run: no network (\(error.localizedDescription)\(proxy)); waiting 5 s, then the same step again (\(offlineWaits))")
                         try await Task.sleep(nanoseconds: 5_000_000_000)
                         continue
                     }
