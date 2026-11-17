@@ -697,6 +697,41 @@ import XCTest
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
+    /// D86, z1 on 138 (item 21): the result Calculator shows is read, and a note without it is known.
+    func testANoteOnCalculatorHoldsItsResult() {
+        typealias P = CandidatePicker.Piece
+        func row(_ t: String, _ y: CGFloat) -> [P] { [P(text: t, box: CGRect(x: 0.5, y: y, width: 0.2, height: 0.03))] }
+        let scientific = [row("97-5", 0.15), row("19.4", 0.207), row("mc", 0.276), row("x2", 0.342), row("AC", 0.618),
+                          row("%", 0.619), row("7", 0.688), row("1", 0.827)]
+        XCTAssertEqual(AgentLoop.calculatorResult(scientific), "19.4")
+        let plain = [row("2,388,581.1428571", 0.38), row("AC", 0.47), row("%", 0.47), row("7", 0.6)]
+        XCTAssertEqual(AgentLoop.calculatorResult(plain), "2388581.1428571")
+        XCTAssertNil(AgentLoop.calculatorResult([row("0", 0.38), row("AC", 0.47)]), "nothing worked out")
+        XCTAssertNil(AgentLoop.calculatorResult([row("19.4", 0.3)]), "no keys: not Calculator")
+        XCTAssertFalse(AgentLoop.holdsNumber("第21项：五城最高温总和87°C，平均为17.4°C。", "19.4"))
+        XCTAssertTrue(AgentLoop.holdsNumber("第21项：五城最高温总和97°C，平均为19.4°C。", "19.4"))
+        XCTAssertTrue(AgentLoop.holdsNumber("第32项：≈ 2,388,581.14。", "2388581.1428571"), "rounded, with commas")
+        XCTAssertTrue(AgentLoop.holdsNumber("第17项：√2 × 1000 ≈ 1414.21", "1414.2135623"))
+        XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
+    }
+
+    /// D87, z1 on 138 (item 38): the days of a weekday in a month are worked out by the calendar.
+    func testTheDaysOfAWeekdayInAMonthArePutRight() {
+        let today = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 11, day: 17))!
+        XCTAssertEqual(AgentLoop.rightWeekdayLists("38. 2027年2月共有4个星期一，分别是2日、9日、16日、23日。", today: today),
+                       "38. 2027年2月共有4个星期一，分别是1日、8日、15日、22日。")
+        XCTAssertEqual(AgentLoop.rightWeekdayLists("2027年2月星期一共4个：2、9、16、23日", today: today), "2027年2月星期一共4个：2、9、16、23日",
+                       "the count after the weekday is not this form")
+        XCTAssertEqual(AgentLoop.rightWeekdayLists("2027年2月有4个星期一：2、9、16、23日", today: today), "2027年2月有4个星期一：1、8、15、22日")
+        XCTAssertEqual(AgentLoop.rightWeekdayLists("2月有5个星期一", today: today), "2月有4个星期一", "February next year")
+        let right = "2026年3月有5个星期日：1日、8日、15日、22日、29日"
+        XCTAssertEqual(AgentLoop.rightWeekdayLists(right, today: today), right)
+        XCTAssertEqual(AgentLoop.rightWeekdayLists("2027年2月有4个星期一，分别是2、9、16、23日，3月有5个星期一", today: today),
+                       "2027年2月有4个星期一，分别是1、8、15、22日，3月有5个星期一", "3月 is not a day of the list")
+        XCTAssertEqual(AgentLoop.rightFacts("1. 2027年2月共有4个星期一，分别是2日、9日、16日、23日；2. 12月25日是星期四", today: today),
+                       "1. 2027年2月共有4个星期一，分别是1日、8日、15日、22日；2. 12月25日是星期五")
+    }
+
     /// D85, y6 on 138 (item 22): a span said after two clock times in one item is worked out and put right.
     func testASpanBetweenTwoTimesIsPutRight() {
         XCTAssertEqual(AgentLoop.rightSpans("22. 深圳今天日出清晨6:37，日落下午5:39；记录中的白昼时长为11小时22分钟。\n23. 首尔85%"),

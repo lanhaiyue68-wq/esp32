@@ -133,6 +133,8 @@ extension Pointer: Gestures {}
     private(set) var notes: [String] = []
     /// The text read on the screen the last reply was made on (with where it is): what a tap lands on, and how big it is.
     private var readRows: [[CandidatePicker.Piece]] = []
+    /// D86: the Calculator result a note was last refused for (a second note on the same result is kept).
+    private var calcNoteRefused: String?
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -1098,6 +1100,102 @@ extension Pointer: Gestures {}
             from = head.range.location + head.range.length
         }
         return dates.matches(in: ns as String, range: NSRange(location: from, length: max(0, location - from))).last
+    }
+
+    /// The date and time facts a text gives, put right: weekdays, counts of days, spans between two times, and the days
+    /// of a weekday in a month.
+    static func rightFacts(_ text: String, today: Date) -> String {
+        rightWeekdayLists(rightSpans(rightDayCounts(rightWeekdays(text, today: today), today: today)), today: today)
+    }
+
+    /// D87, z1 on 138 (item 38): "2027年2月共有4个星期一，分别是2日、9日、16日、23日": Doubao read the year view a column
+    /// off (1 February 2027 is a Monday). How many of a weekday a month has, and which days they are, are worked out by
+    /// the calendar and put right. A month without a year is in today's year, or the next when over half a year back.
+    static func rightWeekdayLists(_ text: String, today: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+        let pattern = #"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月[^。；;\n\d]{0,16}?(\d)\s*个\s*(?:星期|周|週|礼拜|禮拜)([一二三四五六日天])[^。；;\n\d]{0,12}((?:\d{1,2}(?![\d月年:：.])\s*[日号號]?\s*[、，,和及与]\s*)+\d{1,2}(?![\d月年:：.])\s*[日号號]?)?"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return text }
+        let names = ["日", "一", "二", "三", "四", "五", "六"]  // Calendar's weekday 1 is Sunday
+        let ns = text as NSString
+        let out = NSMutableString(string: text)
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            guard let month = Int(ns.substring(with: m.range(at: 2))), (1...12).contains(month),
+                  let count = Int(ns.substring(with: m.range(at: 3))) else { continue }
+            var year = m.range(at: 1).location != NSNotFound ? Int(ns.substring(with: m.range(at: 1))) : nil
+            if year == nil {
+                let now = calendar.component(.year, from: today)
+                let end = calendar.date(from: DateComponents(year: now, month: month + 1, day: 1))
+                year = end.map { $0.timeIntervalSince(today) < -183 * 86_400 } == true ? now + 1 : now
+            }
+            let said = ns.substring(with: m.range(at: 4))
+            guard let y = year, let wanted = names.firstIndex(of: said == "天" ? "日" : said),
+                  let first = calendar.date(from: DateComponents(year: y, month: month, day: 1)),
+                  let length = calendar.range(of: .day, in: .month, for: first)?.count else { continue }
+            let days = (1...length).filter { day in
+                calendar.date(from: DateComponents(year: y, month: month, day: day))
+                    .map { calendar.component(.weekday, from: $0) - 1 == wanted } == true
+            }
+            if m.range(at: 5).location != NSNotFound {
+                let list = ns.substring(with: m.range(at: 5))
+                let given = list.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+                if given != days {
+                    let mark = list.range(of: #"^\d{1,2}\s*([日号號])"#, options: .regularExpression)
+                        .map { String(list[$0].last!) }
+                    let sep = list.range(of: #"[、，,和及与]"#, options: .regularExpression).map { String(list[$0]) } ?? "、"
+                    let end = list.last.map { "日号號".contains($0) ? String($0) : "" } ?? ""
+                    let made = days.map { "\($0)" + (mark ?? "") }.joined(separator: sep) + (mark == nil ? end : "")
+                    out.replaceCharacters(in: m.range(at: 5), with: made)
+                }
+            }
+            if count != days.count { out.replaceCharacters(in: m.range(at: 3), with: "\(days.count)") }
+        }
+        return out as String
+    }
+
+    /// D86, z1 on 138 (item 21): Calculator showed 97÷5 = 19.4 (the five highs added up and divided), Doubao said so in
+    /// its thought, "19.4, which is exactly the five-city average high (87 ÷ 5)", and noted "总和87°C，平均为17.4°C"; the
+    /// answer and the 备忘录 kept it. A note made on Calculator that has no number like the one it shows (rounded or cut)
+    /// is refused once, with the number; noted again on the same screen, it is kept.
+    private func calcResultMissing(_ text: String) -> String? {
+        guard let app = Self.appInFront(steps, startedIn: startApp),
+              case let name = AppNames.hans(app).lowercased(), ["计算器", "计算机", "calculator"].contains(where: { name.contains($0) }),
+              let shown = Self.calculatorResult(readRows), calcNoteRefused != shown,
+              !Self.holdsNumber(text, shown) else { return nil }
+        calcNoteRefused = shown
+        return shown
+    }
+
+    static func calcNoteReason(_ shown: String) -> String {
+        "Refused: 计算器 shows \(shown), and the note has no such number. Note the result as the calculator shows it "
+            + "(rounded as the goal asks). If this note is not about this calculation, note it again and it is kept."
+    }
+
+    /// The result Calculator shows: the lowest line that is only a number above its keys (AC, %, mc…); nil when none or 0.
+    static func calculatorResult(_ rows: [[CandidatePicker.Piece]]) -> String? {
+        let keys: Set<String> = ["AC", "C", "%", "mc", "mr", "m+", "m-", "Rad", "Deg"]
+        guard let top = rows.joined().filter({ keys.contains($0.text.trimmingCharacters(in: .whitespaces)) })
+            .map(\.box.minY).min() else { return nil }
+        let shown = rows.filter { ($0.map(\.box.maxY).max() ?? 1) <= top + 0.005 }.compactMap { row -> (y: CGFloat, text: String)? in
+            let t = row.map(\.text).joined().replacingOccurrences(of: #"[,，\s]"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: "−", with: "-")
+            guard t.range(of: #"^-?\d+(\.\d+)?$"#, options: .regularExpression) != nil else { return nil }
+            return (row.map(\.box.minY).min() ?? 0, t)
+        }
+        guard let last = shown.max(by: { $0.y < $1.y }), let value = Double(last.text), value != 0 else { return nil }
+        return last.text
+    }
+
+    /// Whether a text gives a number that is the shown one rounded or cut to the places it is written with.
+    static func holdsNumber(_ text: String, _ shown: String) -> Bool {
+        guard let value = Double(shown),
+              let re = try? NSRegularExpression(pattern: #"-?\d+(?:\.\d+)?"#) else { return true }
+        let plain = text.replacingOccurrences(of: #"(?<=\d)[,，](?=\d{3})"#, with: "", options: .regularExpression)
+        let ns = plain as NSString
+        return re.matches(in: plain, range: NSRange(location: 0, length: ns.length)).contains { m in
+            let s = ns.substring(with: m.range)
+            guard let n = Double(s) else { return false }
+            let places = s.split(separator: ".").dropFirst().first?.count ?? 0
+            return abs(abs(n) - abs(value)) < pow(10, Double(-places))
+        }
     }
 
     /// D85, y6 on 138 (item 22): "日出清晨6:37，日落下午5:39，白昼时长11小时22分钟": Doubao worked the span out wrong (it is
@@ -2657,7 +2755,21 @@ extension Pointer: Gestures {}
         var timing = Metrics.Step()
         let replied = try await nextActions()
         timing.llmMs = (replied[0].act["think_s"]?.double ?? 0) * 1000
-        for planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
+        for var planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
+            if let said = planned.act["text"]?.str, !said.isEmpty {
+                // D87: a date fact in a note is put right as in the answer, so what is typed from the notes (a 备忘录 of
+                // the results) holds it right too.
+                let text = Self.rightFacts(said, today: Date())
+                if text != said {
+                    planned.act["text"] = .str(text)
+                    DebugLog.write("note: a weekday, a count of days or a span was wrong; put right")
+                }
+                if !notes.contains(text), let shown = calcResultMissing(text) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.calcNoteReason(shown))])
+                    DebugLog.write("note: refused; Calculator shows \(shown) and the note has no such number")
+                    continue
+                }
+            }
             if let text = planned.act["text"]?.str, !text.isEmpty, !notes.contains(text) {
                 let before = notes.reduce(into: Set<Int>()) { $0.formUnion(Self.noteItems($1)) }
                 notes.append(text)
@@ -2978,7 +3090,7 @@ extension Pointer: Gestures {}
             // 132 over the cloud 11-14 (c3): "2026年12月1日是星期日"; it is a Tuesday. A weekday the answer gives for a
             // date is checked with the calendar and put right.
             if name == "done", endsTask, let answer = act["answer"]?.str {
-                let fixed = Self.rightSpans(Self.rightDayCounts(Self.rightWeekdays(answer, today: Date()), today: Date()))
+                let fixed = Self.rightFacts(answer, today: Date())
                 if fixed != answer {
                     DebugLog.write("done: a weekday, a count of days or a span between two times was wrong; put right")
                     act["answer"] = .str(fixed)
