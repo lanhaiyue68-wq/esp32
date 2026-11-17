@@ -1274,7 +1274,11 @@ extension Pointer: Gestures {}
         }
         // D31, 135 over the cloud 11-15 (y4): "2027年春节为2027年2月6日；从今天2026年11月15日到那天还有225天" (83): "那天" is the
         // date said last before it in the same item (never one of the item before: the search stops at an item's number).
-        let thatDay = #"(?:从|自|從)?\s*(?:今天)?\s*(?:"# + d + #")?\s*(?:到|至|距离|距離|距|离|離)\s*(?:那天|那一天|当天|當天)[^，。；;\d]{0,12}?(?:还有|還有|还剩|有|共|是)?\s*(\d{1,4})\s*天"#
+        // D89, z2 on 138 (item 35): "2027年春节是2027年2月6日，星期六；从2026年11月17日到春节间隔80天" (81): a feast day the item
+        // gave a date for ("春节是…", "除夕为…") is that date, as 那天 is the date said last.
+        let feasts = "春节|春節|除夕|元旦|元宵节|元宵|清明节|清明|端午节|端午|中秋节|中秋|国庆节|国庆|國慶|七夕|重阳节|重阳|冬至|圣诞节|圣诞|聖誕"
+        let thatDay = #"(?:从|自|從)?\s*(?:今天)?\s*(?:"# + d + #")?\s*(?:到|至|距离|距離|距|离|離)\s*(那天|那一天|当天|當天|"# + feasts
+            + #")[^，。；;\d]{0,12}?(?:还有|還有|还剩|有|共|是)?\s*(\d{1,4})\s*天"#
         if let re = try? NSRegularExpression(pattern: thatDay), let dates = try? NSRegularExpression(pattern: d),
            let heads = try? NSRegularExpression(pattern: #"(?:^|[；;。\n])\s*(?:第\s*)?\d{1,2}\s*(?:[.、．](?!\d)|[项項])"#) {
             let ns = out
@@ -1286,10 +1290,13 @@ extension Pointer: Gestures {}
                 }
                 let before = NSRange(location: from, length: max(0, m.range.location - from))
                 let start: Date? = m.range(at: 2).location != NSNotFound ? date(ns, m, at: 1, calendar: calendar, near: today) : today
-                guard let said = dates.matches(in: ns as String, range: before).last, let a = startOfDay(start, calendar),
+                let target = ns.substring(with: m.range(at: 4))
+                let named = ["那天", "那一天", "当天", "當天"].contains(target) ? Optional(dates)
+                    : (try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: target) + #"[^，。；;\d]{0,6}"# + d))
+                guard let said = named?.matches(in: ns as String, range: before).last, let a = startOfDay(start, calendar),
                       let b = startOfDay(date(ns, said, at: 1, calendar: calendar, near: a), calendar),
                       let days = calendar.dateComponents([.day], from: a, to: b).day, days >= 0 else { continue }
-                let n = m.range(at: 4)
+                let n = m.range(at: 5)
                 if Int(ns.substring(with: n)) != days { out = out.replacingCharacters(in: n, with: String(days)) as NSString }
             }
         }
@@ -1358,8 +1365,13 @@ extension Pointer: Gestures {}
         return wanted >= 3 && (told * 2 < wanted || (wanted >= 10 && told <= wanted - 3))
     }
 
+    // D88, z2 on 138: "in Simplified Chinese only (no English)" was taken to the letter: items 30, 41, 43 and 47 said a
+    // title or a message "含英文，无法在仅用中文的报告中原样列出" (Z2验证9:29 was one), and "iPhone 13 mini" became
+    // "苹果手机13迷你款". The report is in Simplified Chinese; what it copies keeps its letters.
     static let wholeAnswerPrompt = """
-    You write the final report of a phone task for the phone's owner, in Simplified Chinese only (no English). The goal \
+    You write the final report of a phone task for the phone's owner, in Simplified Chinese. Names, titles, messages, \
+    model names and other words read on the phone are copied as they are written in the notes, English letters and all: \
+    never translate, shorten or leave one out because of its letters. The goal \
     lists numbered things. From the run's notes (in the order they were written; a later note on the same thing is newer \
     and fuller) and its answer so far, write one line per thing of the goal, numbered as in the goal ("1. …"): its result, \
     or "未完成：" and why. Use only what the notes and the answer say, and copy every value (number, price, time, name) \

@@ -715,6 +715,27 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D88, z2 on 138: the report keeps what it copies as written, letters and all.
+    func testTheReportCopiesEnglishAsWritten() {
+        XCTAssertTrue(AgentLoop.wholeAnswerPrompt.contains("English letters and all"))
+        XCTAssertFalse(AgentLoop.wholeAnswerPrompt.contains("no English"))
+    }
+
+    /// D89, z2 on 138 (item 35): a count of days to a feast day the item gave a date for is put right.
+    func testDaysToAFeastDayArePutRight() {
+        let today = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 11, day: 17))!
+        XCTAssertEqual(AgentLoop.rightDayCounts("35. 2027年春节是2027年2月6日，星期六；从2026年11月17日到春节间隔80天。", today: today),
+                       "35. 2027年春节是2027年2月6日，星期六；从2026年11月17日到春节间隔81天。")
+        XCTAssertEqual(AgentLoop.rightDayCounts("2027年春节为2027年2月6日（星期六），除夕为2月5日（星期五）；从今天到春节还有80天", today: today),
+                       "2027年春节为2027年2月6日（星期六），除夕为2月5日（星期五）；从今天到春节还有81天", "春节's date, not the one said last")
+        let undated = "从今天2026年11月17日到春节还有80天"
+        XCTAssertEqual(AgentLoop.rightDayCounts(undated, today: today), undated, "no date given for 春节")
+        let counted = "2027年春节是2027年2月6日；从今天到春节含今天共82天"
+        XCTAssertEqual(AgentLoop.rightDayCounts(counted, today: today), counted)
+        XCTAssertEqual(AgentLoop.rightDayCounts("春节为2027年2月6日，从今天2026年11月15日到那天还有225天", today: today),
+                       "春节为2027年2月6日，从今天2026年11月15日到那天还有83天", "那天 as before")
+    }
+
     /// D87, z1 on 138 (item 38): the days of a weekday in a month are worked out by the calendar.
     func testTheDaysOfAWeekdayInAMonthArePutRight() {
         let today = Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 11, day: 17))!
