@@ -134,6 +134,10 @@ import UIKit
     var watchQueued: [String] = []  // chats whose owner wrote while a task ran: read first when it is done
     var watchBusyTold: Set<String> = []  // chats told "busy" during the task now running (once each)
     var watchBanner: (title: String, body: String)?  // the newest WeChat banner seen while the task runs
+    /// D104 (user 11-17): chats asked, during the task now running, whether their new message comes first.
+    var watchAsked: [String: Double] = [:]
+    var watchPreempt: String?  // the chat whose owner answered 先做: the task running stops for it
+    var watchPaused: [WatchPausedTask] = []  // tasks stopped for an owner's 先做, done again after it (last in, first out)
     var watchRetries: [String: Int] = [:]  // per chat: replies that did not go out, read again at the next check
     /// A tool call that changes something, waiting for the owner's "确认" (two minutes).
     var watchPendingCall: (chat: String, sender: String, call: OwnerTools.Call, request: String, at: Double)?

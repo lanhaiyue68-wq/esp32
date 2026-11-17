@@ -364,6 +364,33 @@ enum WatchSettings {
     /// 127 (user 11-12): sent once to a listed chat whose listed sender writes while the owner's task goes on.
     static let busyReply = "收到，我正在做另一件事，做完就来做你这件。"
 
+    /// D104, user 11-17 ("我给的指令后要先确认是现在干还是等手头的事干完再整"): asked once in a chat that wrote during a
+    /// task. 先做: the task stops, theirs is done, then the one stopped from where it was; 等会 or no answer: as before.
+    static let busyAsk = "收到。我手上正在做另一件事，要现在先做你这件吗？回「先做」我就先做你这件，做完再接着做手上的；回「等会」或不回，我就做完手上这件再做你这件。"
+
+    /// The answer to busyAsk: true for now (先做, 现在, 好), false for after (等会, 做完再, 不用); nil for anything else,
+    /// which is a message of its own.
+    static func preemptAnswer(_ text: String) -> Bool? {
+        let s = AppNames.hans(text).lowercased().filter { !$0.isWhitespace && !"，。！？,.!?~～、…「」\"'".contains($0) }
+        guard !s.isEmpty, s.count <= 16 else { return nil }
+        func starts(_ pattern: String) -> Bool { s.range(of: "^(?:" + pattern + ")", options: .regularExpression) != nil }
+        if starts("先做|先弄|先干|先办|先搞|现在|马上|立刻|立即"), !starts("先做完|先干完|先弄完|现在不|马上不") { return true }
+        if s.range(of: "不|等|稍后|晚点|别急|做完|干完|弄完|完再|后面|回头|待会|一会", options: .regularExpression) != nil { return false }
+        if starts("好|可以|行|嗯|是|对|要|ok") { return true }
+        return nil
+    }
+
+    /// The task stopped for another, to be done again from where it is, with what it had noted (item heads in the
+    /// notes reworded, so they are not taken for more of the goal's items).
+    static func resumedTask(_ task: String, notes: [String]) -> String {
+        var kept = notes.joined(separator: "；")
+        kept = kept.replacingOccurrences(of: #"第\s*(\d{1,2})\s*[项項]"#, with: "第$1件", options: .regularExpression)
+        kept = kept.replacingOccurrences(of: #"(^|[；;\n])\s*(\d{1,2})\s*[.、．](?!\d)"#, with: "$1($2)", options: .regularExpression)
+        return task + "\n\n（这件事刚才做到一半，先停下去做了主人的另一件事。"
+            + (kept.isEmpty ? "" : "当时已经记下的：" + String(kept.prefix(600)) + "。")
+            + "看现在的画面，接着把没做完的做完，已经做好的不用重做。）"
+    }
+
     /// Only a retry with no new destination or action may inherit a previous task. The log's "重新去做" was not in
     /// the old list; failure feedback and references such as "刚才没做好" also describe the same task, not a new one.
     static func isRedo(_ request: String) -> Bool {
@@ -687,6 +714,16 @@ enum WatchSettings {
 
 /// One completed task awaiting its report, never an executable task queue. Persist before returning to WeChat so
 /// a failed send or a restarted watch retries the report instead of performing the phone action again.
+/// D104: a task stopped for the owner's "先做", and what it had noted.
+struct WatchPausedTask: Equatable {
+    var chat: String
+    var sender: String
+    var task: String
+    var phone: Bool
+    var readOnly: Bool
+    var notes: [String]
+}
+
 struct WatchTaskReply: Codable, Equatable {
     var chat: String
     var sender: String
@@ -779,6 +816,15 @@ enum WatchReport {
         if let colon = banner.body.firstIndex(where: { $0 == ":" || $0 == "：" }),
            listed.contains(where: { sameName(String(banner.body[..<colon]), $0) }) { return chat }
         return listed.contains(where: { sameName(title, $0) }) ? chat : nil
+    }
+
+    /// D104: a banner's message without the "sender:" a group's banner puts before it.
+    static func bannerText(_ banner: (title: String, body: String), senders: [String]) -> String {
+        if let colon = banner.body.firstIndex(where: { $0 == ":" || $0 == "：" }),
+           senders.contains(where: { sameName(String(banner.body[..<colon]), $0.filter { !$0.isWhitespace }) }) {
+            return String(banner.body[banner.body.index(after: colon)...])
+        }
+        return banner.body
     }
 
     /// A chat list's preview line as the message it shows, no whitespace: tags WeChat puts before it ([有人@我], [3条])
@@ -1301,6 +1347,7 @@ extension AppModel {
         watchAnswered = [:]
         watchInterjectedAt = [:]
         (watchQueued, watchBusyTold, watchBanner) = ([], [], nil)
+        (watchAsked, watchPreempt, watchPaused) = ([:], nil, [])
         watchRetries = [:]
         watchRestUntil = [:]
         watchPendingCall = nil
@@ -1420,6 +1467,12 @@ extension AppModel {
                     // Back off only an unsent report. A successful send needs the ordinary screen cooldown.
                     (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + (watchTaskReply == nil ? 6 : 20))
                 }
+            } else if !watchPaused.isEmpty, watchQueued.isEmpty, now() >= quietUntil,
+                      UIApplication.shared.applicationState != .active {
+                // D104: theirs is done and reported: the task stopped for it, from where it was.
+                await resumePausedTask()
+                guard watching else { break }
+                (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
             } else if let send = chatTool.nextCommand() {
                 watchStatus = String(localized: "Sending ChatTool's reply to \(send.chat)…")
                 DebugLog.write("watch: ChatTool asks to send to \(send.chat)")
@@ -1466,7 +1519,9 @@ extension AppModel {
                 let due = t - lastCheck >= Double(WatchSettings.intervalMinutes) * 60
                 // a reply that did not go out, or a check that did not finish: again soon, not at the next interval
                 let retry = (!watchRetries.isEmpty || failures > 0) && t - lastCheck >= 20
-                if due || retry || ((moved || marked) && t - lastCheck >= 5) {
+                // D104: the owner said 先做: their chat (queued first) is read at once.
+                let preempting = !watchPaused.isEmpty && !watchQueued.isEmpty && UIApplication.shared.applicationState != .active
+                if due || retry || preempting || ((moved || marked) && t - lastCheck >= 5) {
                     lastCheck = t
                     if marked && !moved { markChecks += 1 }
                     watchStatus = moved || marked ? String(localized: "New activity on WeChat; handling it…") : String(localized: "Regular check…")
@@ -1539,20 +1594,33 @@ extension AppModel {
         let rules = WatchSettings.rules
         guard let chat = WatchReport.bannerChat(seen, targets: rules.targets, senders: rules.senders) else { return }
         if !watchQueued.contains(chat) { watchQueued.append(chat) }
+        // D104: the answer to the question asked there. 先做: this run stops at this step and theirs comes first.
+        if watchAsked[chat] != nil {
+            let said = WatchSettings.bare(WatchReport.bannerText(seen, senders: rules.senders), rules)
+            guard let first = WatchSettings.preemptAnswer(said) else { return }
+            DebugLog.write("watch: busy: \(chat) answered \"\(said)\": \(first ? "theirs first" : "this task first")")
+            guard first, watchPreempt == nil else { return }
+            watchPreempt = chat
+            watchQueued.removeAll { $0 == chat }
+            watchQueued.insert(chat, at: 0)
+            agent.stop()
+            return
+        }
         guard !watchBusyTold.contains(chat) else { return }
         // A task inside WeChat may have its own chat on screen: leaving it could send its part into the wrong chat.
         // There the message waits for the task, as before.
         guard let app = AgentLoop.appInFront(agent.steps, startedIn: nil),
               !AppNames.variants("微信").map(AppNames.hans).contains(AppNames.hans(app)) else { return }
         watchBusyTold.insert(chat)
-        DebugLog.write("watch: busy: \(chat) wrote during the task in \(app); telling it, then back")
+        DebugLog.write("watch: busy: \(chat) wrote during the task in \(app); asking whether theirs comes first, then back")
         afterPhoneTask = true  // walkToChat: no blind back taps in the task's app, straight through Lan Agent
-        let told = await quickSend(WatchSettings.busyReply, chat: chat, after: nil) == .sent
-        DebugLog.write("watch: busy: \(told ? "told" : "not told") \(chat); opening \(app) again")
+        let asked = await quickSend(WatchSettings.busyAsk, chat: chat, after: nil) == .sent
+        if asked { watchAsked[chat] = now() }
+        DebugLog.write("watch: busy: \(asked ? "asked" : "could not ask") \(chat); opening \(app) again")
         _ = try? await openApp(app)
         watchBanner = nil  // what was read meanwhile was WeChat's own screen (a name over a message), no banner
-        agent.aside("Between steps the watch \(told ? "told" : "tried to tell") \(chat) in WeChat that this task is under "
-                    + "way, then opened \(app) again. Go on with the task from the screen now.")
+        agent.aside("Between steps the watch \(asked ? "asked" : "tried to ask") \(chat) in WeChat whether their new "
+                    + "message comes before this task, then opened \(app) again. Go on with the task from the screen now.")
     }
 
     private func missedLine(_ chat: String, _ preview: String) -> String? {
@@ -1756,7 +1824,10 @@ extension AppModel {
             // that should have seen the reply go out missed it (logs(18): the same reply sent twice).
             let afterMine = fresh.lastIndex(where: { $0.mine }).map { fresh.count - 1 - $0 } ?? fresh.count
             let pending = read.suffix(fresh.suffix(afterMine).filter { !$0.mine }.count)
-            let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30 }
+            // D104: "先做" / "等会" said to the question asked during the last task answer it; they are no task.
+            let askedHere = watchAsked.removeValue(forKey: chat) != nil
+            let due = pending.filter { WatchSettings.fires($0, rules) && now() - (watchAnswered[WatchReport.answerKey($0)] ?? 0) > 30
+                && !(askedHere && WatchSettings.preemptAnswer(WatchSettings.bare($0.text, rules)) != nil) }
             responding = due
             if let last = due.last { answering = WatchReport.Line(sender: last.sender, text: last.text, mine: false) }
             if let waiting = watchPendingCall, waiting.chat == chat, let last = due.last, last.sender == waiting.sender,
@@ -1892,7 +1963,16 @@ extension AppModel {
             }
             agent.endAfterSend = nil
             afterPhoneTask = outside && !handled
-            if handled {
+            let preempted = watchPreempt
+            watchPreempt = nil
+            if !handled, outside, done == nil, let forChat = preempted, let source = askers.last {
+                // D104: stopped for the owner's "先做" in forChat: kept, and done again after theirs.
+                watchPaused.append(WatchPausedTask(chat: chat, sender: source.sender, task: task, phone: phone,
+                                                   readOnly: readOnly, notes: agent.notes))
+                for m in askers { watchAnswered[WatchReport.answerKey(m)] = now() }
+                if let i = answerIndex { read[i].replied += "【暂停，先做\(forChat)的】" + task }
+                DebugLog.write("watch: owner task in \(chat) stopped for \(forChat)'s; done again after it")
+            } else if handled {
                 for m in askers { watchAnswered[WatchReport.answerKey(m)] = now() }
             } else if outside, let source = askers.last {
                 // Save the result even if Stop was pressed during the action; a later watch may report it, but
@@ -1949,6 +2029,37 @@ extension AppModel {
         if outcome == .deferred { DebugLog.write("watch: return paused; not a failed attempt") }
         else { DebugLog.write("watch: return to list \(outcome == .arrived ? "verified" : "pending; navigation retry only")") }
         return outcome
+    }
+
+    /// D104: the task stopped for an owner's "先做", done again now from where it is, and reported as any other.
+    private func resumePausedTask() async {
+        guard watching, !Task.isCancelled, let paused = watchPaused.popLast() else { return }
+        DebugLog.write("watch: back to the owner task in \(paused.chat) stopped for another: \(paused.task)")
+        let task = WatchSettings.resumedTask(paused.task, notes: paused.notes)
+        agent.endAfterSend = paused.phone && !WatchSettings.severalParts(paused.task) ? 5 : nil
+        let busyWatch = startBusyWatch()
+        let done = await watchRun(WatchSettings.ownerTask(chat: paused.chat, task: task, phone: true, readOnly: paused.readOnly),
+                                  stepLimit: agent.maxSteps, fastText: true,
+                                  directStart: !WatchSettings.severalParts(paused.task), readOnly: paused.readOnly)
+        busyWatch.cancel()
+        agent.betweenSteps = nil
+        agent.endAfterSend = nil
+        afterPhoneTask = true
+        let preempted = watchPreempt
+        watchPreempt = nil
+        if done == nil, let forChat = preempted {
+            watchPaused.append(WatchPausedTask(chat: paused.chat, sender: paused.sender, task: paused.task, phone: paused.phone,
+                                               readOnly: paused.readOnly, notes: paused.notes + agent.notes))
+            DebugLog.write("watch: owner task in \(paused.chat) stopped again for \(forChat)'s")
+            return
+        }
+        guard watching, !Task.isCancelled else { return }
+        var result = WatchSettings.phoneTaskResult(action: agent.steps.last?["action"]?.str, answer: done, attempted: agent.sent,
+                                                   reason: agent.steps.last?["reason"]?.str, notes: paused.notes + agent.notes)
+        if PrivacyGuard.check(result, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) != nil {
+            result = "任务已结束，结果含有受保护信息，未发送详情。"
+        }
+        watchTaskReply = WatchTaskReply(chat: paused.chat, sender: paused.sender, text: result)
     }
 
     private func deliverWatchTaskReply() async {

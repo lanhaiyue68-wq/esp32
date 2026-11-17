@@ -715,6 +715,26 @@ import XCTest
         XCTAssertTrue(AgentLoop.holdsNumber("2的30次方 = 1,073,741,824", "1073741824"))
     }
 
+    /// D104: a message during a task is asked about: 先做 stops the task for it, 等会 keeps it after; the answer is no task.
+    func testANewMessageDuringATaskIsAskedAboutFirst() {
+        for now in ["先做", "先做吧", "现在做", "马上", "好", "好的，先做", "可以", "嗯", "先做我这个，做完再做外卖", "OK"] {
+            XCTAssertEqual(WatchSettings.preemptAnswer(now), true, now)
+        }
+        for later in ["等会", "等一下", "不用", "先做完手上的", "做完再说", "现在不用", "不急", "一会再说", "先不做", "好，等会"] {
+            XCTAssertEqual(WatchSettings.preemptAnswer(later), false, later)
+        }
+        for other in ["帮我查一下深圳明天的天气", "在吗", "?", ""] {
+            XCTAssertNil(WatchSettings.preemptAnswer(other), other)
+        }
+        XCTAssertTrue(WatchSettings.busyAsk.contains("先做") && WatchSettings.busyAsk.contains("等会"))
+        XCTAssertEqual(WatchReport.bannerText((title: "测试群", body: "主人蓝海乐: 先做"), senders: ["主人蓝海乐"]), " 先做")
+        XCTAssertEqual(WatchReport.bannerText((title: "主人蓝海乐", body: "先做"), senders: ["主人蓝海乐"]), "先做")
+        let goal = "帮我做这2件事：1. 在美团外卖点一杯奶茶到确认订单页；2. 在天气看深圳明天的温度"
+        let resumed = WatchSettings.resumedTask(goal, notes: ["第2项：深圳明天18–25°C", "1. 已加入购物车：珍珠奶茶"])
+        XCTAssertEqual(AgentLoop.goalParts(resumed), 2, "the notes are no more items")
+        XCTAssertTrue(resumed.contains("深圳明天18–25°C") && resumed.hasPrefix(goal))
+    }
+
     /// D103: a click near the top waits while a message's banner is over it; text that stays is the screen's own.
     func testAClickNearTheTopWaitsForABanner() {
         func row(_ pieces: (String, Double, Double)...) -> [CandidatePicker.Piece] {
