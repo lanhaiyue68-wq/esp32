@@ -141,6 +141,8 @@ extension Pointer: Gestures {}
     private var cutRefused: Set<Int> = []
     /// D114: a short goal that reads one group was refused once for ending where that group's title is not shown.
     private var groupTitleRefused = false
+    /// D134: a name or remark the goal sets was refused once for being typed again after it was saved.
+    private var setAgainRefused = false
     /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
     private var lastGroupTitle: String?
     /// D124: finger-down swipes in a chat refused this run because the thought wanted newer messages (two at most).
@@ -616,6 +618,7 @@ extension Pointer: Gestures {}
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
+        setAgainRefused = false
         (olderSwipeRefused, bottomRefused) = (0, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -823,7 +826,10 @@ extension Pointer: Gestures {}
         ("抖音", ["douyin", "tiktok"]), ("小红书", ["xiaohongshu", "rednote"]), ("快手", ["kuaishou"]),
         ("微信", ["wechat", "weixin"]), ("备忘录", ["notes"]), ("日历", ["calendar"]), ("设置", ["settings"]),
         ("天气", ["weather"]), ("股市", ["stocks"]), ("计算器", ["calculator"]), ("时钟", ["clock", "alarm"]),
-        ("提醒事项", ["reminders"]), ("高德", ["amap", "gaode"]), ("safari", ["浏览器"]),
+        // D128, q134h on 144 (h22): a run that began inside Safari said only "address bar" and "Baidu"; "never went into
+        // safari" made it search all over again, 12 steps.
+        ("提醒事项", ["reminders"]), ("高德", ["amap", "gaode"]),
+        ("safari", ["浏览器", "address bar", "url bar", "地址栏", "网址列"]),
     ]
 
     /// 123 over the cloud 11-12: a goal of nine parts in seven apps followed a remembered way, did only the weather, and
@@ -867,7 +873,8 @@ extension Pointer: Gestures {}
         let stopsBeforePaying = #"(未|没有|没|不)(提交订单|确认订单|确认支付|支付|付款|下单|提交)"#
         let skipped = numberedItems(answer).filter { item in
             let body = AppNames.hans(String(answer[item.body])).lowercased()
-            guard body.range(of: #"第\s*\d{1,2}\s*[项項]"#, options: .regularExpression) == nil,
+            // D135: "第3、4项无合计金额" points at other items as much as "第3项" does.
+            guard body.range(of: #"第\s*\d{1,2}(\s*[、，,和与及到至~-]\s*\d{1,2})*\s*[项項]"#, options: .regularExpression) == nil,
                   !absent.contains(where: { app in
                       let name = AppNames.hans(app).lowercased()
                       return !name.isEmpty && body.contains(name)
@@ -875,8 +882,14 @@ extension Pointer: Gestures {}
             let clauses = body.replacingOccurrences(of: stopsBeforePaying, with: "", options: .regularExpression)
                 .components(separatedBy: CharacterSet(charactersIn: "，,；;。（）()"))
             return clauses.indices.contains { i in
-                notDone.contains { clauses[i].contains($0) }
-                    && !reasons.contains { reason in clauses[...i].contains { $0.contains(reason) } }
+                guard notDone.contains(where: { clauses[i].contains($0) }) else { return false }
+                // D135, x3 on 144: "1. 美团外卖搜索“汉堡”：未完成，美团外卖需登录才能浏览店铺" was sent back as no reason given,
+                // and the run went back and made a second X3组记录 memo. A bare status after the colon ("：未完成") is
+                // explained by the clause right after it; "店名未记录，后来因为网络慢退出" still is not.
+                let tail = (clauses[i].components(separatedBy: CharacterSet(charactersIn: "：:")).last ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+                let upTo = notDone.contains(tail) ? min(i + 1, clauses.count - 1) : i
+                return !reasons.contains { reason in clauses[...upTo].contains { $0.contains(reason) } }
             }
         }.map { $0.n }
         guard !skipped.isEmpty else { return nil }
@@ -1912,11 +1925,14 @@ extension Pointer: Gestures {}
     /// D27: the note a readup leaves; a long read keeps its first and last 2500 characters.
     /// D123, q143n on 144 (n16): the header said "读到“143夜测一”为止" whether or not those words were read, and the model
     /// took it that the read-up had found them. It says which: found, the top reached without them, or not yet.
-    static func readUpNote(_ lines: [String], screens: Int, until: String, top: Bool = false) -> String {
+    static func readUpNote(_ lines: [String], screens: Int, until: String, top: Bool = false, now: Date = Date()) -> String {
         let text = lines.joined(separator: "\n")
         let bare = { (s: String) in AppNames.hans(s).filter { !$0.isWhitespace } }
-        let found = !until.isEmpty && lines.contains { bare($0).contains(bare(until)) }
-        let reach = until.isEmpty ? "" : found ? "，读到“\(until)”为止"
+        let targets = readUpTargets(until, now: now)
+        let hit = targets.first { t in lines.contains { bare($0).contains(t) } }
+        let found = hit != nil
+        let shownAs = hit.map { $0 == targets.first ? "" : "（微信里显示为“\($0)”）" } ?? ""
+        let reach = until.isEmpty ? "" : found ? "，读到“\(until)”\(shownAs)为止"
             : top ? "，一直读到最上面，没有读到“\(until)”" : "，还没读到“\(until)”，更早的没有读"
         let kept = text.count <= 6000 ? text
             : String(text.prefix(2500)) + "\n…（中间省略\(text.count - 5000)字）…\n" + String(text.suffix(2500))
@@ -1925,6 +1941,56 @@ extension Pointer: Gestures {}
             // D46, y5 on 136: the run found 133真人测试一 under 昨天下午1:20, then "corrected" it to the time line below
             // it (2:34): in WeChat a time line heads the messages under it.
             + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的）：\n" + kept + sentTimesLine(of: until, in: lines)
+    }
+
+    /// D133, s6 on 144 (11-18): "一直读到11月14日为止" was read up for 11月14日, but WeChat heads the last week's messages
+    /// 昨天 and 星期X (11-14 was 星期六); the date never shows there. A date one to six days back is also looked for as WeChat
+    /// shows it. The words themselves come first.
+    static func readUpTargets(_ until: String, now: Date = Date()) -> [String] {
+        let bare = AppNames.hans(until).filter { !$0.isWhitespace }
+        guard !bare.isEmpty else { return [] }
+        var out = [bare]
+        guard let re = try? NSRegularExpression(pattern: #"^(\d{1,2})月(\d{1,2})[日号]$"#),
+              let m = re.firstMatch(in: bare, range: NSRange(bare.startIndex..., in: bare)),
+              let mr = Range(m.range(at: 1), in: bare), let dr = Range(m.range(at: 2), in: bare),
+              let month = Int(bare[mr]), let day = Int(bare[dr]) else { return out }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let today = cal.startOfDay(for: now)
+        var parts = cal.dateComponents([.year], from: today)
+        parts.month = month
+        parts.day = day
+        guard var date = cal.date(from: parts) else { return out }
+        if date > today, let back = cal.date(byAdding: .year, value: -1, to: date) { date = back }
+        guard let days = cal.dateComponents([.day], from: date, to: today).day else { return out }
+        if days == 1 {
+            out.append("昨天")
+        } else if (2...6).contains(days) {
+            out.append(["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][cal.component(.weekday, from: date) - 1])
+        }
+        return out
+    }
+
+    /// D134, s4 on 144 (11-18): 137测试备注 was changed to 144测试备注; a new plan took the saved page for another friend's,
+    /// and 主人蓝海乐 was changed to 144测试备注 as well. A name or remark the goal sets, typed and then saved (a tap after
+    /// it), is not typed again unasked: refused once.
+    static func setsNameAgain(_ steps: [JObject], typed: String, task: String) -> Bool {
+        let goal = AppNames.hans(task)
+        guard goal.range(of: #"(备注|群名|名称|名字|昵称)[^，。；“”"]{0,4}(改成|改为|设为|设成|写成)"#, options: .regularExpression) != nil,
+              let re = try? NSRegularExpression(pattern: #"[「“"]([^」”"]+)[」”"]"#) else { return false }
+        let key = typedKey(typed)
+        let ns = task as NSString
+        let quoted = re.matches(in: task, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
+        guard key.count >= 2, quoted.contains(where: { typedKey($0) == key }),
+              let i = steps.lastIndex(where: { $0["action"]?.str == "type" && typedKey($0["text"]?.str ?? "") == key }) else { return false }
+        return steps[(i + 1)...].contains { $0["action"]?.str == "tap" }
+    }
+
+    static func setAgainReason(_ typed: String) -> String {
+        "Refused: “\(typed)” was already typed and saved once in this run, and the goal sets it for one person or thing. "
+            + "A page that still shows the old name belongs to someone else (or is the page from before the save): go back "
+            + "and check whose page it was saved on; never set it on a second one. If the text in this field came out wrong, "
+            + "clear the field and type it again: that is let through."
     }
 
     /// D54, 136 (user 11-16: "这个可以让codex来判断啊，咋会犯这样的低级错误"): when 133真人测试一 was sent was answered 昨天下午1:20
@@ -2539,7 +2605,9 @@ extension Pointer: Gestures {}
             let a = s["action"]?.str ?? ""
             // D17, 134 over the cloud 11-15 (y4): 高德's 驾车 tab, the mode panel, 公车捷运, and round again; then the drive
             // time was noted and 公车捷运 was refused 25 times as the same round. A round that noted something got on.
-            if a == "tap" { taps.insert(s, at: 0) } else if observedActions.contains(a) || ["note", "part done"].contains(a) { break }
+            // D129, q133x on 144 (x4): the taps of a part skipped as a round counted again in the next part, whose first tap
+            // was refused as the old round; three parts were skipped after one refusal each and the run failed at item 14.
+            if a == "tap" { taps.insert(s, at: 0) } else if observedActions.contains(a) || a == "note" || partEnds.contains(a) { break }
             if taps.count >= 12 { break }
         }
         taps.append(next)
@@ -2555,6 +2623,9 @@ extension Pointer: Gestures {}
         }
         return false
     }
+
+    /// Records that end a part: what came before belongs to another part (D129).
+    static let partEnds: Set<String> = ["part done", "part failed", "thing skipped"]
 
     static let roundReason = "Refused: these taps, the same spots in the same order, already came back to where they began "
         + "twice. One of them does not do what you think (a − or ✕ that opens the item instead). Do not go round again: "
@@ -2572,7 +2643,7 @@ extension Pointer: Gestures {}
             if a == "swipe" {
                 guard let e = swipeDirection(s) else { break }
                 dirs.insert(e, at: 0)
-            } else if observedActions.contains(a) { break }
+            } else if observedActions.contains(a) || partEnds.contains(a) { break }
             if dirs.count >= 16 { break }
         }
         let turns = zip(dirs, dirs.dropFirst()).filter { $0 != $1 }.count
@@ -3606,6 +3677,11 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(
                         "Refused: the goal says to send “\(exact)” exactly. Type “\(exact)” with nothing added or left out.")])
                     DebugLog.write("type: refused; the goal's message with something added")
+                    return false
+                }
+                if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task) {
+                    setAgainRefused = true
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.setAgainReason(typedNow))])
                     return false
                 }
                 if name == "type", let sent = sentMatch,
@@ -4724,6 +4800,10 @@ extension Pointer: Gestures {}
     /// cleared, and Codex plans the rest. False (the caller stops the run) for a goal of one thing or when none are left.
     private func skipStuckThing(_ shot: Data?, _ why: String) async throws -> Bool {
         guard presetPlan.isEmpty else { return false }
+        // D130, q133x on 144 (x4): item 12 was noted and 天气 opened for item 13 with part 12 still open; stuck in 天气,
+        // "未能完成：第12项" was written (12 had its answer) and 13 was planned and skipped again. Parts already noted close
+        // first: the stuck part is the one the work is in.
+        skipPartsNoted()
         var why = why
         // A way learned for this step did not get it on: counted against the way (two misses and no win: dropped).
         if let tip = tryingTip { lessons?.tipResult(tip, worked: false); tryingTip = nil }
@@ -4752,8 +4832,11 @@ extension Pointer: Gestures {}
                 break
             }
         }
-        guard Self.goalParts(task) >= 3, itemFailsLeft > 0 else { return false }  // one thing: the run stops as before
-        itemFailsLeft -= 1
+        // D132, x4 on 144: 美团 not signed in took two of the five skips. A thing the coach found cannot be done on this
+        // phone now (sign-in, a service off) is a skip the goal allows, not the run going wrong: it spends nothing.
+        let blocked = why.hasPrefix("做不成：")
+        guard Self.goalParts(task) >= 3, itemFailsLeft > 0 || blocked else { return false }  // one thing: the run stops as before
+        if !blocked { itemFailsLeft -= 1 }
         let what = parts.count >= 2 && partIndex < parts.count ? Self.failedPartNote(parts[partIndex], why: why) : CloudBridge.failureWords(why)
         let line = "未能完成：" + String(what.prefix(160))
         if !notes.contains(line) { notes.append(line) }
@@ -4906,6 +4989,7 @@ extension Pointer: Gestures {}
     /// parts goes back and forth by nature, and the guard stopped runs with the first part done (e01, f02, f06 on 11-09).
     private func gotOn() {
         (departures, circleRefused, bounceGuard, bounceRefused, deadRefused, bounceOpener) = ([], 0, nil, 0, 0, false)
+        roundRefused = 0  // D129: one refusal in item 12 and one in 13 made the third, in item 14, a change of plan
         pressRuns = [:]
         stepsSinceProgress = 0
     }
@@ -5296,6 +5380,7 @@ extension Pointer: Gestures {}
     private func closeFailedPart(_ why: String, by: String?) -> String {
         if let tip = tryingTip { lessons?.tipResult(tip, worked: false); tryingTip = nil }
         guard parts.count >= 2, partIndex < parts.count else { return "" }
+        skipPartsNoted()  // D130
         doneParts.append(parts[partIndex] + " -> 未能完成：" + String(why.prefix(80)))
         record(nil, ["action": .str("part failed"), "part": .int(partIndex + 1)])
         gotOn()
@@ -5658,7 +5743,7 @@ extension Pointer: Gestures {}
             // D27, user 11-15 (客户场景: 微信群或个人聊天记录爬楼): reading back through a chat was a swipe and a model call a
             // screen. Up to readUpScreens screens are scrolled and read on the phone, the text only, until the words
             // given or the top (nothing moves), and what was read goes into the notes oldest first.
-            let until = AppNames.hans(a["until"]?.str ?? "").filter { !$0.isWhitespace }
+            let targets = Self.readUpTargets(a["until"]?.str ?? "")  // D133
             var screens: [[String]] = [], last: [String] = [], top = false
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
@@ -5666,7 +5751,10 @@ extension Pointer: Gestures {}
                 if i > 0, rows == last { top = true; break }  // the top: nothing moved
                 screens.append(rows)
                 last = rows
-                if !until.isEmpty, rows.contains(where: { AppNames.hans($0).filter { !$0.isWhitespace }.contains(until) }) { break }
+                if rows.contains(where: { row in
+                    let bare = AppNames.hans(row).filter { !$0.isWhitespace }
+                    return targets.contains { bare.contains($0) }
+                }) { break }
                 try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
                 await screen?.settled()
             }

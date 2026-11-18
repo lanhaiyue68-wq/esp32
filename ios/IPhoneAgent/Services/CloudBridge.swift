@@ -270,8 +270,19 @@ import Foundation
         case "done":
             let answer = last["answer"]?.str ?? ""
             if last["approval"]?.str == "rejected" {
-                return Outcome(status: "cancelled", answer: said(false, answer.isEmpty ? "消息没有获批准，没有发送" : answer),
-                               error: "not_approved", steps: moves)
+                // D137, s1 on 144: 丰巢 wanted a phone number sign-in; the run found that, its message about it was not
+                // approved, and the answer was only "没有发送：这条消息未获批准". What was found (or the message that held
+                // it) goes back too.
+                var text = answer.isEmpty ? "消息没有获批准，没有发送" : answer
+                if text.hasSuffix("。") { text = String(text.dropLast()) }
+                var draft = ""
+                if let wait = steps.last(where: { $0["action"]?.str == "waiting approval" }), let r = wait["reason"]?.str {
+                    draft = r.hasPrefix("about to send: ") ? String(r.dropFirst("about to send: ".count)) : r
+                }
+                let found = foundNotes(steps)
+                if !found.isEmpty { text += "。已查到：" + found.joined(separator: "；") }
+                else if !draft.isEmpty { text += "。没发出的内容是：“" + draft + "”" }
+                return Outcome(status: "cancelled", answer: said(false, text), error: "not_approved", steps: moves)
             }
             return Outcome(status: "succeeded", answer: said(true, answer.isEmpty ? "已完成" : answer), error: nil, steps: moves)
         case "stopped": return Outcome(status: "cancelled", answer: said(false, "任务被停止了"), error: "stopped", steps: moves)

@@ -1368,6 +1368,8 @@ import XCTest
         let icon: JObject = ["action": .str("tap"), "source": .str("route"), "x": .num(380), "y": .num(592), "text": .str("高德地圖")]
         XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [thought]), ["高德"])
         XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [icon, thought]), [])
+        let bar: JObject = ["action": .str("tap"), "thought": .str("The page is blank, so I tap the address bar to type Baidu.")]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "用Safari搜索“深圳天气”，告诉我第一条结果的标题", steps: [bar]), [], "D128")
     }
 
     /// D123, q143n on 144 (n16): a read-up says whether it read the words it was to stop at.
@@ -1400,6 +1402,79 @@ import XCTest
         XCTAssertTrue(AgentLoop.mayBeScrolledUp([open, tap, swipe(300, 750)]))
         XCTAssertFalse(AgentLoop.mayBeScrolledUp([open, swipe(750, 300)]))
         XCTAssertFalse(AgentLoop.mayBeScrolledUp([]), "never opened here")
+    }
+
+    /// D129, q133x on 144 (x4): taps of a part that ended are not a round of the next part.
+    func testARoundDoesNotReachIntoTheLastPart() {
+        func tap(_ x: Double, _ y: Double) -> JObject { ["action": .str("tap"), "x": .num(x), "y": .num(y)] }
+        let (a, b) = (tap(122, 95), tap(100, 110))
+        XCTAssertTrue(AgentLoop.repeatsRound([a, b, a, b, a], next: b))
+        for end in ["part failed", "thing skipped", "part done"] {
+            XCTAssertFalse(AgentLoop.repeatsRound([a, b, a, b, a, ["action": .str(end)]], next: b), end)
+        }
+        func swipe(_ y1: Double, _ y2: Double) -> JObject {
+            ["action": .str("swipe"), "x1": .num(500), "y1": .num(y1), "x2": .num(500), "y2": .num(y2)]
+        }
+        let (up, down) = (swipe(750, 300), swipe(300, 750))
+        let seen = [up, down, up, down, up, down, up]
+        if AgentLoop.scrollsBackAgain(seen, next: down) {
+            XCTAssertFalse(AgentLoop.scrollsBackAgain(seen + [["action": .str("thing skipped")]], next: down))
+        }
+    }
+
+    /// D130, x4 on 144: item 12 noted with its part still open; the part that failed was 13's.
+    func testANotedPartIsNotTheOneThatFailed() {
+        let task = "帮我做这14件事：" + (1...14).map { "\($0). 在天气看第\($0)个城市的气温" }.joined(separator: "；")
+        let parts = ["第12项：在天气看第12个城市的气温", "第13项：在天气看第13个城市的气温", "第14项：在天气看第14个城市的气温"]
+        XCTAssertEqual(AgentLoop.partsNoted(parts, from: 0, task: task, told: ["第12项：27分钟"], sent: []), 1)
+    }
+
+    /// D133, s6 on 144: WeChat shows the last week's days as 昨天 and 星期X.
+    func testAReadUpForADateAlsoLooksForWeChatsWeekday() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 12))!  // a Wednesday
+        XCTAssertEqual(AgentLoop.readUpTargets("11月14日", now: now), ["11月14日", "星期六"])
+        XCTAssertEqual(AgentLoop.readUpTargets("11月17日", now: now), ["11月17日", "昨天"])
+        XCTAssertEqual(AgentLoop.readUpTargets("11月1日", now: now), ["11月1日"])
+        XCTAssertEqual(AgentLoop.readUpTargets("143夜测一", now: now), ["143夜测一"])
+        XCTAssertEqual(AgentLoop.readUpTargets("", now: now), [])
+        let note = AgentLoop.readUpNote(["星期六 下午3:30", "b"], screens: 3, until: "11月14日", now: now)
+        XCTAssertTrue(note.contains("读到“11月14日”（微信里显示为“星期六”）为止"), note)
+    }
+
+    /// D134, s4 on 144: a remark set and saved is not typed again.
+    func testARemarkSavedOnceIsNotSetAgain() {
+        let task = "在微信“测试群”的成员里找一位是我好友的人（不是我自己），把他的备注改成“144测试备注”，改完确认通讯录里显示的是新备注"
+        let typed: JObject = ["action": .str("type"), "text": .str("144测试备注")]
+        let tap: JObject = ["action": .str("tap"), "x": .num(889), "y": .num(89)]
+        XCTAssertTrue(AgentLoop.setsNameAgain([typed, tap], typed: "144测试备注", task: task))
+        XCTAssertFalse(AgentLoop.setsNameAgain([typed], typed: "144测试备注", task: task), "not saved yet")
+        XCTAssertFalse(AgentLoop.setsNameAgain([tap], typed: "144测试备注", task: task), "first time")
+        XCTAssertFalse(AgentLoop.setsNameAgain([typed, tap], typed: "144测试备注", task: "在淘宝搜索“144测试备注”"), "no remark set")
+    }
+
+    /// D135, x3 on 144: "：未完成，<reason>" gives its reason; "第3、4项" points at other items.
+    func testANotDoneWithItsReasonRightAfterIsNotSentBack() {
+        let goal = "帮我做这5件事：1. 在美团外卖搜索“汉堡”；2. 计算第1项的合计；3. 在高德查路线；4. 新建备忘录写结果；5. 告诉我结果"
+        let answer = "1. 美团外卖搜索“汉堡”：未完成，美团外卖需登录才能浏览店铺，按规则跳过。\n"
+            + "2. 计算第1、4项合计金额之和：未完成，第1、4项无合计金额可计算，跳过。\n3. 高德：步行5小时11分。\n"
+            + "4. 新建备忘录：未完成，操作过程中卡住，未能写入。\n5. 以上为全部结果。"
+        XCTAssertNil(AgentLoop.skippedWithoutReason(answer, task: goal))
+        let bare = AgentLoop.skippedWithoutReason("1. 美团外卖搜索“汉堡”：未完成，店名未记录。\n3. 高德：5小时。", task: goal) ?? ""
+        XCTAssertTrue(bare.hasPrefix("The answer says item 1"), bare)
+    }
+
+    /// D137, s1 on 144: a message turned down still brings back what the run found.
+    func testARejectedSendSaysWhatWasFound() {
+        let steps: [JObject] = [["action": .str("note"), "text": .str("丰巢要授权手机号才能看快递")],
+                                ["action": .str("waiting approval"), "reason": .str("about to send: S1 丰巢要登录")],
+                                ["action": .str("done"), "answer": .str(AgentLoop.notApprovedAnswer), "approval": .str("rejected")]]
+        let out = CloudBridge.outcome(of: steps)
+        XCTAssertEqual(out.status, "cancelled")
+        XCTAssertTrue(out.answer.contains("未获批准。已查到：丰巢要授权手机号才能看快递"), out.answer)
+        let bare = CloudBridge.outcome(of: Array(steps.dropFirst()))
+        XCTAssertTrue(bare.answer.contains("没发出的内容是：“S1 丰巢要登录”"), bare.answer)
     }
 
     /// D127, q134h on 144 (h21): the goal's message with its placeholder filled is that message, of any length.
