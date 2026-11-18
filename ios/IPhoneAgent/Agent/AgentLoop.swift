@@ -750,7 +750,7 @@ extension Pointer: Gestures {}
             prompt += experience?.context(goal: task, scene: scene, aspect: aspect) ?? ""
             if role == "actor" {
                 let example: JObject = ["action": .str("circle"), "x": .int(500), "y": .int(450), "r": .int(180)]
-                if let bounds = Actions.drawingBounds(example, aspect: aspect) {
+                if Self.drawsOnScreen(task, steps: steps), let bounds = Actions.drawingBounds(example, aspect: aspect) {  // D149
                     prompt += String(format: "\n\nScreen width/height = %.4f. Circle R is in width units; vertical radius = R * %.4f."
                         + " For example, circle 500 450 180 covers x 320..680, y %.0f..%.0f. Place parts using these actual bounds.",
                         aspect, aspect, bounds.minY, bounds.maxY)
@@ -779,7 +779,8 @@ extension Pointer: Gestures {}
             // D25, 135 over the cloud 11-15 (y1): the final answer of 49 things stopped at item 28 ("…差价"), cut at the
             // actor's 1000 tokens. A goal of 10+ things gets room for its whole answer.
             let room = Self.goalParts(task) >= 10 ? Self.bigGoalTokens : (Self.maxTokens[role] ?? 1000)
-            reply = try await llm.chat(system: system, text: prompt, image: frame, maxTokens: room, temperature: temperature)
+            let sys = Self.systemWithGoal(system, task: task, prompt: prompt)  // D149
+            reply = try await llm.chat(system: sys, text: prompt, image: frame, maxTokens: room, temperature: temperature)
         } catch {
             if !Task.isCancelled, llm === actor, let planner, planner !== llm, ModelRequestFailure.isAccountClosed(error) {
                 // D47, 136 over the cloud 11-16 (z5, z6): Doubao answered 403 AccountOverdueError and two runs of 50 things
@@ -5158,7 +5159,9 @@ extension Pointer: Gestures {}
     private var partFocus: String {
         guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
         var text = "Current part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])\n"
-        if !doneParts.isEmpty { text += "Already done, with what it found: " + doneParts.joined(separator: " | ") + "\n" }
+        if !doneParts.isEmpty {  // D149: what each found is in the notes (partResultNote); here only which they are
+            text += "Already done (what each found is in your notes below): " + doneParts.map(Self.doneHead).joined(separator: " | ") + "\n"
+        }
         return text + "Work on the current part only. When it is finished on the screen, answer done with what it achieved;"
             + " then the next part begins.\n\n"
     }
@@ -5431,6 +5434,45 @@ extension Pointer: Gestures {}
     /// 4个星期一…", and that went only into the list of parts done, which a plan of one part never shows. The last part (Codex,
     /// "第49项：report all") answered from the notes: 未记录 for 11, 22, 35, 38, 39, 40 and more. What a part found is a note
     /// like any other, headed with its item; nil when it says nothing.
+    // MARK: D149, user 11-19 ("token也是错啊"): fewer input tokens a step, the same things told
+
+    /// 145's regression (1742 executor steps, 23:25–03:49): 16,000 input tokens a step, 10,600 from Ark's prefix cache (the
+    /// system prompt) and 5,400 at the full price: the screenshot (~590×1280, about 960 tokens) and ~4,400 of text. The text
+    /// told the same things again every step: the whole plan with its parts done, each part done with what it found (also
+    /// in the notes), a 1500-character goal (x4), and the circle bounds a drawing needs, in every task.
+
+    /// The drawing hints go to a goal that draws, or to a run that drew already.
+    static func drawsOnScreen(_ task: String, steps: [JObject]) -> Bool {
+        AppNames.hans(task).range(of: #"画|描|涂|draw|sketch|circle|圆圈"#, options: [.regularExpression, .caseInsensitive]) != nil
+            || steps.contains { ["circle", "path"].contains($0["action"]?.str ?? "") }
+    }
+
+    /// A goal this long goes at the end of the system prompt, which Ark's prefix cache bills at a fifth from the second step.
+    static let goalInSystemChars = 400
+    static let goalAboveLine = "Goal: at the end of the system prompt (GOAL OF THIS RUN)."
+
+    static func goalLine(_ task: String) -> String {
+        task.count >= goalInSystemChars ? goalAboveLine : "Goal: \(task)"
+    }
+
+    static func systemWithGoal(_ system: String, task: String, prompt: String) -> String {
+        prompt.hasPrefix(goalAboveLine) ? system + "\n\nGOAL OF THIS RUN (the owner's words, the same for every step):\n" + task : system
+    }
+
+    /// The plan without the lines of the parts already done.
+    static func planLeft(_ plan: String, parts: [String], from index: Int) -> String {
+        guard parts.count >= 2, index >= 1 else { return plan }
+        let done = Set(parts.prefix(index))
+        let kept = plan.components(separatedBy: "\n").filter { !done.contains($0.trimmingCharacters(in: .whitespaces)) }
+        return "(parts 1–\(min(index, parts.count)) are done and left out)\n" + kept.joined(separator: "\n")
+    }
+
+    /// A part done, as partFocus names it: its own words (not what it found), cut at 40 characters.
+    static func doneHead(_ done: String) -> String {
+        let part = done.components(separatedBy: " -> ").first ?? done
+        return part.count > 40 ? String(part.prefix(40)) + "…" : part
+    }
+
     static func partResultNote(part: String, found: String) -> String? {
         let t = found.trimmingCharacters(in: .whitespacesAndNewlines)
         let bare = t.replacingOccurrences(of: #"[\s。．.!！]"#, with: "", options: .regularExpression)
@@ -5639,7 +5681,7 @@ extension Pointer: Gestures {}
 
     func replan(stuck: Bool = false, rest: [Int] = [], first: String? = nil) async throws {
         guard let planner else { throw LLMError(message: "no planner model") }
-        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task, found: notes))"
+        var prompt = Self.goalLine(task) + "\n" + Self.todayLine(goal: task, found: notes)  // D149
         // D16: a new plan of a goal of 10+ things names the things left, so it does not stop at the next few.
         let left = rest.isEmpty && stuck && presetPlan.isEmpty
             ? Self.itemsLeft(task: task, told: notes + doneParts, sent: messageSent) : rest
@@ -5715,7 +5757,9 @@ extension Pointer: Gestures {}
                     aspect: Double(image.width) / Double(image.height), action: last)
             }
         }
-        var prompt = "Goal: \(task)\n\(Self.todayLine(goal: task, found: notes))\n\nPlan:\n\(plan)\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
+        // D149: the plan without the parts done (they are in partFocus), the goal as goalLine.
+        var prompt = Self.goalLine(task) + "\n" + Self.todayLine(goal: task, found: notes) + "\n\nPlan:\n"
+            + Self.planLeft(plan, parts: parts, from: partIndex) + "\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
             + (Self.scrollingHint(steps).map { "\n\n" + $0 } ?? "") + "\n\nNext action?"
         let driving = (plannerLeads || takeover > 0 || actorClosed) && planner != nil
         if takeover > 0 { takeover -= 1 }

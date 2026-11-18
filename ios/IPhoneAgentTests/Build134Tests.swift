@@ -1512,6 +1512,26 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D149, user 11-19: fewer input tokens a step.
+    func testAStepTellsLessAgain() {
+        let parts = ["1. 第1项：天气", "2. 第2项：计算器", "3. 第3项：微信"]
+        let plan = "1. 第1项：天气\n2. 第2项：计算器\nKeep the order.\n3. 第3项：微信"
+        XCTAssertEqual(AgentLoop.planLeft(plan, parts: parts, from: 2), "(parts 1–2 are done and left out)\nKeep the order.\n3. 第3项：微信")
+        XCTAssertEqual(AgentLoop.planLeft(plan, parts: parts, from: 0), plan)
+        XCTAssertEqual(AgentLoop.planLeft("1. 打开设置", parts: ["1. 打开设置"], from: 1), "1. 打开设置")
+        XCTAssertTrue(AgentLoop.drawsOnScreen("在备忘录里画一个笑脸", steps: []))
+        XCTAssertFalse(AgentLoop.drawsOnScreen("打开设置看电量", steps: []))
+        XCTAssertTrue(AgentLoop.drawsOnScreen("打开设置", steps: [["action": .str("circle")]]))
+        XCTAssertEqual(AgentLoop.goalLine("打开设置"), "Goal: 打开设置")
+        let long = String(repeating: "在天气看深圳今天的最高温；", count: 40)
+        XCTAssertEqual(AgentLoop.goalLine(long), AgentLoop.goalAboveLine)
+        XCTAssertEqual(AgentLoop.systemWithGoal("S", task: long, prompt: AgentLoop.goalAboveLine + "\n今天"),
+                       "S\n\nGOAL OF THIS RUN (the owner's words, the same for every step):\n" + long)
+        XCTAssertEqual(AgentLoop.systemWithGoal("S", task: "打开设置", prompt: "Goal: 打开设置"), "S")
+        XCTAssertEqual(AgentLoop.doneHead("1. 第6项：在淘宝搜索 -> 已加购一件"), "1. 第6项：在淘宝搜索")
+        XCTAssertEqual(AgentLoop.doneHead(String(repeating: "长", count: 50)).count, 41)
+    }
+
     /// D148, x4's rerun on 145: an add to the cart is noted as the part's item.
     func testAnAddToTheCartIsNotedAsItsItem() {
         let part = "第6项：在淘宝搜索“露营椅”，在前5个商品里挑价格最低的一个，选第一个规格，加入购物车一件"
