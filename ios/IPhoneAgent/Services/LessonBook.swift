@@ -5,6 +5,13 @@ import Foundation
 /// percentage, an item number) or its progress (已完成, 当前在…).
 let runFactPattern = #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\s*\d+\s*[项項]|已(完成|听取|聽取|记录|記錄|读取|讀取|显示|顯示|打开|打開)|当前在|當前在"#
 
+/// D112b, 143 z5: a tip that adds to the cart, buys or pays (淘宝's "点“加入购物车”打开规格选择弹窗，查看默认选中规格")
+/// is not kept or given: on a one-spec item that tap puts it in the cart, in a task that only asked to look.
+func tipSpends(_ text: String) -> Bool {
+    AppNames.hans(text).range(of: #"加入购物车|加购|立即购买|马上抢|去结算|结算|提交订单|下单|付款|支付|拼单"#,
+                              options: .regularExpression) != nil
+}
+
 /// What the user taught in Review, kept as their own sentences and handed to the planner and the actor on
 /// every later run of a similar task, whatever app it is in. One wrong run is fine; the same mistake twice
 /// is not. Human lessons: step notes, steps the user added, accepted AI hints. A note that starts with
@@ -400,7 +407,7 @@ let runFactPattern = #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\
         let found = lessons.filter { l in
             // D30: a tip that tells a past run's values or progress (135 kept some) is not given to later tasks.
             guard let app = l.app, l.disabled != true,
-                  l.text.range(of: runFactPattern, options: .regularExpression) == nil else { return false }
+                  l.text.range(of: runFactPattern, options: .regularExpression) == nil, !tipSpends(l.text) else { return false }
             return AppNames.variants(app).map { AppNames.hans($0).lowercased() }.contains { !$0.isEmpty && t.contains($0) }
         }
         return Array(found.sorted { a, b in

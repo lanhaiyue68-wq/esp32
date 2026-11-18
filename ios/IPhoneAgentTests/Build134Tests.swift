@@ -725,6 +725,22 @@ import XCTest
         XCTAssertNil(AgentLoop.paddedGoalMessage("你好", task: goal))
     }
 
+    /// D112, z5 on 143: a shop's "5000+人已加购" is how many people have it in their cart, not the toast.
+    func testHowManyPeopleCartedItIsNoToast() {
+        func row(_ t: String) -> [CandidatePicker.Piece] { [CandidatePicker.Piece(text: t, box: CGRect(x: 0.1, y: 0.3, width: 0.4, height: 0.03))] }
+        XCTAssertFalse(AgentLoop.addedToCart([row("5000+人已加购")]))
+        XCTAssertFalse(AgentLoop.addedToCart([row("1.2万人 已加购")]))
+        XCTAssertTrue(AgentLoop.addedToCart([row("已加购")]))
+        XCTAssertTrue(AgentLoop.addedToCart([row("5000+人已加购"), row("加购成功")]))
+    }
+
+    /// D112b, z5 on 143: a way that taps 加入购物车 (to see the spec) is not kept for later tasks.
+    func testAWayThatAddsOrBuysIsNotKept() {
+        XCTAssertTrue(AgentLoop.waySpends("在商品页点“加入购物车”打开规格选择弹窗，查看默认选中规格后关闭，不确认加购。"))
+        XCTAssertTrue(AgentLoop.waySpends("點立即購買看價格"))
+        XCTAssertFalse(AgentLoop.waySpends("店铺名被截断时点店铺名进入店铺页读取完整名称"))
+    }
+
     /// D110: a swipe's line is one stroke of small even moves that add up to the whole line.
     func testASwipeIsOneSmoothStroke() {
         let d = Pointer.strokeDeltas(from: (300, 700), to: (300, 320), step: 24)

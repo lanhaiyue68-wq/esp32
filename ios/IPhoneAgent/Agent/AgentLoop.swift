@@ -187,7 +187,10 @@ extension Pointer: Gestures {}
     /// The done check sent the run back once for an item it said it had not done (skippedWithoutReason).
     private var skipAsked = false
     static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        // 143 z5 (item 11): a shop page's "5000+人已加购" (how many people have it in their cart) was taken for the
+        // toast twice, and the run told the user it had put the cup in the cart twice; nothing had been added.
         let text = AppNames.hans(rows.joined().map(\.text).joined())
+            .replacingOccurrences(of: #"人\s*已加购"#, with: "", options: .regularExpression)
         return ["加购成功", "已加入购物车", "成功加入购物车", "加入购物车成功", "已加购", "已添加到购物车"].contains { text.contains($0) }
     }
     /// Whether an "added to the cart" text in this app is a shop's toast: an app that sells things, or one not known
@@ -4609,12 +4612,17 @@ extension Pointer: Gestures {}
                 // 淘宝商品页" were kept as ways, and every later task in that app would get them. A way is a method: one that
                 // tells this run's values (a time, a price, a percentage, an item number) or its progress is not kept.
                 let runFact = tag == "WAY:" && text.range(of: runFactPattern, options: .regularExpression) != nil
-                return text.isEmpty || spot || runFact ? .unknown : make(String(text.prefix(160)))
+                // D112b, 143 z5: "在商品页点“加入购物车”打开规格选择弹窗，查看默认选中规格" was kept for 淘宝; on a one-spec
+                // item that tap puts it in the cart. A way that adds, buys or pays is never kept for later tasks.
+                let spends = tag == "WAY:" && Self.waySpends(text)
+                return text.isEmpty || spot || runFact || spends ? .unknown : make(String(text.prefix(160)))
             }
             if upper.hasPrefix("NONE") { return .unknown }
         }
         return .unknown
     }
+
+    static func waySpends(_ way: String) -> Bool { tipSpends(way) }
 
     /// The planner looks at a stuck thing: what was tried (the last steps) and the screen now.
     private func coach(_ part: String, why: String) async throws -> Coaching {
