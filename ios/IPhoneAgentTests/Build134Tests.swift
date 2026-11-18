@@ -1477,6 +1477,28 @@ import XCTest
         XCTAssertTrue(bare.answer.contains("没发出的内容是：“S1 丰巢要登录”"), bare.answer)
     }
 
+    /// D138, x3 on 144: what was seen in 天气 is not labelled with a 美团 part's item.
+    func testAScrollNoteFromAnotherAppHasNoItemLabel() {
+        let steps: [JObject] = [["action": .str("open"), "app": .str("天气")],
+                                ["action": .str("swipe"), "thought": .str("周五25°")]]
+        XCTAssertEqual(AgentLoop.seenWhileScrollingNote(steps, part: "第1项：在美团外卖搜索“汉堡”"), "（滚动页面时看到，原话）：周五25°")
+        XCTAssertEqual(AgentLoop.seenWhileScrollingNote(steps, part: "第9项：在天气看深圳最高温"), "第9项（滚动页面时看到，原话）：周五25°")
+    }
+
+    /// D139, s6 on 144: chat time lines get their dates.
+    func testAChatTimeLineGetsItsDate() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 12))!  // a Wednesday
+        XCTAssertEqual(AgentLoop.datedTimeLine("昨天 晚上9:47", now: now), "昨天 晚上9:47（11月17日）")
+        XCTAssertEqual(AgentLoop.datedTimeLine("下午1:19", now: now), "下午1:19（11月18日）")
+        XCTAssertEqual(AgentLoop.datedTimeLine("星期六 下午3:30", now: now), "星期六 下午3:30（11月14日）")
+        XCTAssertEqual(AgentLoop.datedTimeLine("11月14日 下午3:30", now: now), "11月14日 下午3:30")
+        XCTAssertEqual(AgentLoop.datedTimeLine("（我）Z6全部做完12:42", now: now), "（我）Z6全部做完12:42")
+        let note = AgentLoop.readUpNote(["昨天 晚上9:47", "（我）Z6温差大", "下午1:19", "（我）143夜测一"], screens: 2, until: "", now: now)
+        XCTAssertTrue(note.contains("昨天 晚上9:47（11月17日）\n（我）Z6温差大\n下午1:19（11月18日）"), note)
+    }
+
     /// D127, q134h on 144 (h21): the goal's message with its placeholder filled is that message, of any length.
     func testAFilledPlaceholderIsTheGoalsMessage() {
         let task = "帮我做这三件事：1. 天气里看北京明天的最高温；2. 在验证群发“北京明天最高X度”（X换成你看到的数字）；3. 告诉我发出去没有。只发这一条"

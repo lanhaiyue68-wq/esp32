@@ -1926,7 +1926,7 @@ extension Pointer: Gestures {}
     /// D123, q143n on 144 (n16): the header said "读到“143夜测一”为止" whether or not those words were read, and the model
     /// took it that the read-up had found them. It says which: found, the top reached without them, or not yet.
     static func readUpNote(_ lines: [String], screens: Int, until: String, top: Bool = false, now: Date = Date()) -> String {
-        let text = lines.joined(separator: "\n")
+        let text = lines.map { datedTimeLine($0, now: now) }.joined(separator: "\n")  // D139
         let bare = { (s: String) in AppNames.hans(s).filter { !$0.isWhitespace } }
         let targets = readUpTargets(until, now: now)
         let hit = targets.first { t in lines.contains { bare($0).contains(t) } }
@@ -1940,7 +1940,31 @@ extension Pointer: Gestures {}
             + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字"
             // D46, y5 on 136: the run found 133真人测试一 under 昨天下午1:20, then "corrected" it to the time line below
             // it (2:34): in WeChat a time line heads the messages under it.
-            + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的）：\n" + kept + sentTimesLine(of: until, in: lines)
+            + "；单独一行的时间是它下面那些消息的发送时间，不是上面消息的；时间行后括号里是程序算出的日期，整理时照这个从旧到新的"
+            + "顺序写，不要按钟点重排）：\n" + kept + sentTimesLine(of: until, in: lines)
+    }
+
+    /// D139, s6 on 144: the read-up was given oldest first, and the answer put today's 凌晨12:42 … 下午3:13 before
+    /// 昨天晚上9:47, sorted by the clock. A chat time line without a date gets the date it stands for: 昨天 晚上9:47（11月17日）.
+    static func datedTimeLine(_ line: String, now: Date = Date()) -> String {
+        let bare = line.trimmingCharacters(in: .whitespaces)
+        guard isChatTimeLine(bare), bare.range(of: #"\d{1,2}月\d{1,2}日"#, options: .regularExpression) == nil else { return line }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let today = cal.startOfDay(for: now)
+        var back = 0
+        if bare.contains("昨天") { back = 1 } else if bare.contains("前天") { back = 2 }
+        let days = ["日", "一", "二", "三", "四", "五", "六"]
+        if let r = bare.range(of: #"(星期|周)[一二三四五六日天]"#, options: .regularExpression) {
+            let name = String(bare[r].last!) == "天" ? "日" : String(bare[r].last!)
+            if let want = days.firstIndex(of: name) {
+                let todayIndex = cal.component(.weekday, from: today) - 1
+                back = (todayIndex - want + 7) % 7
+                if back == 0 { back = 7 }
+            }
+        }
+        guard let date = cal.date(byAdding: .day, value: -back, to: today) else { return line }
+        return line + "（\(cal.component(.month, from: date))月\(cal.component(.day, from: date))日）"
     }
 
     /// D133, s6 on 144 (11-18): "一直读到11月14日为止" was read up for 11月14日, but WeChat heads the last week's messages
@@ -2747,8 +2771,23 @@ extension Pointer: Gestures {}
         for t in seen.reversed() where !said.contains(t) { said.append(t) }
         guard !said.isEmpty else { return nil }
         let item = part.flatMap(partItems).flatMap { $0.count == 1 ? $0[0] : nil }
-        return (item.map { "第\($0)项" } ?? "") + "（滚动页面时看到，原话）：" + said.joined(separator: " ")
+        // D138, x3 on 144: the executor was in 天气 for item 9 while the plan's part was still item 1 (美团): what it saw
+        // was noted as "第1项（滚动页面时看到）…", then again as 第2项 and 第3项. A part naming another app gets no label.
+        let label = item.flatMap { n -> String? in
+            guard let part, let front = appInFront(steps, startedIn: nil) else { return "第\(n)项" }
+            let (p, f) = (AppNames.hans(part).lowercased(), AppNames.hans(front).lowercased())
+            let named = goalApps.filter { app in ([app.name] + app.also).contains { !$0.isEmpty && p.contains($0) } }
+            guard !named.isEmpty, !f.isEmpty else { return "第\(n)项" }
+            let inFront = named.contains { app in
+                ([app.name] + app.also + AppNames.variants(app.name).map { AppNames.hans($0).lowercased() })
+                    .contains { !$0.isEmpty && (f.contains($0) || $0.contains(f)) }
+            }
+            return inFront ? "第\(n)项" : nil
+        }
+        return (label ?? "") + seenWhileScrollingMark + said.joined(separator: " ")
     }
+
+    static let seenWhileScrollingMark = "（滚动页面时看到，原话）："
 
     static let scrollTurnsLimit = 3
     static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
@@ -3757,7 +3796,7 @@ extension Pointer: Gestures {}
                     // D19, 134 over the cloud 11-15 (y5): 设置 › 关于本机 scrolled down, up, down; the turn back up to 型号名称
                     // was then refused 20 times. Three refusals are a change of plan, as with a round of taps (D17).
                     if let line = Self.seenWhileScrollingNote(steps, part: parts.count >= 2 && partIndex < parts.count ? parts[partIndex] : nil),
-                       !notes.contains(line) {
+                       !notes.contains(where: { $0.hasSuffix(line.components(separatedBy: Self.seenWhileScrollingMark).last ?? line) }) {
                         notes.append(line)
                         record(nil, ["action": .str("note"), "text": .str(line), "by": .str("run")])
                     }
