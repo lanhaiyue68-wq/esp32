@@ -1369,7 +1369,9 @@ import XCTest
         XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [thought]), ["高德"])
         XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [icon, thought]), [])
         let bar: JObject = ["action": .str("tap"), "thought": .str("The page is blank, so I tap the address bar to type Baidu.")]
-        XCTAssertEqual(AgentLoop.unvisitedApps(task: "用Safari搜索“深圳天气”，告诉我第一条结果的标题", steps: [bar]), [], "D128")
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "用Safari搜索“深圳天气”，告诉我第一条结果的标题", steps: [bar]), [], "D128, D140")
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "在 App Store 搜索“高德地图”，记下评分", steps: []), [], "D140: searched words")
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: "在天气看深圳明天的最高温", steps: []), ["天气"], "an app the goal goes into")
     }
 
     /// D123, q143n on 144 (n16): a read-up says whether it read the words it was to stop at.
@@ -1461,7 +1463,7 @@ import XCTest
             + "2. 计算第1、4项合计金额之和：未完成，第1、4项无合计金额可计算，跳过。\n3. 高德：步行5小时11分。\n"
             + "4. 新建备忘录：未完成，操作过程中卡住，未能写入。\n5. 以上为全部结果。"
         XCTAssertNil(AgentLoop.skippedWithoutReason(answer, task: goal))
-        let bare = AgentLoop.skippedWithoutReason("1. 美团外卖搜索“汉堡”：未完成，店名未记录。\n3. 高德：5小时。", task: goal) ?? ""
+        let bare = AgentLoop.skippedWithoutReason("1. 美团外卖搜索“汉堡”：未完成，店名未记录。\n2. 计算：12元。\n3. 高德：5小时。", task: goal) ?? ""
         XCTAssertTrue(bare.hasPrefix("The answer says item 1"), bare)
     }
 

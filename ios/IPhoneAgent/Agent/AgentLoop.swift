@@ -908,8 +908,12 @@ extension Pointer: Gestures {}
 
     static func unvisitedApps(task: String, steps: [JObject]) -> [String] {
         if steps.contains(where: { $0["action"]?.str == "takeover" }) { return [] }  // the user did part of it by hand
-        let goal = Self.withoutSettingUp(AppNames.hans(task).lowercased().replacingOccurrences(
+        var goal = Self.withoutSettingUp(AppNames.hans(task).lowercased().replacingOccurrences(
             of: #"(不要|不用|不必|别|勿|禁止)[^，,。；;！!？?\n]*"#, with: " ", options: .regularExpression))
+        // D140, 145's CI: 用Safari搜索“深圳天气” asked for 天气 to be opened, and App Store 搜索“高德地图” for 高德. Words
+        // searched for are no app to go into.
+        goal = goal.replacingOccurrences(of: #"((?:搜索|搜|查找)\s*[“"「])[^”"」]{1,40}([”"」])"#, with: "$1 $2",
+                                         options: .regularExpression)
         // Only what the model did and said while doing it: not the plan, nor this check's own words.
         // 130 over the cloud 11-13 (q130b g5): on 淘宝's cart the executor "remembered" items 5-8 as done and noted made-up
         // results for them (拼多多 ¥13.9, a message never sent), then typed them into the note: what a note or typing
