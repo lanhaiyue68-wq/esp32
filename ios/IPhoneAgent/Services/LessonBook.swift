@@ -7,8 +7,9 @@ let runFactPattern = #"\d{1,2}[:：]\d{2}|[¥￥]\s*\d|\d+(\.\d+)?\s*[%％]|第\
 
 /// D112b, 143 z5: a tip that adds to the cart, buys or pays (淘宝's "点“加入购物车”打开规格选择弹窗，查看默认选中规格")
 /// is not kept or given: on a one-spec item that tap puts it in the cart, in a task that only asked to look.
+/// 144's CI: "支付" held 支付宝, and a way on 支付宝's App Store page was no longer kept: the app's name is no payment.
 func tipSpends(_ text: String) -> Bool {
-    AppNames.hans(text).range(of: #"加入购物车|加购|立即购买|马上抢|去结算|结算|提交订单|下单|付款|支付|拼单"#,
+    AppNames.hans(text).range(of: #"加入购物车|加购|立即购买|马上抢|去结算|结算|提交订单|下单|付款|支付(?!宝)|拼单"#,
                               options: .regularExpression) != nil
 }
 
