@@ -296,7 +296,7 @@ import XCTest
     func testAReadUpTheChatComesOutOldestFirst() throws {
         let newest = ["下午3:52", "Y1全部做完", "Y1温差小"], older = ["昨天 晚上9:30", "C1比价做完", "下午3:52"]
         XCTAssertEqual(AgentLoop.readUpMerge([newest, older]), ["昨天 晚上9:30", "C1比价做完", "下午3:52", "Y1全部做完", "Y1温差小"])
-        let note = AgentLoop.readUpNote(["a", "b"], screens: 2, until: "11月14日")
+        let note = AgentLoop.readUpNote(["11月14日 下午3:30", "b"], screens: 2, until: "11月14日")
         XCTAssertTrue(note.hasPrefix("往上读到的聊天记录（2 屏，从旧到新，读到“11月14日”为止；行首“（我）”"), note)
         XCTAssertTrue(note.contains("单独一行的时间是它下面那些消息的发送时间"))  // D46
         XCTAssertLessThan(AgentLoop.readUpNote([String(repeating: "字", count: 9000)], screens: 40, until: "").count, 6200)
@@ -1359,6 +1359,58 @@ import XCTest
         func dead(_ s: JObject) -> JObject { var d = s; d["changed"] = .bool(false); return d }
         XCTAssertNotNil(AgentLoop.bounce(arrow, after: [back, arrow, back]), "moves that changed the screen")
         XCTAssertNil(AgentLoop.bounce(arrow, after: [dead(back), dead(arrow), dead(back)]))
+    }
+
+    /// D122, q143n on 144 (n08): an app opened by a remembered tap on its icon was visited.
+    func testARememberedTapOnAnIconIsAVisit() {
+        let task = "用高德地图查从现在的位置走路到最近的便利店要多久，不要开始导航"
+        let thought: JObject = ["action": .str("tap"), "thought": .str("搜索框已激活，我输入便利店并搜索。")]
+        let icon: JObject = ["action": .str("tap"), "source": .str("route"), "x": .num(380), "y": .num(592), "text": .str("高德地圖")]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [thought]), ["高德"])
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: task, steps: [icon, thought]), [])
+    }
+
+    /// D123, q143n on 144 (n16): a read-up says whether it read the words it was to stop at.
+    func testAReadUpSaysWhetherItFoundTheWords() {
+        XCTAssertTrue(AgentLoop.readUpNote(["清晨6:59", "（我）143夜测一"], screens: 2, until: "143夜测一").contains("读到“143夜测一”为止"))
+        let short = AgentLoop.readUpNote(["清晨6:59", "（我）Z3全部做完"], screens: 4, until: "143夜测一")
+        XCTAssertTrue(short.contains("还没读到“143夜测一”") && !short.contains("为止"), short)
+        XCTAssertTrue(AgentLoop.readUpNote(["a"], screens: 9, until: "143夜测一", top: true).contains("一直读到最上面，没有读到“143夜测一”"))
+    }
+
+    /// D124, q143n on 144 (n16): a finger moving down in a chat to reach newer messages is seen.
+    func testANewerWishWithAnOlderSwipeIsSeen() {
+        func swipe(_ y1: Double, _ y2: Double, _ t: String) -> JObject {
+            ["action": .str("swipe"), "x1": .num(500), "y1": .num(y1), "x2": .num(500), "y2": .num(y2), "thought": .str(t)]
+        }
+        XCTAssertTrue(AgentLoop.wantsNewerByOlderSwipe(swipe(300, 800, "The screen shows Monday's messages. I need to swipe up to scroll forward to today's messages.")))
+        XCTAssertFalse(AgentLoop.wantsNewerByOlderSwipe(swipe(750, 300, "I scroll forward to today's messages.")), "the finger moves up")
+        XCTAssertFalse(AgentLoop.wantsNewerByOlderSwipe(swipe(300, 750, "我向上翻找更早的消息")), "older is wanted")
+    }
+
+    /// D125, q134h on 144 (h03): a chat opened as it was left may be scrolled up.
+    func testALatestMessageInAChatOpenedAsLeftIsChecked() {
+        XCTAssertTrue(AgentLoop.asksLatestMessage("测试群里最后一条消息是谁发的，说了啥？"))
+        XCTAssertTrue(AgentLoop.asksLatestMessage("在微信验证群里看最新三条消息分别是什么"))
+        XCTAssertFalse(AgentLoop.asksLatestMessage("在微信测试群发“133真人测试一”"))
+        let open: JObject = ["action": .str("open"), "app": .str("WeChat")], tap: JObject = ["action": .str("tap"), "x": .num(272), "y": .num(211)]
+        func swipe(_ y1: Double, _ y2: Double) -> JObject { ["action": .str("swipe"), "y1": .num(y1), "y2": .num(y2)] }
+        XCTAssertTrue(AgentLoop.mayBeScrolledUp([open]))
+        XCTAssertFalse(AgentLoop.mayBeScrolledUp([open, tap]), "entered from the chat list: at its bottom")
+        XCTAssertTrue(AgentLoop.mayBeScrolledUp([open, tap, swipe(300, 750)]))
+        XCTAssertFalse(AgentLoop.mayBeScrolledUp([open, swipe(750, 300)]))
+        XCTAssertFalse(AgentLoop.mayBeScrolledUp([]), "never opened here")
+    }
+
+    /// D127, q134h on 144 (h21): the goal's message with its placeholder filled is that message, of any length.
+    func testAFilledPlaceholderIsTheGoalsMessage() {
+        let task = "帮我做这三件事：1. 天气里看北京明天的最高温；2. 在验证群发“北京明天最高X度”（X换成你看到的数字）；3. 告诉我发出去没有。只发这一条"
+        XCTAssertTrue(AgentLoop.fillsPlaceholder("北京明天最高13度", task: task))
+        XCTAssertFalse(AgentLoop.fillsPlaceholder("上海明天最高13度", task: task))
+        XCTAssertFalse(AgentLoop.fillsPlaceholder("北京明天最高度", task: task), "nothing in its place")
+        XCTAssertTrue(AgentLoop.needsApproval("北京明天最高13度", task: task, chatApp: true))
+        XCTAssertTrue(AgentLoop.needsApproval("北京明天最高8度", task: task, chatApp: true))
+        XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 }
 

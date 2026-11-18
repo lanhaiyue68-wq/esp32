@@ -16,6 +16,14 @@ def fits_text(text, item):
         words = ast.literal_eval(words)  # some queue files keep the list as its repr
     if t in words or ('“' + t + '”') in item['task'] or ('"' + t + '"') in item['task']:
         return True
+    # build 144's h21: “北京明天最高X度”（X换成你看到的数字） typed as 北京明天最高13度 was turned down: the quoted message
+    # with its placeholder filled (1-12 characters) is the message the instruction asks for.
+    for p in re.findall(r'[（(]\s*([^（()）,，。；;\s]{1,6}?)\s*(?:换成|替换成|改成)', item['task']):
+        for msg in re.findall(r'[“"]([^”"]+)[”"]', item['task']):
+            if p in msg:
+                head, tail = msg.split(p, 1)
+                if re.fullmatch(re.escape(head) + r'.{1,12}' + re.escape(tail), t):
+                    return True
     for w in words:
         if re.fullmatch(re.escape(w) + r'\s*\d{1,2}[:：]\d{2}', t) and                 re.search('“' + re.escape(w) + '”[^；]{0,40}(时间|時間)', item['task']):
             return True

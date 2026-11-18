@@ -143,6 +143,10 @@ extension Pointer: Gestures {}
     private var groupTitleRefused = false
     /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
     private var lastGroupTitle: String?
+    /// D124: finger-down swipes in a chat refused this run because the thought wanted newer messages (two at most).
+    private var olderSwipeRefused = 0
+    /// D125: a done telling a chat's latest message was refused once for a chat that may be scrolled up.
+    private var bottomRefused = false
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -612,6 +616,7 @@ extension Pointer: Gestures {}
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
+        (olderSwipeRefused, bottomRefused) = (0, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -1905,11 +1910,17 @@ extension Pointer: Gestures {}
     }
 
     /// D27: the note a readup leaves; a long read keeps its first and last 2500 characters.
-    static func readUpNote(_ lines: [String], screens: Int, until: String) -> String {
+    /// D123, q143n on 144 (n16): the header said "读到“143夜测一”为止" whether or not those words were read, and the model
+    /// took it that the read-up had found them. It says which: found, the top reached without them, or not yet.
+    static func readUpNote(_ lines: [String], screens: Int, until: String, top: Bool = false) -> String {
         let text = lines.joined(separator: "\n")
+        let bare = { (s: String) in AppNames.hans(s).filter { !$0.isWhitespace } }
+        let found = !until.isEmpty && lines.contains { bare($0).contains(bare(until)) }
+        let reach = until.isEmpty ? "" : found ? "，读到“\(until)”为止"
+            : top ? "，一直读到最上面，没有读到“\(until)”" : "，还没读到“\(until)”，更早的没有读"
         let kept = text.count <= 6000 ? text
             : String(text.prefix(2500)) + "\n…（中间省略\(text.count - 5000)字）…\n" + String(text.suffix(2500))
-        return "往上读到的聊天记录（\(screens) 屏，从旧到新" + (until.isEmpty ? "" : "，读到“\(until)”为止")
+        return "往上读到的聊天记录（\(screens) 屏，从旧到新" + reach
             + "；行首“（我）”是机主自己发的，靠右、没有名字；别人的消息上方一行是发送人名字"
             // D46, y5 on 136: the run found 133真人测试一 under 昨天下午1:20, then "corrected" it to the time line below
             // it (2:34): in WeChat a time line heads the messages under it.
@@ -2155,6 +2166,10 @@ extension Pointer: Gestures {}
         // wrong place" until the run ended. An address typed outside a chat app is not a message unless the goal's
         // message is that address.
         if address, !chatApp, !messageParts(task).map(key).contains(where: { !$0.isEmpty && $0.contains(typed) }) { return false }
+        // D127, q134h on 144 (h21): "北京明天最高X度（X换成你看到的数字）" typed as 北京明天最高8度 passed as the goal's words with
+        // one stray letter and went out unasked, like a search; typed as 北京明天最高13度 (two strays) it was held as some other
+        // message, and the owner's runner turned it down. The goal's message with its placeholder filled is that message.
+        if fillsPlaceholder(typed, task: task) { return publishes(task) }
         guard !typed.isEmpty, goal.contains(typed) || takenFrom(typed, goal) else { return chatApp || publishes(task) }
         guard publishes(task) else { return false }
         let messages = messageParts(task).map(key).filter { !$0.isEmpty }
@@ -2180,7 +2195,8 @@ extension Pointer: Gestures {}
     /// D109: apps whose feed turns one video a screen, and a swipe there that turns it (up or down, long).
     /// D121, z3 on 143 (items 24 and 37): Calendar's month view stayed on November through seven held swipes: a held
     /// stroke ends with no speed, and the months snap back. A month turns with a quick stroke there too.
-    static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok", "日历", "calendar"]
+    /// D121b, 144: on this phone (zh-TW) Calendar is 行事曆, and its months still turned with four slow strokes.
+    static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok", "日历", "calendar", "行事历", "行事曆"]
 
     static func flicks(app: String?, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Bool {
         guard let app else { return false }
@@ -2203,6 +2219,21 @@ extension Pointer: Gestures {}
         }
         let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
         return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
+    }
+
+    /// D127: a goal message holding a word the goal says to replace ("北京明天最高X度", X换成…), typed with 1–12 characters
+    /// in that word's place. `typed` is a typedKey, lowercased.
+    static func fillsPlaceholder(_ typed: String, task: String) -> Bool {
+        func key(_ s: String) -> String { AppNames.hans(typedKey(s)).lowercased() }
+        let words = placeholders(task).map(key).filter { !$0.isEmpty }
+        return messageParts(task).map(key).contains { message in
+            words.contains { word in
+                guard let r = message.range(of: word) else { return false }
+                let (head, tail) = (String(message[..<r.lowerBound]), String(message[r.upperBound...]))
+                guard head.count + tail.count >= 2, typed.hasPrefix(head), typed.hasSuffix(tail) else { return false }
+                return (1...12).contains(typed.count - head.count - tail.count)
+            }
+        }
     }
 
     /// The goal's own words, a little shortened or reworded: its characters in the goal's order, with one in ten (at least
@@ -2988,6 +3019,9 @@ extension Pointer: Gestures {}
                 }
                 act["x"] = .num(x.rounded())
                 act["y"] = .num(y.rounded())
+                // D122, q143n on 144 (n08): a remembered way opened 高德 by its icon; no thought named it, and "this run
+                // never went into 高德" refused a right answer three times. The label tapped goes with the step.
+                if let anchor = step.anchor { act["text"] = .str(anchor) }
             case "swipe":
                 for (k, v) in zip(["x1", "y1", "x2", "y2"], step.values) { act[k] = .num(Double(v)) }
             default: break
@@ -3392,6 +3426,16 @@ extension Pointer: Gestures {}
                     return false
                 }
             }
+            // D125, q134h on 144 (h03): the run before had read 测试群 back to Sunday; WeChat opened on it there, "the last
+            // message" was told from the bottom of that screen (Y4全部做完, 星期日), and the check passed it. A goal asking
+            // for a chat's latest message, in a chat opened as it was left, is refused once to go to the bottom first.
+            if name == "done", endsTask, !bottomRefused, Self.asksLatestMessage(task), Self.inChatApp(steps, task: task),
+               Self.mayBeScrolledUp(steps) {
+                bottomRefused = true
+                record(planned.shot, ["action": .str("done rejected"), "reason": .str(Self.scrolledUpReason)])
+                DebugLog.write("done: refused once; the chat may be scrolled up, not at its latest message")
+                return false
+            }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {
                 if checksLeft > 0 {
                     let answer = act["answer"]?.str ?? "", frame = screen?.frame ?? planned.shot
@@ -3662,6 +3706,14 @@ extension Pointer: Gestures {}
                 // "open 微信" nine times in a row; each left the same page. A third open in a row of one app is refused.
                 if name == "open", let app = act["app"]?.str, Self.opensInARow(steps, app: app) >= 2 {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.reopenReason(app))])
+                    return false
+                }
+                // D124, q143n on 144 (n16): in 测试群 the model wanted today's newer messages and moved the finger down 13
+                // times "to scroll forward"; each went further back, to Sunday, and it answered "not found". In a chat a
+                // finger moving down shows older messages: refused (twice a run at most), with the way to newer ones.
+                if name == "swipe", olderSwipeRefused < 2, Self.inChatApp(steps, task: task), Self.wantsNewerByOlderSwipe(act) {
+                    olderSwipeRefused += 1
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.olderSwipeReason)])
                     return false
                 }
                 // D119, z3 on 143 (item 34): Weather's chart for 3 p.m. was held at the same spot 15 times; each landed on
@@ -4365,6 +4417,42 @@ extension Pointer: Gestures {}
     static let sameTapLimit = 3
     static let sameTapReason = "Refused: this spot was just tapped 3 times in a row and the task did not get on. It is not "
         + "the control you want: look at what else is on the screen, scroll, or go another way."
+    /// D124: a swipe whose finger moves down (older messages, in a chat) while its thought wants newer ones.
+    static func wantsNewerByOlderSwipe(_ act: JObject) -> Bool {
+        guard let y1 = act["y1"]?.double, let y2 = act["y2"]?.double, y2 - y1 >= 200 else { return false }
+        let thought = AppNames.hans((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased()
+        return thought.range(of: #"newer|scroll forward|back down|to the bottom|bottom of the chat|更新的|较新的|回到底部|到底部|滑到最下|最下面|往下翻|向下翻"#,
+                             options: .regularExpression) != nil
+    }
+    static let olderSwipeReason = "Refused: in a chat a finger moving down (y 300 → 750) shows OLDER messages, further back. "
+        + "Newer messages (toward today, at the bottom) come with the finger moving up: swipe from y 750 to y 300."
+
+    /// D125: a goal asking for a chat's latest message(s).
+    static func asksLatestMessage(_ task: String) -> Bool {
+        AppNames.hans(task).range(of: #"最(后|新|近)的?[一二两三四五六七八九十几\d]*条|最新消息|最后发|最新发"#, options: .regularExpression) != nil
+    }
+
+    /// D125: since the app was last opened nothing took the chat to its bottom: no tap or back (a chat entered from the
+    /// list opens at its bottom), and the last long swipe or read-up went back to older messages.
+    static func mayBeScrolledUp(_ steps: [JObject]) -> Bool {
+        guard let open = steps.lastIndex(where: { $0["action"]?.str == "open" }) else { return false }
+        var down = false
+        for s in steps[(open + 1)...] {
+            switch s["action"]?.str {
+            case "tap", "back": down = true
+            case "readup": down = false
+            case "swipe":
+                let dy = (s["y2"]?.double ?? 0) - (s["y1"]?.double ?? 0)
+                if dy <= -200 { down = true } else if dy >= 200 { down = false }
+            default: break
+            }
+        }
+        return !down
+    }
+    static let scrolledUpReason = "Refused: WeChat opens a chat where it was left, and an earlier run may have scrolled it up: "
+        + "the bottom of this screen need not be the latest message. Swipe the finger up (from y 750 to y 300) until nothing "
+        + "moves, then tell the last message at the bottom."
+
     static let sameHoldReason = "Refused: this spot was just held 3 times in a row and showed the same each time. On a chart, a "
         + "hold that shows another time than the one wanted is moved by the difference: work out how far one hour is from the "
         + "time labels under the chart (the distance between two labels divided by the hours between them) and hold that much "
@@ -4880,6 +4968,7 @@ extension Pointer: Gestures {}
     A line "程序按时间行算出" in the notes is worked out by the program from the chat itself (a time line heads the messages under it): it is right; never say NO against it.
     A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
     A recommended feed or a search result list (小红书, 抖音, 视频号, 淘宝, 拼多多…) can show other items, or the same in another order, each time it is opened: what was noted from it earlier stands. Never say NO because the list on the screen now differs from what was noted.
+    Weather's 10-day forecast starts with 今天 and runs ten days, so weekday names come twice: 明天 is the row right under 今天, and a later row with the same weekday is a week on. An answer for today or tomorrow read from a later row is wrong: say NO.
     """
 
     /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
@@ -5570,18 +5659,18 @@ extension Pointer: Gestures {}
             // screen. Up to readUpScreens screens are scrolled and read on the phone, the text only, until the words
             // given or the top (nothing moves), and what was read goes into the notes oldest first.
             let until = AppNames.hans(a["until"]?.str ?? "").filter { !$0.isWhitespace }
-            var screens: [[String]] = [], last: [String] = []
+            var screens: [[String]] = [], last: [String] = [], top = false
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
                 let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88).map(Self.readUpLine)
-                if i > 0, rows == last { break }  // the top: nothing moved
+                if i > 0, rows == last { top = true; break }  // the top: nothing moved
                 screens.append(rows)
                 last = rows
                 if !until.isEmpty, rows.contains(where: { AppNames.hans($0).filter { !$0.isWhitespace }.contains(until) }) { break }
                 try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
                 await screen?.settled()
             }
-            notes.append(Self.readUpNote(Self.readUpMerge(screens), screens: screens.count, until: a["until"]?.str ?? ""))
+            notes.append(Self.readUpNote(Self.readUpMerge(screens), screens: screens.count, until: a["until"]?.str ?? "", top: top))
         case "path":
             let pts = a["smooth"]?.bool == true ? smoothCurve(points(a)) : points(a)
             try await phone.drag(pts.map { CGPoint(x: $0.x / 1000, y: $0.y / 1000) }, hold: true)
