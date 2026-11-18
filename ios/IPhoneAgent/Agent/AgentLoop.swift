@@ -145,6 +145,8 @@ extension Pointer: Gestures {}
     private var setAgainRefused = false
     /// D141: refusals of text typed ahead of its items' results (typedAheadOfResults), per run.
     private var aheadRefusals = 0
+    /// D144: refusals of a goal's message typed without the number it stands for (offPatternGoalMessage), per run.
+    private var offPatternRefusals = 0
     /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
     private var lastGroupTitle: String?
     /// D124: finger-down swipes in a chat refused this run because the thought wanted newer messages (two at most).
@@ -626,7 +628,7 @@ extension Pointer: Gestures {}
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
-        (setAgainRefused, aheadRefusals) = (false, 0)
+        (setAgainRefused, aheadRefusals, offPatternRefusals) = (false, 0, 0)
         (olderSwipeRefused, bottomRefused) = (0, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -1065,7 +1067,32 @@ extension Pointer: Gestures {}
         // 微信 (each time it saw the old bubble it took the message as sent) until the loop guard stopped it.
         return "This run never sent " + missing.map { "“\($0)”" }.joined(separator: "、") + ". The same words already in the "
             + "chat are an older message from an earlier run, not this run's: type and send each again now in the chat the "
-            + "goal names (it is approved there), or say in the answer that it was not sent."
+            + "goal names (it is approved there), or say in the answer that it was not sent. When a number or fact the "
+            + "message needs could not be found (a thing it comes from was 未能完成), send nothing made up in its place: "
+            + "say in the answer that it was not sent and why."
+    }
+
+    /// D144, x3 on 145 (rerun): 美团 asked to log in, items 3 and 4 were skipped, and “X3外卖合计N元” (N from item 5) had no
+    /// number; told it was never sent, the model typed "X3外卖合计无法计算（缺少第3、4项合计金额数据）", and the refused approval
+    /// ended the run at item 6 of 26. Text typed as the start of a goal's message with a number in it (N, X) that does not
+    /// keep to it: that message.
+    static func offPatternGoalMessage(_ typed: String, task: String) -> String? {
+        let t = typedKey(AppNames.hans(typed))
+        for m in goalMessages(task) {
+            guard let r = m.range(of: #"(?<![A-Za-z0-9])[NnXx](?![A-Za-z0-9])"#, options: .regularExpression) else { continue }
+            let head = String(m[..<r.lowerBound])
+            guard head.count >= 3, t.hasPrefix(head) else { continue }
+            let pattern = "^" + NSRegularExpression.escapedPattern(for: head) + #"[0-9０-９][0-9０-９.,，]*"#
+                + NSRegularExpression.escapedPattern(for: String(m[r.upperBound...])) + "$"
+            if t.range(of: pattern, options: .regularExpression) == nil { return m }
+        }
+        return nil
+    }
+
+    static func offPatternReason(_ message: String) -> String {
+        "Refused: the goal's message is “\(message)”, the letter standing for a number worked out on the phone. Type it only "
+            + "with that number in its place. When the number could not be worked out (a thing it comes from was 未能完成), "
+            + "send nothing in its place: note 未发送 with the reason and say so in the answer."
     }
 
     /// Whether a screen title is a chat the goal names ("测试群（4人）" for a goal that posts to 测试群).
@@ -3763,6 +3790,13 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(
                         "Refused: the goal says to send “\(exact)” exactly. Type “\(exact)” with nothing added or left out.")])
                     DebugLog.write("type: refused; the goal's message with something added")
+                    return false
+                }
+                if name == "type", Self.inChatApp(steps, task: task), offPatternRefusals < 2,
+                   let goalMessage = Self.offPatternGoalMessage(typedNow, task: task) {
+                    offPatternRefusals += 1
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.offPatternReason(goalMessage))])
+                    DebugLog.write("type: refused; a goal's message without the number it stands for")
                     return false
                 }
                 if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task) {

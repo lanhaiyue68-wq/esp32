@@ -1512,6 +1512,15 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D144, x3 on 145: a goal's message typed with its number made into words.
+    func testAGoalMessageWithItsNumberLeftOutIsRefused() {
+        let goal = "5. 用计算器算第3项和第4项两个合计金额之和；6. 在微信测试群发“X3外卖合计N元”（N换成第5项算出的数）；7. 在测试群发“X3全部做完”"
+        XCTAssertEqual(AgentLoop.offPatternGoalMessage("X3外卖合计无法计算（缺少第3、4项合计金额数据）", task: goal), "X3外卖合计N元")
+        XCTAssertNil(AgentLoop.offPatternGoalMessage("X3外卖合计56.5元", task: goal))
+        XCTAssertNil(AgentLoop.offPatternGoalMessage("X3全部做完", task: goal))
+        XCTAssertNil(AgentLoop.offPatternGoalMessage("X6过半了", task: "在测试群发“X6过半了”"))
+    }
+
     /// D142, s7 on 145: a part finished on what an earlier run read.
     func testAResultFromAnEarlierRunIsNoResult() {
         XCTAssertTrue(AgentLoop.fromAnEarlierRun("笔记2（YESKY数码）：发布日期01-22；设置步骤已在早前运行中读出，无需再打开。"))
