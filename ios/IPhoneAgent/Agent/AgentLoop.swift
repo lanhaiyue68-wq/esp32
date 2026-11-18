@@ -139,6 +139,8 @@ extension Pointer: Gestures {}
     private var bracketRefused: Set<Int> = []
     /// D107: the goal's items a note with text cut short on the screen was refused for (once each; 0: a note with no item).
     private var cutRefused: Set<Int> = []
+    /// D114: a short goal that reads one group was refused once for ending where that group's title is not shown.
+    private var groupTitleRefused = false
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -605,6 +607,9 @@ extension Pointer: Gestures {}
         continuations = 0
         continuedAt = nil
         roundRefused = 0
+        // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
+        // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
+        (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused) = ([], [], nil, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -2224,6 +2229,15 @@ extension Pointer: Gestures {}
         return all.filter { name in !generic.contains { name.hasSuffix($0) } }
     }
 
+    /// D114: the one group a short goal only reads in ("在微信验证群看最新一条消息是谁发的"): at most two numbered parts,
+    /// one group named, nothing quoted (to send or to find). nil for any other goal.
+    static func readsOneGroup(_ task: String) -> String? {
+        let groups = namedGroups(task)
+        guard goalParts(task) < 3, groups.count == 1,
+              task.range(of: #"[“"「『]"#, options: .regularExpression) == nil else { return nil }
+        return groups[0].replacingOccurrences(of: #"^.*?(?:微信|WeChat|wechat)"#, with: "", options: .regularExpression)
+    }
+
     static func chatCheck(seen: String?, task: String, steps: [JObject]) -> ChatCheck {
         let groups = namedGroups(task)
         guard !groups.isEmpty else { return .unknown }
@@ -3309,6 +3323,32 @@ extension Pointer: Gestures {}
                 if fixed != answer {
                     DebugLog.write("done: a weekday, a count of days or a span between two times was wrong; put right")
                     act["answer"] = .str(fixed)
+                }
+            }
+            // D113, q143n on 143 (n07, n15): a note title "…来首尔不知道去哪…" and an author "Linlin的奇妙…" went out cut, as
+            // read off the list: D107 looks at notes, and a short goal is answered in done. Refused once, to open it.
+            if name == "done", endsTask, Self.goalParts(task) < 3, let answer = act["answer"]?.str,
+               let why = cutNoteMissing(answer) {
+                record(planned.shot, ["action": .str("done rejected"),
+                                      "reason": .str(why.replacingOccurrences(of: "this note holds", with: "this answer holds"))])
+                DebugLog.write("done: refused once; the answer holds text cut short on the screen")
+                return false
+            }
+            // D114, q143n on 143 (n12): to read 验证群's last message WeChat opened on 测试群 with a 10001 SMS banner over its
+            // title; the taps meant for the back arrow hit the status bar, Doubao said it was "already inside the target
+            // chat" and told 测试群's last message, and the done check passed it. A short goal that reads one group ends
+            // only under that group's title: refused once, with the way there.
+            if name == "done", endsTask, !groupTitleRefused, messageSent.isEmpty, let group = Self.readsOneGroup(task),
+               Self.inChatApp(steps, task: task) {
+                let title = (screen?.frame ?? planned.shot).flatMap { WatchReport.navigationTitle(in: $0) }
+                if Self.chatCheck(seen: title, task: task, steps: steps) != .right {
+                    groupTitleRefused = true
+                    let seen = title.map { "the title there is “\($0)”" } ?? "no chat title can be read there; a banner may cover it"
+                    record(planned.shot, ["action": .str("done rejected"), "reason": .str(
+                        "Refused: “\(group)” is not shown at the top of this screen (\(seen)). Read it only under its own "
+                        + "title: swipe a banner at the top up to clear it, go back to the chat list, open \(group) and read it there.")])
+                    DebugLog.write("done: refused once; the group the goal reads is not the chat on the screen")
+                    return false
                 }
             }
             if name == "done", endsTask, verifiesDone, presetPlan.isEmpty, endAfterSend == nil {

@@ -734,6 +734,26 @@ import XCTest
         XCTAssertTrue(AgentLoop.addedToCart([row("5000+人已加购"), row("加购成功")]))
     }
 
+    /// D113, n07 and n15 on 143: an answer cut short as read off a list is seen.
+    func testAnAnswerCutShortIsSeen() {
+        XCTAssertTrue(AgentLoop.holdsCutText("第一篇笔记标题为“一张图看懂全首尔必吃美食 来首尔不知道去哪…”，点赞数为26"))
+        XCTAssertTrue(AgentLoop.holdsCutText("第一个视频作者为「Linlin的奇妙…」，点赞数为 5.6 万。"))
+        XCTAssertFalse(AgentLoop.holdsCutText("365 乘以 24 等于 8,760。"))
+    }
+
+    /// D114, n12 on 143: a short goal that only reads one group ends under that group's title.
+    func testAShortGoalReadsItsGroupUnderItsTitle() {
+        let goal = "在微信验证群看最新一条消息是谁发的、说了什么（只看，不要发消息）"
+        XCTAssertEqual(AgentLoop.readsOneGroup(goal), "验证群")
+        XCTAssertNil(AgentLoop.readsOneGroup("在微信测试群发“143夜测一”"))
+        XCTAssertNil(AgentLoop.readsOneGroup("在微信测试群里往上翻，找一下今天有没有发过“143夜测一”"))
+        XCTAssertNil(AgentLoop.readsOneGroup("用计算器算一下 365 乘以 24 等于多少"))
+        let open: [JObject] = [["action": .str("open"), "app": .str("WeChat")]]
+        XCTAssertEqual(AgentLoop.chatCheck(seen: "验证群(3)", task: goal, steps: open), .right)
+        XCTAssertNotEqual(AgentLoop.chatCheck(seen: "测试群(4)", task: goal, steps: open), .right)
+        XCTAssertNotEqual(AgentLoop.chatCheck(seen: nil, task: goal, steps: open), .right)
+    }
+
     /// D112b, z5 on 143: a way that taps 加入购物车 (to see the spec) is not kept for later tasks.
     func testAWayThatAddsOrBuysIsNotKept() {
         XCTAssertTrue(AgentLoop.waySpends("在商品页点“加入购物车”打开规格选择弹窗，查看默认选中规格后关闭，不确认加购。"))
