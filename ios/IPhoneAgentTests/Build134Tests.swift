@@ -1511,6 +1511,28 @@ import XCTest
         XCTAssertTrue(AgentLoop.needsApproval("北京明天最高8度", task: task, chatApp: true))
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
+
+    /// D142, s7 on 145: a part finished on what an earlier run read.
+    func testAResultFromAnEarlierRunIsNoResult() {
+        XCTAssertTrue(AgentLoop.fromAnEarlierRun("笔记2（YESKY数码）：发布日期01-22；设置步骤已在早前运行中读出，无需再打开。"))
+        XCTAssertTrue(AgentLoop.fromAnEarlierRun("这家店上次任务里已经看过"))
+        XCTAssertFalse(AgentLoop.fromAnEarlierRun("笔记1：发布日期6/3；打开快捷指令→自动化→特定时间→关机"))
+        XCTAssertFalse(AgentLoop.fromAnEarlierRun("比之前便宜了5元"))
+        XCTAssertEqual(AgentLoop.readUpStillTries, 2, "D143")
+    }
+
+    /// D141, x4 on 145: a memo of results typed before they were looked up, and 全部做完 sent with items 3–19 not done.
+    func testResultsTypedAheadOfTheirItemsAreRefused() {
+        let goal = (1...12).map { "\($0). 在天气看一个城市今天的最高温" }.joined(separator: "；") + "；13. 在微信测试群发“T全部做完”"
+        let told = ["第1项：20°", "第2项：21°"]
+        XCTAssertEqual(AgentLoop.typedAheadOfResults("1. 20°；2. 21°；3. 22°", task: goal, told: told, sent: []), [3])
+        XCTAssertEqual(AgentLoop.typedAheadOfResults("1. 20°；2. 21°", task: goal, told: told, sent: []), [])
+        XCTAssertEqual(AgentLoop.typedAheadOfResults("T全部做完", task: goal, told: told, sent: []), Array(3...12))
+        let all = (1...12).map { "第\($0)项：2\($0 % 10)°" }
+        XCTAssertEqual(AgentLoop.typedAheadOfResults("T全部做完", task: goal, told: all, sent: []), [])
+        XCTAssertEqual(AgentLoop.typedAheadOfResults("露营椅", task: goal, told: told, sent: []), [], "a search word")
+        XCTAssertTrue(AgentLoop.aheadReason([3, 4, 5]).contains("第3–5项") || AgentLoop.aheadReason([3, 4, 5]).contains("第3-5项"))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

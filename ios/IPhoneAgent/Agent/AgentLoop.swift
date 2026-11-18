@@ -143,6 +143,8 @@ extension Pointer: Gestures {}
     private var groupTitleRefused = false
     /// D134: a name or remark the goal sets was refused once for being typed again after it was saved.
     private var setAgainRefused = false
+    /// D141: refusals of text typed ahead of its items' results (typedAheadOfResults), per run.
+    private var aheadRefusals = 0
     /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
     private var lastGroupTitle: String?
     /// D124: finger-down swipes in a chat refused this run because the thought wanted newer messages (two at most).
@@ -177,6 +179,12 @@ extension Pointer: Gestures {}
     /// 124 over the cloud 11-12 (e02): 行事曆 did not open, the model gave up, and 视频号, Bluetooth and Weather were never
     /// tried. In a goal of three parts or more, this many single things may fail and be written down; the run goes on.
     private var itemFailsLeft = 2
+    /// D141b, x4 on 145 (28 things): five things were skipped one by one with things noted between them (3, 4, 5, 6, 8,
+    /// 9, 15, 16), and the sixth stuck thing (17, 电池 not opening) ended the run with 18–28 never tried. A skip is given
+    /// back once a thing not noted before is noted after it: only skips in a row with nothing got between run out.
+    private var skipOwed = false
+    /// D142: the part sent back once for a result taken from an earlier run (fromAnEarlierRun); -1: none.
+    private var earlierRunRefused = -1
     /// 132 over the cloud 11-14 (c3): 京东 was not on the phone; Codex, driving, said fail three times in 14 s with nothing
     /// done between, each refusal took one of the two allowed, and the third ended a twenty-item run at item 15 (16–20
     /// never tried). A fail right after a refused one, with nothing done between, is the same item: it costs nothing
@@ -618,7 +626,7 @@ extension Pointer: Gestures {}
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
-        setAgainRefused = false
+        (setAgainRefused, aheadRefusals) = (false, 0)
         (olderSwipeRefused, bottomRefused) = (0, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -1903,6 +1911,35 @@ extension Pointer: Gestures {}
     }
 
     /// For the planner: the goal's things left (itemsLeft), every one to be planned.
+    /// D141, q133x on 145 (x4, a goal of 28): at step 87 the memo of items 1–23 (item 24) was typed with results made
+    /// up for 3 and 4 (视频号 "@小透明，点赞数10"; looked up later: "深圳游玩•", 5977), and at 112 "X4全部做完" (item 26)
+    /// went out to 测试群 with items 3–19 not done. Results typed for items that have none yet, or a goal's 全部做完
+    /// message typed before the items ahead of it: those items (empty: go ahead).
+    static func typedAheadOfResults(_ typed: String, task: String, told: [String], sent: Set<String>) -> [Int] {
+        let t = AppNames.hans(typed).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 4 else { return [] }
+        let left = itemsLeft(task: task, told: told, sent: sent)
+        guard !left.isEmpty else { return [] }
+        if t.count <= 20, t.range(of: #"(全部|都|全)(做完|完成|办完|搞定)"#, options: .regularExpression) != nil {
+            let goal = AppNames.hans(task)
+            guard let own = numberedItems(goal).first(where: { goal[$0.body].contains(t) }) else { return [] }
+            return left.filter { $0 < own.n }
+        }
+        guard let re = try? NSRegularExpression(pattern: #"(?:^|[；;。，,\n]|\s)\s*(?:第\s*)?(\d{1,2})\s*(?:[.、．](?!\d)|[项項][：:])"#)
+        else { return [] }
+        let ns = t as NSString
+        let typedItems = Set(re.matches(in: t, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Int(ns.substring(with: $0.range(at: 1))) })
+        guard typedItems.count >= 2 else { return [] }
+        return left.filter { typedItems.contains($0) }
+    }
+
+    static func aheadReason(_ ahead: [Int]) -> String {
+        "Refused: 第" + itemRanges(ahead) + "项 have no result noted in this run yet, so this cannot be typed or sent now. "
+            + "Do them first in the goal's order: look each one up and note its result (or note 未能完成 with the reason for "
+            + "one that cannot be done). Never write a result that was not seen on the screen."
+    }
+
     static func itemsLeftLine(_ left: [Int]) -> String {
         "The goal's things with no result yet: " + itemRanges(left) + ". Plan EVERY one of them, one part per thing, in the "
             + "goal's order, each part starting with 第N项： (N = its number in the goal). Leave out only ones already given "
@@ -1914,6 +1951,7 @@ extension Pointer: Gestures {}
 
     /// D27: screens readup goes up at most (a chat's day or two).
     static let readUpScreens = 40
+    static let readUpStillTries = 2  // D143: swipes more, a wait apart, before an unmoved screen is the top
 
     /// D27: a read up a chat, oldest first: each screen's rows not seen on the screens below it go before what came
     /// before (a screen further up shows older messages). `screens` are in the order read, newest first.
@@ -2841,6 +2879,7 @@ extension Pointer: Gestures {}
         (parts, partIndex, doneParts, takeover, stepsInPart, rescued, troubles) = ([], 0, [], 0, 0, false, 0)
         (stallsNoProgress, messageSent, sendIsMessage, refusalsNoProgress) = (0, [], false, 0)
         itemFailsLeft = Self.itemFailsAllowed(task)
+        (skipOwed, earlierRunRefused) = (false, -1)
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
@@ -3195,7 +3234,10 @@ extension Pointer: Gestures {}
                 // D51, y5 on 136: the plan's part 1 was item 23; items 23, 24 and 25 were noted in 20 steps without a
                 // "part done", the part counted as stalled and a thing was skipped (four times in y5; 29, 32 and 37 were
                 // noted and still reported 未能完成). A note of a thing not noted before is the part getting on.
-                if Self.newThingNoted(text, before: before) { (stepsInPart, troubles) = (0, 0) }
+                if Self.newThingNoted(text, before: before) {
+                    (stepsInPart, troubles) = (0, 0)
+                    if skipOwed { (itemFailsLeft, skipOwed) = (itemFailsLeft + 1, false) }  // D141b
+                }
                 gotOn()
             }
             record(planned.shot, planned.act)
@@ -3598,6 +3640,7 @@ extension Pointer: Gestures {}
                     freeFailRefusals += 1
                 } else {
                     itemFailsLeft -= 1
+                    skipOwed = true
                     freeFailRefusals = 0
                     let line = "未能完成：" + String(why.prefix(120))
                     if !notes.contains(line) { notes.append(line) }
@@ -3725,6 +3768,14 @@ extension Pointer: Gestures {}
                 if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task) {
                     setAgainRefused = true
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.setAgainReason(typedNow))])
+                    return false
+                }
+                if name == "type", aheadRefusals < 2,
+                   case let ahead = Self.typedAheadOfResults(act["text"]?.str ?? "", task: task, told: notes + doneParts,
+                                                             sent: messageSent), !ahead.isEmpty {
+                    aheadRefusals += 1
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.aheadReason(ahead))])
+                    DebugLog.write("type: refused; results typed ahead of items \(Self.itemRanges(ahead))")
                     return false
                 }
                 if name == "type", let sent = sentMatch,
@@ -4879,7 +4930,7 @@ extension Pointer: Gestures {}
         // phone now (sign-in, a service off) is a skip the goal allows, not the run going wrong: it spends nothing.
         let blocked = why.hasPrefix("做不成：")
         guard Self.goalParts(task) >= 3, itemFailsLeft > 0 || blocked else { return false }  // one thing: the run stops as before
-        if !blocked { itemFailsLeft -= 1 }
+        if !blocked { (itemFailsLeft, skipOwed) = (itemFailsLeft - 1, true) }
         let what = parts.count >= 2 && partIndex < parts.count ? Self.failedPartNote(parts[partIndex], why: why) : CloudBridge.failureWords(why)
         let line = "未能完成：" + String(what.prefix(160))
         if !notes.contains(line) { notes.append(line) }
@@ -5308,11 +5359,27 @@ extension Pointer: Gestures {}
 
     /// The executor's (or Codex's) "done" on a plan of several parts: the next part begins, the last one ends the run.
     /// A part Codex rescued is done: the executor takes the next one. True: the run goes on.
+    /// D142, s7 on 145 (小红书, three notes): part 2 was finished with "笔记2（YESKY数码）：发布日期01-22；设置步骤已在早前运行中
+    /// 读出，无需再打开" and never opened in this run; the check found the three named were not the top three. What a run
+    /// before this one saw is no result of this one.
+    static func fromAnEarlierRun(_ text: String) -> Bool {
+        AppNames.hans(text).range(of: #"(早前|之前|上次|上一次|此前|以前|先前|前一次)的?(运行|任务|执行|测试|对话|那次)"#,
+                                  options: .regularExpression) != nil
+    }
+
+    static let earlierRunReason = "Not done: what an earlier run found is no result of this run (the page can have changed "
+        + "since). Open it again now and write down what the screen shows."
+
     private func partFinished(_ act: JObject, shot: Data?) -> Bool {
         guard parts.count >= 2, partIndex < parts.count else { return false }
         let n = partIndex + 1
         // What a part found is what the next one needs: a price read in one app goes into a message in another.
         let found = String((act["answer"]?.str ?? "").prefix(300))
+        if earlierRunRefused != partIndex, Self.fromAnEarlierRun(found) {  // D142
+            earlierRunRefused = partIndex
+            record(shot, ["action": .str("part not done"), "part": .int(n), "reason": .str(Self.earlierRunReason)])
+            return true
+        }
         // B8, 122 over the cloud 11-12: the 视频号 part of an 11-part goal was finished with nothing found or written
         // down, and its result was simply missing. A part that asks to find something out is sent back once.
         if found.isEmpty, notes.count == notesAtPart, emptyPartRefused != partIndex, Self.readsSomething(parts[partIndex]) {
@@ -5787,11 +5854,22 @@ extension Pointer: Gestures {}
             // screen. Up to readUpScreens screens are scrolled and read on the phone, the text only, until the words
             // given or the top (nothing moves), and what was read goes into the notes oldest first.
             let targets = Self.readUpTargets(a["until"]?.str ?? "")  // D133
-            var screens: [[String]] = [], last: [String] = [], top = false
+            var screens: [[String]] = [], last: [String] = [], top = false, still = 0
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
                 let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88).map(Self.readUpLine)
-                if i > 0, rows == last { top = true; break }  // the top: nothing moved
+                // D143, s6 on 145: "一直读到11月14日" stopped after 5 screens at 11月17日凌晨 as "the top": nothing moved
+                // once, while WeChat was loading older messages (or the swipe was lost). The top is the same screen after
+                // two more swipes, each after a wait.
+                if i > 0, rows == last {
+                    if still >= Self.readUpStillTries { top = true; break }
+                    still += 1
+                    try await Task.sleep(nanoseconds: 1_500_000_000)
+                    try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
+                    await screen?.settled()
+                    continue
+                }
+                still = 0
                 screens.append(rows)
                 last = rows
                 if rows.contains(where: { row in
