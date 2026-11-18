@@ -582,7 +582,12 @@ import Foundation
         // unseen or off there (the reason the top band went from the corner: a hop's estimate is the worse one), it goes
         // from the corner after all, and clicks as before. The status bar's clock (a click there stops the sharing)
         // stays from the corner.
-        if !aim, !stale, !viaBorders(x, y), !Self.nearClock(x, y), let last = lastClick, let p = pos, hops < Self.nearbyHops,
+        // D151, user 11-19 ("必须走曲线，而且是随机曲线，起点不固定，弧度也是随机，长度也随机，只有终点固定对了就行"): 145's
+        // regression, 603 taps: 338 still went back to the corner first, 198 of them for the right side (x > 0.75, the
+        // right border) and 110 for the bottom rows (the bottom border). Those hop from where the pointer rests too, and
+        // like the top band click only where the pointer is seen on the target; unseen or off there, they go by the
+        // border after all, as before (hopNeedsCorner).
+        if !aim, !stale, !Self.nearClock(x, y), let last = lastClick, let p = pos, hops < Self.nearbyHops,
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
@@ -598,8 +603,8 @@ import Foundation
             // search finds the pointer and corrects it before the click (2-4 s, only then).
             startedOver = false
             let arrival = try await arrive(x, y, before: before, began: began)
-            if Self.hopNeedsCorner(y: y, arrival: arrival, startedOver: startedOver) {
-                log(String(format: "tap (%.3f, %.3f): hop %ld not seen on the target near the top; from the corner after all", x, y, hops))
+            if Self.hopNeedsCorner(y: y, border: viaBorders(x, y), arrival: arrival, startedOver: startedOver) {
+                log(String(format: "tap (%.3f, %.3f): hop %ld not seen on the target near the top or a border; from the corner after all", x, y, hops))
                 (before, began) = (screen?.frame, now())
             } else {
                 if arrival == .offTarget { try await self.aim(x, y) }
@@ -1052,8 +1057,9 @@ import Foundation
 
     /// D102: a hop into the top band clicks only where the pointer was seen on the target; otherwise the tap goes from
     /// the corner after all (not when the arrival check itself already started over from there).
-    static func hopNeedsCorner(y: Double, arrival: Arrival, startedOver: Bool) -> Bool {
-        y < topBand && arrival != .onTarget && !startedOver
+    /// D151: a hop to a target the border path is for (the right side, the bottom rows) likewise.
+    static func hopNeedsCorner(y: Double, border: Bool = false, arrival: Arrival, startedOver: Bool) -> Bool {
+        (y < topBand || border) && arrival != .onTarget && !startedOver
     }
     static let hopWindow = 120.0   // seconds; after longer, start from the corner
 

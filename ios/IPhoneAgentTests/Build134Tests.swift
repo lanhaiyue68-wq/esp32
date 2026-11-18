@@ -930,6 +930,11 @@ import XCTest
         XCTAssertTrue(Pointer.hopNeedsCorner(y: 0.12, arrival: .offTarget, startedOver: false))
         XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.09, arrival: .unseen, startedOver: true), "already came from the corner")
         XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.48, arrival: .unseen, startedOver: false), "lower down, as before")
+        // D151: a hop to the right side or the bottom rows clicks only where seen on the target, else by the border.
+        XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.72, border: true, arrival: .onTarget, startedOver: false))
+        XCTAssertTrue(Pointer.hopNeedsCorner(y: 0.72, border: true, arrival: .unseen, startedOver: false))
+        XCTAssertTrue(Pointer.hopNeedsCorner(y: 0.95, border: true, arrival: .offTarget, startedOver: false))
+        XCTAssertFalse(Pointer.hopNeedsCorner(y: 0.72, border: true, arrival: .unseen, startedOver: true), "came by the border already")
         XCTAssertTrue(Pointer.nearClock(0.12, 0.03), "the clock stays from the corner")
         XCTAssertFalse(Pointer.nearClock(0.527, 0.089))
     }
