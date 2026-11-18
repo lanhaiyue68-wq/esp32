@@ -556,6 +556,7 @@ import Foundation
         defer { targetHalf = nil }  // for one tap only
         if aim { targetHalf = nil }  // an aimed tap (after one that changed nothing) lands on the spot
         drawChain = false  // a tap ends a drawing run: its drift must not carry into the next stroke
+        if y < Self.bannerBand { try await swipeAwayStuckBanner() }  // D116
         var before = screen?.frame, began = now()  // the screen before the move: where the pointer arrives is what changes
         defer { lastSpot = CGPoint(x: x, y: y) }
         if !aim, let last = lastClick, let p = pos, Self.clickAgain(last, x, y, units: p, link: device.links, at: Date().timeIntervalSince1970) {
@@ -967,6 +968,7 @@ import Foundation
     static let bannerBand = 0.16
     static let bannerWait = 6.0
     private var notBanners: Set<String> = []
+    private var swipedBanners: Set<String> = []
 
     /// The banner over the top of these rows ("title|body"), unless it was found to be part of the screen.
     /// 142's z6: 4 waits of 6 s each, none a banner: Notes' search results and Taobao's and Pinduoduo's product titles
@@ -979,12 +981,51 @@ import Foundation
     }
 
     /// A banner's time at the right of its title row: "现在", "刚刚", "2分钟前", "now", "2m ago".
-    static func bannerTimeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool {
-        rows.joined().contains { piece in
-            piece.box.minX >= 0.72 && piece.box.midY <= bannerBand
-                && piece.text.filter({ !$0.isWhitespace }).lowercased().range(
-                    of: #"^(现在|現在|刚刚|剛剛|now|\d{1,2}(分钟|分鐘|秒|小时|小時|m|min|s|h)(前|ago)?)$"#,
-                    options: .regularExpression) != nil
+    static func bannerTimeShown(_ rows: [[CandidatePicker.Piece]]) -> Bool { rows.joined().contains(where: isBannerTime) }
+    static func isBannerTime(_ piece: CandidatePicker.Piece) -> Bool {
+        piece.box.minX >= 0.72 && piece.box.midY <= bannerBand
+            && piece.text.filter({ !$0.isWhitespace }).lowercased().range(
+                of: #"^(现在|現在|刚刚|剛剛|now|\d{1,2}(分钟|分鐘|秒|小时|小時|m|min|s|h)(前|ago)?)$"#,
+                options: .regularExpression) != nil
+    }
+
+    /// D116: where to press to swipe a banner up: on its body, just under the title row that holds its time.
+    static func bannerSwipeStart(_ rows: [[CandidatePicker.Piece]]) -> Double? {
+        rows.joined().first(where: isBannerTime).map { min(bannerBand - 0.01, Double($0.box.midY) + 0.035) }
+    }
+
+    /// D116, q143n on 143 (n12): a 10001 SMS banner ("1分鐘前") stayed over WeChat's title for minutes; after 6 s it was
+    /// taken for the screen's own, and the taps meant for the back arrow under it went to the status bar. A real banner
+    /// (its time shown) still there after the wait is swiped up once, before the pointer goes to the target: a swipe at
+    /// click time would leave the pointer at the swipe's end.
+    private func swipeAwayStuckBanner() async throws {
+        guard let screen else { return }
+        let started = now()
+        var rows: [[CandidatePicker.Piece]] = [], seen: String?
+        repeat {
+            guard let frame = screen.frame else { return }
+            rows = await CandidatePicker.rowsOffMain(in: frame, top: 0, bottom: Self.bannerBand)
+            guard let key = Self.bannerKey(rows, notBanners: notBanners) else {
+                if seen != nil { log(String(format: "tap: the banner went up after %.1f s", now() - started)) }
+                return
+            }
+            if seen == nil { log("tap: a notification banner over the top (\(key.prefix(40))); waiting for it to go") }
+            seen = key
+            try await Task.sleep(nanoseconds: 500_000_000)
+        } while now() - started < Self.bannerWait
+        guard let key = seen, !swipedBanners.contains(key), let from = Self.bannerSwipeStart(rows) else { return }
+        swipedBanners.insert(key)
+        log("tap: the banner is still there after 6 s; swiping it up")
+        try await dragNow([CGPoint(x: 0.5, y: from), CGPoint(x: 0.5, y: max(0.01, from - 0.1))], hold: false, quick: true)
+        (lastClick, pos) = (nil, nil)  // the pointer is at the top now: the tap goes from the corner
+        try await Task.sleep(nanoseconds: 800_000_000)
+        guard let frame = screen.frame else { return }
+        let after = await CandidatePicker.rowsOffMain(in: frame, top: 0, bottom: Self.bannerBand)
+        if Self.bannerKey(after, notBanners: notBanners) != nil {
+            notBanners.insert(key)
+            log("tap: the banner did not go when swiped: the screen's own")
+        } else {
+            log("tap: the banner went up when swiped")
         }
     }
 

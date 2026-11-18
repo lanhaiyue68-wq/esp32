@@ -141,6 +141,8 @@ extension Pointer: Gestures {}
     private var cutRefused: Set<Int> = []
     /// D114: a short goal that reads one group was refused once for ending where that group's title is not shown.
     private var groupTitleRefused = false
+    /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
+    private var lastGroupTitle: String?
     /// How often each way off a screen was taken from that screen, in this run.
     private var departures: [(look: [UInt8], move: JObject, times: Int)] = []
     private var circleRefused = 0
@@ -609,7 +611,7 @@ extension Pointer: Gestures {}
         roundRefused = 0
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
-        (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused) = ([], [], nil, false)
+        (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -2235,7 +2237,44 @@ extension Pointer: Gestures {}
         let groups = namedGroups(task)
         guard goalParts(task) < 3, groups.count == 1,
               task.range(of: #"[“"「『]"#, options: .regularExpression) == nil else { return nil }
-        return groups[0].replacingOccurrences(of: #"^.*?(?:微信|WeChat|wechat)"#, with: "", options: .regularExpression)
+        return groupName(groups[0])
+    }
+
+    /// A group as the goal names it, without the words before it ("在微信验证群" → 验证群, "如果群" → 群).
+    static func groupName(_ said: String) -> String {
+        said.replacingOccurrences(of: #"(?i)^.*(?:微信|wechat|如果|若是|要是|打开|打開|进入|進入|点进|點進|发到|發到|到|在|的)"#, with: "",
+                                  options: .regularExpression)
+    }
+
+    /// A chat title that is a group's: it ends in 群 once a member count "(4)" is taken off.
+    static func looksLikeGroup(_ title: String) -> Bool {
+        AppNames.hans(title).replacingOccurrences(of: #"\s*[（(][^)）]*(?:[)）]|$)\s*$"#, with: "", options: .regularExpression)
+            .hasSuffix("群")
+    }
+
+    /// D115, s4 on 143: for 测试群's members Doubao opened 137测试群 (left by earlier rounds) and went on there; after
+    /// the done check stopped it, Codex in the right 测试群（4人） kept taking the members for the wrong group's, back and
+    /// forth 20 times until the steps ran out. Each step in a chat app now says where it is against the goal's group.
+    static func chatPlaceLine(_ title: String?, after last: String?, task: String, steps: [JObject]) -> String? {
+        guard let title else { return nil }
+        let named = namedGroups(task).map(groupName).filter { $0.count >= 2 }
+        guard !named.isEmpty else { return nil }
+        let names = named.joined(separator: "、")
+        if looksLikeGroup(title) {
+            if chatCheck(seen: title, task: task, steps: steps) == .right {
+                return "Chat place: the chat open now, “\(title)”, is \(names), the group the goal names. Work here: what you "
+                    + "read in it, and on its 聊天信息 page (its members), is that group's."
+            }
+            return "Chat place: the chat open now, “\(title)”, is not \(names), the group the goal names: a name that only "
+                + "holds it with more around it (137测试群 for 测试群) is another group. Do nothing for the goal here: go back "
+                + "and open \(names) itself."
+        }
+        let infoPage = AppNames.hans(title).range(of: #"^(聊天信息|群成员|聊天成员|群聊成员)"#, options: .regularExpression) != nil
+        guard infoPage, let last else { return nil }
+        if chatCheck(seen: last, task: task, steps: steps) == .right {
+            return "Chat place: this page belongs to “\(last)”, the group the goal names: its members are that group's members."
+        }
+        return "Chat place: this page belongs to “\(last)”, not \(names), the group the goal names: go back and open \(names) itself."
     }
 
     static func chatCheck(seen: String?, task: String, steps: [JObject]) -> ChatCheck {
@@ -4799,6 +4838,7 @@ extension Pointer: Gestures {}
     A message that was to carry the time at the top of the screen carries the time when it was typed; the screen's time now is later (the run went on), so a message sent an hour ago with an earlier time is right.
     A line "程序按时间行算出" in the notes is worked out by the program from the chat itself (a time line heads the messages under it): it is right; never say NO against it.
     A message the steps typed and then sent with enter counts as sent, unless that chat is on the screen and it is not there.
+    A recommended feed or a search result list (小红书, 抖音, 视频号, 淘宝, 拼多多…) can show other items, or the same in another order, each time it is opened: what was noted from it earlier stands. Never say NO because the list on the screen now differs from what was noted.
     """
 
     /// The models have no clock. Over USB 11-09, today the 9th: a check said next Wednesday was the 25th and threw out the right
@@ -5350,6 +5390,11 @@ extension Pointer: Gestures {}
         }
         if readsScreenText, let list = Self.screenText(readRows) {
             prompt += "\n\nText read on this screen (\"text\" x y, 0-1000; tap these coordinates for a labelled control):\n" + list
+        }
+        if Self.inChatApp(steps, task: task) {  // D115
+            let title = WatchReport.navigationTitle(rows: readRows)
+            if let line = Self.chatPlaceLine(title, after: lastGroupTitle, task: task, steps: steps) { prompt += "\n\n" + line }
+            if let title, Self.looksLikeGroup(title) { lastGroupTitle = title }
         }
         // Only inside a chat app, under a chat title the goal names: a note titled 第5组记录 has a centred title too, and
         // its lines must never be listed as messages.

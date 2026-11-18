@@ -754,6 +754,40 @@ import XCTest
         XCTAssertNotEqual(AgentLoop.chatCheck(seen: nil, task: goal, steps: open), .right)
     }
 
+    /// D115, s4 on 143: each step in a chat app says whether the chat open is the group the goal names.
+    func testEachStepSaysWhetherThisIsTheGoalsGroup() {
+        let goal = "在微信“测试群”的成员里找一位是我好友的人（不是我自己），把他的备注改成“137测试备注”，改完确认通讯录里显示的是新备注；如果群里没有我的好友就说明"
+        let open: [JObject] = [["action": .str("open"), "app": .str("WeChat")]]
+        let right = AgentLoop.chatPlaceLine("测试群(4)", after: nil, task: goal, steps: open)
+        XCTAssertTrue(right?.contains("is 测试群,") == true, right ?? "nil")
+        let wrong = AgentLoop.chatPlaceLine("137测试群", after: nil, task: goal, steps: open)
+        XCTAssertTrue(wrong?.contains("is not 测试群") == true, wrong ?? "nil")
+        XCTAssertTrue(AgentLoop.chatPlaceLine("聊天信息(4)", after: "测试群(4)", task: goal, steps: open)?.contains("its members are") == true)
+        XCTAssertTrue(AgentLoop.chatPlaceLine("聊天信息(4)", after: "137测试群", task: goal, steps: open)?.contains("not 测试群") == true)
+        XCTAssertNil(AgentLoop.chatPlaceLine("张三", after: "测试群(4)", task: goal, steps: open))
+        XCTAssertNil(AgentLoop.chatPlaceLine("测试群(4)", after: nil, task: "用计算器算一下 365 乘以 24", steps: open))
+        XCTAssertEqual(AgentLoop.groupName("在微信验证群"), "验证群")
+        XCTAssertEqual(AgentLoop.groupName("开心群"), "开心群")
+        XCTAssertEqual(AgentLoop.groupName("打开测试群"), "测试群")
+        XCTAssertTrue(AgentLoop.looksLikeGroup("测试群（4人）"))
+        XCTAssertFalse(AgentLoop.looksLikeGroup("聊天信息(4)"))
+    }
+
+    /// D117, s7 on 143: a feed or search list that shows other notes now does not make the noted ones wrong.
+    func testAChangedFeedIsNoContradiction() {
+        XCTAssertTrue(AgentLoop.doneCheck.contains("search result list"))
+    }
+
+    /// D116, n12 on 143: a banner that stays is swiped up from just under its time row.
+    func testAStuckBannerIsSwipedFromItsBody() {
+        func p(_ t: String, _ x: Double, _ y: Double) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y - 0.01, width: 0.1, height: 0.02))
+        }
+        let banner = [[p("10001", 0.2, 0.075), p("1分鐘前", 0.85, 0.076)], [p("【中国电信-余额提醒】尊敬客户", 0.3, 0.096)]]
+        XCTAssertEqual(Pointer.bannerSwipeStart(banner) ?? 0, 0.111, accuracy: 0.002)
+        XCTAssertNil(Pointer.bannerSwipeStart([[p("测试群(4)", 0.4, 0.075)]]))
+    }
+
     /// D112b, z5 on 143: a way that taps 加入购物车 (to see the spec) is not kept for later tasks.
     func testAWayThatAddsOrBuysIsNotKept() {
         XCTAssertTrue(AgentLoop.waySpends("在商品页点“加入购物车”打开规格选择弹窗，查看默认选中规格后关闭，不确认加购。"))
