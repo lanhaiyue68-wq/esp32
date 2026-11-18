@@ -2178,7 +2178,9 @@ extension Pointer: Gestures {}
     /// typed in Safari were held as messages); a goal that names none, or names a chat app, may be in one.
     /// Whether this app sends messages (微信, 企业微信, 钉钉…).
     /// D109: apps whose feed turns one video a screen, and a swipe there that turns it (up or down, long).
-    static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok"]
+    /// D121, z3 on 143 (items 24 and 37): Calendar's month view stayed on November through seven held swipes: a held
+    /// stroke ends with no speed, and the months snap back. A month turns with a quick stroke there too.
+    static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok", "日历", "calendar"]
 
     static func flicks(app: String?, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Bool {
         guard let app else { return false }
@@ -3656,13 +3658,21 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.deadSwipeReason)])
                     return false
                 }
-                if name == "tap", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {
+                // D120, z3 on 143 (item 13): inside 微信's 视频号 (a full-screen video) Doubao took the page for 抖音 and sent
+                // "open 微信" nine times in a row; each left the same page. A third open in a row of one app is refused.
+                if name == "open", let app = act["app"]?.str, Self.opensInARow(steps, app: app) >= 2 {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.reopenReason(app))])
+                    return false
+                }
+                // D119, z3 on 143 (item 34): Weather's chart for 3 p.m. was held at the same spot 15 times; each landed on
+                // 5 p.m. The same hold three times in a row is refused like a tap, with how to move along a chart.
+                if name == "tap" || name == "hold", Self.tapsInARow(steps, like: act) >= Self.sameTapLimit {
                     deadRefused += 1
                     if deadRefused >= Self.refusalsInARow {
                         deadRefused = 0
                         return try await changeOfPlan(planned.shot, "kept tapping a spot that does nothing")
                     }
-                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.sameTapReason)])
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(name == "hold" ? Self.sameHoldReason : Self.sameTapReason)])
                     return false
                 }
                 // Over USB 11-10 淘寶's box showed a suggestion (保温水壶, grey) and the model searched it as if it had typed
@@ -4355,6 +4365,37 @@ extension Pointer: Gestures {}
     static let sameTapLimit = 3
     static let sameTapReason = "Refused: this spot was just tapped 3 times in a row and the task did not get on. It is not "
         + "the control you want: look at what else is on the screen, scroll, or go another way."
+    static let sameHoldReason = "Refused: this spot was just held 3 times in a row and showed the same each time. On a chart, a "
+        + "hold that shows another time than the one wanted is moved by the difference: work out how far one hour is from the "
+        + "time labels under the chart (the distance between two labels divided by the hours between them) and hold that much "
+        + "further left (earlier) or right (later)."
+
+    /// D120: how many times in a row, up to now, this app was opened (notes, waits and refusals between do not count).
+    static func opensInARow(_ steps: [JObject], app: String) -> Int {
+        let want = AppNames.hans(app).lowercased()
+        var n = 0
+        for s in steps.reversed() {
+            let name = s["action"]?.str ?? ""
+            if ["stale plan", "note", "refused", "wait"].contains(name) { continue }
+            guard name == "open", AppNames.hans(s["app"]?.str ?? "").lowercased() == want else { break }
+            n += 1
+        }
+        return n
+    }
+
+    static func reopenReason(_ app: String) -> String {
+        "Refused: \(app) was just opened twice in a row, and it is the app in front now: the page you see is inside it (in 微信 "
+            + "a 视频号 video, a mini program or an article can look like another app). Use the page's own back arrow (top left) "
+            + "or close button, or its tabs, to get where you want."
+    }
+
+    /// D118, z3 on 143 (item 27): Taobao's 综合 sort menu was tapped three times and never opened: the hop there was
+    /// not seen and clicked off it, and the page's moving cards made every tap count as one that changed the screen, so
+    /// none was aimed. When the model says its last tap did nothing and taps the same spot again, that tap is aimed.
+    static func saysTapDidNothing(_ thought: String) -> Bool {
+        AppNames.hans(thought).lowercased().range(of: #"did not (open|work|respond|react|change|appear)|didn't (open|work|respond|react|change)|(is|was) not open|not open(ed)? yet|no effect|nothing happened|没(有)?(反应|打开|展开|弹出|变化|生效)|未(打开|展开|弹出|响应|生效)|还(是)?没(打开|展开|弹出|反应)|仍(然)?(未|没)"#,
+                                                   options: .regularExpression) != nil
+    }
 
     /// How many taps in a row, up to now, aimed at the same spot as `act` (notes, stale plans and refusals between
     /// them do not count as something else).
@@ -4363,7 +4404,7 @@ extension Pointer: Gestures {}
         for s in steps.reversed() {
             let name = s["action"]?.str ?? ""
             if ["stale plan", "note", "refused"].contains(name) { continue }
-            guard name == "tap", sameSpot(s, act) else { break }
+            guard name == (act["action"]?.str ?? "tap"), sameSpot(s, act) else { break }
             n += 1
         }
         return n
@@ -5485,9 +5526,12 @@ extension Pointer: Gestures {}
         func p(_ k: String) -> Double { (a[k]?.double ?? 0) / 1000 }
         switch a["action"]?.str {
         case "tap":
+            // D118: the same spot again after the model said the last tap there did nothing: aimed.
+            let again = lastTap.map { abs(Double($0.x) - p("x")) <= 0.03 && abs(Double($0.y) - p("y")) <= 0.03 } ?? false
+                && Self.saysTapDidNothing((a["thought"]?.str ?? "") + " " + (a["thought_zh"]?.str ?? ""))
             lastTap = CGPoint(x: p("x"), y: p("y"))
             if let half = Self.textHalf(at: CGPoint(x: p("x"), y: p("y")), in: readRows) { phone.aimLoosely(half.x, half.y) }
-            try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext)
+            try await phone.tap(p("x"), p("y"), aim: (a["precise"]?.bool ?? false) || missed || aimNext || again)
             aimNext = false
         case "swipe":
             // D109: up or down a feed of one video a screen (抖音, 快手): one quick stroke, as a finger does.

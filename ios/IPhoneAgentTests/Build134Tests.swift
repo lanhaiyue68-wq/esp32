@@ -788,6 +788,31 @@ import XCTest
         XCTAssertNil(Pointer.bannerSwipeStart([[p("测试群(4)", 0.4, 0.075)]]))
     }
 
+    /// D118, z3 on 143: the model saying its last tap did nothing is heard.
+    func testATapThatDidNothingIsHeard() {
+        XCTAssertTrue(AgentLoop.saysTapDidNothing("The sort menu did not open after my tap; I tap 综合 again."))
+        XCTAssertTrue(AgentLoop.saysTapDidNothing("The sort menu is not open yet, so I tap 综合 again."))
+        XCTAssertTrue(AgentLoop.saysTapDidNothing("排序菜单没有打开，我再点一次综合。"))
+        XCTAssertFalse(AgentLoop.saysTapDidNothing("The search results are loaded. I tap the 综合 sort button."))
+    }
+
+    /// D119 and D120, z3 on 143: the same hold three times, and one app opened three times in a row, are refused.
+    func testTheSameHoldAndTheSameOpenAreCounted() {
+        let hold: JObject = ["action": .str("hold"), "x": .int(620), "y": .int(900)]
+        XCTAssertEqual(AgentLoop.tapsInARow([hold, hold, ["action": .str("note")], hold], like: hold), 3)
+        let tap: JObject = ["action": .str("tap"), "x": .int(620), "y": .int(900)]
+        XCTAssertEqual(AgentLoop.tapsInARow([hold, hold], like: tap), 0)
+        let open: JObject = ["action": .str("open"), "app": .str("微信")]
+        XCTAssertEqual(AgentLoop.opensInARow([open, ["action": .str("wait")], open], app: "微信"), 2)
+        XCTAssertEqual(AgentLoop.opensInARow([open, ["action": .str("tap"), "x": .int(1), "y": .int(1)]], app: "微信"), 0)
+    }
+
+    /// D121, z3 on 143: Calendar's months turn with a quick stroke.
+    func testCalendarMonthsTurnWithAFlick() {
+        XCTAssertTrue(AgentLoop.flicks(app: "日曆", 0.5, 0.75, 0.5, 0.3))
+        XCTAssertFalse(AgentLoop.flicks(app: "備忘錄", 0.5, 0.75, 0.5, 0.3))
+    }
+
     /// D112b, z5 on 143: a way that taps 加入购物车 (to see the spec) is not kept for later tasks.
     func testAWayThatAddsOrBuysIsNotKept() {
         XCTAssertTrue(AgentLoop.waySpends("在商品页点“加入购物车”打开规格选择弹窗，查看默认选中规格后关闭，不确认加购。"))
