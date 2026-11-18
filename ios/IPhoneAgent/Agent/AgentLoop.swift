@@ -5159,9 +5159,7 @@ extension Pointer: Gestures {}
     private var partFocus: String {
         guard parts.count >= 2, planner != nil, partIndex < parts.count else { return "" }
         var text = "Current part (\(partIndex + 1) of \(parts.count)): \(parts[partIndex])\n"
-        if !doneParts.isEmpty {  // D149: what each found is in the notes (partResultNote); here only which they are
-            text += "Already done (what each found is in your notes below): " + doneParts.map(Self.doneHead).joined(separator: " | ") + "\n"
-        }
+        if !doneParts.isEmpty { text += "Already done, with what it found: " + doneParts.joined(separator: " | ") + "\n" }
         return text + "Work on the current part only. When it is finished on the screen, answer done with what it achieved;"
             + " then the next part begins.\n\n"
     }
@@ -5467,10 +5465,20 @@ extension Pointer: Gestures {}
         return "(parts 1–\(min(index, parts.count)) are done and left out)\n" + kept.joined(separator: "\n")
     }
 
-    /// A part done, as partFocus names it: its own words (not what it found), cut at 40 characters.
-    static func doneHead(_ done: String) -> String {
-        let part = done.components(separatedBy: " -> ").first ?? done
-        return part.count > 40 ? String(part.prefix(40)) + "…" : part
+    /// What a part found stays beside the part in partFocus ("1. read a price -> 價格 19": the next part needs to know
+    /// which part found it; StressNightTests), and the note partFinished made of the same words is what is left out of
+    /// the executor's step: notes whose words (after their 第N项：) a part done already shows whole.
+    static func notesNotShown(_ notes: [String], in done: [String]) -> [String] {
+        let found = done.compactMap { d -> String? in
+            guard let r = d.range(of: " -> ") else { return nil }
+            return String(d[r.upperBound...])
+        }
+        guard !found.isEmpty else { return notes }
+        return notes.filter { note in
+            let body = note.replacingOccurrences(of: #"^\s*第\s*\d{1,3}\s*[项項]\s*[：:]\s*"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return body.count < 4 || !found.contains { $0.contains(body) }
+        }
     }
 
     static func partResultNote(part: String, found: String) -> String? {
@@ -5730,6 +5738,14 @@ extension Pointer: Gestures {}
         }
     }
 
+    /// D149: the notes for the executor's step, less those partFocus already shows with their part.
+    private var stepNotesText: String {
+        let shown = parts.count >= 2 && planner != nil && partIndex < parts.count ? doneParts : []
+        let kept = Self.notesNotShown(notes, in: shown)
+        return kept.isEmpty ? "" : "\n\nYour notes from this run (already read: use them, never go back to read these again):\n"
+            + kept.map { "- " + $0 }.joined(separator: "\n")
+    }
+
     /// The notes, for a prompt ("" when there are none).
     private var notesText: String {
         notes.isEmpty ? "" : "\n\nYour notes from this run (already read: use them, never go back to read these again):\n"
@@ -5759,7 +5775,7 @@ extension Pointer: Gestures {}
         }
         // D149: the plan without the parts done (they are in partFocus), the goal as goalLine.
         var prompt = Self.goalLine(task) + "\n" + Self.todayLine(goal: task, found: notes) + "\n\nPlan:\n"
-            + Self.planLeft(plan, parts: parts, from: partIndex) + "\n\n\(partFocus)Recent actions:\n\(recentActions)\(notesText)"
+            + Self.planLeft(plan, parts: parts, from: partIndex) + "\n\n\(partFocus)Recent actions:\n\(recentActions)\(stepNotesText)"
             + (Self.scrollingHint(steps).map { "\n\n" + $0 } ?? "") + "\n\nNext action?"
         let driving = (plannerLeads || takeover > 0 || actorClosed) && planner != nil
         if takeover > 0 { takeover -= 1 }

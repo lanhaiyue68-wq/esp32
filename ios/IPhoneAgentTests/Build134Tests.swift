@@ -1548,8 +1548,11 @@ import XCTest
         XCTAssertEqual(AgentLoop.systemWithGoal("S", task: long, prompt: AgentLoop.goalAboveLine + "\n今天"),
                        "S\n\nGOAL OF THIS RUN (the owner's words, the same for every step):\n" + long)
         XCTAssertEqual(AgentLoop.systemWithGoal("S", task: "打开设置", prompt: "Goal: 打开设置"), "S")
-        XCTAssertEqual(AgentLoop.doneHead("1. 第6项：在淘宝搜索 -> 已加购一件"), "1. 第6项：在淘宝搜索")
-        XCTAssertEqual(AgentLoop.doneHead(String(repeating: "长", count: 50)).count, 41)
+        let done = ["1. 第6项：在淘宝搜索 -> 已加购一件，价格7.21元", "1. read a price -> 價格 19"]
+        XCTAssertEqual(AgentLoop.notesNotShown(["第6项：已加购一件，价格7.21元", "價格 19", "第7项：购物车里有1件"], in: done),
+                       ["第7项：购物车里有1件"])
+        XCTAssertEqual(AgentLoop.notesNotShown(["價格 19"], in: []), ["價格 19"], "no part done: every note")
+        XCTAssertEqual(AgentLoop.notesNotShown(["好"], in: ["1. a -> 好的"]), ["好"], "too short to tell")
     }
 
     /// D148, x4's rerun on 145: an add to the cart is noted as the part's item.
