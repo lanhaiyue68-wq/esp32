@@ -147,6 +147,8 @@ extension Pointer: Gestures {}
     private var aheadRefusals = 0
     /// D144: refusals of a goal's message typed without the number it stands for (offPatternGoalMessage), per run.
     private var offPatternRefusals = 0
+    /// D146: a second note with the same first line refused once (secondNoteHead), per run.
+    private var secondNoteRefused = false
     /// D115: the last group chat title seen in this run, for a 聊天信息 page opened from it.
     private var lastGroupTitle: String?
     /// D124: finger-down swipes in a chat refused this run because the thought wanted newer messages (two at most).
@@ -628,7 +630,7 @@ extension Pointer: Gestures {}
         // D113b, q143n on 143: the loop lives as long as the app, and these were never emptied: an item number refused
         // once (cut text, a bracket sum, a calculator note) was never refused again in any later task.
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
-        (setAgainRefused, aheadRefusals, offPatternRefusals) = (false, 0, 0)
+        (setAgainRefused, aheadRefusals, offPatternRefusals, secondNoteRefused) = (false, 0, 0, false)
         (olderSwipeRefused, bottomRefused) = (0, false)
         if !traceStarted { trace?.start(task: task) }
         running = true
@@ -857,8 +859,9 @@ extension Pointer: Gestures {}
 
     /// Whether a part of the answer (split at ；; 。 and line ends) names one of `words` and says it was not done or sent.
     static func ownsNotDone(_ answer: String, about words: [String]) -> Bool {
+        // D145: "无法在微信测试群发送“X3外卖合计N元”" (x3 on 145) owns it too.
         let notDone = ["未完成", "未能完成", "没有完成", "没完成", "没做", "未做", "跳过", "做不到", "未发送", "没发送", "没有发送", "未发出",
-                       "没发出", "not done", "skipped", "could not", "not sent", "wasn't sent", "was not sent"]
+                       "没发出", "无法", "没法", "not done", "skipped", "could not", "not sent", "wasn't sent", "was not sent"]
         return AppNames.hans(answer).lowercased().components(separatedBy: CharacterSet(charactersIn: "；;。\n")).contains { part in
             words.contains { !$0.isEmpty && part.contains(AppNames.hans($0).lowercased()) } && notDone.contains { part.contains($0) }
         }
@@ -1087,6 +1090,25 @@ extension Pointer: Gestures {}
             if t.range(of: pattern, options: .regularExpression) == nil { return m }
         }
         return nil
+    }
+
+    /// D146, x3 on 145 (rerun): the memo "X3组记录" (item 23) was typed into a new note at step 262, and at 303 a second new
+    /// note was started with the same first line to put in what was missing; 备忘录's search then found several. Text of
+    /// several lines whose first line starts a text of several lines this run already typed: that first line.
+    static func secondNoteHead(_ steps: [JObject], typed: String) -> String? {
+        func head(_ text: String) -> String? {
+            let lines = text.replacingOccurrences(of: "\\n", with: "\n").components(separatedBy: "\n")
+            let first = lines[0].trimmingCharacters(in: .whitespaces)
+            return lines.count >= 2 && first.count >= 2 ? first : nil
+        }
+        guard let h = head(typed) else { return nil }
+        return steps.contains { $0["action"]?.str == "type" && head($0["text"]?.str ?? "") == h } ? h : nil
+    }
+
+    static func secondNoteReason(_ head: String) -> String {
+        "Refused: a note starting “\(head)” was already written in this run. Do not start a second one: open that note "
+            + "(search “\(head)” in 备忘录), tap at the end of its text and type only what is missing. If it is not there, "
+            + "type it again."
     }
 
     static func offPatternReason(_ message: String) -> String {
@@ -1621,6 +1643,14 @@ extension Pointer: Gestures {}
         guard !keys.isEmpty else { return answer }
         var noted: [Int: String] = [:]
         for note in notes {
+            // D147, x4 on 145 (rerun): "第20项：测试群最新三条消息（最新在前）：1. 我发的“X3全部做完”…；2. …；3. …" was read
+            // by numberedItems as items 1–3 (the list inside), item 20 was never kept, and the answer's 20 told the screen
+            // after the run's own later sends ("X4全部做完" first). A note that starts 第N项 is item N's.
+            if let head = note.range(of: #"^\s*第\s*\d{1,3}\s*[项項]\s*[：:]?"#, options: .regularExpression),
+               let n = noteItems(String(note[head])).first {
+                if noted[n] == nil { noted[n] = String(note[head.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) }
+                continue
+            }
             guard let first = numberedItems(note).first, noted[first.n] == nil else { continue }
             noted[first.n] = String(note[first.body]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -3502,7 +3532,11 @@ extension Pointer: Gestures {}
                 let answer = act["answer"]?.str ?? ""
                 unvisited = Self.unvisitedReason(task: task, steps: steps, answer: answer, startedIn: startApp)
                 if unvisited == nil, endAfterSend == nil {
-                    unvisited = Self.unsentGoalReason(task: task, sent: sentTexts, answer: answer)  // sent, not only approved
+                    // D145, x3 on 145 (rerun): "第6项：因缺少第5项的计算结果，无法在微信测试群发送“X3外卖合计N元”" was the part's
+                    // result, and the answer did not say it again: refused twice as never sent, the model made a message
+                    // up. What was noted on the way counts as said.
+                    unvisited = Self.unsentGoalReason(task: task, sent: sentTexts,  // sent, not only approved
+                                                      answer: ([answer] + notes + doneParts).joined(separator: "\n"))
                 }
                 let absent = steps.filter { $0["action"]?.str == "open failed" }.compactMap { $0["app"]?.str }
                 if unvisited == nil, !skipAsked, let skipped = Self.skippedWithoutReason(answer, task: task, absent: absent) {
@@ -3797,6 +3831,12 @@ extension Pointer: Gestures {}
                     offPatternRefusals += 1
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.offPatternReason(goalMessage))])
                     DebugLog.write("type: refused; a goal's message without the number it stands for")
+                    return false
+                }
+                if name == "type", !secondNoteRefused, let head = Self.secondNoteHead(steps, typed: act["text"]?.str ?? "") {
+                    secondNoteRefused = true
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.secondNoteReason(head))])
+                    DebugLog.write("type: refused; a second note starting \(head)")
                     return false
                 }
                 if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task) {

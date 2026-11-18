@@ -1512,6 +1512,31 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D147, x4's rerun on 145: a chat read noted with a list inside keeps its item.
+    func testAChatReadNoteWithAListInsideKeepsItsItem() {
+        let answer = "1. 标题A；2. 测试群最新三条：X4全部做完、X4读到第20项了、X3全部做完；3. 已发送“X4读到第20项了”"
+        let note = "第2项：测试群最新三条消息（最新在前）：1. 我发的“X3全部做完”；2. 我发的“X6全部做完”；3. 我发的“X2全部做完”"
+        let out = AgentLoop.keepReadNotes(answer, notes: [note], sent: ["X4全部做完", "X4读到第20项了"])
+        XCTAssertTrue(out.contains("我发的“X6全部做完”"), out)
+        XCTAssertFalse(out.contains("X4全部做完、"), out)
+        XCTAssertTrue(out.contains("已发送“X4读到第20项了”"), out)
+    }
+
+    /// D145, D146: x3's rerun on 145.
+    func testANotedUnsentMessageAndASecondNote() {
+        let goal = "5. 用计算器算第3项和第4项两个合计金额之和；6. 在微信测试群发“X3外卖合计N元”（N换成第5项算出的数）"
+        let noted = "第6项：因缺少第5项的计算结果，无法在微信测试群发送“X3外卖合计N元”"
+        XCTAssertTrue(AgentLoop.ownsNotDone(noted, about: ["X3外卖合计N元"]))
+        XCTAssertNil(AgentLoop.unsentGoalReason(task: goal, sent: [], answer: "全部做完。\n" + noted))
+        XCTAssertNotNil(AgentLoop.unsentGoalReason(task: goal, sent: [], answer: "全部做完。"))
+        let wrote: JObject = ["action": .str("type"), "text": .str("X3组记录\n1. 汉堡：要登录")]
+        XCTAssertEqual(AgentLoop.secondNoteHead([wrote], typed: "X3组记录\n1. 汉堡\n2. 奶茶"), "X3组记录")
+        XCTAssertEqual(AgentLoop.secondNoteHead([wrote], typed: "X3组记录\\n1. 汉堡"), "X3组记录", "a typed \\n")
+        XCTAssertNil(AgentLoop.secondNoteHead([wrote], typed: "\n4. 奶茶：要登录"), "what is missing, added")
+        XCTAssertNil(AgentLoop.secondNoteHead([wrote], typed: "X3组记录"), "the search box")
+        XCTAssertNil(AgentLoop.secondNoteHead([], typed: "X3组记录\n1. 汉堡"))
+    }
+
     /// D144, x3 on 145: a goal's message typed with its number made into words.
     func testAGoalMessageWithItsNumberLeftOutIsRefused() {
         let goal = "5. 用计算器算第3项和第4项两个合计金额之和；6. 在微信测试群发“X3外卖合计N元”（N换成第5项算出的数）；7. 在测试群发“X3全部做完”"
