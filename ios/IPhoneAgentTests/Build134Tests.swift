@@ -1512,6 +1512,18 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D148, x4's rerun on 145: an add to the cart is noted as the part's item.
+    func testAnAddToTheCartIsNotedAsItsItem() {
+        let part = "第6项：在淘宝搜索“露营椅”，在前5个商品里挑价格最低的一个，选第一个规格，加入购物车一件"
+        XCTAssertEqual(AgentLoop.cartItemHead(part: part, goalParts: 28), "第6项：已加入购物车。")
+        XCTAssertEqual(AgentLoop.cartItemHead(part: "1. " + part, goalParts: 28), "第6项：已加入购物车。")
+        XCTAssertEqual(AgentLoop.cartItemHead(part: "第6–9项：淘宝和拼多多", goalParts: 28), "", "a run of items")
+        XCTAssertEqual(AgentLoop.cartItemHead(part: nil, goalParts: 28), "")
+        XCTAssertEqual(AgentLoop.cartItemHead(part: part, goalParts: 1), "", "a goal of one thing")
+        let goal = (1...12).map { "\($0). 在淘宝看一样东西" }.joined(separator: "；")
+        XCTAssertFalse(AgentLoop.itemsLeft(task: goal, told: ["第6项：已加入购物车。购物车：第1次看到加购成功的提示"], sent: []).contains(6))
+    }
+
     /// D147, x4's rerun on 145: a chat read noted with a list inside keeps its item.
     func testAChatReadNoteWithAListInsideKeepsItsItem() {
         let answer = "1. 标题A；2. 测试群最新三条：X4全部做完、X4读到第20项了、X3全部做完；3. 已发送“X4读到第20项了”"

@@ -397,6 +397,16 @@ extension Pointer: Gestures {}
             + "it is not a badge or a count; what is under it is hidden."
     }
 
+    /// D148, x4 on 145 (rerun): item 6 (淘宝, add the cheapest chair) was added at step 115; the note said only "购物车：第1次
+    /// 看到加购成功的提示…", nothing was noted as 第6项, and stuck replans planned 6 again four times: about 200 steps going
+    /// back to the chair and being refused at 加入购物车. An add is noted as the goal's item when the part names one.
+    static func cartItemHead(part: String?, goalParts: Int) -> String {
+        guard goalParts >= 3, let part, partItemRange(part) == nil,
+              let r = part.range(of: #"^\s*(?:\d{1,2}\s*[.)、．]\s*)?第\s*\d{1,3}\s*[项項]"#, options: .regularExpression),
+              let n = noteItems(String(part[r])).first else { return "" }
+        return "第\(n)项：已加入购物车。"
+    }
+
     static func cartTapNote(_ n: Int) -> String {
         "购物车：这个 App 加购不会弹提示，按加号算：这是第\(n)次加进购物车（这次任务一共加了\(n)次）。同一件不要再点加号，每点一次就多一份；目标要几份就只加几次。"
     }
@@ -5755,13 +5765,15 @@ extension Pointer: Gestures {}
         let cartToast = Self.addedToCart(readRows) && Self.sellsThings(frontApp)
         // In 美团 / 饿了么 each + that changed the screen is one add (no toast comes); a toast as well is not counted twice.
         var tapAdded = false
+        let cartItemHead = Self.cartItemHead(part: parts.count >= 2 && partIndex < parts.count ? parts[partIndex] : nil,
+                                             goalParts: Self.goalParts(task))
         if Self.addsWithoutToast(frontApp) {
             for i in min(cartTapsChecked, steps.count)..<steps.count where steps[i]["action"]?.str == "tap"
                 && steps[i]["changed"] != .bool(false) && Self.addsDish(steps[i]["thought"]?.str ?? "", in: frontApp) {
                 tapAdded = true
                 cartAdds += 1
                 cartAddsIn[AppNames.hans(frontApp ?? "").lowercased(), default: 0] += 1
-                let line = Self.cartTapNote(cartAdds)
+                let line = cartItemHead + Self.cartTapNote(cartAdds)  // D148
                 notes.append(line)
                 prompt += "\n\n" + line
             }
@@ -5771,7 +5783,7 @@ extension Pointer: Gestures {}
         if cartToast, !cartToastShown, !tapAdded {
             cartAdds += 1
             cartAddsIn[frontApp.map { AppNames.hans($0).lowercased() } ?? "", default: 0] += 1
-            let line = Self.cartNote(cartAdds)
+            let line = cartItemHead + Self.cartNote(cartAdds)  // D148
             notes.append(line)
             gotOn()
             prompt += "\n\n" + line
