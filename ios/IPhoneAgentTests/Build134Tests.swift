@@ -1512,6 +1512,21 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D150b, user 11-19: an icon that keeps missing is left for longer, never for good.
+    func testAnIconThatKeepsMissingWaitsLonger() {
+        XCTAssertEqual([0, 1, 2, 3, 4, 7].map { AppPlaces.searchOpens(afterMisses: $0) }, [0, 1, 2, 4, 4, 4])
+        let app = "D150测试应用"
+        AppPlaces.noteIcon(app, missed: true)
+        XCTAssertEqual([AppPlaces.takeSearchFirst(app), AppPlaces.takeSearchFirst(app)], [true, false])
+        AppPlaces.noteIcon(app, missed: true)
+        XCTAssertEqual((0..<3).map { _ in AppPlaces.takeSearchFirst(app) }, [true, true, false])
+        AppPlaces.noteIcon(app, missed: false)
+        AppPlaces.noteIcon(app, missed: true)
+        XCTAssertEqual([AppPlaces.takeSearchFirst(app), AppPlaces.takeSearchFirst(app)], [true, false], "the icon worked: back to 1")
+        AppPlaces.noteIcon(app, missed: false)
+        XCTAssertFalse(AppPlaces.takeSearchFirst(app))
+    }
+
     /// D149, user 11-19: fewer input tokens a step.
     func testAStepTellsLessAgain() {
         let parts = ["1. 第1项：天气", "2. 第2项：计算器", "3. 第3项：微信"]

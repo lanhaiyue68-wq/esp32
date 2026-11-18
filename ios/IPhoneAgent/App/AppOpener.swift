@@ -82,16 +82,27 @@ enum AppPlaces {
     /// 但是不要永久改搜索"; 142's z6: one bad open of 抖音 sent every later one through Search, 10–15 s against 6 s by its
     /// icon): an app whose icon was tapped twice for nothing is opened by Search the next time only; the time after, its
     /// icon again.
-    private static var searchNext: Set<String> = []
+    /// D150b, user 11-19 ("板子动作也优化一下加速"): on 145 WeChat's icon missed again on every other open, each miss two
+    /// taps for nothing before Search (26–30 s an open, against 12–13 s by Search alone). Still never Search for good:
+    /// an icon missed again in a row is left for 1, then 2, then 4 opens by Search, and the first icon that opens the app
+    /// puts it back to the icon every time.
+    private static var searchLeft: [String: Int] = [:]
+    private static var iconMisses: [String: Int] = [:]
+    static func searchOpens(afterMisses n: Int) -> Int { n <= 0 ? 0 : min(4, 1 << min(n - 1, 2)) }
+
     static func noteIcon(_ name: String, missed: Bool) {
-        for v in AppNames.variants(name) {
-            if missed { searchNext.insert(normalized(v)) } else { searchNext.remove(normalized(v)) }
+        let keys = AppNames.variants(name).map { normalized($0) }
+        let streak = missed ? (keys.compactMap { iconMisses[$0] }.max() ?? 0) + 1 : 0
+        for k in keys {
+            iconMisses[k] = streak == 0 ? nil : streak
+            searchLeft[k] = missed ? searchOpens(afterMisses: streak) : nil
         }
     }
-    /// True once after an icon was missed: this open goes by Search, and the next one by the icon again.
+    /// True while opens by Search are left after an icon was missed: this open goes by Search.
     static func takeSearchFirst(_ name: String) -> Bool {
-        guard AppNames.variants(name).contains(where: { searchNext.contains(normalized($0)) }) else { return false }
-        for v in AppNames.variants(name) { searchNext.remove(normalized(v)) }
+        let keys = AppNames.variants(name).map { normalized($0) }
+        guard let left = keys.compactMap({ searchLeft[$0] }).max(), left > 0 else { return false }
+        for k in keys { searchLeft[k] = left - 1 }
         return true
     }
 

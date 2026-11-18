@@ -96,14 +96,21 @@ struct ProbeMap: Codable {
         try await Task.sleep(nanoseconds: 150_000_000)
     }
 
+    /// D150a, user 11-19 ("板子动作也优化一下加速"): the mode was asked before every home, ~80 ms each (145's regression:
+    /// 702 homes). The board keeps it in NVS and nothing here turns it off: asked once a link (links goes up on every
+    /// reconnect, a rebooted board included).
+    private static var curveOnLink: Int?
+
     private static func confirmBezierMotion(_ device: HIDDevice) async throws {
+        if curveOnLink == device.links { return }
         let mode: String
         do { mode = try await device.send("curve").trimmingCharacters(in: .whitespacesAndNewlines) }
         catch let error as DeviceError where error.message.lowercased().contains("unknown command") {
             // Firmware predating curve support always emits straight steps.
+            curveOnLink = device.links
             return
         }
-        if mode == "on" { return }  // query only: do not rewrite board NVS on every gesture
+        if mode == "on" { curveOnLink = device.links; return }  // query only: do not rewrite board NVS on every gesture
         guard mode == "off" else {
             throw DeviceError(message: "无法确认开发板的贝塞尔曲线模式，未执行定位。请检查连接后重试。")
         }
@@ -111,6 +118,7 @@ struct ProbeMap: Codable {
         guard changed == "on" else {
             throw DeviceError(message: "开发板未确认恢复贝塞尔曲线移动，未执行定位。请检查连接后重试。")
         }
+        curveOnLink = device.links
     }
 
     static func move(_ device: HIDDevice, _ x: Int, _ y: Int) async throws {
