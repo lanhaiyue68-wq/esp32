@@ -2093,6 +2093,22 @@ extension Pointer: Gestures {}
         return k
     }
 
+    /// D186, x1 and x4 over the cloud 11-20 (150): "fail 第19项：…" came with item 19 already looking noted (the scroll note
+    /// "第19项（滚动页面时看到，原话）…" and the fail's own "未能完成：第19项…"); D130's pass over noted parts closed 19 as noted
+    /// and failed part 20 in its place, and 20 (测试群最新三条) was never looked at. In x1 "fail 第13项" failed part 14 the
+    /// same way. Of the k parts passed as noted, the passing stops at the first holding an item the fail names.
+    static func partsNotedBefore(_ k: Int, parts: [String], from: Int, named: Set<Int>) -> Int {
+        guard !named.isEmpty else { return k }
+        return (0..<k).first(where: { from + $0 < parts.count && !named.isDisjoint(with: partItems(parts[from + $0]) ?? []) }) ?? k
+    }
+
+    /// D186: the items a text names (第N项).
+    static func itemsNamed(_ text: String) -> Set<Int> {
+        guard let re = try? NSRegularExpression(pattern: #"第\s*(\d{1,3})\s*[项項]"#) else { return [] }
+        let ns = text as NSString
+        return Set(re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { Int(ns.substring(with: $0.range(at: 1))) })
+    }
+
     /// Numbers as runs: [7, 8, 9, 11, 17, 18, 19] → "7–9, 11, 17–19".
     static func itemRanges(_ numbers: [Int]) -> String {
         var out: [String] = [], i = 0
@@ -5255,7 +5271,8 @@ extension Pointer: Gestures {}
         let what = parts.count >= 2 && partIndex < parts.count ? Self.failedPartNote(parts[partIndex], why: why) : CloudBridge.failureWords(why)
         let line = "未能完成：" + String(what.prefix(160))
         if !notes.contains(line) { notes.append(line) }
-        _ = closeFailedPart(why, by: nil)
+        // D186: the note just written names this part's items; the part failing is this one.
+        _ = closeFailedPart(why, by: nil, named: parts.count >= 2 && partIndex < parts.count ? Set(Self.partItems(parts[partIndex]) ?? []) : Set<Int>())
         (bounceGuard, bounceRefused, circleRefused, bounceOpener) = (nil, 0, 0, false)
         (stallsNoProgress, refusalsNoProgress, troubles, stepsInPart) = (0, 0, 0, 0)
         record(shot, ["action": .str("thing skipped"), "reason": .str(why + ". " + Self.oneThingFailedReason)])
@@ -5815,8 +5832,9 @@ extension Pointer: Gestures {}
     }
 
     /// D82: the parts next whose items were all noted on the way are done (partsNoted).
-    private func skipPartsNoted() {
-        let k = Self.partsNoted(parts, from: partIndex, task: task, told: notes + doneParts, sent: messageSent)
+    private func skipPartsNoted(named: Set<Int> = []) {
+        let k = Self.partsNotedBefore(Self.partsNoted(parts, from: partIndex, task: task, told: notes + doneParts, sent: messageSent),
+                                      parts: parts, from: partIndex, named: named)
         for _ in 0..<k {
             doneParts.append(parts[partIndex] + " -> 已在前面记录")
             record(nil, ["action": .str("part done"), "part": .int(partIndex + 1), "reason": .str("its items were noted on the way")])
@@ -5885,10 +5903,10 @@ extension Pointer: Gestures {}
 
     /// A refused fail closes the part it was in as 未能完成, so the next part is worked on: the run kept the part that
     /// cannot be done open, and Codex failed on it again and again (c3, 132). Returns what the refusal says about the next part.
-    private func closeFailedPart(_ why: String, by: String?) -> String {
+    private func closeFailedPart(_ why: String, by: String?, named: Set<Int>? = nil) -> String {
         if let tip = tryingTip { lessons?.tipResult(tip, worked: false); tryingTip = nil }
         guard parts.count >= 2, partIndex < parts.count else { return "" }
-        skipPartsNoted()  // D130
+        skipPartsNoted(named: named ?? Self.itemsNamed(why))  // D130; D186: never past the part the fail names
         doneParts.append(parts[partIndex] + " -> 未能完成：" + String(why.prefix(80)))
         record(nil, ["action": .str("part failed"), "part": .int(partIndex + 1)])
         gotOn()

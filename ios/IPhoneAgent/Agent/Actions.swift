@@ -44,6 +44,9 @@ enum Actions {
             }
             return ["action": .str(name), first: .str(text)]
         }
+        // D188, x4 on 150 (item 19): "DO: wait 5" came back "wait needs 0 numbers"; the hiccup became a stuck replan.
+        // "wait 2/3/5" was refused 89 times in the traces of 140–150. An action without numbers takes none: they are dropped.
+        if keys.isEmpty { return ["action": .str(name)] }
         let tokens = matches(#"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"#, in: rest)
         let numbers = try tokens.map { token -> Int in
             guard let value = Double(token), value.isFinite, (0...1000).contains(value) else {

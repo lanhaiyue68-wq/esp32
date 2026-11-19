@@ -1787,6 +1787,28 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D186, x4 on 150: a fail naming its item fails that item's part, even when the item looks noted already.
+    func testAFailNamingItsItemFailsThatPart() {
+        let task = "帮我做这24件事：" + (1...23).map { "\($0). 查第\($0)样东西" }.joined(separator: "；") + "；24. 把结果告诉我"
+        let parts = ["1. 第19项：x", "2. 第20项：x", "3. 第21项：x", "4. 第22项：x"]
+        let told = (1...18).map { "第\($0)项：有" } + ["第19项（滚动页面时看到，原话）：专题", "未能完成：第19项：未能确定"]
+        let k = AgentLoop.partsNoted(parts, from: 0, task: task, told: told, sent: [])
+        XCTAssertEqual(k, 1, "19 looks noted")
+        XCTAssertEqual(AgentLoop.itemsNamed("第19项：搜索结果专题页中未能确定"), [19])
+        XCTAssertEqual(AgentLoop.partsNotedBefore(k, parts: parts, from: 0, named: [19]), 0, "19 is the part failing")
+        XCTAssertEqual(AgentLoop.partsNotedBefore(k, parts: parts, from: 0, named: []), 1, "no item named: as before (D130)")
+        XCTAssertEqual(AgentLoop.partsNotedBefore(2, parts: parts, from: 0, named: [20]), 1, "19 noted, 20 fails")
+        XCTAssertEqual(AgentLoop.partsNotedBefore(2, parts: parts, from: 0, named: [7]), 2, "an item already closed")
+    }
+
+    /// D188, x4 on 150: "wait 5" is a wait.
+    func testAWaitWithSecondsIsAWait() throws {
+        XCTAssertEqual(try Actions.parseCommand("wait 5"), ["action": .str("wait")])
+        XCTAssertEqual(try Actions.parseCommand("wait"), ["action": .str("wait")])
+        XCTAssertEqual(try Actions.parseCommand("back 2"), ["action": .str("back")])
+        XCTAssertThrowsError(try Actions.parseCommand("tap 500"))
+    }
+
     /// D185, n16 on 150: the time line under a message is not its time.
     func testAMessagesTimeIsTheLineAboveIt() {
         let row = { (t: String, x: Double, y: Double) -> [CandidatePicker.Piece] in
