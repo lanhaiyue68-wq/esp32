@@ -4763,7 +4763,10 @@ extension Pointer: Gestures {}
             case "readup": down = false
             case "swipe":
                 let dy = (s["y2"]?.double ?? 0) - (s["y1"]?.double ?? 0)
-                if dy <= -200 { down = true } else if dy >= 200 { down = false }
+                // D166, h03 over the cloud 11-19 (148): s6 had read 测试群 back to 11月17日; four swipes toward newer from
+                // there were taken for the bottom, and "the last message" was X2首尔温差6度, hours older than the last.
+                // A swipe toward newer that still moved the chat is not at its bottom; one that moved nothing is.
+                if dy <= -200 { down = s["changed"] != .bool(true) } else if dy >= 200 { down = false }
             default: break
             }
         }
@@ -4771,7 +4774,7 @@ extension Pointer: Gestures {}
     }
     static let scrolledUpReason = "Refused: WeChat opens a chat where it was left, and an earlier run may have scrolled it up: "
         + "the bottom of this screen need not be the latest message. Swipe the finger up (from y 750 to y 300) until nothing "
-        + "moves, then tell the last message at the bottom."
+        + "moves, then tell the last message at the bottom. A swipe that still moved the chat did not reach its bottom."
 
     static let sameHoldReason = "Refused: this spot was just held 3 times in a row and showed the same each time. On a chart, a "
         + "hold that shows another time than the one wanted is moved by the difference: work out how far one hour is from the "

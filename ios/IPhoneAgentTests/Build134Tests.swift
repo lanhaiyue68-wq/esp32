@@ -1427,6 +1427,10 @@ import XCTest
         XCTAssertTrue(AgentLoop.mayBeScrolledUp([open, tap, swipe(300, 750)]))
         XCTAssertFalse(AgentLoop.mayBeScrolledUp([open, swipe(750, 300)]))
         XCTAssertFalse(AgentLoop.mayBeScrolledUp([]), "never opened here")
+        // D166, h03 on 148: toward newer, the chat still moving is not its bottom; a swipe that moves nothing is.
+        func newer(_ moved: Bool) -> JObject { ["action": .str("swipe"), "y1": .num(800), "y2": .num(350), "changed": .bool(moved)] }
+        XCTAssertTrue(AgentLoop.mayBeScrolledUp([open, newer(true), newer(true), newer(true), newer(true)]))
+        XCTAssertFalse(AgentLoop.mayBeScrolledUp([open, newer(true), newer(true), newer(false)]))
     }
 
     /// D129, q133x on 144 (x4): taps of a part that ended are not a round of the next part.
