@@ -63,8 +63,20 @@ extension AppModel {
 
     /// The keyboard menu is open: click "Lan Agent" in it. Without that row (not added, or not read), close the menu
     /// with the globe key once and let the caller fall back, never toggling it open and shut.
+    /// D180, n15 over the cloud 11-20 (148): twice the menu was taken for open with no Lan Agent row (thermal serious, the
+    /// frames 4 s old, the main thread held 4-5 s), closed at once, and the globe's click went on to the next keyboard:
+    /// "shouerlvyou" went in as letters, and the search never ran. Lan Agent was picked from the same menu minutes
+    /// before and after. A menu without the row is looked at once more, on a fresh frame, before it is closed.
     private func useKeyboardMenu(_ rows: [[CandidatePicker.Piece]], _ attempt: Int) async -> Bool {
-        guard let entry = CandidatePicker.keyboardMenuEntry(rows: rows) else {
+        var found = CandidatePicker.keyboardMenuEntry(rows: rows)
+        if found == nil {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            if let again = await freshFrame() {
+                found = CandidatePicker.keyboardMenuEntry(rows: await CandidatePicker.rowsOffMain(in: again, top: 0.3, bottom: 1))
+                if found != nil { DebugLog.write("keyboard: the Lan Agent row showed on a second look (try \(attempt))") }
+            }
+        }
+        guard let entry = found else {
             DebugLog.write("keyboard: the keyboard menu has no Lan Agent row (try \(attempt)); closing it")
             try? await pointer.tap(Self.globeKey.x, Self.globeKey.y)
             return false
