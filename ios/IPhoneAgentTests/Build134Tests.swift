@@ -1786,6 +1786,15 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D181, x2 and n16 on 148: the model saying the phone is on the Home Screen or the lock screen has left the app.
+    func testAThoughtSayingTheAppWasLeftIsBelieved() {
+        XCTAssertTrue(AgentLoop.saysAppLeft("上次滑动回到了主屏幕；我重新打开行事历查看2027年1月。"))
+        XCTAssertTrue(AgentLoop.saysAppLeft("屏幕回到了锁屏界面，我需要重新打开微信"))
+        XCTAssertTrue(AgentLoop.saysAppLeft("The lock screen is showing, so I need to open WeChat"))
+        XCTAssertTrue(AgentLoop.saysAppLeft("The screen is showing system search rather than Calendar"))
+        XCTAssertFalse(AgentLoop.saysAppLeft("微信里打开了一张天气截图，我打开天气查看"))
+    }
+
     func testANoteSayingNotShownGetsBackWhatWasSaid() {
         let tap: JObject = ["action": .str("tap"), "thought": .str("点电池")]
         let swipe: JObject = ["action": .str("swipe"), "thought": .str("电池页面已显示电量100%已充满，低耗电模式开关被遮挡，我向上滑动查看。")]

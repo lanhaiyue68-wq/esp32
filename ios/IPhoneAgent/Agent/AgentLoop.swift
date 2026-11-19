@@ -1828,6 +1828,16 @@ extension Pointer: Gestures {}
         return startedIn
     }
 
+    /// D181, x2 (Calendar) and n16 (微信, 00:06) over the cloud 11-19/20 (148): the phone left the app without the run
+    /// going Home (a swipe from the home bar; the lock screen), the model said so ("上次滑动回到了主屏幕", "屏幕回到了锁屏
+    /// 界面") and asked to open the app again; it was refused as still in it, and the next open became a drag down "to
+    /// close a picture" (Spotlight, the lock screen). A thought that names the Home Screen, the lock screen, the app
+    /// switcher or the system's search is taken at its word.
+    static func saysAppLeft(_ thought: String) -> Bool {
+        AppNames.hans(thought).range(of: #"主屏幕|主画面|主屏|桌面|锁屏|锁定画面|锁定屏幕|应用切换器|多任务|系统搜索|通知中心|控制中心|home screen|lock screen|app switcher|spotlight|system search|notification center|control center"#,
+                                     options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     static func stillInAppReason(_ app: String) -> String {
         // 125 in 测试群 11-12: the model sees a step's first 300 characters (recentActions), and how to close the picture
         // came after them. Short, the way out first.
@@ -3525,7 +3535,8 @@ extension Pointer: Gestures {}
                                  shot: planned.shot)
             }
             if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
-               AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")) {
+               AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")),
+               !Self.saysAppLeft(act["thought"]?.str ?? "") {
                 sameAppRefused += 1
                 pictureIn = inApp
                 record(planned.shot, ["action": .str("refused"), "reason": .str(Self.stillInAppReason(inApp))])
