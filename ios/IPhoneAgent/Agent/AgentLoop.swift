@@ -586,6 +586,7 @@ extension Pointer: Gestures {}
     private var pendingInput: String?
     private var pendingRefused = 0
     private var notesTypedRefused = false  // D183
+    private var timeLineRefused = false  // D185
     /// Text already entered by a quick send, handed over for visual inspection without retyping.
     var inputToInspect: String?
     /// A destination-specific receipt, independent of the actor's next navigation/action guess.
@@ -1049,6 +1050,41 @@ extension Pointer: Gestures {}
     static let notesTypedAgainReason = "Refused: this run already typed these words in 备忘录, and the note holding them is "
         + "kept (its first line is its title; the body below it stays empty). Never make a second note with the same "
         + "words: go back to the list, open the note that starts with them and check it there, then go on."
+
+    /// D185, n16 over the cloud 11-20 (150): "今天有没有发过“143夜测一”" was answered "发过，凌晨12:38". On the screen 143夜测一
+    /// stood under 昨天 晚上11:41, and 凌晨12:38 was the line under it, over 133真人测试一 (two look-alike texts); the done
+    /// check passed it. A chat's time line belongs to the messages under it. When the answer quotes a message seen on the
+    /// screen and gives the time of a line under it, never the one above it, that is said, with the line above.
+    static func timeLineMismatch(_ answer: String, rows: [[CandidatePicker.Piece]]) -> String? {
+        func all(_ pattern: String, _ text: String, group: Int = 0) -> [String] {
+            guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+            let ns = text as NSString
+            return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: group)) }
+        }
+        let clock = #"\d{1,2}[:：]\d{2}"#
+        let times = { (t: String) in Set(all(clock, t).map { $0.replacingOccurrences(of: "：", with: ":") }) }
+        let said = times(answer)
+        let quoted = all(#"[“"「]([^”"」]{2,30})[”"」]"#, answer, group: 1)
+        guard !said.isEmpty, !quoted.isEmpty else { return nil }
+        let label = #"^(昨天|前天|今天|星期[一二三四五六日天]|周[一二三四五六日天]|\d{1,2}月\d{1,2}日|\d{4}年\d{1,2}月\d{1,2}日)?(凌晨|清晨|早上|上午|中午|下午|傍晚|晚上)?\d{1,2}[:：]\d{2}$"#
+        let lines = rows.filter { !$0.isEmpty }.map { row -> (text: String, label: Bool) in
+            let text = row.map(\.text).joined().filter { !$0.isWhitespace }
+            let box = row.dropFirst().reduce(row[0].box) { $0.union($1.box) }
+            return (text, abs(Double(box.midX) - 0.5) < 0.2 && text.range(of: label, options: .regularExpression) != nil)
+        }
+        for message in quoted {
+            let key = typedKey(message)
+            let at = lines.indices.filter { !lines[$0].label && typedKey(lines[$0].text).contains(key) }
+            guard key.count >= 3, let last = at.last else { continue }
+            let above = at.compactMap { i in lines[..<i].last(where: { $0.label }) }
+            if above.contains(where: { !times($0.text).isDisjoint(with: said) }) { continue }
+            let below = lines[(last + 1)...].filter { $0.label }
+            guard let wrong = below.first(where: { !times($0.text).isDisjoint(with: said) }), let right = above.last else { continue }
+            return "Refused: on the screen the time line above “\(message)” is “\(right.text)”; “\(wrong.text)” is under it and "
+                + "belongs to the messages after it. A message's time is the nearest time line above it. Answer again with that time."
+        }
+        return nil
+    }
 
     static func typedKey(_ text: String) -> String {
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
@@ -3798,6 +3834,15 @@ extension Pointer: Gestures {}
                 record(planned.shot, ["action": .str("done rejected"),
                                       "reason": .str(why.replacingOccurrences(of: "this note holds", with: "this answer holds"))])
                 DebugLog.write("done: refused once; the answer holds text cut short on the screen")
+                return false
+            }
+            // D185, n16 on 150: the answer gave the time line under the message as its time; read off the screen.
+            if name == "done", endsTask, !timeLineRefused, let answer = act["answer"]?.str,
+               let shown = screen?.frame ?? planned.shot,
+               let why = Self.timeLineMismatch(answer, rows: await CandidatePicker.rowsOffMain(in: shown, top: 0.08, bottom: 0.92)) {
+                timeLineRefused = true
+                record(planned.shot, ["action": .str("done rejected"), "reason": .str(why)])
+                DebugLog.write("done: refused once; the answer took the time line below the message for its time")
                 return false
             }
             // D114, q143n on 143 (n12): to read 验证群's last message WeChat opened on 测试群 with a 10001 SMS banner over its

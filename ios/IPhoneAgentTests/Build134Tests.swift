@@ -1787,6 +1787,21 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D185, n16 on 150: the time line under a message is not its time.
+    func testAMessagesTimeIsTheLineAboveIt() {
+        let row = { (t: String, x: Double, y: Double) -> [CandidatePicker.Piece] in
+            [CandidatePicker.Piece(text: t, box: CGRect(x: x - 0.1, y: y - 0.01, width: 0.2, height: 0.02))]
+        }
+        let screen = [row("X6全部做完", 0.68, 0.60), row("昨天 晚上11:41", 0.5, 0.665), row("143夜测一", 0.7, 0.72),
+                      row("凌晨12:38", 0.49, 0.79), row("133真人测试一", 0.65, 0.85)]
+        let wrong = "今天测试群里发过“143夜测一”，发送时间为凌晨12:38（即今天凌晨00:38）"
+        XCTAssertNotNil(AgentLoop.timeLineMismatch(wrong, rows: screen))
+        XCTAssertTrue(AgentLoop.timeLineMismatch(wrong, rows: screen)?.contains("11:41") == true)
+        XCTAssertNil(AgentLoop.timeLineMismatch("今天没有发过；最近一条“143夜测一”是昨天晚上11:41发的", rows: screen))
+        XCTAssertNil(AgentLoop.timeLineMismatch("“133真人测试一”发于凌晨12:38", rows: screen))
+        XCTAssertNil(AgentLoop.timeLineMismatch("测试群最新一条是“133真人测试一”", rows: screen), "no time given")
+    }
+
     /// D184, h22 on 148: in a browser a list swipe starts at the page's very edge, outside the cards (links).
     func testABrowserPageIsSwipedFromItsVeryEdge() {
         let swipe: JObject = ["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(350)]
