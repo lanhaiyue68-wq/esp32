@@ -1786,6 +1786,19 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D184, h22 on 148: in a browser a list swipe starts at the page's very edge, outside the cards (links).
+    func testABrowserPageIsSwipedFromItsVeryEdge() {
+        let swipe: JObject = ["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(350)]
+        XCTAssertEqual(AgentLoop.safeSwipe(swipe, after: [], browser: true)["x1"]?.int, AgentLoop.browserMarginX)
+        XCTAssertEqual(AgentLoop.safeSwipe(swipe, after: [])["x1"]?.int, AgentLoop.marginX)
+        let safari: JObject = ["action": .str("open"), "app": .str("Safari")]
+        let wechat: JObject = ["action": .str("open"), "app": .str("微信")]
+        XCTAssertTrue(AgentLoop.inBrowser([safari], startedIn: nil, thought: ""))
+        XCTAssertFalse(AgentLoop.inBrowser([wechat], startedIn: nil, thought: "公众号网页"), "an app known is taken")
+        XCTAssertTrue(AgentLoop.inBrowser([], startedIn: nil, thought: "The Baidu results page is open"))
+        XCTAssertFalse(AgentLoop.inBrowser([], startedIn: nil, thought: "淘宝搜索结果"))
+    }
+
     /// D183, h14 on 148: the same words typed in 备忘录 a second time in one run are a second note.
     func testTheSameWordsTypedInNotesAgainAreRefused() {
         let open: JObject = ["action": .str("open"), "app": .str("備忘錄")]

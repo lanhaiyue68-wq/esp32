@@ -3481,7 +3481,9 @@ extension Pointer: Gestures {}
         defer { metrics?.step(timing) }
         for (i, planned) in acts.enumerated() {
             var act = planned.act
-            if act["action"]?.str == "swipe" { act = Self.safeSwipe(act, after: steps) }
+            if act["action"]?.str == "swipe" {
+                act = Self.safeSwipe(act, after: steps, browser: Self.inBrowser(steps, startedIn: startApp, thought: act["thought"]?.str ?? ""))
+            }
             // Over USB 11-10 one reply opened WeChat twice, 18 s each.
             if i > 0, act["action"]?.str == "open", acts[i - 1].act["action"]?.str == "open", acts[i - 1].act["app"] == act["app"] { continue }
             // 123 on the phone 11-12 (W2 again): a Weather screenshot opened full screen from 测试群 was taken for the
@@ -5389,7 +5391,22 @@ extension Pointer: Gestures {}
     static let marginX = 40
     static let homeBarTop = 900.0
 
-    static func safeSwipe(_ act: JObject, after steps: [JObject]) -> JObject {
+    /// D184, h22 on 148 (r148h2b three times, r148hb once): on Baidu's results for 深圳天气 a swipe up from the margin
+    /// (x 0.04) began on the weather card, a link edge to edge but for a thin border, and Safari opened its page instead
+    /// of scrolling (a pointer pressed on a link and moved drags the link, and dropped it opens). The same swipe from a
+    /// spot with no link scrolled. In a browser the margin is the page's very edge, outside the cards.
+    static let browserMarginX = 12
+    static func inBrowser(_ steps: [JObject], startedIn: String?, thought: String) -> Bool {
+        let words = ["safari", "浏览器", "chrome"]
+        if let app = appInFront(steps, startedIn: startedIn) {
+            let name = AppNames.hans(app).lowercased()
+            return words.contains { name.contains($0) }
+        }
+        let said = AppNames.hans(thought).lowercased()
+        return (words + ["百度", "baidu", "网页", "web page", "webpage"]).contains { said.contains($0) }
+    }
+
+    static func safeSwipe(_ act: JObject, after steps: [JObject], browser: Bool = false) -> JObject {
         guard let x1 = act["x1"]?.double, let y1 = act["y1"]?.double, let x2 = act["x2"]?.double, let y2 = act["y2"]?.double,
               abs(x2 - x1) < 100, abs(y2 - y1) > 100 else { return act }
         if let last = steps.last(where: { $0["action"]?.str != "stale plan" }), last["action"]?.str == "swipe",
@@ -5406,7 +5423,8 @@ extension Pointer: Gestures {}
         }
         let shift = max(0, max(y1, y2) - 800)
         var safe = act
-        safe["x1"] = .int(marginX); safe["x2"] = .int(marginX)
+        let margin = browser ? browserMarginX : marginX
+        safe["x1"] = .int(margin); safe["x2"] = .int(margin)
         safe["y1"] = .int(Int(y1 - shift)); safe["y2"] = .int(Int(y2 - shift))
         return safe
     }
