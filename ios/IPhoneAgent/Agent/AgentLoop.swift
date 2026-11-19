@@ -2022,6 +2022,11 @@ extension Pointer: Gestures {}
     /// D27: screens readup goes up at most (a chat's day or two).
     static let readUpScreens = 40
     static let readUpStillTries = 2  // D143: swipes more, a wait apart, before an unmoved screen is the top
+    /// D164, s6 over the cloud 11-19 (148): "一直读到11月14日" stopped at 11月17日 as "the top" (145's s6 did too), and on
+    /// 147 a read-up's swipe opened a picture full screen: the swipes started at the middle, on the bubbles. A chat is
+    /// read up from the margin, as every list is scrolled (marginX); a screen that did not move gets one swipe from the
+    /// middle before it is the top.
+    static let readUpX = Double(marginX) / 1000
 
     /// D27: a read up a chat, oldest first: each screen's rows not seen on the screens below it go before what came
     /// before (a screen further up shows older messages). `screens` are in the order read, newest first.
@@ -2228,6 +2233,22 @@ extension Pointer: Gestures {}
                      "聊天信息", "设置备注和标签", "备注", "群聊名称", "修改群聊名称", "我在本群的昵称", "通讯录", "添加朋友",
                      "朋友资料", "资料设置", "新消息通知", "设置"]
         return pages.contains { t == $0 || (t.hasPrefix($0) && t.dropFirst($0.count).allSatisfy { "()（）0123456789 ".contains($0) }) }
+    }
+
+    /// D163, s4 over the cloud 11-19 (148): to see the new remark in 通讯录 the run searched for it there; the remark,
+    /// typed into the search box, was refused as set a second time, and the friend's 微信号 typed there next was held as
+    /// a message ("about to send: LHY8768Z"), turned down, and the run stopped unfinished. A box at the top with 取消 at
+    /// its right end is a search (WeChat's, Contacts', Settings'…): what is typed there reaches no one and sets nothing.
+    static func searchBarUp(_ rows: [[CandidatePicker.Piece]]) -> Bool {
+        rows.joined().contains { piece in
+            ["取消", "cancel"].contains(AppNames.hans(piece.text).lowercased().trimmingCharacters(in: .whitespaces))
+                && piece.box.midY <= 0.14 && piece.box.minX >= 0.75
+        }
+    }
+
+    static func searchBarUp(in frame: Data?) async -> Bool {
+        guard let frame else { return false }
+        return searchBarUp(await CandidatePicker.rowsOffMain(in: frame, top: 0.03, bottom: 0.15))
     }
 
     static let wrongPlaceReason = "Not sent: this is not where the goal says to send. Go to the conversation the goal names "
@@ -3863,7 +3884,8 @@ extension Pointer: Gestures {}
                     DebugLog.write("type: refused; a second note starting \(head)")
                     return false
                 }
-                if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task) {
+                if name == "type", !setAgainRefused, Self.setsNameAgain(steps, typed: typedNow, task: task),
+                   !(await Self.searchBarUp(in: screen?.frame ?? planned.shot)) {  // D163: a search sets nothing
                     setAgainRefused = true
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.setAgainReason(typedNow))])
                     return false
@@ -4027,6 +4049,11 @@ extension Pointer: Gestures {}
                 if sending, !chatOnScreen, let title = (screen?.frame ?? planned.shot).flatMap({ WatchReport.navigationTitle(in: $0) }),
                    Self.notAChat(title) {
                     DebugLog.write("send: \(title) is a picker or settings page, not a chat: no message")
+                    localHere = true
+                }
+                // D163: nor is a search box at the top, 取消 at its right end: what is typed there reaches no one.
+                if sending, !chatOnScreen, !localHere, await Self.searchBarUp(in: screen?.frame ?? planned.shot) {
+                    DebugLog.write("send: a search box is up (取消 at the top right): a search, no message")
                     localHere = true
                 }
                 // 130 over the cloud 11-13 (fourth round, g4): with the app in front not known, the note's first line
@@ -4356,6 +4383,16 @@ extension Pointer: Gestures {}
         timing.frameMs += try await settle()
         // feedback for the next round
         steps[steps.count - 1]["changed"] = .bool(Vision.changed(seen, screen?.frame, ignore: spots))
+        // D162: a tap at the spot of the tap before it that changed the screen: did it lead to another page (its title)?
+        if let last = steps.last, last["action"]?.str == "tap", last["changed"] == .bool(true),
+           Self.tapsInARow(Array(steps.dropLast()), like: last) >= 1, let was = seen, let shown = screen?.frame {
+            let before = WatchReport.navigationTitle(rows: await CandidatePicker.rowsOffMain(in: was, top: 0.02, bottom: 0.22))
+            let after = WatchReport.navigationTitle(rows: await CandidatePicker.rowsOffMain(in: shown, top: 0.02, bottom: 0.22))
+            if before != after, before != nil || after != nil {
+                steps[steps.count - 1]["newPage"] = .bool(true)
+                DebugLog.write("tap: led to another page (\(before ?? "-") → \(after ?? "-")): the same spot again is no dead spot")
+            }
+        }
         // A swipe from the margin over a page that moves by itself (Weather's sky) "changed" the screen without scrolling it:
         // over USB 11-10, 20 swipes on Beijing's forecast and the run ran out of time. The words tell whether it scrolled.
         if let last = steps.last, last["action"]?.str == "swipe", last["x1"]?.int == Self.marginX, let was = seen, let shown = screen?.frame {
@@ -4755,12 +4792,15 @@ extension Pointer: Gestures {}
 
     /// How many taps in a row, up to now, aimed at the same spot as `act` (notes, stale plans and refusals between
     /// them do not count as something else).
+    /// D162, s4 over the cloud 11-19 (148): back at the top left, 资料设置 → 朋友资料 → 聊天信息 → 测试群, each tap to a page
+    /// with another title; the fourth, from the chat to the list, was refused as a spot that does nothing, and the run
+    /// went round. A tap that led to another page ends the run of taps: the spot is the same, the page under it is not.
     static func tapsInARow(_ steps: [JObject], like act: JObject) -> Int {
         var n = 0
         for s in steps.reversed() {
             let name = s["action"]?.str ?? ""
             if ["stale plan", "note", "refused"].contains(name) { continue }
-            guard name == (act["action"]?.str ?? "tap"), sameSpot(s, act) else { break }
+            guard name == (act["action"]?.str ?? "tap"), sameSpot(s, act), s["newPage"] != .bool(true) else { break }
             n += 1
         }
         return n
@@ -6059,7 +6099,8 @@ extension Pointer: Gestures {}
                     if still >= Self.readUpStillTries { top = true; break }
                     still += 1
                     try await Task.sleep(nanoseconds: 1_500_000_000)
-                    try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
+                    let x = still == 1 ? 0.5 : Self.readUpX  // D164
+                    try await phone.swipe(x, 0.32, x, 0.78, hold: true)
                     await screen?.settled()
                     continue
                 }
@@ -6070,7 +6111,7 @@ extension Pointer: Gestures {}
                     let bare = AppNames.hans(row).filter { !$0.isWhitespace }
                     return targets.contains { bare.contains($0) }
                 }) { break }
-                try await phone.swipe(0.5, 0.32, 0.5, 0.78, hold: true)
+                try await phone.swipe(Self.readUpX, 0.32, Self.readUpX, 0.78, hold: true)  // D164
                 await screen?.settled()
             }
             notes.append(Self.readUpNote(Self.readUpMerge(screens), screens: screens.count, until: a["until"]?.str ?? "", top: top))

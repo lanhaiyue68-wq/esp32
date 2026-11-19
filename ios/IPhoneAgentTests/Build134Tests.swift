@@ -1682,6 +1682,31 @@ import XCTest
         XCTAssertEqual(AgentLoop.typedAheadOfResults("露营椅", task: goal, told: told, sent: []), [], "a search word")
         XCTAssertTrue(AgentLoop.aheadReason([3, 4, 5]).contains("第3–5项") || AgentLoop.aheadReason([3, 4, 5]).contains("第3-5项"))
     }
+
+    /// D162, s4 on 148: back at the top left, each tap to a page with another title, is no spot that does nothing.
+    func testTapsThatEachLedToAnotherPageAreNoDeadSpot() {
+        func back(_ newPage: Bool) -> JObject {
+            var s: JObject = ["action": .str("tap"), "x": .int(58), "y": .int(87)]
+            if newPage { s["newPage"] = .bool(true) }
+            return s
+        }
+        let next: JObject = ["action": .str("tap"), "x": .int(60), "y": .int(89)]
+        XCTAssertEqual(AgentLoop.tapsInARow([back(false), back(false), back(false)], like: next), 3)
+        XCTAssertEqual(AgentLoop.tapsInARow([back(false), back(false), back(true)], like: next), 0, "the last led to another page")
+        XCTAssertEqual(AgentLoop.tapsInARow([back(true), back(false), back(false)], like: next), 2)
+    }
+
+    /// D163, s4 on 148: a box at the top with 取消 at its right end is a search; 完成 there, or 取消 at the left, is not.
+    func testASearchBoxAtTheTopIsNoChat() {
+        let piece = { (t: String, x: Double, y: Double) in
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y - 0.01, width: 0.08, height: 0.02))
+        }
+        XCTAssertTrue(AgentLoop.searchBarUp([[piece("LHY8768Z", 0.15, 0.09)], [piece("取消", 0.86, 0.09)]]))
+        XCTAssertTrue(AgentLoop.searchBarUp([[piece("Cancel", 0.84, 0.08)]]))
+        XCTAssertFalse(AgentLoop.searchBarUp([[piece("取消", 0.04, 0.09), piece("完成", 0.88, 0.09)]]), "a settings page")
+        XCTAssertFalse(AgentLoop.searchBarUp([[piece("测试群(4)", 0.42, 0.09)]]), "a chat")
+        XCTAssertFalse(AgentLoop.searchBarUp([[piece("取消", 0.86, 0.6)]]), "a sheet lower down")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
