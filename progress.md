@@ -1,5 +1,12 @@
 # 当前进度
 
+## 2026-11-20 03:00（首爾）149 已編好（D161–D184），IPA 在桌面；148 測試停止
+- 使用者 02:4x：「把發現的問題全部都修了吧，出一個最新版」。補 D184（0996448）：瀏覽器裡列表上滑從頁面最左緣（x 0.012）起手，不按到百度卡片的連結（h22 四次被拖成打開連結）。淘寶購物車「127」是不是種類數無法確認，不寫規則（照實回報＋註明不確定較安全）。
+- 版本 149（ceaf50b），build149-ci＝ceaf50b＋cherry-pick 4fe5701（b9b3af2），`git push --force-with-lease=main:7ba242c build3200 build149-ci:main`。CI run 44579731253：編譯、打包、上傳成功；單元測試 929 個 1 個失敗——Build123Tests.testAFailureCarriesWhatWasFound：D168 把「AAPL 355.63」當模型英文自言自語濾掉。本機已修 D168b（64e0d1e：四個英文字以上才算句子），未進這版 IPA，下一版帶上。
+- IPA：E:/桌面/Lan-Agent-build149-unsigned.ipa，4,439,138 bytes，SHA256 607915e02932c37d1b0a7c53388d96e4a5128ea7b09d13f21e4b8a9bebfde507；三個 bundle（App、鍵盤、Live Activity）都是 149。147 的 IPA 已送回收筒，148 留著。
+- 148 測試停止：chain148c 與 cloudq 已結束，y2 從雲端取消（手機回 cancelled from the cloud）。r148y2 只有 y1：開頭取屏未就緒 54 秒失敗；y2 開頭有 10 分鐘 steps 0（取屏還沒好），之後跑到 96 步被取消。
+- 下一步：使用者裝 149 → 只複查 148 這兩輪失敗過的題（x1、x2、x4、n15、h14、h22、s3、s4、s6、s7、h02），過了就收尾；D168b 跟下一版一起編。
+
 ## 2026-11-20 02:30（首爾）148 續測 hb 跑完（21/21），本機加 D182–D183（未推）；y2 跑中
 - r148hb（01:11–02:09）：21/21 標成功（r148h 19/21；h07、h18 這次都成功）。慢：h04 636s（r148h 244）、h22 741s（93）、h14 220s（45）、h18 235s、h21 219s、h06 205s。iOS 回報溫度等級：critical 37 次（01:15–01:25）、serious 123 次，App 被暫停 79 次；h04 那段一次點擊等了 36 秒、整個 App 被停 8–24 秒。
 - h22（Safari 百度深圳天氣）：答案對（深圳市气象局（台）），但記憶路線從 Dock 點 Safari（Dock 圖示沒有字），想法只說「Baidu results page」「weather.com.cn page」，「這次沒進過 safari」退兩次，規劃者重開 Safari 重查→D182（7fec594）：說到百度／網頁也算在 Safari 裡。開頭的上滑又一次點開了氣象局頁（同 r148h2b 的 Safari 上滑被當點擊，仍待實測）。
