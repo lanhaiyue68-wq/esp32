@@ -1517,6 +1517,16 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D157, 147's x2 and s3: a plan reply that calls a tool is no plan past its markup.
+    func testAPlanThatCallsAToolIsCutAndAskedAgain() {
+        let reply = "1. 打开微信\n2. 进入测试群<seed:tool_call><function name=\"open_app\"><parameter name=\"app_name\">微信</parameter></function></seed:tool_call>"
+        XCTAssertTrue(AgentLoop.holdsToolCall(reply))
+        XCTAssertEqual(AgentLoop.withoutToolCalls(reply), "1. 打开微信\n2. 进入测试群")
+        XCTAssertEqual(AgentLoop.withoutToolCalls("<seed:tool_call><function name=\"list_available_functions\">"), "")
+        XCTAssertFalse(AgentLoop.holdsToolCall("1. 打开微信\n2. 看 function 的说明"))
+        XCTAssertEqual(AgentLoop.withoutToolCalls("1. a"), "1. a")
+    }
+
     /// D153, 147's s4: a spot that did nothing on one screen is not refused on another.
     func testADeadSpotIsDeadOnItsOwnScreenOnly() {
         let tap: JObject = ["action": .str("tap"), "x": .num(500), "y": .num(500)]

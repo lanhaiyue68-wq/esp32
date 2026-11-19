@@ -5746,10 +5746,17 @@ extension Pointer: Gestures {}
             prompt += "\n\nOne part per thing of the goal, each starting with 第N项： (N = its number in the goal)."
         }
         prompt += notesText
-        let (reply, seconds, frame) = try await ask("planner", planner, plannerPrompt, prompt)
-        let (en, zh) = Actions.parsePlan(reply)
+        let asked = try await ask("planner", planner, plannerPrompt, prompt)
+        var (reply, seconds) = (asked.0, asked.1)
+        let frame = asked.2
+        if Self.holdsToolCall(reply) {  // D157
+            DebugLog.write("plan: the reply called a tool; asking once more for plain numbered steps")
+            let again = try await ask("planner", planner, plannerPrompt, prompt + Self.noToolCallsLine)
+            (reply, seconds) = (again.0, seconds + again.1)
+        }
+        let (en, zh) = Actions.parsePlan(Self.withoutToolCalls(reply))
         // build105 live 11-08: Plus timed out, and the fallback answered {"action":"search",...}, which became the plan.
-        if !plan.isEmpty, en.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
+        if !plan.isEmpty, en.isEmpty || en.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
             DebugLog.write("plan: the reply was not a plan; keeping the last one")
         } else {
             plan = en
@@ -5763,6 +5770,20 @@ extension Pointer: Gestures {}
                          "reason": .str("the executor did not get on: Codex drives until this part is done, at most \(Self.takeoverSteps) steps")])
         }
     }
+
+    /// D157, 147 over the cloud 11-19: 20 of 191 plans ended in the model's own tool-call markup ("我会按顺序完成剩余的所有
+    /// 项目……<seed:tool_call><function name="open_app">…"), and that text was the plan: x2 went through six stuck plans and
+    /// took 1901 s (145: 987 s), s3 replanned into "<seed:tool_call><function name="list_available_functions">". A reply
+    /// that calls a tool is asked once more for plain steps, and what it says after the markup is never part of the plan.
+    static func holdsToolCall(_ reply: String) -> Bool {
+        reply.contains("<seed:tool_call") || reply.contains("<function=") || reply.contains("<function name=")
+    }
+    static func withoutToolCalls(_ reply: String) -> String {
+        let cut = ["<seed:tool_call", "<function=", "<function name="].compactMap { reply.range(of: $0)?.lowerBound }.min()
+        return cut.map { String(reply[..<$0]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? reply
+    }
+    static let noToolCallsLine = "\n\nYour last answer called a tool. There are no tools or functions here: answer with "
+        + "the plan only, numbered steps in plain text (1. … 2. …)."
 
     /// D149: the notes for the executor's step, less those partFocus already shows with their part.
     private var stepNotesText: String {
