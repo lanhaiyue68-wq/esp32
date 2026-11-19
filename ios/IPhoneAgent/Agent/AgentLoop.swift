@@ -2753,8 +2753,13 @@ extension Pointer: Gestures {}
         + "again on this page: read the labels for the right control, or go back further first (to the app's home, where "
         + "its tabs are)."
 
+    /// D169, n07 over the cloud 11-19 (148): a 小红书 video note showed its likes (2.6万) on the video and its whole title
+    /// only on the comments sheet; the run opened and closed the sheet ten times to see both at once, never noted either,
+    /// and ran out of steps. What is asked for may be split over the two screens of a back-and-forth.
     static let loopReason = "this move starts again a back-and-forth this run already went through twice; the move that "
-        + "left was the mistake. Stay on this screen and do the task here. If what the goal asks for is already done, answer done."
+        + "left was the mistake. Stay on this screen and do the task here. If what the goal asks for is already done, answer done. "
+        + "If it shows partly here and partly on the other screen, note what this screen shows now (note …) and take the "
+        + "rest from your notes or the other screen: a thing noted need not be seen again."
 
     /// A move that leaves the current screen: back, home, or a tap on the back arrow at the top left.
     static func leaves(_ act: JObject) -> Bool {
