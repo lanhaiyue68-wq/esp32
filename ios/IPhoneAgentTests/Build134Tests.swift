@@ -1762,6 +1762,16 @@ import XCTest
     func testTheCheckTakesAnUnnamedPageFromTheSteps() {
         XCTAssertTrue(AgentLoop.doneCheck.contains("does not name the city"))
     }
+
+    /// D175, x1 on 148: a long record typed into a note is told to the check by its start and its end.
+    func testTheCheckIsToldTheEndOfALongTypedText() {
+        let record = "X1组记录\n" + (1...22).map { "\($0). 第\($0)项的结果写在这里，内容比较长一些。" }.joined(separator: "\n")
+        let did = AgentLoop.whatItDid([["action": .str("open"), "app": .str("备忘录")], ["action": .str("type"), "text": .str(record)]])
+        XCTAssertTrue(did.contains("X1组记录"), did)
+        XCTAssertTrue(did.contains("22. 第22项"), did)
+        XCTAssertTrue(did.contains("not missing"), did)
+        XCTAssertEqual(AgentLoop.typedForCheck("X1全部做完"), "X1全部做完")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

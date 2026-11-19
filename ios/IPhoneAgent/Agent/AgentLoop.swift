@@ -5757,6 +5757,16 @@ extension Pointer: Gestures {}
 
     /// What a run did, for the check: every app opened, text typed and note, and the last taps. Over USB 11-10 50 calculator
     /// taps pushed the opening of 淘寶 and 拼多多 out of the last 40 lines, and the check said they were never opened.
+    /// D175, x1 over the cloud 11-19 (148): the 22 results went into the note in one type (839 characters) and the note
+    /// held them all, but the check got the first 80 ("…3. 淘宝首个蓝牙耳机") with the screen showing 13-22, said "仅写到第3项开头"
+    /// twice, and the run typed the whole record twice more into the note and ended "（未能核實）". A long text typed is
+    /// told by its start and end and its length: the middle left out is not missing.
+    static func typedForCheck(_ text: String) -> String {
+        guard text.count > 180 else { return text }
+        return String(text.prefix(80)) + " … " + String(text.suffix(80))
+            + " (\(text.count) characters typed in one go; the middle is left out here, not missing)"
+    }
+
     static func whatItDid(_ steps: [JObject], taps: Int = 20) -> String {
         let tapIndices = steps.indices.filter { steps[$0]["action"]?.str == "tap" }
         let kept = Set(tapIndices.suffix(taps))
@@ -5764,7 +5774,7 @@ extension Pointer: Gestures {}
             let s = steps[i]
             switch s["action"]?.str {
             case "open": return "opened " + (s["app"]?.str ?? "?")
-            case "type": return "typed " + String((s["text"]?.str ?? "").prefix(80))
+            case "type": return "typed " + Self.typedForCheck(s["text"]?.str ?? "")
             case "press": return "pressed the keys " + String((s["text"]?.str ?? "").prefix(80))
             case "note": return "noted " + String((s["text"]?.str ?? "").prefix(200))
             case "listen": return "listened to the video and read its subtitles (the text is in the notes)"
