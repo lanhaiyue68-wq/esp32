@@ -139,6 +139,8 @@ extension Pointer: Gestures {}
     private var bracketRefused: Set<Int> = []
     /// D107: the goal's items a note with text cut short on the screen was refused for (once each; 0: a note with no item).
     private var cutRefused: Set<Int> = []
+    /// D174: each refused cut note's text, and how many notes there were then (kept once the run goes round instead).
+    private var cutPending: [Int: (text: String, at: Int)] = [:]
     /// D114: a short goal that reads one group was refused once for ending where that group's title is not shown.
     private var groupTitleRefused = false
     /// D134: a name or remark the goal sets was refused once for being typed again after it was saved.
@@ -687,6 +689,25 @@ extension Pointer: Gestures {}
         }
         DebugLog.write("act \(steps.count): \(step["action"]?.str ?? "?") \(fields.joined(separator: ", "))")
         onStep?()
+        if ["loop", "part stalled"].contains(step["action"]?.str ?? "") { keepCutNotes() }
+    }
+
+    /// D174, 148 over the cloud 11-19 (x2 item 7, h22 rerun): a search result's title noted with "…" was refused (D107)
+    /// to be opened and read whole; the run opened it (a video, a page), came back, opened it again, and never noted it
+    /// again: x2 spent 400 s there, h22 ran out of steps. Once the run goes round, a cut note not noted again since is
+    /// kept as it was first read.
+    private func keepCutNotes() {
+        let pending = cutPending
+        cutPending = [:]
+        for (n, p) in pending.sorted(by: { $0.key < $1.key }) {
+            let later = notes.dropFirst(p.at)
+            if (n > 0 ? later.contains(where: { Self.noteItems($0).contains(n) }) : !later.isEmpty) { continue }
+            guard !notes.contains(p.text) else { continue }
+            notes.append(p.text)
+            record(nil, ["action": .str("note"), "text": .str(p.text), "by": .str("run"),
+                         "reason": .str("kept as first read: the run went round instead of noting it again")])
+            DebugLog.write("note: the cut note for item \(n) is kept as first read; the run was going round")
+        }
     }
 
     /// The board or mirroring went away mid-run: pause ("waiting for the board") until the screen is live
@@ -1923,6 +1944,7 @@ extension Pointer: Gestures {}
         let n = Self.noteItems(text).min() ?? 0
         guard !cutRefused.contains(n) else { return nil }
         cutRefused.insert(n)
+        cutPending[n] = (text, notes.count)
         return "Refused: this note holds text cut short on the screen (… or ... where it was cut, or 被截断). Open the thing "
             + "it is about (the note, the product, the app's page, the developer's name) and read it whole, then note it. If "
             + "it is cut there too, note it again as it is and it is kept."
