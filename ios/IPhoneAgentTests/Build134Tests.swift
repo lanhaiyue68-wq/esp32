@@ -1333,6 +1333,13 @@ import XCTest
         XCTAssertTrue(CloudBridge.ownerMayRead("App Store 中 WeChat 的评分为4.8"))
     }
 
+    /// D171, h07 on 148: a secure connection cut by a network drop is waited for, as a lost connection is.
+    func testAFailedSecureConnectionIsWaitedFor() {
+        XCTAssertTrue(ModelRequestFailure.isNetworkDown(URLError(.secureConnectionFailed)))
+        XCTAssertTrue(ModelRequestFailure.isNetworkDown(URLError(.networkConnectionLost)))
+        XCTAssertFalse(ModelRequestFailure.isNetworkDown(URLError(.timedOut)))
+    }
+
     /// D71, y6 on 137: a feed that keeps playing does not stop the swipe to the next video, nor opening an app.
     func testAPlayingFeedDoesNotStopTheSwipeToTheNextVideo() {
         XCTAssertTrue(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(300)]))

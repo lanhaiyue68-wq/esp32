@@ -8,10 +8,14 @@ enum ModelRequestFailure {
 
     /// The phone has no way to the server at the moment: no model can answer, and waiting is the cure. Over USB 11-09 the
     /// Wi-Fi went away for a few minutes; one model call failed, the replan after it failed the same way, and the run ended.
+    /// D171, h07 over the cloud 11-19 (148): the phone's network dropped for ~90 s; two calls said 网络连接已中断 and were
+    /// waited out, the next said TLS错误导致安全连接失败 (a handshake cut by the same drop), counted as the model's error,
+    /// and the replan after it hit it again and ended the run; 13 s later the next task ran. A failed secure connection
+    /// is waited for as well (a lasting one still ends at offlineWaitLimit).
     static func isNetworkDown(_ error: Error) -> Bool {
         let codes: Set<Int> = [NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorCannotConnectToHost,
                                NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed, NSURLErrorDataNotAllowed,
-                               NSURLErrorInternationalRoamingOff]
+                               NSURLErrorInternationalRoamingOff, NSURLErrorSecureConnectionFailed]
         var current: NSError? = error as NSError
         for _ in 0..<3 {
             guard let e = current else { return false }
