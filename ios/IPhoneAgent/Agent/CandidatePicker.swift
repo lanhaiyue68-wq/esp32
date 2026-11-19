@@ -97,7 +97,8 @@ enum CandidatePicker {
             let dx: Double = abs(Double(p.box.midX - point.x)), dy: Double = abs(Double(p.box.midY - point.y))
             return named && dx <= 0.1 && dy <= 0.08
         }
-        let pieces: [Piece] = rows(in: jpeg, top: 0, bottom: 1).flatMap { $0 }
+        // D154: the status bar's clock is no control's label ("tap “5:25”" was a back arrow, 147's s7).
+        let pieces: [Piece] = rows(in: jpeg, top: Vision.topMask, bottom: 1).flatMap { $0 }
         guard let best = pieces.filter(around).min(by: { cost($0) < cost($1) }) else { return nil }
         return (best.text, CGPoint(x: best.box.midX, y: best.box.midY))
     }

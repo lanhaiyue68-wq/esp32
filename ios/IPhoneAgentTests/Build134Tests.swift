@@ -1517,6 +1517,38 @@ import XCTest
         XCTAssertTrue(AgentLoop.flicks(app: "行事曆", 0.5, 0.75, 0.5, 0.3), "D121b")
     }
 
+    /// D153, 147's s4: a spot that did nothing on one screen is not refused on another.
+    func testADeadSpotIsDeadOnItsOwnScreenOnly() {
+        let tap: JObject = ["action": .str("tap"), "x": .num(500), "y": .num(500)]
+        let white = [UInt8](repeating: 15, count: 64), dark = [UInt8](repeating: 1, count: 64)
+        XCTAssertTrue(AgentLoop.deadTwiceHere([(tap, white), (tap, white)], tap, scene: white))
+        XCTAssertFalse(AgentLoop.deadTwiceHere([(tap, white), (tap, white)], tap, scene: dark), "a photo opened full screen")
+        XCTAssertFalse(AgentLoop.deadTwiceHere([(tap, white), (tap, dark)], tap, scene: dark))
+        XCTAssertTrue(AgentLoop.deadTwiceHere([(tap, nil), (tap, nil)], tap, scene: dark), "no screen kept: as before")
+    }
+
+    /// D155, 147's h22: a loading page may be waited on again, three times in a row at most.
+    func testALoadingPageMayBeWaitedOnAgain() {
+        let wait: JObject = ["action": .str("wait")]
+        XCTAssertTrue(AgentLoop.mayWaitAgain(wait, steps: [["action": .str("tap")], wait]))
+        XCTAssertTrue(AgentLoop.mayWaitAgain(wait, steps: [wait, ["action": .str("stale plan")], wait]))
+        XCTAssertFalse(AgentLoop.mayWaitAgain(wait, steps: [wait, wait, wait]))
+        XCTAssertFalse(AgentLoop.mayWaitAgain(["action": .str("tap")], steps: [wait]))
+    }
+
+    /// D154, 147's s3 and s7: only a clean run, whole, of a few steps is remembered as a way.
+    func testOnlyACleanWholeRunIsRemembered() {
+        let open: JObject = ["action": .str("open"), "app": .str("微信")]
+        let tap: JObject = ["action": .str("tap"), "x": .num(500), "y": .num(300)]
+        let done: JObject = ["action": .str("done"), "answer": .str("ok")]
+        XCTAssertEqual(RouteBook.recipe(steps: [open, tap, tap, done], shots: [:], label: { _, _ in nil })?.count, 3)
+        XCTAssertNil(RouteBook.recipe(steps: [open, tap, done], shots: [:], label: { _, _ in nil }), "s3: open and look")
+        XCTAssertNil(RouteBook.recipe(steps: [open, tap, ["action": .str("loop")], tap, done], shots: [:], label: { _, _ in nil }),
+                     "a run that went round")
+        XCTAssertNil(RouteBook.recipe(steps: [open] + Array(repeating: tap, count: RouteBook.recipeLines) + [done], shots: [:],
+                                      label: { _, _ in nil }), "s7: only its last 30 lines")
+    }
+
     /// D150b, user 11-19: an icon that keeps missing is left for longer, never for good.
     func testAnIconThatKeepsMissingWaitsLonger() {
         XCTAssertEqual([0, 1, 2, 3, 4, 7].map { AppPlaces.searchOpens(afterMisses: $0) }, [0, 1, 2, 4, 4, 4])

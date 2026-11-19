@@ -596,7 +596,9 @@ extension Pointer: Gestures {}
     private var boxCleared = false  // a send run emptied the box before its first type
     /// Taps that did nothing: each one after which the next stroke still left no line. A spot in here twice is
     /// refused: traces(44) tapped the New Board button at the bottom right a dozen times as if it were the pen.
-    private var deadTaps: [JObject] = []
+    /// D153: each with the screen it did nothing on (Vision.experienceScene), so another screen's spot is never refused.
+    private var deadTaps: [(tap: JObject, scene: [UInt8]?)] = []
+    private var screenScene: [UInt8]? { screen?.frame.flatMap(Vision.experienceScene) }
     /// Checked before every `type`: a reason refuses the text (it is never typed) and goes into the steps, so the
     /// model rewrites it. WeChat watch uses it so private details never leave the phone.
     var outgoingGuard: ((String) -> String?)?
@@ -2903,6 +2905,17 @@ extension Pointer: Gestures {}
     static let scrollBackReason = "Refused: this page was already scrolled one way, back, and that way again: all of it has "
         + "been seen. Do not scroll it again. Go on with what the goal needs next, or answer from what you saw."
 
+    /// D153, s4 over the cloud 11-19 (147): taps at the middle of WeChat's new-chat picker had done nothing there; later
+    /// the middle of a profile photo opened full screen, the tap that closes it, was refused as that dead spot, and the
+    /// run spent its last 60 steps in the photo viewer. A spot is dead on the screen it did nothing on, not on another.
+    static func deadTwiceHere(_ dead: [(tap: JObject, scene: [UInt8]?)], _ act: JObject, scene: [UInt8]?) -> Bool {
+        dead.filter { d in
+            guard sameSpot(d.tap, act) else { return false }
+            guard let was = d.scene, let now = scene else { return true }
+            return RouteBook.sceneDistance(was, now) <= 1
+        }.count >= 2
+    }
+
     static func sameSpot(_ a: JObject, _ b: JObject) -> Bool {
         guard a["action"] == b["action"] else { return false }
         let (pa, pb) = (pointerPath(a), pointerPath(b))
@@ -3908,7 +3921,7 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.endReachedReason)])
                     return false
                 }
-                if name == "tap", deadTaps.filter({ Self.sameSpot($0, act) }).count >= 2 {
+                if name == "tap", Self.deadTwiceHere(deadTaps, act, scene: screenScene) {
                     // Over USB 11-09 a run was refused here 48 times in a row, one model call each, up to its step limit.
                     deadRefused += 1
                     if deadRefused >= Self.refusalsInARow {
@@ -4311,7 +4324,7 @@ extension Pointer: Gestures {}
                 if let share = Self.inkShare(before: seen, after: screen?.frame, stroke: strokePoints(act)) {
                     if share < 0.25 {
                         inkSeen = inkSeen ?? false
-                        if let tap = Self.tapBeforeStroke(steps) { deadTaps.append(tap) }  // that tap picked no pen
+                        if let tap = Self.tapBeforeStroke(steps) { deadTaps.append((tap, screenScene)) }  // that tap picked no pen
                         record(screen?.frame, ["action": .str("no ink"), "reason": .str(Self.noInkReason)])
                     } else {
                         inkSeen = true
@@ -4365,7 +4378,7 @@ extension Pointer: Gestures {}
     private func noteDeadTap() {
         noteLearnedControls()
         guard let last = steps.last, last["action"]?.str == "tap", last["changed"] == .bool(false) else { return }
-        deadTaps.append(last)
+        deadTaps.append((last, screenScene))
     }
 
     /// Learned buttons from what this action did: a learned spot that changed nothing is counted against it; the
@@ -5678,6 +5691,19 @@ extension Pointer: Gestures {}
         return icon && opens
     }
 
+    /// D155, h22 over the cloud 11-19 (147): Baidu's page was still loading after a wait; the model asked to wait again,
+    /// was told twice that it "changed nothing last time", and the run went to a stuck plan (the planner then drove into a
+    /// 149-second open of the Safari it was in). A loading page changes nothing until it has loaded: up to three waits in
+    /// a row go through.
+    static let waitsInARow = 3
+    static func mayWaitAgain(_ act: JObject, steps: [JObject]) -> Bool {
+        guard act["action"]?.str == "wait" else { return false }
+        let between: Set<String> = ["stale plan", "hiccup"]
+        let trailing = steps.reversed().filter { !between.contains($0["action"]?.str ?? "") }
+            .prefix(while: { $0["action"]?.str == "wait" }).count
+        return trailing < waitsInARow
+    }
+
     /// A remembered way as the plan: its steps as hints, not numbered parts.
     static func rememberedPlan(_ recipe: RouteBook.Recipe) -> String {
         "Do it the way it was done before; adapt any text, time or name to this goal. Where the next steps are clear, "
@@ -5917,7 +5943,8 @@ extension Pointer: Gestures {}
                                       "reason": .str("Home changed nothing after the keyboard fallback; the Home route could not be verified"),
                                       "think_s": .num(seconds)], shot: frame)]
             }
-            if missed, let last = lastObservedAction, Actions.sameTarget(acts[0], last), !recoveringSend(acts[0]) {
+            if missed, let last = lastObservedAction, Actions.sameTarget(acts[0], last), !recoveringSend(acts[0]),
+               !Self.mayWaitAgain(acts[0], steps: steps) {
                 if acts[0]["action"] == .str("tap") {
                     if last["precise"] == .bool(true) {
                         let reason = "tap target unchanged after a precision retry; inspect another route, keep completed work"

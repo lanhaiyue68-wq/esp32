@@ -43,6 +43,10 @@ import Foundation
     }
     @Published private(set) var recipes: [Recipe] = []
     static let recipeLines = 30
+    /// D154: fewer lines than this are no way (s3 147: "open WeChat; tap the group" from a run that found it made).
+    static let minRecipeLines = 3
+    /// D154: a run with any of these went round in circles; its actions are no way to follow.
+    static let stuckMarks: Set<String> = ["part stalled", "loop", "planner drives"]
     var enabled = true
     var clock: () -> Date = Date.init
     private let file: URL?
@@ -60,7 +64,7 @@ import Foundation
 
     var count: Int { routes.count }
     func clear() { routes = []; recipes = []; save() }
-    private var recipeFile: URL? { file?.deletingLastPathComponent().appendingPathComponent("recipes-v1.json") }
+    private var recipeFile: URL? { file?.deletingLastPathComponent().appendingPathComponent("recipes-v2.json") }  // D154: v1 was learned from any finished run
 
     /// The way the newest similar task was done. An app the old task named must be named by this one too ("go to Claude"
     /// is not the way into ChatGPT). A chat or a label it named and this one does not is the same way to another place
@@ -139,6 +143,11 @@ import Foundation
     nonisolated static func recipe(steps: [JObject], shots: [Int: Data],
                                    label: (Data, CGPoint) -> (text: String, centre: CGPoint)?) -> [String]? {
         guard steps.last?["action"]?.str == "done" else { return nil }
+        // D154, 147 over the cloud 11-19: s7 (小红书, three notes) followed the last 30 lines of a run that had gone round,
+        // note 1 opened three times and "tap “5:25”" (the clock) for the back arrow, and opened note 1 three times again;
+        // s3 (a new WeChat group) followed "open WeChat; tap the group" from a run that had found the group made, and went
+        // back and forth through the old group for 20 steps. Only a clean run, whole, of a few steps or more is a way.
+        guard !steps.contains(where: { stuckMarks.contains($0["action"]?.str ?? "") }) else { return nil }
         var lines: [String] = []
         for (i, s) in steps.enumerated() where s["changed"] != .bool(false) && s["performed"] != .bool(false) {
             func n(_ k: String) -> Int { Int((s[k]?.double ?? 0).rounded()) }
@@ -161,7 +170,7 @@ import Foundation
             default: break
             }
         }
-        return lines.isEmpty ? nil : Array(lines.suffix(recipeLines))
+        return (minRecipeLines...recipeLines).contains(lines.count) ? lines : nil
     }
 
     /// The route for this task that starts on this screen. A label the old task named (an app, a chat) must be named
