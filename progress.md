@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-20 03:25（首爾）150 已編好（149＋D168b），929 測試 0 失敗，IPA 在桌面
+- 使用者：「一次性全部弄好！」→ 版本 150（6eb36f1），build150-ci＝6eb36f1＋4fe5701（caa4b7d），`git push --force-with-lease=main:b9b3af2 build3200 build150-ci:main`。CI run 44584114424：編譯、打包成功，單元測試 929 個 0 失敗。
+- IPA：E:/桌面/Lan-Agent-build150-unsigned.ipa，4,439,924 bytes，SHA256 d6c08cce793b70cd4c12f844daeed5993fe805e8eb96e6f2b6c08ea3cae47834；三個 bundle 皆 150。沒裝過的 149 IPA 已送回收筒，148 留著。
+- 下一步：使用者裝 150 → 只複查 x1、x2、x4、n15、h14、h22、s3、s4、s6、s7、h02，過了就收尾。下次推送 lease＝main:caa4b7d。
+
 ## 2026-11-20 03:00（首爾）149 已編好（D161–D184），IPA 在桌面；148 測試停止
 - 使用者 02:4x：「把發現的問題全部都修了吧，出一個最新版」。補 D184（0996448）：瀏覽器裡列表上滑從頁面最左緣（x 0.012）起手，不按到百度卡片的連結（h22 四次被拖成打開連結）。淘寶購物車「127」是不是種類數無法確認，不寫規則（照實回報＋註明不確定較安全）。
 - 版本 149（ceaf50b），build149-ci＝ceaf50b＋cherry-pick 4fe5701（b9b3af2），`git push --force-with-lease=main:7ba242c build3200 build149-ci:main`。CI run 44579731253：編譯、打包、上傳成功；單元測試 929 個 1 個失敗——Build123Tests.testAFailureCarriesWhatWasFound：D168 把「AAPL 355.63」當模型英文自言自語濾掉。本機已修 D168b（64e0d1e：四個英文字以上才算句子），未進這版 IPA，下一版帶上。
