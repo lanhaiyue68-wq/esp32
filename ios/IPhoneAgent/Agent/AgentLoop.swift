@@ -2084,6 +2084,16 @@ extension Pointer: Gestures {}
         return line + "（\(cal.component(.month, from: date))月\(cal.component(.day, from: date))日）"
     }
 
+    /// D172, s6 over the cloud 11-19 (148, second run): the read up went on swiping after the chat was gone (WeChat's chat
+    /// list and its mini-program drawer, then the system search): 144 s, and its notes held 短信, 丰巢 and search results as
+    /// 测试群's messages; the check of the answer found them. A read stops when the title it began under is gone: another
+    /// title, or none on two screens in a row (a picture opened full screen has none for one).
+    static func leftChat(_ chat: String?, _ now: String?, untitled: Int) -> Bool {
+        guard let chat else { return false }
+        guard let now else { return untitled >= 1 }
+        return AppNames.hans(now).filter { !$0.isWhitespace } != AppNames.hans(chat).filter { !$0.isWhitespace }
+    }
+
     /// D133, s6 on 144 (11-18): "一直读到11月14日为止" was read up for 11月14日, but WeChat heads the last week's messages
     /// 昨天 and 星期X (11-14 was 星期六); the date never shows there. A date one to six days back is also looked for as WeChat
     /// shows it. The words themselves come first.
@@ -6113,8 +6123,18 @@ extension Pointer: Gestures {}
             // given or the top (nothing moves), and what was read goes into the notes oldest first.
             let targets = Self.readUpTargets(a["until"]?.str ?? "")  // D133
             var screens: [[String]] = [], last: [String] = [], top = false, still = 0
+            var chat: String?, untitled = 0  // D172
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
+                // D172: the chat read is the one under the title the read began with.
+                let title = WatchReport.navigationTitle(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.22))
+                if i == 0 {
+                    chat = title
+                } else if Self.leftChat(chat, title, untitled: untitled) {
+                    DebugLog.write("readup: the screen is no longer \(chat ?? "-") (\(title ?? "no title")): stopped, nothing more read")
+                    break
+                }
+                untitled = title == nil ? untitled + 1 : 0
                 let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.1, bottom: 0.88).map(Self.readUpLine)
                 // D143, s6 on 145: "一直读到11月14日" stopped after 5 screens at 11月17日凌晨 as "the top": nothing moved
                 // once, while WeChat was loading older messages (or the swipe was lost). The top is the same screen after

@@ -1747,6 +1747,15 @@ import XCTest
         XCTAssertEqual(Pointer.swipeHopLimit(startY: 0.8), 2)
         XCTAssertEqual(Pointer.swipeHopLimit(startY: 0.5), Pointer.nearbyHops)
     }
+
+    /// D172, s6 on 148: a read up stops once the chat's title is gone; one screen without a title (a picture) is no stop.
+    func testAReadUpStopsWhenTheChatIsGone() {
+        XCTAssertFalse(AgentLoop.leftChat("测试群(4)", "测试群(4)", untitled: 0))
+        XCTAssertTrue(AgentLoop.leftChat("测试群(4)", "丰巢", untitled: 0))
+        XCTAssertFalse(AgentLoop.leftChat("测试群(4)", nil, untitled: 0), "a picture opened full screen, once")
+        XCTAssertTrue(AgentLoop.leftChat("测试群(4)", nil, untitled: 1), "the chat list or the search, twice")
+        XCTAssertFalse(AgentLoop.leftChat(nil, "丰巢", untitled: 3), "begun without a title: nothing to tell")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
