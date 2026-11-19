@@ -5308,12 +5308,23 @@ extension Pointer: Gestures {}
     /// swipes each moved a permission sheet a step on). Measured in Settings: from the margin it scrolls the same. Not from
     /// the floating bars at the bottom either. What the margin does not move (a time picker) gets the model's own spot.
     static let marginX = 40
+    static let homeBarTop = 900.0
 
     static func safeSwipe(_ act: JObject, after steps: [JObject]) -> JObject {
         guard let x1 = act["x1"]?.double, let y1 = act["y1"]?.double, let x2 = act["x2"]?.double, let y2 = act["y2"]?.double,
               abs(x2 - x1) < 100, abs(y2 - y1) > 100 else { return act }
         if let last = steps.last(where: { $0["action"]?.str != "stale plan" }), last["action"]?.str == "swipe",
-           last["changed"] == .bool(false) || last["scrolled"] == .bool(false) { return act }
+           last["changed"] == .bool(false) || last["scrolled"] == .bool(false) {
+            // D176, x2 over the cloud 11-19 (148): Calendar's year view did not move from the margin, so the model's own
+            // "swipe 500 1000 500 350" went as it was: from the home bar, and the phone went to its Home Screen. The
+            // run then took that for a picture, dragged it down (Spotlight) and lost 2027. The model's spot, but never
+            // from the home bar.
+            let low = max(0, max(y1, y2) - homeBarTop)
+            guard low > 0 else { return act }
+            var own = act
+            own["y1"] = .int(Int(y1 - low)); own["y2"] = .int(Int(y2 - low))
+            return own
+        }
         let shift = max(0, max(y1, y2) - 800)
         var safe = act
         safe["x1"] = .int(marginX); safe["x2"] = .int(marginX)

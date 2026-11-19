@@ -1772,6 +1772,18 @@ import XCTest
         XCTAssertTrue(did.contains("not missing"), did)
         XCTAssertEqual(AgentLoop.typedForCheck("X1全部做完"), "X1全部做完")
     }
+
+    /// D176, x2 on 148: after a margin swipe that moved nothing, the model's own swipe still never starts on the home bar.
+    func testTheModelsOwnSwipeStaysOffTheHomeBar() {
+        let unmoved: JObject = ["action": .str("swipe"), "x1": .int(40), "y1": .int(800), "x2": .int(40), "y2": .int(150), "changed": .bool(false)]
+        let up: JObject = ["action": .str("swipe"), "x1": .int(500), "y1": .int(1000), "x2": .int(500), "y2": .int(350)]
+        let own = AgentLoop.safeSwipe(up, after: [unmoved])
+        XCTAssertEqual(own["x1"]?.int, 500)
+        XCTAssertEqual(own["y1"]?.int, 900)
+        XCTAssertEqual(own["y2"]?.int, 250)
+        let mid: JObject = ["action": .str("swipe"), "x1": .int(500), "y1": .int(850), "x2": .int(500), "y2": .int(350)]
+        XCTAssertEqual(AgentLoop.safeSwipe(mid, after: [unmoved])["y1"]?.int, 850, "above the home bar it is the model's own")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
