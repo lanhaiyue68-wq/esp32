@@ -2087,11 +2087,13 @@ extension Pointer: Gestures {}
     /// D172, s6 over the cloud 11-19 (148, second run): the read up went on swiping after the chat was gone (WeChat's chat
     /// list and its mini-program drawer, then the system search): 144 s, and its notes held 短信, 丰巢 and search results as
     /// 测试群's messages; the check of the answer found them. A read stops when the title it began under is gone: another
-    /// title, or none on two screens in a row (a picture opened full screen has none for one).
+    /// title, or none on two screens in a row (a picture opened full screen has none for one). A title read with a bit
+    /// more or less (a grey line joined to it) is the same chat.
     static func leftChat(_ chat: String?, _ now: String?, untitled: Int) -> Bool {
         guard let chat else { return false }
         guard let now else { return untitled >= 1 }
-        return AppNames.hans(now).filter { !$0.isWhitespace } != AppNames.hans(chat).filter { !$0.isWhitespace }
+        let a = AppNames.hans(chat).filter { !$0.isWhitespace }, b = AppNames.hans(now).filter { !$0.isWhitespace }
+        return !a.contains(b) && !b.contains(a)
     }
 
     /// D133, s6 on 144 (11-18): "一直读到11月14日为止" was read up for 11月14日, but WeChat heads the last week's messages
@@ -6126,8 +6128,8 @@ extension Pointer: Gestures {}
             var chat: String?, untitled = 0  // D172
             for i in 0..<Self.readUpScreens {
                 guard let frame = await freshFrame() else { break }
-                // D172: the chat read is the one under the title the read began with.
-                let title = WatchReport.navigationTitle(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.22))
+                // D172: the chat read is the one under the title the read began with (the bar only, not the messages).
+                let title = WatchReport.navigationTitle(rows: await CandidatePicker.rowsOffMain(in: frame, top: 0.02, bottom: 0.12))
                 if i == 0 {
                     chat = title
                 } else if Self.leftChat(chat, title, untitled: untitled) {

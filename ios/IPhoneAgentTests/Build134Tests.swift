@@ -1755,6 +1755,7 @@ import XCTest
         XCTAssertFalse(AgentLoop.leftChat("测试群(4)", nil, untitled: 0), "a picture opened full screen, once")
         XCTAssertTrue(AgentLoop.leftChat("测试群(4)", nil, untitled: 1), "the chat list or the search, twice")
         XCTAssertFalse(AgentLoop.leftChat(nil, "丰巢", untitled: 3), "begun without a title: nothing to tell")
+        XCTAssertFalse(AgentLoop.leftChat("测试群(4)", "测试群(4)你撤回了一条消息", untitled: 0), "a grey line joined to it")
     }
 }
 
