@@ -347,12 +347,21 @@ import Foundation
     /// D160, y1, y2 and y3 on 147 over the cloud 11-19: the run's note of what was said while scrolling (D83) is the
     /// model's own words, mostly English ("I'm on the weather city list. I need to scroll down to find Beijing…"), and
     /// all three answers sent them to the owner. Those words stay with the model; the owner gets them only in Chinese.
+    /// D168, y1 on 148: two parts' "done" came back in the model's English ("The world clock shows only Beijing, so part
+    /// 2 is done; I open 淘宝 for the flask product details.") and went to the owner as found. A note or "done" that
+    /// is mostly English words and names no item (第N项) is the model talking to itself; one naming an item may hold an
+    /// English title and stays.
     nonisolated static func ownerMayRead(_ note: String) -> Bool {
         let mark = "（滚动页面时看到，原话）："  // AgentLoop.seenWhileScrollingMark
-        guard let r = note.range(of: mark) else { return true }
-        let said = note[r.upperBound...]
-        let han = said.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
-        let words = said.split(whereSeparator: { !($0.isASCII && $0.isLetter) }).count
+        guard let r = note.range(of: mark) else {
+            return note.range(of: #"第\s*\d+\s*项"#, options: .regularExpression) != nil || mostlyChinese(note[...])
+        }
+        return mostlyChinese(note[r.upperBound...])
+    }
+
+    nonisolated static func mostlyChinese(_ text: Substring) -> Bool {
+        let han = text.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
+        let words = text.split(whereSeparator: { !($0.isASCII && $0.isLetter) }).count
         return han >= words
     }
 

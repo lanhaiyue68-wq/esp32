@@ -1326,6 +1326,11 @@ import XCTest
         let line = AgentLoop.seenWhileScrollingNote([["action": .str("swipe"),
                                                       "thought": .str("I'm on the weather city list. I need to scroll down.")]], part: nil)
         XCTAssertEqual(line.map(CloudBridge.ownerMayRead), false)
+        // D168, y1 on 148: a part's "done" in the model's English is not found; an item holding an English title is.
+        XCTAssertFalse(CloudBridge.ownerMayRead("The world clock shows only Beijing, so part 2 is done; I open 淘宝 for the flask."))
+        XCTAssertTrue(CloudBridge.ownerMayRead("第1项：抖音第一个视频讲解“Why do you care so much?”"))
+        XCTAssertTrue(CloudBridge.ownerMayRead("世界时钟仅显示北京一个城市"))
+        XCTAssertTrue(CloudBridge.ownerMayRead("App Store 中 WeChat 的评分为4.8"))
     }
 
     /// D71, y6 on 137: a feed that keeps playing does not stop the swipe to the next video, nor opening an app.
