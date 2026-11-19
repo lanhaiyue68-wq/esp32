@@ -1757,6 +1757,11 @@ import XCTest
         XCTAssertFalse(AgentLoop.leftChat(nil, "丰巢", untitled: 3), "begun without a title: nothing to tell")
         XCTAssertFalse(AgentLoop.leftChat("测试群(4)", "测试群(4)你撤回了一条消息", untitled: 0), "a grey line joined to it")
     }
+
+    /// D173, h02 on 148 (rerun): Seoul was searched and its forecast opened; the check said NO for a chart that names no city.
+    func testTheCheckTakesAnUnnamedPageFromTheSteps() {
+        XCTAssertTrue(AgentLoop.doneCheck.contains("does not name the city"))
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

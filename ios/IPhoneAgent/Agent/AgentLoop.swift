@@ -5310,6 +5310,7 @@ extension Pointer: Gestures {}
     - The goal names no city or place and the answer is for a city an app kept from before, not the phone's own location.
     - A cart or order on the screen holds more of an item than the goal asked for (×3 for one cup), or the answer leaves out how many.
     The screen may have moved on: what was noted or done earlier stands unless the screen contradicts it. Work out dates from today's date. Never judge style or wording, nor the answer's language.
+    A page that does not name the city, chat or item it is about (Weather's hourly chart, a detail sheet, a picture) is no contradiction: which one it is comes from the steps (the search typed and the result tapped). Never say NO only because the screen does not show that name.
     What the run itself changed after reading it is no contradiction: it read a chat's latest messages and then sent more there, or counted a cart and then added to it. The answer stands as read at the time.
     A note, memo or document has no separate title field: its first line is its title.
     In a list of days (a 10-day forecast), today's row is first and tomorrow is the row right under it; a weekday name further down is a later week. An answer for "tomorrow" read off a lower row is wrong.
