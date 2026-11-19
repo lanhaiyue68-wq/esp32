@@ -585,6 +585,7 @@ extension Pointer: Gestures {}
     private var quietSinceSend = 0
     private var pendingInput: String?
     private var pendingRefused = 0
+    private var notesTypedRefused = false  // D183
     /// Text already entered by a quick send, handed over for visual inspection without retyping.
     var inputToInspect: String?
     /// A destination-specific receipt, independent of the actor's next navigation/action guess.
@@ -1033,6 +1034,21 @@ extension Pointer: Gestures {}
         let text = words.isEmpty ? "消息已按要求发出" : "已发出\(words)"
         return #"{"send":""# + text.replacingOccurrences(of: "\"", with: "") + #""}"#
     }
+
+    /// D183, h14 over the cloud 11-20 (148): "新建一条备忘录，内容写“133真人测试备忘”" made three notes of those words. The
+    /// first held them as its title line; the model took the empty body for nothing typed, a paste hiccup brought a new
+    /// plan from "新建一条空白备忘录", and its part 2 made another. Words this run already typed in 备忘录, typed there
+    /// again, are refused once: the note holding them is in the list.
+    static func typedIntoNotesBefore(_ text: String, steps: [JObject], startedIn: String?) -> Bool {
+        guard let app = appInFront(steps, startedIn: startedIn),
+              ["备忘录", "notes"].contains(AppNames.hans(app).lowercased().filter { !$0.isWhitespace }) else { return false }
+        let key = typedKey(text)
+        guard key.count >= 4 else { return false }
+        return steps.contains { $0["action"]?.str == "type" && typedKey($0["text"]?.str ?? "") == key }
+    }
+    static let notesTypedAgainReason = "Refused: this run already typed these words in 备忘录, and the note holding them is "
+        + "kept (its first line is its title; the body below it stays empty). Never make a second note with the same "
+        + "words: go back to the list, open the note that starts with them and check it there, then go on."
 
     static func typedKey(_ text: String) -> String {
         text.filter { !$0.isWhitespace && !"\"'“”‘’「」".contains($0) }
@@ -3924,6 +3940,12 @@ extension Pointer: Gestures {}
                 lastStale = nil
                 if name == "type", let refused = outgoingGuard?(act["text"]?.str ?? "") {
                     record(planned.shot, ["action": .str("blocked"), "reason": .str(refused)])  // never typed
+                    return false
+                }
+                if name == "type", !notesTypedRefused,
+                   Self.typedIntoNotesBefore(act["text"]?.str ?? "", steps: steps, startedIn: startApp) {
+                    notesTypedRefused = true
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.notesTypedAgainReason)])
                     return false
                 }
                 if name == "type", let pendingInput {

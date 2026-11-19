@@ -1786,6 +1786,17 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D183, h14 on 148: the same words typed in 备忘录 a second time in one run are a second note.
+    func testTheSameWordsTypedInNotesAgainAreRefused() {
+        let open: JObject = ["action": .str("open"), "app": .str("備忘錄")]
+        let typed: JObject = ["action": .str("type"), "text": .str("133真人测试备忘")]
+        XCTAssertTrue(AgentLoop.typedIntoNotesBefore("133真人测试备忘", steps: [open, typed], startedIn: nil))
+        XCTAssertFalse(AgentLoop.typedIntoNotesBefore("133真人测试备忘", steps: [open], startedIn: nil), "the first time")
+        XCTAssertFalse(AgentLoop.typedIntoNotesBefore("第23项：补充", steps: [open, typed], startedIn: nil), "other words")
+        let wechat: JObject = ["action": .str("open"), "app": .str("微信")]
+        XCTAssertFalse(AgentLoop.typedIntoNotesBefore("133真人测试备忘", steps: [open, typed, wechat], startedIn: nil), "not in Notes")
+    }
+
     /// D182, h22 on 148: Safari opened by a remembered way from the Dock, the thoughts about the Baidu page, was visited.
     func testABrowserPageSpokenOfIsSafariVisited() {
         let goal = "用 Safari 打开 www.baidu.com 搜“深圳天气”，第一条结果的标题是什么？不要登录"
