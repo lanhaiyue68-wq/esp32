@@ -1140,7 +1140,7 @@ import Foundation
         // aim: a list moves wherever it is pressed).
         let start = CGPoint(x: Double(points[0].x), y: Double(points[0].y))
         if !drawing, hold || quick, Self.swipeHops(from: start, to: points[points.count - 1]), !viaBorders(start.x, start.y),
-           let last = lastClick, let p = pos, hops < Self.nearbyHops,
+           let last = lastClick, let p = pos, hops < Self.swipeHopLimit(startY: Double(start.y)),
            Self.canHop(last, units: p, link: device.links, at: Date().timeIntervalSince1970) {
             let (ux, uy) = hopUnits(from: last, to: start.x, start.y, units: p)
             lastClick = nil
@@ -1151,6 +1151,7 @@ import Foundation
         } else {
             try await point(start.x, start.y, rehome: startFromHome, edgeStart: !hold && !drawing && !quick)
         }
+        var strokedLine = false  // D167: a 2-point line went in one stroke
         // With the position unknown the next move would go home first: never with the button down.
         if pos == nil { try await moveTo(dx(Double(points[0].x)), dy(Double(points[0].y)), rehome: true) }
         try await device.send("press")
@@ -1189,6 +1190,7 @@ import Foundation
                 do {
                     try await device.send("stroke " + deltas.map { "\($0.0) \($0.1)" }.joined(separator: " "))
                     (pos, strokeCommand, stroked) = (to, true, true)
+                    strokedLine = true
                     moves += 1
                 } catch let e as DeviceError where e.message.contains("unknown command") {
                     strokeCommand = false
@@ -1226,8 +1228,11 @@ import Foundation
             unitsSinceDrawHome += Int(len + travel)
         } else if hold || quick, let p = pos, Self.swipeHops(from: start, to: points[points.count - 1]) {
             // D108: the pointer rests where the swipe ended: the next tap or swipe may go straight from there.
-            let end = points[points.count - 1]
-            lastClick = LastClick(x: Double(end.x), y: Double(end.y), ux: p.0, uy: p.1, link: device.links,
+            // D167: a held stroke rests short of its end (restsAt): the next hop goes from there.
+            let end = strokedLine && hold ? Self.restsAt(from: start, to: points[points.count - 1]) : points[points.count - 1]
+            let q = strokedLine && hold ? (dx(Double(end.x)), dy(Double(end.y))) : p
+            pos = q
+            lastClick = LastClick(x: Double(end.x), y: Double(end.y), ux: q.0, uy: q.1, link: device.links,
                                   time: Date().timeIntervalSince1970, swiped: true)
         } else {
             pos = nil
@@ -1255,6 +1260,19 @@ import Foundation
     }
 
     static let swipeStrokeStep = 200  // the board paces each segment itself; a stroke takes at most 40
+
+    /// D167, x4 over the cloud 11-19 (148): four swipes up Taobao's results from (0.04, 0.80), each hopping straight
+    /// from the last one's end (D108), and the fourth opened the app switcher: the pointer had sunk to the home bar.
+    /// 147's x4 (小红书), 148's h2 (Weather) and s sets did the same. Measured over 145-148's logs (328 swipes, then the
+    /// next tap's hop and where the pointer was seen): a held stroke moves the pointer about 10 % short of its length
+    /// (a hop about 4 %), so each swipe up and hop back down left it ~6 % of the swipe lower. A held stroke now rests
+    /// where it really ends, and a swipe low on the screen, where a small miss is the home bar, hops at most twice
+    /// before it starts from the corner again.
+    static let strokeShortfall = 0.1
+    static func restsAt(from a: CGPoint, to b: CGPoint) -> CGPoint {
+        CGPoint(x: a.x + (b.x - a.x) * (1 - strokeShortfall), y: a.y + (b.y - a.y) * (1 - strokeShortfall))
+    }
+    static func swipeHopLimit(startY: Double) -> Int { startY > 0.78 ? 2 : nearbyHops }
 
     /// D110: a straight line from one point to another as a stroke's moves, each at most `step` units on either axis.
     static func strokeDeltas(from a: (Int, Int), to b: (Int, Int), step: Int) -> [(Int, Int)] {

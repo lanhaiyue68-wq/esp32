@@ -1724,6 +1724,17 @@ import XCTest
         XCTAssertFalse(AgentLoop.turnsSideways(after: [left(false)], thought: "", 0.04, 0.8, 0.04, 0.4), "up a list")
         XCTAssertFalse(AgentLoop.turnsSideways(after: [], thought: "", 0.85, 0.43, 0.35, 0.43), "the first one is walked")
     }
+
+    /// D167, x4 on 148: a held swipe rests short of its end, and one low on the screen hops at most twice in a row.
+    func testAHeldSwipeRestsShortOfItsEnd() {
+        let rest = Pointer.restsAt(from: CGPoint(x: 0.04, y: 0.8), to: CGPoint(x: 0.04, y: 0.4))
+        XCTAssertEqual(Double(rest.y), 0.44, accuracy: 0.001)
+        XCTAssertEqual(Double(rest.x), 0.04, accuracy: 0.001)
+        let down = Pointer.restsAt(from: CGPoint(x: 0.5, y: 0.3), to: CGPoint(x: 0.5, y: 0.7))
+        XCTAssertEqual(Double(down.y), 0.66, accuracy: 0.001)
+        XCTAssertEqual(Pointer.swipeHopLimit(startY: 0.8), 2)
+        XCTAssertEqual(Pointer.swipeHopLimit(startY: 0.5), Pointer.nearbyHops)
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
