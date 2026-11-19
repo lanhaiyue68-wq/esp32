@@ -120,14 +120,33 @@ enum Actions {
 
     static func parseActions(_ text: String) throws -> [JObject] {
         // Some models join THINK and DO on one line (log24). Accept only that explicit labelled form.
-        let normalized = joinedAnswers(text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
-                                                                 with: "$1\n$2", options: .regularExpression))
+        let normalized = firstCopy(joinedAnswers(text.replacingOccurrences(of: #"(?m)^(\s*THINK\s*[:：][^\n]*?[。.!?])\s*(DO\s*[:：])"#,
+                                                                           with: "$1\n$2", options: .regularExpression)))
         let thought = firstGroup(#"^\s*THINK\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
         let zh = firstGroup(#"^\s*ZH\s*[:：]\s*(.*?)\s*$"#, in: normalized, multiline: true)
         var acts = try allGroups(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: normalized).flatMap(splitNote).map(parseCommand).prefix(6).map { $0 }
         guard !acts.isEmpty else { throw ParseError(message: "no DO line in reply: \(text.prefix(200))") }
         acts[0] = JObject([("thought", .str(thought ?? "")), ("thought_zh", .str(zh ?? ""))]).merging(acts[0])
         return acts
+    }
+
+    /// D179, x1 over the cloud 11-19 (148): a reply came back twice over ("THINK: 页面显示加购成功，接下来打开购物车… DO: tap
+    /// 842 89THINK: 页面显示加购成功… DO: tap 842 89"); both taps went, and the answer later read the thought twice as "第二次
+    /// 加购成功提示，最终数量未能确认". A reply whose first thought comes again is taken up to there: the rest is a copy.
+    static func firstCopy(_ text: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"THINK\s*[:：]\s*"#) else { return text }
+        let ns = text as NSString
+        let found = re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard found.count >= 2 else { return text }
+        let start = found[0].range.location + found[0].range.length
+        let end = ns.range(of: "\n", options: [], range: NSRange(location: start, length: ns.length - start)).location
+        let first = ns.substring(with: NSRange(location: start, length: (end == NSNotFound ? ns.length : end) - start))
+            .trimmingCharacters(in: .whitespaces)
+        guard first.count >= 6 else { return text }
+        for m in found.dropFirst() where ns.substring(from: m.range.location + m.range.length).hasPrefix(first) {
+            return ns.substring(to: m.range.location)
+        }
+        return text
     }
 
     /// Split an optional EN: / ZH: plan reply; a plain reply is used for both.

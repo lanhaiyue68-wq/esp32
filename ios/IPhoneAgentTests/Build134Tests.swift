@@ -1795,6 +1795,17 @@ import XCTest
         XCTAssertNil(AgentLoop.saidBeforeUnshown("第17项：电量100%，起送价未显示。", steps: [tap, swipe]), "the number is in the note")
         XCTAssertNil(AgentLoop.saidBeforeUnshown(note, steps: [swipe, tap]), "another page since")
     }
+
+    /// D179, x1 on 148: a reply that came back twice over is done once.
+    func testAReplyCopiedTwiceIsDoneOnce() throws {
+        let twice = "THINK: 页面显示加购成功，接下来打开购物车核对数量。   \nDO: tap 842 89THINK: 页面显示加购成功，接下来打开购物车核对数量。 \nDO: tap 842 89"
+        let acts = try Actions.parseActions(twice)
+        XCTAssertEqual(acts.count, 1)
+        XCTAssertEqual(acts[0]["x"]?.int, 842)
+        XCTAssertEqual(try Actions.parseActions("THINK: 先点搜索框再输入。\nDO: tap 300 90\nDO: type 抽纸").count, 2)
+        XCTAssertEqual(try Actions.parseActions("THINK: 先点加号。\nDO: tap 900 700\nTHINK: 再点一次加号。\nDO: tap 900 700").count, 2,
+                       "another thought is not a copy")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).
