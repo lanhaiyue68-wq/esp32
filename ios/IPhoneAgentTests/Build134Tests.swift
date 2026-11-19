@@ -1707,6 +1707,19 @@ import XCTest
         XCTAssertFalse(AgentLoop.searchBarUp([[piece("测试群(4)", 0.42, 0.09)]]), "a chat")
         XCTAssertFalse(AgentLoop.searchBarUp([[piece("取消", 0.86, 0.6)]]), "a sheet lower down")
     }
+
+    /// D165, s7 on 148: a picture swiped sideways that did not turn is swiped again with a quick stroke.
+    func testASidewaysSwipeThatDidNotTurnIsAFlickNext() {
+        let left = { (changed: Bool) -> JObject in
+            ["action": .str("swipe"), "x1": .int(800), "y1": .int(450), "x2": .int(250), "y2": .int(450), "changed": .bool(changed)]
+        }
+        XCTAssertTrue(AgentLoop.turnsSideways(after: [left(false)], thought: "", 0.85, 0.43, 0.35, 0.43))
+        XCTAssertFalse(AgentLoop.turnsSideways(after: [left(true)], thought: "", 0.85, 0.43, 0.35, 0.43), "it turned")
+        XCTAssertTrue(AgentLoop.turnsSideways(after: [left(true)], thought: "上次横向滑动未翻页，改在图片中部向左滑动", 0.85, 0.43, 0.35, 0.43))
+        XCTAssertFalse(AgentLoop.turnsSideways(after: [left(false)], thought: "", 0.2, 0.43, 0.8, 0.43), "the other way")
+        XCTAssertFalse(AgentLoop.turnsSideways(after: [left(false)], thought: "", 0.04, 0.8, 0.04, 0.4), "up a list")
+        XCTAssertFalse(AgentLoop.turnsSideways(after: [], thought: "", 0.85, 0.43, 0.35, 0.43), "the first one is walked")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

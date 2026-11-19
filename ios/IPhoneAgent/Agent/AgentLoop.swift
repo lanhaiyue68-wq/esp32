@@ -2421,6 +2421,21 @@ extension Pointer: Gestures {}
     /// D121b, 144: on this phone (zh-TW) Calendar is 行事曆, and its months still turned with four slow strokes.
     static let flickApps = ["抖音", "抖音极速版", "快手", "快手极速版", "tiktok", "日历", "calendar", "行事历", "行事曆"]
 
+    /// D165, s7 over the cloud 11-19 (148): a 小红书 note's pictures never turned: five sideways swipes, each walked slowly
+    /// and held (D109), and each snapped back; the steps were then taken from an older note. A sideways swipe after one
+    /// the same way that changed nothing (or that the model says did not turn) is one quick stroke, as a finger turns a
+    /// picture, a banner or a page. Coordinates 0-1.
+    static func turnsSideways(after steps: [JObject], thought: String, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Bool {
+        guard abs(x2 - x1) >= 0.25, abs(y2 - y1) <= 0.15,
+              let last = steps.last(where: { !["stale plan", "note", "refused"].contains($0["action"]?.str ?? "") }),
+              last["action"]?.str == "swipe", let a1 = last["x1"]?.double, let a2 = last["x2"]?.double,
+              let b1 = last["y1"]?.double, let b2 = last["y2"]?.double,
+              abs(a2 - a1) >= 250, abs(b2 - b1) <= 150, (a2 - a1) * (x2 - x1) > 0 else { return false }
+        let said = AppNames.hans(thought).lowercased().range(of: #"(未|没|没有|还没)(翻页|翻过去|切换|滑过去|翻到)|did(n't| not) (turn|page|flip|move|change)"#,
+                                                                options: .regularExpression) != nil
+        return last["changed"] == .bool(false) || said
+    }
+
     static func flicks(app: String?, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Bool {
         guard let app else { return false }
         let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
@@ -6054,7 +6069,8 @@ extension Pointer: Gestures {}
         case "swipe":
             // D109: up or down a feed of one video a screen (抖音, 快手): one quick stroke, as a finger does.
             if let pointer = phone as? Pointer,
-               Self.flicks(app: Self.appInFront(steps, startedIn: startApp), p("x1"), p("y1"), p("x2"), p("y2")) {
+               Self.flicks(app: Self.appInFront(steps, startedIn: startApp), p("x1"), p("y1"), p("x2"), p("y2"))
+                || Self.turnsSideways(after: steps, thought: a["thought"]?.str ?? "", p("x1"), p("y1"), p("x2"), p("y2")) {
                 try await pointer.flick(p("x1"), p("y1"), p("x2"), p("y2"))
             } else {
                 try await phone.swipe(p("x1"), p("y1"), p("x2"), p("y2"), hold: true)
