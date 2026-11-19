@@ -1784,6 +1784,17 @@ import XCTest
         let mid: JObject = ["action": .str("swipe"), "x1": .int(500), "y1": .int(850), "x2": .int(500), "y2": .int(350)]
         XCTAssertEqual(AgentLoop.safeSwipe(mid, after: [unmoved])["y1"]?.int, 850, "above the home bar it is the model's own")
     }
+
+    /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    func testANoteSayingNotShownGetsBackWhatWasSaid() {
+        let tap: JObject = ["action": .str("tap"), "thought": .str("点电池")]
+        let swipe: JObject = ["action": .str("swipe"), "thought": .str("电池页面已显示电量100%已充满，低耗电模式开关被遮挡，我向上滑动查看。")]
+        let note = "第17项：低耗电模式为关闭状态；电池百分比开关已打开但当前页面未显示具体电量数值。"
+        XCTAssertEqual(AgentLoop.saidBeforeUnshown(note, steps: [tap, swipe])?.count, 1)
+        XCTAssertNil(AgentLoop.saidBeforeUnshown("第17项：电量100%，低耗电模式关闭。", steps: [tap, swipe]), "it says it is shown")
+        XCTAssertNil(AgentLoop.saidBeforeUnshown("第17项：电量100%，起送价未显示。", steps: [tap, swipe]), "the number is in the note")
+        XCTAssertNil(AgentLoop.saidBeforeUnshown(note, steps: [swipe, tap]), "another page since")
+    }
 }
 
 /// A model whose account is overdue: every call answers HTTP 403 AccountOverdueError (D47).

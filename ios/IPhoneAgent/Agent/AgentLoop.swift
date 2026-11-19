@@ -1950,6 +1950,44 @@ extension Pointer: Gestures {}
             + "it is cut there too, note it again as it is and it is kept."
     }
 
+    /// D177, x4 over the cloud 11-19 (148), item 17: on 电池 the model said "电池页面已显示电量100%已充满" and swiped up to
+    /// 低耗电模式; its note then said "当前页面未显示具体电量数值", and the owner got 未完成 for a level it had read. A note
+    /// saying a thing is not shown, right after the swipes on this page said a number the note lacks, is refused once
+    /// with those words quoted.
+    private var unshownRefused: Set<Int> = []
+    private func unshownNoteMissing(_ text: String) -> String? {
+        guard let said = Self.saidBeforeUnshown(text, steps: steps) else { return nil }
+        let n = Self.noteItems(text).min() ?? 0
+        guard !unshownRefused.contains(n) else { return nil }
+        unshownRefused.insert(n)
+        return "Refused: this note says a thing is not shown, but on this page you said: " + said.map { "“\($0)”" }.joined(separator: " ")
+            + " If a number there is the value the note says is not shown, note it as you saw it (your thoughts are not kept). "
+            + "If it was something else, note it again as it is and it is kept."
+    }
+
+    static func saidBeforeUnshown(_ note: String, steps: [JObject]) -> [String]? {
+        let pattern = #"未显示|没有显示|没显示|不显示|看不到|未看到|没看到|未能读取|无法读取|not (?:visible|shown)"#
+        guard AppNames.hans(note).range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
+        var said: [String] = []
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "swipe" || a == "hold" {
+                if let t = s["thought"]?.str, !t.isEmpty { said.insert(String(t.prefix(160)), at: 0) }
+            } else if ["stale plan", "refused"].contains(a) {
+                continue
+            } else { break }
+            if said.count >= 3 { break }
+        }
+        let value = #"\d+(?:\.\d+)?\s*(?:%|％|元|°|度|万|件|人|个|GB|小时|分钟)"#
+        let numbers = { (t: String) -> [String] in
+            guard let re = try? NSRegularExpression(pattern: value) else { return [] }
+            return re.matches(in: t, range: NSRange(t.startIndex..., in: t)).compactMap { Range($0.range, in: t).map { String(t[$0]) } }
+        }
+        let had = Set(numbers(note).map { $0.filter { !$0.isWhitespace } })
+        let fresh = said.filter { t in numbers(t).contains { !had.contains($0.filter { !$0.isWhitespace }) } }
+        return fresh.isEmpty ? nil : fresh
+    }
+
     static func holdsCutText(_ text: String) -> Bool {
         AppNames.hans(text).range(of: #"被截断|显示不全|[\p{Han}A-Za-z0-9](?:\.\.\.|…)"#, options: .regularExpression) != nil
     }
@@ -3369,6 +3407,11 @@ extension Pointer: Gestures {}
                 if !notes.contains(text), let why = cutNoteMissing(said) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(why)])
                     DebugLog.write("note: refused once; it holds text cut short on the screen")
+                    continue
+                }
+                if !notes.contains(text), let why = unshownNoteMissing(said) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(why)])
+                    DebugLog.write("note: refused once; it says not shown what was said just before")
                     continue
                 }
                 if !notes.contains(text), let why = bracketNoteMissing(said) {
