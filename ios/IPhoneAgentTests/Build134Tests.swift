@@ -1331,6 +1331,7 @@ import XCTest
         XCTAssertTrue(CloudBridge.ownerMayRead("第1项：抖音第一个视频讲解“Why do you care so much?”"))
         XCTAssertTrue(CloudBridge.ownerMayRead("世界时钟仅显示北京一个城市"))
         XCTAssertTrue(CloudBridge.ownerMayRead("App Store 中 WeChat 的评分为4.8"))
+        XCTAssertTrue(CloudBridge.ownerMayRead("AAPL 355.63"), "D168b: a short value is no sentence")
     }
 
     /// D171, h07 on 148: a secure connection cut by a network drop is waited for, as a lost connection is.

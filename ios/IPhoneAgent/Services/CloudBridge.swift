@@ -350,13 +350,19 @@ import Foundation
     /// D168, y1 on 148: two parts' "done" came back in the model's English ("The world clock shows only Beijing, so part
     /// 2 is done; I open 淘宝 for the flask product details.") and went to the owner as found. A note or "done" that
     /// is mostly English words and names no item (第N项) is the model talking to itself; one naming an item may hold an
-    /// English title and stays.
+    /// English title and stays. D168b, 149's CI: "AAPL 355.63" (a stock read off the screen) was dropped as talk; a
+    /// sentence is four English words or more, so a short value with a name in Latin letters stays.
     nonisolated static func ownerMayRead(_ note: String) -> Bool {
         let mark = "（滚动页面时看到，原话）："  // AgentLoop.seenWhileScrollingMark
         guard let r = note.range(of: mark) else {
             return note.range(of: #"第\s*\d+\s*项"#, options: .regularExpression) != nil || mostlyChinese(note[...])
+                || englishWords(note[...]) < 4
         }
         return mostlyChinese(note[r.upperBound...])
+    }
+
+    nonisolated static func englishWords(_ text: Substring) -> Int {
+        text.split(whereSeparator: { !($0.isASCII && $0.isLetter) }).count
     }
 
     nonisolated static func mostlyChinese(_ text: Substring) -> Bool {
