@@ -875,7 +875,10 @@ extension Pointer: Gestures {}
         // D128, q134h on 144 (h22): a run that began inside Safari said only "address bar" and "Baidu"; "never went into
         // safari" made it search all over again, 12 steps.
         ("提醒事项", ["reminders"]), ("高德", ["amap", "gaode"]),
-        ("safari", ["浏览器", "address bar", "url bar", "地址栏", "网址列"]),
+        // D182, q134h again on 148 (h22): a remembered way opened Safari from the Dock, an icon with no label to go with
+        // the step, and the thoughts spoke of "the Baidu results page" and "the weather.com.cn page": "never went into
+        // safari" twice, a fresh Safari, 741 s for a right answer. A web page spoken of is the browser.
+        ("safari", ["浏览器", "address bar", "url bar", "地址栏", "网址列", "百度", "baidu", "网页", "web page", "webpage"]),
     ]
 
     /// 123 over the cloud 11-12: a goal of nine parts in seven apps followed a remembered way, did only the weather, and

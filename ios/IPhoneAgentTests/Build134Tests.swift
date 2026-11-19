@@ -1786,6 +1786,15 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D182, h22 on 148: Safari opened by a remembered way from the Dock, the thoughts about the Baidu page, was visited.
+    func testABrowserPageSpokenOfIsSafariVisited() {
+        let goal = "用 Safari 打开 www.baidu.com 搜“深圳天气”，第一条结果的标题是什么？不要登录"
+        let route: JObject = ["action": .str("tap"), "source": .str("route"), "x": .num(390), "y": .num(935)]
+        let swipe: JObject = ["action": .str("swipe"), "thought": .str("The Baidu results page is already open with 深圳天气 searched.")]
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: [route, swipe]), [])
+        XCTAssertEqual(AgentLoop.unvisitedApps(task: goal, steps: [route]), ["safari"])
+    }
+
     /// D181, x2 and n16 on 148: the model saying the phone is on the Home Screen or the lock screen has left the app.
     func testAThoughtSayingTheAppWasLeftIsBelieved() {
         XCTAssertTrue(AgentLoop.saysAppLeft("上次滑动回到了主屏幕；我重新打开行事历查看2027年1月。"))
