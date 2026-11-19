@@ -693,7 +693,7 @@ import XCTest
         XCTAssertTrue(AgentLoop.appRuleLines("日曆", rules: rules).contains("scroll up and down"))
         XCTAssertFalse(AgentLoop.appRuleLines("日曆", rules: rules).contains("WeChat"))
         XCTAssertEqual(AgentLoop.appRuleLines("小红书", rules: rules), "")
-        XCTAssertTrue(AgentLoop.appRuleLines("行事曆").contains("sideways"), "the real rules name 日历")
+        XCTAssertTrue(AgentLoop.appRuleLines("行事曆").contains("year view"), "the real rules name 日历")  // D159: by the year view
     }
 
     /// D65, y3 on 137 (item 20): what the done check found wrong stays in the notes for the answer written at the end.
