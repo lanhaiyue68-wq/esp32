@@ -1310,6 +1310,24 @@ import XCTest
         XCTAssertTrue(CloudBridge.outcome(of: steps).answer.contains("已查到：第1项：草莓酱爱咖啡版，点赞792；第6项：免拼购买价39.9元"))
     }
 
+    /// D160, y1–y3 on 147: the model's English words while scrolling are not the owner's answer; a note a later one
+    /// repeats from its start is sent once.
+    func testTheOwnerGetsNoEnglishWordsSaidWhileScrolling() {
+        let mark = AgentLoop.seenWhileScrollingMark
+        let steps: [JObject] = [
+            ["action": .str("note"), "text": .str("第6项：评价数69,498条，免拼购买价¥29.9")],
+            ["action": .str("note"), "text": .str("第6项" + mark + "I'm on the Pinduoduo product page. The补贴价 ¥29.9 is visible."),
+             "by": .str("run")],
+            ["action": .str("note"), "text": .str("第6项：评价数69,498条，免拼购买价¥29.9；单独购买价未显示")],
+            ["action": .str("note"), "text": .str(mark + "页面显示机型名称 iPhone 13 mini"), "by": .str("run")],
+        ]
+        XCTAssertEqual(CloudBridge.foundNotes(steps), ["第6项：评价数69,498条，免拼购买价¥29.9；单独购买价未显示",
+                                                       mark + "页面显示机型名称 iPhone 13 mini"])
+        let line = AgentLoop.seenWhileScrollingNote([["action": .str("swipe"),
+                                                      "thought": .str("I'm on the weather city list. I need to scroll down.")]], part: nil)
+        XCTAssertEqual(line.map(CloudBridge.ownerMayRead), false)
+    }
+
     /// D71, y6 on 137: a feed that keeps playing does not stop the swipe to the next video, nor opening an app.
     func testAPlayingFeedDoesNotStopTheSwipeToTheNextVideo() {
         XCTAssertTrue(AgentLoop.staleProof(["action": .str("swipe"), "x1": .int(500), "y1": .int(800), "x2": .int(500), "y2": .int(300)]))

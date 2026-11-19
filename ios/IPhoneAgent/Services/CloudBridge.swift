@@ -338,9 +338,22 @@ import Foundation
         // held only the separate notes: 12 of 26 items. A part's "done" carries what it found too.
         for s in steps where ["note", "part done"].contains(s["action"]?.str ?? "") {
             let text = ((s["action"]?.str == "note" ? s["text"] : s["found"])?.str ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty, !found.contains(text) { found.append(text) }
+            if !text.isEmpty, !found.contains(text), ownerMayRead(text) { found.append(text) }
         }
-        return found
+        // D160: a note that a later one repeats from its start adds nothing ("第6项：…¥29.9" then "第6项：…¥29.9；单独购买价…").
+        return found.filter { t in !found.contains { $0 != t && $0.hasPrefix(t) } }
+    }
+
+    /// D160, y1, y2 and y3 on 147 over the cloud 11-19: the run's note of what was said while scrolling (D83) is the
+    /// model's own words, mostly English ("I'm on the weather city list. I need to scroll down to find Beijing…"), and
+    /// all three answers sent them to the owner. Those words stay with the model; the owner gets them only in Chinese.
+    nonisolated static func ownerMayRead(_ note: String) -> Bool {
+        let mark = "（滚动页面时看到，原话）："  // AgentLoop.seenWhileScrollingMark
+        guard let r = note.range(of: mark) else { return true }
+        let said = note[r.upperBound...]
+        let han = said.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
+        let words = said.split(whereSeparator: { !($0.isASCII && $0.isLetter) }).count
+        return han >= words
     }
 
     /// Why a run stopped, in words for the user: the loop's own reasons in Chinese, a model's Chinese reason as it is.
