@@ -1392,9 +1392,12 @@ import XCTest
     /// D60, y1 on 137 (item 10): back, the back arrow and back again that all left 测试群 where it was are no back-and-forth.
     func testMovesThatChangedNothingAreNoBackAndForth() {
         let back: JObject = ["action": .str("back")], arrow: JObject = ["action": .str("tap"), "x": .int(55), "y": .int(88)]
+        let open: JObject = ["action": .str("tap"), "x": .int(500), "y": .int(400)]
         func dead(_ s: JObject) -> JObject { var d = s; d["changed"] = .bool(false); return d }
-        XCTAssertNotNil(AgentLoop.bounce(arrow, after: [back, arrow, back]), "moves that changed the screen")
+        XCTAssertNotNil(AgentLoop.bounce(back, after: [open, back, open]), "in and out again, moves that changed the screen")
+        XCTAssertNil(AgentLoop.bounce(back, after: [dead(open), dead(back), dead(open)]))
         XCTAssertNil(AgentLoop.bounce(arrow, after: [dead(back), dead(arrow), dead(back)]))
+        XCTAssertNil(AgentLoop.bounce(arrow, after: [back, arrow, back]), "D214: going back three times is no back-and-forth")
     }
 
     /// D122, q143n on 144 (n08): an app opened by a remembered tap on its icon was visited.
