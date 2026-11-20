@@ -1834,6 +1834,9 @@ import XCTest
         XCTAssertNil(AgentLoop.publicTap(tap("人物搜索结果显示匹配的 @hanakoxbt，点击其姓名打开主页，不碰关注按钮。")))
         XCTAssertNil(AgentLoop.publicTap(tap("搜索结果中第一项的账号为 @hanakoxbt，我点击其名称打开主页，避开关注按钮。")))
         XCTAssertEqual(AgentLoop.publicTap(tap("按钮显示“关注”，点一次关注。")), "关注")
+        // D217, xr15 on 154: a follow button said to be absent is no follow tap; "还没有关注，点关注" still is.
+        XCTAssertNil(AgentLoop.publicTap(tap("I'm on delost's profile, already following (no follow button visible). This is post #2, 23 hours ago.")))
+        XCTAssertEqual(AgentLoop.publicTap(tap("还没有关注他，点关注。")), "关注")
     }
 
     /// D212, y20 on 152: Grok is X's own page: "Grok 页面，不是 X 应用" does not open X again.

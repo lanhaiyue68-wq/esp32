@@ -5086,7 +5086,9 @@ extension Pointer: Gestures {}
         var t = AppNames.hans(((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased())
         // D211, Hanako on 152 (q152y y20): "点击其姓名打开主页，不碰关注按钮" / "避开关注按钮" were refused as follows ten
         // times and the run ran out. Keeping off a button is no tap on it.
-        t = t.replacingOccurrences(of: #"(不要|不用|避免|避开|绕开|绕过|不碰|别碰|不点|不按|不去|不会|别|勿|以免|而不是|don't|do not|avoid|not |without|instead of)[^，,。.；;]*"#,
+        // D217, delost on 154 (xr15): "already following (no follow button visible). This is post #2…" asked the owner
+        // about a follow; the tap opened the post. A follow button said to be absent (no …, 没有…) is no tap on it.
+        t = t.replacingOccurrences(of: #"(不要|不用|避免|避开|绕开|绕过|不碰|别碰|不点|不按|不去|不会|没有|沒有|别|勿|以免|而不是|don't|do not|avoid|not |\bno |without|instead of)[^，,。.；;]*"#,
                                    with: " ", options: .regularExpression)
         let like = #"点赞按钮|点个赞|给[^，,。]{0,8}点赞|点赞(这|该|视频|笔记|一下)|点击点赞|tap (the )?(heart|like)\b|like button|\blike (it|this|the video|the post|the note)"#
         // D196, the X bloggers on 151: 18 follows went through and the owner was asked about none of them: the words
