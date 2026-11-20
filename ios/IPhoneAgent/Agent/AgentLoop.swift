@@ -141,6 +141,8 @@ extension Pointer: Gestures {}
     private var cutRefused: Set<Int> = []
     /// D174: each refused cut note's text, and how many notes there were then (kept once the run goes round instead).
     private var cutPending: [Int: (text: String, at: Int)] = [:]
+    /// D213: scrolls refused because the thought said things were noted when nothing was (twice at most per run).
+    private var claimRefused = 0
     /// D114: a short goal that reads one group was refused once for ending where that group's title is not shown.
     private var groupTitleRefused = false
     /// D134: a name or remark the goal sets was refused once for being typed again after it was saved.
@@ -651,6 +653,10 @@ extension Pointer: Gestures {}
         (cutRefused, bracketRefused, calcNoteRefused, groupTitleRefused, lastGroupTitle) = ([], [], nil, false, nil)
         (setAgainRefused, aheadRefusals, offPatternRefusals, secondNoteRefused) = (false, 0, 0, false)
         (olderSwipeRefused, bottomRefused) = (0, false)
+        // D207, the X reading run on 152 (q152y y03, y19): D174's cut notes waiting to be kept were never emptied either;
+        // the last task's answer lines went into the next task's notes as "kept as first read", and y03 took the 5
+        // search results of y02 for the replies it had to read. Nothing of an earlier task waits for this one.
+        (cutPending, claimRefused) = ([:], 0)
         if !traceStarted { trace?.start(task: task) }
         running = true
         job = Task { [weak self] in
@@ -1926,11 +1932,25 @@ extension Pointer: Gestures {}
     /// still in X, twice. A thought that says the screen is not that app is taken at its word.
     static func saysNotIn(_ thought: String, _ app: String) -> Bool {
         let t = AppNames.hans(thought).lowercased()
+        if inAppPage(t, app) != nil { return false }  // D212
         return AppNames.variants(app).map { AppNames.hans($0).lowercased() }.contains { name in
             guard !name.isEmpty else { return false }
             let n = NSRegularExpression.escapedPattern(for: name)
             return t.range(of: #"(不是|不在|并非|而非|\bnot (in |on |the )?)\s*"# + n + #"(?![a-z0-9])"#, options: .regularExpression) != nil
         }
+    }
+
+    /// D212, Hanako on 152 (q152y y20): X opened on Grok (left there by the Grok task), and "当前屏幕是 Grok 页面，不是 X
+    /// 应用" was taken at its word (D199): home and open X again, three times, and the part stalled. Grok is a page of
+    /// X's own; a thought naming it is still in X.
+    static func inAppPage(_ thought: String, _ app: String) -> String? {
+        guard ["x", "twitter", "推特"].contains(AppNames.hans(app).lowercased()) else { return nil }
+        return thought.lowercased().contains("grok") ? "Grok" : nil
+    }
+
+    static func inAppPageReason(_ page: String, _ app: String) -> String {
+        "Refused: \(page) is a page inside \(app), not another app: opening \(app) again lands on it again. Leave it inside "
+            + "\(app): tap the back arrow at its top left, drag its panel down, or tap \(app)'s home tab (the house, bottom left)."
     }
 
     static func stillInAppReason(_ app: String) -> String {
@@ -2494,8 +2514,13 @@ extension Pointer: Gestures {}
     /// The goal posts something others see (a message, a reply, a comment, a post). What it says not to do is not counted:
     /// "不要留言" asks for no comment.
     static func publishes(_ task: String) -> Bool {
-        let t = task.lowercased().replacingOccurrences(
+        var t = task.lowercased().replacingOccurrences(
             of: #"(不要|不用|不必|別|别|勿|禁止|don't|do not|never)[^，,。.；;！!？?\n]*"#, with: " ", options: .regularExpression)
+        // D208b, the X reading run on 152: "看这条帖子下面的前5条回复", "切到“回复”标签", "记下回复数", "作者自己接着回复的连续帖"
+        // read replies and post nothing, but each made the goal one that posts: any search typed outside its words
+        // would have waited for approval. Replies counted, listed or read are not a reply to send.
+        t = t.replacingOccurrences(of: #"(?<=[条條的看读讀查着著])回[复覆]|回[复覆](?=[数數”"」]|标签|標籤|列表|区|區|给谁|給誰)"#,
+                                   with: " ", options: .regularExpression)
         // Build 120 on the phone, 11-11: "影片是誰發的", "評論、收藏、轉發各是多少" were read as sending, and a news
         // site typed in Safari and a search on 小紅書 were held for approval (one task cancelled). But "在测试群发你好"
         // sends: a 发 still counts, except inside words that only read or name something.
@@ -2641,13 +2666,22 @@ extension Pointer: Gestures {}
         return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
     }
 
+    /// D208, the X reading run on 152 (q152y y08, y12): X was in front from the last task, so the run had no open step,
+    /// and a goal naming no app on namedApps was taken to be in a chat app: "from:yyyole 苹果" typed in X's search
+    /// waited for approval as a message (the task was cancelled), and "thedelost" typed there again was refused six
+    /// times as sent already. A goal that opens X (Twitter) is in X, where this run reads and searches.
+    static func namesX(_ goal: String) -> Bool {
+        AppNames.hans(goal).lowercased().range(of: #"(打开|进入|进|在|用|去|回到|open|launch|in)\s*(x|twitter|推特)(?![a-z0-9_])|推特|twitter"#,
+                                                options: .regularExpression) != nil
+    }
+
     static func inChatApp(_ steps: [JObject], task: String = "") -> Bool {
         guard let app = steps.last(where: { $0["action"]?.str == "open" })?["app"]?.str else {
             let goal = AppNames.hans(task).lowercased()
             if ["微信", "wechat", "企业微信", "钉钉", "飞书", "短信", "imessage", "telegram", "whatsapp"].contains(where: { goal.contains($0) }) {
                 return true
             }
-            return !namedApps.contains { goal.contains($0) }
+            return !namedApps.contains { goal.contains($0) } && !namesX(goal)
         }
         let name = AppNames.hans(app).lowercased().filter { !$0.isWhitespace }
         return chatApps.contains { name == $0 || name.contains($0) && $0.count >= 2 }
@@ -3743,7 +3777,9 @@ extension Pointer: Gestures {}
                !Self.saysAppLeft(act["thought"]?.str ?? ""), !Self.saysNotIn(act["thought"]?.str ?? "", inApp) {
                 sameAppRefused += 1
                 pictureIn = inApp
-                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.stillInAppReason(inApp))])
+                let page = Self.inAppPage(act["thought"]?.str ?? "", inApp)
+                record(planned.shot, ["action": .str("refused"),
+                                      "reason": .str(page.map { Self.inAppPageReason($0, inApp) } ?? Self.stillInAppReason(inApp))])
                 return false
             }
             let ourKeyboard = ourKeyboardOnScreen?() == true
@@ -4303,6 +4339,12 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.saidRoundReason(steps))])
                     return false
                 }
+                if name == "swipe", notes.isEmpty, claimRefused < 2,
+                   Self.claimsNoted((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")) {  // D213
+                    claimRefused += 1
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.claimedNoteReason)])
+                    return false
+                }
                 if name == "swipe", Self.scrollsBackAgain(steps, next: act) {
                     // D19, 134 over the cloud 11-15 (y5): 设置 › 关于本机 scrolled down, up, down; the turn back up to 型号名称
                     // was then refused 20 times. Three refusals are a change of plan, as with a round of taps (D17).
@@ -4516,6 +4558,10 @@ extension Pointer: Gestures {}
                 // A button reading 取消关注 / 取消跟随 / Unfollow is refused unless the goal asks to unfollow.
                 if name == "tap", Self.unfollowLabel(Self.labelAt(tapAt, in: readRows)), !Self.unfollowAsked(task) {
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.unfollowReason)])
+                    return false
+                }
+                if name == "tap", Self.followStateTap(tapAt, in: readRows), !Self.unfollowAsked(task) {  // D210
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.followStateReason)])
                     return false
                 }
                 // #17 (122, 11-11): a like, a follow or a 收藏 shows to others like a message, and went unasked. A tap the
@@ -4993,11 +5039,26 @@ extension Pointer: Gestures {}
         }
     }
 
+    /// D209, the X reading run on 152 (q152y): an article read to its end (y11), a thread (y20), each picture of a post
+    /// (y17) and three profiles in turn (y12) had 40 steps, one thing's, and ran out. A goal that reads something
+    /// through counts as 4 things; one that visits several accounts (@a、@b、@c) as one thing each.
+    static func readThroughParts(_ goal: String) -> Int {
+        let g = AppNames.hans(goal).lowercased()
+        var n = 0
+        if let re = try? NSRegularExpression(pattern: #"@[a-z0-9_]{2,15}"#) {
+            let ns = g as NSString
+            let handles = Set(re.matches(in: g, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) })
+            if handles.count >= 2 { n = min(handles.count, 30) }
+        }
+        if g.range(of: #"读完|全文|整篇|整串|完整串|每一张|每张|逐张|看完整"#, options: .regularExpression) != nil { n = max(n, 4) }
+        return n
+    }
+
     /// Each part of a plan gets its own steps (specs/004 §2.1): the alarm + sun + group message task spent all 40 on
     /// the alarm (live test 11-08). 20 a part, never fewer than `base`, at most 240: 122 over the cloud 11-12, goals
     /// of 9 to 15 parts ran out at 100 (4 of 5 failures of the big ones), each part taking 10 to 15 steps.
     static func stepBudget(plan: String, base: Int, goal: String = "") -> Int {
-        let parts = max(Self.parts(of: plan).count, goalParts(goal), candidateCount(goal))
+        let parts = max(Self.parts(of: plan).count, goalParts(goal), candidateCount(goal), readThroughParts(goal))
         guard parts >= 2 else { return base }
         // 133 over the cloud 11-14 (y1–y6): goals of 50 things had 240 steps, under 5 a thing. Past 20 things each
         // gets 12 more (at most 600).
@@ -5018,7 +5079,9 @@ extension Pointer: Gestures {}
     static func publicTap(_ act: JObject) -> String? {
         guard act["action"]?.str == "tap" else { return nil }
         var t = AppNames.hans(((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased())
-        t = t.replacingOccurrences(of: #"(不要|不用|避免|别|勿|以免|而不是|don't|do not|avoid|not |without|instead of)[^，,。.；;]*"#,
+        // D211, Hanako on 152 (q152y y20): "点击其姓名打开主页，不碰关注按钮" / "避开关注按钮" were refused as follows ten
+        // times and the run ran out. Keeping off a button is no tap on it.
+        t = t.replacingOccurrences(of: #"(不要|不用|避免|避开|绕开|绕过|不碰|别碰|不点|不按|不去|不会|别|勿|以免|而不是|don't|do not|avoid|not |without|instead of)[^，,。.；;]*"#,
                                    with: " ", options: .regularExpression)
         let like = #"点赞按钮|点个赞|给[^，,。]{0,8}点赞|点赞(这|该|视频|笔记|一下)|点击点赞|tap (the )?(heart|like)\b|like button|\blike (it|this|the video|the post|the note)"#
         // D196, the X bloggers on 151: 18 follows went through and the owner was asked about none of them: the words
@@ -5032,6 +5095,18 @@ extension Pointer: Gestures {}
         where t.range(of: pattern, options: .regularExpression) != nil { return what }
         return nil
     }
+
+    /// D213, the X reading run on 152 (q152y y07, y01): "已记录前6个关注账号，继续向上滑动" with nothing noted; three swipes
+    /// went to the list's end, and its last four were noted as its first. "with posts 1 and 2 noted" had none either. A
+    /// scroll whose thought says things were noted, in a run that has noted nothing, is refused (twice at most).
+    static func claimsNoted(_ thought: String) -> Bool {
+        AppNames.hans(thought).lowercased().range(
+            of: #"已(经)?(记录|记下|记好|记完|记了)(了)?\s*(前|第)?\s*([0-9]+|[一二两三四五六七八九十]+)\s*(个|条|位|人|项|篇|张|则)?|\b(noted|recorded) (the )?(first|top) [0-9]+|\b(posts?|items?|replies|accounts?) [0-9]+( and [0-9]+| to [0-9]+)? (are |were )?(already )?(noted|recorded)|with (posts?|items?) [0-9]+( and [0-9]+)? noted"#,
+            options: .regularExpression) != nil
+    }
+
+    static let claimedNoteReason = "Refused: nothing is noted in this run yet: no note line went in. Before you scroll on, "
+        + "note what the screen shows now, in order from the top (note 1. … 2. …); then scroll on from the last one noted."
 
     /// D200: a move (tap, type, key, swipe, open…) comes before this place in the reply.
     static func movedBefore(_ k: Int, _ acts: [JObject]) -> Bool {
@@ -5066,6 +5141,21 @@ extension Pointer: Gestures {}
         guard t.range(of: #"(?<![不别勿])(取关|取消关注|取消跟随|unfollow)"#, options: .regularExpression) != nil else { return false }
         return !["取关", "取消关注", "取消跟随"].contains { forbids(task, $0) }
     }
+
+    /// D210, delost on 152 (q152y y22): "现在打开“正在跟隨”列表" tapped the profile's 正在跟隨 button, X's follow button
+    /// for an account followed: 取消跟隨 @thedelost came up, four times over (closed each time; still followed). That
+    /// button (正在关注, 正在跟随, 已关注, 互相关注, Following), on the right half, is refused unless the goal asks to
+    /// unfollow; the list of whom they follow is the number with those words under the bio, at the left.
+    static func followStateTap(_ p: CGPoint, in rows: [[CandidatePicker.Piece]]) -> Bool {
+        guard let piece = rows.joined().first(where: { $0.box.insetBy(dx: -0.012, dy: -0.012).contains(p) }),
+              piece.box.midX >= 0.5 else { return false }
+        let label = AppNames.hans(piece.text).lowercased().filter { !$0.isWhitespace }
+        return ["正在关注", "正在跟随", "已关注", "互相关注", "已互关", "following"].contains(label)
+    }
+
+    static let followStateReason = "Refused: this is the follow button of an account already followed (正在关注 / 正在跟随 / "
+        + "已关注 / Following): a tap on it unfollows (取消跟隨 comes up). Whom this account follows is the number with "
+        + "正在关注 / 跟隨中 under the bio, at the left: tap that number."
 
     static let unfollowReason = "Refused: this button unfollows the account, and the goal does not ask for that. Close this "
         + "menu (取消, or tap outside it) and go on: a ✓ person icon, 正在关注, 正在跟随 or 已关注 means it is followed already."

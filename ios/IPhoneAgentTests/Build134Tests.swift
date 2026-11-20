@@ -1786,7 +1786,69 @@ import XCTest
         XCTAssertEqual(AgentLoop.safeSwipe(mid, after: [unmoved])["y1"]?.int, 850, "above the home bar it is the model's own")
     }
 
-    /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D208, y08 and y12 on 152: a goal that opens X, with no open step, is not in a chat app; its search is no message.
+    func testAGoalInXIsNoChatApp() {
+        let goal = "打开X，搜索“AI 视频”，在“热门”标签看前5条帖子。只读不互动：不要点赞、回复、转发，不要发帖、私信；最后用简体中文按条整理告诉我"
+        XCTAssertFalse(AgentLoop.inChatApp([], task: goal))
+        XCTAssertFalse(AgentLoop.needsApproval("from:yyyole 苹果", task: goal, chatApp: AgentLoop.inChatApp([], task: goal)))
+        XCTAssertTrue(AgentLoop.inChatApp([], task: "在微信打开X的链接，把标题发到测试群"))
+        XCTAssertFalse(AgentLoop.namesX("北京明天最高X度（X换成你看到的数字），发到测试群"))
+        XCTAssertFalse(AgentLoop.namesX("在xbox商店看价格"))
+    }
+
+    /// D208b, y03, y10, y20 and y21 on 152: replies read (前5条回复, 回复数, “回复”标签) post nothing; a reply to send does.
+    func testRepliesReadAreNoPosting() {
+        XCTAssertFalse(AgentLoop.publishes("打开X，进入@karpathy的主页，打开他最新一条帖子，看这条帖子下面的前5条回复，记下每条回复的作者和内容大意"))
+        XCTAssertFalse(AgentLoop.publishes("切到“回复”标签，看他最近5条回复，每条记下回复给谁、他说了什么"))
+        XCTAssertFalse(AgentLoop.publishes("记下回复数、转帖数、喜欢数"))
+        XCTAssertFalse(AgentLoop.publishes("找一条串帖（作者自己接着回复的连续帖），打开读完整串"))
+        XCTAssertTrue(AgentLoop.publishes("在测试群回复他“收到”"))
+        XCTAssertTrue(AgentLoop.publishes("给这条帖子回复“谢谢”"))
+    }
+
+    /// D209, y11, y12, y17 and y20 on 152: reading something through, or several accounts in turn, gets more steps.
+    func testReadingThroughGetsMoreSteps() {
+        XCTAssertEqual(AgentLoop.readThroughParts("打开X，依次进入@karpathy、@thedelost、@flxrnc的主页，各看最新1条本人发的帖子"), 3)
+        XCTAssertEqual(AgentLoop.readThroughParts("找到他最新一篇X文章，打开读完全文，按小标题整理每部分要点"), 4)
+        XCTAssertEqual(AgentLoop.readThroughParts("进入@karpathy的主页，看他最近5条回复"), 0)
+        XCTAssertEqual(AgentLoop.stepBudget(plan: "1. a", base: 40, goal: "找到他最新一篇X文章，打开读完全文"), 80)
+    }
+
+    /// D210, y22 on 152: the follow button of an account followed (right half) is refused; the count at the left is not.
+    func testTheFollowedButtonIsNoWayToTheList() {
+        func row(_ t: String, _ x: Double, _ y: Double) -> [CandidatePicker.Piece] {
+            [CandidatePicker.Piece(text: t, box: CGRect(x: x - 0.06, y: y - 0.01, width: 0.12, height: 0.02))]
+        }
+        let rows = [row("正在跟隨", 0.8, 0.575), row("正在跟隨", 0.15, 0.46)]
+        XCTAssertTrue(AgentLoop.followStateTap(CGPoint(x: 0.745, y: 0.575), in: rows))
+        XCTAssertFalse(AgentLoop.followStateTap(CGPoint(x: 0.15, y: 0.46), in: rows), "the count's words at the left open the list")
+        XCTAssertFalse(AgentLoop.followStateTap(CGPoint(x: 0.8, y: 0.575), in: [row("跟隨", 0.8, 0.575)]), "a follow is D196's")
+    }
+
+    /// D211, y20 on 152: "点击其姓名打开主页，不碰关注按钮" / "避开关注按钮" is no follow tap.
+    func testATapThatKeepsOffTheFollowButtonIsNoFollow() {
+        func tap(_ t: String) -> JObject { ["action": .str("tap"), "x": .int(245), "y": .int(210), "thought": .str(t)] }
+        XCTAssertNil(AgentLoop.publicTap(tap("人物搜索结果显示匹配的 @hanakoxbt，点击其姓名打开主页，不碰关注按钮。")))
+        XCTAssertNil(AgentLoop.publicTap(tap("搜索结果中第一项的账号为 @hanakoxbt，我点击其名称打开主页，避开关注按钮。")))
+        XCTAssertEqual(AgentLoop.publicTap(tap("按钮显示“关注”，点一次关注。")), "关注")
+    }
+
+    /// D212, y20 on 152: Grok is X's own page: "Grok 页面，不是 X 应用" does not open X again.
+    func testGrokIsInsideX() {
+        XCTAssertFalse(AgentLoop.saysNotIn("当前屏幕是 Grok 页面，不是 X 应用。我需要打开 X 应用。", "X"))
+        XCTAssertEqual(AgentLoop.inAppPage("X opened on a Grok chat, not the X timeline.", "X"), "Grok")
+        XCTAssertNil(AgentLoop.inAppPage("当前屏幕是日历应用，不是X。", "X"))
+        XCTAssertTrue(AgentLoop.saysNotIn("当前屏幕是日历应用，不是X。我需要打开X应用来完成任务。", "X"))
+    }
+
+    /// D213, y07 and y01 on 152: a scroll after things "noted", with nothing noted, is refused.
+    func testAScrollAfterNotesNeverWrittenIsRefused() {
+        XCTAssertTrue(AgentLoop.claimsNoted("已记录前6个关注账号，继续向上滑动列表查看第7到第10个。"))
+        XCTAssertTrue(AgentLoop.claimsNoted("I'm on the Following feed with posts 1 and 2 noted. I'll scroll up."))
+        XCTAssertFalse(AgentLoop.claimsNoted("先记下这一屏的前4个账号，再向上滑动。"))
+        XCTAssertFalse(AgentLoop.claimsNoted("已打开关注列表，向上滑动查看更多。"))
+    }
+
     /// D202, xr15 on 152: a new note between the legs of a scroll is something found on the way; the count starts again.
     func testANewNoteStartsTheScrollCountAgain() {
         func swipe(_ y1: Int, _ y2: Int) -> JObject {
@@ -2012,6 +2074,7 @@ import XCTest
         XCTAssertFalse(AgentLoop.saysAppLeft("微信里打开了一张天气截图，我打开天气查看"))
     }
 
+    /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
     func testANoteSayingNotShownGetsBackWhatWasSaid() {
         let tap: JObject = ["action": .str("tap"), "thought": .str("点电池")]
         let swipe: JObject = ["action": .str("swipe"), "thought": .str("电池页面已显示电量100%已充满，低耗电模式开关被遮挡，我向上滑动查看。")]
