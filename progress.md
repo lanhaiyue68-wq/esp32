@@ -1,5 +1,15 @@
 # 当前进度
 
+## 2026-11-21 08:00（首爾）出 155、156：156＝Duet 品牌（Pilot 名稱、雙圓交疊圖示與動畫 logo、藍色主色、蘋果風按壓彈簧）；IPA 在桌面，未上機
+- 155（07:08）：154＋D217＋D60 測試更新；CI run 44826470437 全綠（956/0）；IPA E:/桌面/Lan-Agent-build155-unsigned.ipa（SHA256 31001c71…8759）。使用者沒裝（改要品牌版），chain155 在 07:45 截止，未跑。
+- 使用者：「換一下logo和名字，包括首頁的那個動畫logo，然後ui界面也調整成蘋果風，按著要有蘋果的動畫感」。名稱：系統 Duet、安卓 Echo（小藍）、蘋果 Pilot（大藍）；Logo B 雙圓交疊「两部手机，一个大脑」。
+- 156（d217bea，CI 分支 26f1fbc，lease main:9f677a4）：AppIcon／LaunchLogo／Branding 換成雙圓（scratchpad duet_icons.py 產生）；Shared/AgentFace 改畫雙圓並依心情動（呼吸漂移、白點眨眼、思考時小圓擺動、看向點擊處、成功跳、失敗搖，Reduce Motion 靜止）；AccentColor 改 Pilot 藍；BigButton 漸層＋陰影＋按下即縮、放開微彈（Apple：按下臨界阻尼、放開 0.6）；新 Pressable 給狀態膠囊與 ▶；首頁 logo 後加柔光；關於頁加「Duet · 两部手机，一个大脑」。鍵盤名稱與狀態列改 Pilot，CandidatePicker 以 ourKeyboardMarks／ourKeyboardNames 新舊名都認（地球鍵選單、狀態列）。
+- 工作區裡另有來源不明（非「發佈會 HTML 簡報」對話，可能是 Codex）的未提交改名 Lan Agent→Pilot（project.yml、Info.plist、InfoPlist／Localizable、Settings 從 Bundle 取名、PasteHop、Onboarding、Settings 頁），檢查一致後併入 156。開發板藍牙名「Lan Agent」、螢幕鏡像接收端名稱屬韌體，未改。
+- CI run 44831141605：編譯打包成功，測試 955/956：PhaseB 測試仍找「Lan Agent 輸入法」（提示已改 Pilot），本機 4e13200 已改，待下次 CI。IPA E:/桌面/Lan-Agent-build156-unsigned.ipa，3,222,640 bytes，SHA256 4fe77f7d3b55ca9916e89dcebe15f03e28a1fabefd098646ade447c308cef1df；三個 bundle 皆 156、名稱 Pilot。
+- 「發佈會 HTML 簡報」對話告知：07:20–07:35 它用 USB 測試通道截圖，誤點一次開了微信監看（使用者 07:30 手動停），一次對重播按了「让 AI 优化」（只預覽、未套用）。
+- 複查：chain156.sh 背景等手機回報 156（q156r：y02、y08、y16 會打字，測新名字的鍵盤；y07、y12）。結果 r156r/。
+- 下一步：使用者回來裝 156 → 看圖示／首頁動畫／按壓手感 → chain156 自動跑 → 分析。下次推送 lease main:26f1fbc。
+
 ## 2026-11-21 07:05（首爾）154 複查跑完（chain154，06:11–07:03，r154r/ ＋ r154r2/）：5 題成功 3、失敗 2；本機再修 D217，未推送
 - 使用者 8 點要帶手機給客戶看，07:03 全部結束，手機閒置。第一輪 y07 因螢幕共享沒開（screen_capture unavailable）排隊 17 分鐘被取消；同 id 補跑被 cloudq 當已完成跳過，改用 r154r2 重跑。
 - y07 自己的正在關注：成功（199 s），18 人，前 10 位與 01:25 的 z01 完全一致 → D214 生效（153 上是頭像點擊被誤擋）。
