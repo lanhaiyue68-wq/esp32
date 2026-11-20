@@ -15,7 +15,9 @@ struct AboutView: View {
                 VStack(spacing: Space.m) {
                     Image("LaunchLogo").resizable().scaledToFit().frame(width: 96, height: 96)
                         .accessibilityHidden(true)
-                    Text(verbatim: "Lan Agent").font(.title2.bold())
+                    Text(verbatim: Settings.defaultAgentName).font(.title2.bold())
+                    Text(verbatim: "Duet · 两部手机，一个大脑").font(.subheadline.weight(.medium))
+                        .foregroundStyle(AgentFace.pilotBlue)
                     Text("Version \(version)").font(.subheadline).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)

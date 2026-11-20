@@ -43,7 +43,9 @@ import UIKit
         }
     }
     static let agentNameKey = "agentName"
-    static var defaultAgentName: String { String(localized: "Lan Agent") }
+    static var defaultAgentName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Pilot"
+    }
     /// The name, for code without a Settings instance (Live Activity).
     static var storedAgentName: String { UserDefaults.standard.string(forKey: agentNameKey) ?? defaultAgentName }
     @Published var onboarded: Bool { didSet { defaults.set(onboarded, forKey: "onboarded") } }

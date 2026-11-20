@@ -51,9 +51,15 @@ enum CandidatePicker {
     static func ourKeyboardShown(rows: [[Piece]]) -> Bool {
         let low = rows.filter { ($0.map(\.box.minY).min() ?? 0) >= 0.55 }.map { bare($0.map(\.text).joined()).lowercased() }
         // Without Full Access it says so and never asks: not waited for.
-        return low.contains { $0.contains("lanagent") } && low.contains { $0.contains("空格") }
+        return low.contains { line in ourKeyboardMarks.contains { line.contains($0) } } && low.contains { $0.contains("空格") }
             && !low.contains { $0.contains("完整取用") }
     }
+
+    /// The keyboard's status line, bare and lowercased: its old name (Lan Agent), or Pilot's own words (156: the
+    /// keyboard is called Pilot now; a phone still on an older build shows the old line).
+    static let ourKeyboardMarks = ["lanagent", "pilot輸入法", "pilot输入法", "pilot已填入", "連不上pilot", "连不上pilot"]
+    /// The keyboard's name in the globe key's menu, bare and lowercased (Pilot from 156, Lan Agent before).
+    static let ourKeyboardNames: Set<String> = ["pilot", "lanagent"]
 
     static func keyboardMenuOpen(rows: [[Piece]]) -> Bool {
         rows.contains { row in keyboardMenuWords.contains { bare(row.map(\.text).joined()).lowercased().hasPrefix($0) } }
@@ -67,7 +73,7 @@ enum CandidatePicker {
         func left(_ row: [Piece]) -> Double { Double(row.map(\.box.minX).min() ?? 1) }
         let markers = rows.filter { row in keyboardMenuWords.contains { line(row).hasPrefix($0) } }.map(left)
         guard !markers.isEmpty else { return nil }
-        for row in rows where !row.isEmpty && line(row) == "lanagent" {
+        for row in rows where !row.isEmpty && ourKeyboardNames.contains(line(row)) {
             let box = row.dropFirst().reduce(row[0].box) { $0.union($1.box) }
             guard box.midX < 0.7, markers.contains(where: { abs($0 - Double(box.minX)) < 0.08 }) else { continue }
             return CGPoint(x: box.midX, y: box.midY)

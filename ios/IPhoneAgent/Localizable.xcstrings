@@ -4849,12 +4849,12 @@
         }
       }
     },
-    "Start Using Lan Agent" : {
+    "Start Using Pilot" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始使用 Lan Agent"
+            "value" : "开始使用 Pilot"
           }
         }
       }
@@ -5993,12 +5993,12 @@
     "Lan Agent" : {
       "shouldTranslate" : false
     },
-    "Lan Agent follows your iPhone's language. To change it just for this app, open Settings › Lan Agent › Language." : {
+    "Pilot follows your iPhone's language. To change it just for this app, open Settings › Pilot › Language." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lan Agent 跟随 iPhone 的语言。只想改这个 App 的语言，请打开 设置 › Lan Agent › 语言。"
+            "value" : "Pilot 跟随 iPhone 的语言。只想改这个 App 的语言，请打开 设置 › Pilot › 语言。"
           }
         }
       }

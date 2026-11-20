@@ -78,13 +78,29 @@ struct BigButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 50)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .foregroundStyle(enabled ? Color.white : Color.secondary)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(enabled ? tint : Color(uiColor: .tertiarySystemFill)))
-            .opacity(configuration.isPressed ? 0.8 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(enabled ? tint.gradient : Color(uiColor: .tertiarySystemFill).gradient))
+            .shadow(color: enabled ? tint.opacity(configuration.isPressed ? 0.12 : 0.28) : .clear,
+                    radius: configuration.isPressed ? 3 : 10, y: configuration.isPressed ? 1 : 5)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            // Apple's feel: down at once and critically damped, back up with a little spring.
+            .animation(.spring(response: 0.3, dampingFraction: configuration.isPressed ? 1 : 0.6), value: configuration.isPressed)
+    }
+}
+
+/// Anything small that is tapped (a chip, a play button): it shrinks a little under the finger the moment it is
+/// pressed and springs back on release, like iOS's own controls.
+struct Pressable: ButtonStyle {
+    var scale: CGFloat = 0.92
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: configuration.isPressed ? 1 : 0.6), value: configuration.isPressed)
     }
 }
 

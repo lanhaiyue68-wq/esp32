@@ -102,7 +102,7 @@ extension AppModel {
         try await Task.sleep(nanoseconds: 800_000_000)
         try await pointer.swipe(0.5, 0.32, 0.5, 0.62, hold: false)
         try await Task.sleep(nanoseconds: 900_000_000)
-        try await pointer.type("Lan Agent")
+        try await pointer.type(Settings.defaultAgentName)
         try await Task.sleep(nanoseconds: 700_000_000)
         try await pointer.key("enter")
     }

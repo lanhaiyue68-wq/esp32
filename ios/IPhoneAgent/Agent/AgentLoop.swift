@@ -6501,7 +6501,7 @@ extension Pointer: Gestures {}
             if sentTexts.isEmpty, let bottom = Self.chatBottomNote(steps) { prompt += "\n" + bottom }
         }
         if ourKeyboardOnScreen?() == true {
-            prompt += "\n\nThe keyboard on screen is the app's own (\"Lan Agent 輸入法\"): the field is focused, use type."
+            prompt += "\n\nThe keyboard on screen is the app's own (\"Pilot 輸入法\"): the field is focused, use type."
         }
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically

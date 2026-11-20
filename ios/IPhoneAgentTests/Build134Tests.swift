@@ -1147,6 +1147,11 @@ import XCTest
         ]
         XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: ours))
         XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Lan Agent 已填入：猫", box: CGRect(x: 0.3, y: 0.73, width: 0.4, height: 0.02))], keys]))
+        // 156: the keyboard is called Pilot.
+        XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Pilot 輸入法：等待要打的字…", box: CGRect(x: 0.2, y: 0.73, width: 0.6, height: 0.02))], keys]))
+        XCTAssertTrue(CandidatePicker.ourKeyboardShown(rows: [[P(text: "暫時連不上 Pilot（沒打開請先打開）", box: CGRect(x: 0.15, y: 0.73, width: 0.7, height: 0.02))], keys]))
+        XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Pilot 真好用", box: CGRect(x: 0.2, y: 0.73, width: 0.4, height: 0.02))], keys]),
+                       "the name alone in a line over the keys is not the status line")
         XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "空格", box: CGRect(x: 0.4, y: 0.95, width: 0.1, height: 0.02))]]),
                        "the system keyboard")
         XCTAssertFalse(CandidatePicker.ourKeyboardShown(rows: [[P(text: "Lan Agent 真好用", box: CGRect(x: 0.2, y: 0.3, width: 0.4, height: 0.02))], keys]),

@@ -48,7 +48,7 @@ struct StatusChips: View {
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .accessibilityValue(Text(ok ? "Ready" : "Needs setup"))
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: ok)
     }

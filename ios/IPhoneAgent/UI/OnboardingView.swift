@@ -162,7 +162,7 @@ struct OnboardingView: View {
             if calibrator.busy { return "Calibrating…" }
             return actReady ? "Calibrate" : "Waiting for the mouse…"
         case .brain:
-            if app.modelOK == true { return "Start Using Lan Agent" }
+            if app.modelOK == true { return "Start Using Pilot" }
             return testing ? "Testing…" : "Test Connection"
         }
     }

@@ -123,6 +123,7 @@ struct HomeView: View {
             PokeableFace(mood: editing ? .listening : app.mood, look: lookAt, busy: app.agent.running,
                          onInteract: { Task { await app.refreshHomeStatus() } })
                 .frame(width: 128, height: 143)
+                .background(Circle().fill(AgentFace.pilotBlue.opacity(0.16)).frame(width: 150, height: 150).blur(radius: 30))
                 .padding(.top, Space.s)
             Text(greeting)
                 .font(.subheadline)
@@ -229,7 +230,7 @@ struct HomeView: View {
                             Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Color.accentColor)
                                 .opacity(blocker == nil && !agent.running ? 1 : 0.35)
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(Pressable(scale: 0.82))
                         .accessibilityLabel(Text("Run \(item.name)"))
                     }
                 }

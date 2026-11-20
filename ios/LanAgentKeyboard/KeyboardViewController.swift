@@ -34,7 +34,7 @@ final class KeyboardViewController: UIInputViewController {
         height.priority = UILayoutPriority(999)
         height.isActive = true
 
-        status.text = "Lan Agent 輸入法"
+        status.text = "Pilot 輸入法"
         status.font = .systemFont(ofSize: 15, weight: .medium)
         status.textAlignment = .center
         status.numberOfLines = 3
@@ -61,10 +61,10 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard hasFullAccess else {
-            status.text = "請到 設定 › 一般 › 鍵盤 › Lan Agent\n打開「允許完整取用」"
+            status.text = "請到 設定 › 一般 › 鍵盤 › Pilot\n打開「允許完整取用」"
             return
         }
-        status.text = "Lan Agent 輸入法：等待要打的字…"
+        status.text = "Pilot 輸入法：等待要打的字…"
         textDidChange(nil)
         exchange(KeyboardLink.line(.hello(fullAccess: true))) { _ in }
         timer?.invalidate()
@@ -86,16 +86,16 @@ final class KeyboardViewController: UIInputViewController {
             // Codex read it and gave the item up. The line says so only while asks go unanswered.
             guard let reply, let job = KeyboardLink.job(reply) else {
                 if reply == nil {
-                    self.status.text = "暫時連不上 Lan Agent（沒打開請先打開）"
+                    self.status.text = "暫時連不上 Pilot（沒打開請先打開）"
                 } else if self.status.text?.hasPrefix("暫時連不上") == true {
-                    self.status.text = "Lan Agent 輸入法：等待要打的字…"
+                    self.status.text = "Pilot 輸入法：等待要打的字…"
                 }
                 self.busy = false
                 return
             }
             self.textDocumentProxy.insertText(job.text)
             if job.enter { self.textDocumentProxy.insertText("\n") }
-            self.status.text = "Lan Agent 已填入：\(job.text.prefix(20))"
+            self.status.text = "Pilot 已填入：\(job.text.prefix(20))"
             self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
         }
     }

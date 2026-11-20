@@ -42,7 +42,7 @@ struct SettingsView: View {
                     }
                     .tint(.primary)
                 } footer: {
-                    Text("Lan Agent follows your iPhone's language. To change it just for this app, open Settings › Lan Agent › Language.")
+                    Text("Pilot follows your iPhone's language. To change it just for this app, open Settings › Pilot › Language.")
                 }
                 // User 11-11: how much of Codex is left, from its last answer.
                 Section {

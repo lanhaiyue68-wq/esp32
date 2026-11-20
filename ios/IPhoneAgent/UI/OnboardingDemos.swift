@@ -156,7 +156,7 @@ struct MiniPhoneDemo: View {
                     .foregroundStyle(.secondary)
                     HStack {
                         Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
-                        Text(verbatim: "Lan Agent").font(.system(size: 8, weight: .semibold))
+                        Text(verbatim: Settings.defaultAgentName).font(.system(size: 8, weight: .semibold))
                     }
                     .padding(5)
                     .frame(maxWidth: .infinity, alignment: .leading)
