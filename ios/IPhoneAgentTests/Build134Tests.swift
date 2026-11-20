@@ -1787,6 +1787,23 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D195, the X bloggers on 151: "看最新5条本人发的帖子" goes through 5 posts.
+    func testTheLatestFivePostsAreFiveThings() {
+        XCTAssertEqual(AgentLoop.candidateCount("然后在“帖子”里看最新5条本人发的帖子（跳过置顶和转帖）"), 5)
+        XCTAssertEqual(AgentLoop.candidateCount("看测试群最近三条消息"), 3)
+        XCTAssertEqual(AgentLoop.candidateCount("美团最近两单花了多少钱"), 0)
+    }
+
+    /// D196, the X bloggers on 151: the words the model used for its follow taps are a follow.
+    func testTheWordsOfAFollowTapAreAFollow() {
+        func tap(_ t: String) -> JObject { ["action": .str("tap"), "x": .int(745), "y": .int(588), "thought": .str(t)] }
+        XCTAssertEqual(AgentLoop.publicTap(tap("已在 wood 主页，按钮显示“跟隨”，点一次关注，再检查是否变成“正在跟隨”。")), "关注")
+        XCTAssertEqual(AgentLoop.publicTap(tap("The profile is open and the button reads 跟隨, so I tap it once to follow, then check the button changed.")), "关注")
+        XCTAssertEqual(AgentLoop.publicTap(tap("Hanako 的主页已打开，按钮显示“跟随”，需要点击一次。")), "关注")
+        XCTAssertNil(AgentLoop.publicTap(tap("主页按钮显示“正在跟隨”。第一条帖子被截断，点“顯示更多”展开全文。")))
+        XCTAssertNil(AgentLoop.publicTap(tap("I need to follow the steps and open the first post.")))
+    }
+
     /// D194, the X install on 151: an allowed install has steps for its download beyond a one-thing run's 45.
     func testAnAllowedInstallHasStepsForItsDownload() {
         XCTAssertGreaterThanOrEqual(AgentLoop.installStepAllowance, 45)

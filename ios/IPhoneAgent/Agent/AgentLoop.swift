@@ -4848,7 +4848,9 @@ extension Pointer: Gestures {}
     /// D36, s2 on 136 (高德: 比较前10家川菜馆, 看评价可不可疑, 推荐三家): one thing of the goal, so the steps of one; the run
     /// ran out at the 9th place's reviews. A goal that goes through N candidates (前10家, 十来个, 4篇) counts as N things.
     static func candidateCount(_ goal: String) -> Int {
-        let pattern = #"(?:前|比较|对比|比一比|挑|找|看|查)\s*(\d{1,2}|十来|十几|二十|十|[两二三四五六七八九])\s*(?:家|个|款|篇|条|间|套|部|只|件|座)"#
+        // D195, the X bloggers over the cloud 11-20 (151): "看最新5条本人发的帖子" was one thing, about 50 steps; 4 of 18
+        // ran out at the 3rd to 5th post (long posts, 顯示更多, translations). 最新/最近 N 条 goes through N as well.
+        let pattern = #"(?:前|比较|对比|比一比|挑|找|看|查|最新|最近)\s*(\d{1,2}|十来|十几|二十|十|[两二三四五六七八九])\s*(?:家|个|款|篇|条|间|套|部|只|件|座)"#
         guard let re = try? NSRegularExpression(pattern: pattern) else { return 0 }
         let g = AppNames.hans(goal), ns = g as NSString
         let words = ["十来": 10, "十几": 12, "二十": 20, "十": 10, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
@@ -4887,7 +4889,10 @@ extension Pointer: Gestures {}
         t = t.replacingOccurrences(of: #"(不要|不用|避免|别|勿|以免|而不是|don't|do not|avoid|not |without|instead of)[^，,。.；;]*"#,
                                    with: " ", options: .regularExpression)
         let like = #"点赞按钮|点个赞|给[^，,。]{0,8}点赞|点赞(这|该|视频|笔记|一下)|点击点赞|tap (the )?(heart|like)\b|like button|\blike (it|this|the video|the post|the note)"#
-        let follow = #"加关注|点关注|关注按钮|点击关注(?!页|栏|tab)|关注(他|她|作者|博主|这个|该)|follow button|\bfollow (him|her|the author|this|the account)"#
+        // D196, the X bloggers on 151: 18 follows went through and the owner was asked about none of them: the words
+        // were "点一次关注", "tap it once to follow", "按钮显示“跟随”，需要点击一次". (2 runs were asked, about a second
+        // tap the model called "the follow button", which ended them.)
+        let follow = #"加关注|点关注|关注按钮|点击关注(?!页|栏|tab)|点[一下次个]{1,3}关注(?!页|栏|tab)|关注(他|她|作者|博主|这个|该)|显示[“"「]?(?:关注|跟随|follow)[”"」]?[，,]?[^。.]{0,10}(?:点|tap)|follow button|\bfollow (him|her|the author|this|the account|it|them)\b|tap (it |the button )?(once )?to follow"#
         let keep = #"收藏按钮|点击收藏|收藏(这|该|一下|视频|笔记)|加入收藏|bookmark (it|this|the)|save (it|this) to"#
         for (pattern, what) in [(like, "点赞"), (follow, "关注"), (keep, "收藏")]
         where t.range(of: pattern, options: .regularExpression) != nil { return what }
