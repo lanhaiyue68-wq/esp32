@@ -1045,6 +1045,11 @@ extension Pointer: Gestures {}
         let moves = Array(steps[start...].filter { moving.contains($0["action"]?.str ?? "") && $0["changed"] != .bool(false) }.suffix(3))
         guard moves.count == 3, sameSpot(act, moves[1]), sameSpot(moves[2], moves[0]), !sameSpot(moves[0], moves[1])
         else { return nil }
+        // D214, y07 on 153 (q153r): X opened on a post; back arrow (55 87), the profile's back arrow (90 95), back (55 87)
+        // took the run out three screens, and the tap on X's avatar at the top left (where the second arrow was) was
+        // refused as a back-and-forth, then Codex's too, four new plans over: the task failed at 105 s. Moves that each
+        // leave (back, home, the top-left corner) only go back further; one of the two must go in for a back-and-forth.
+        guard !(leaves(moves[0]) && leaves(moves[1])) else { return nil }
         return moves[0]
     }
 

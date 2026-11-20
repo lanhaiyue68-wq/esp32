@@ -1849,6 +1849,13 @@ import XCTest
         XCTAssertFalse(AgentLoop.claimsNoted("已打开关注列表，向上滑动查看更多。"))
     }
 
+    /// D214, y07 on 153: three taps back at the top left are no back-and-forth; going in and back out is.
+    func testBackingOutThreeScreensIsNoBackAndForth() {
+        func tap(_ x: Int, _ y: Int) -> JObject { ["action": .str("tap"), "x": .int(x), "y": .int(y)] }
+        XCTAssertNil(AgentLoop.bounce(tap(88, 92), after: [tap(55, 87), tap(90, 95), tap(55, 87)]))
+        XCTAssertNotNil(AgentLoop.bounce(tap(55, 87), after: [tap(500, 400), tap(55, 87), tap(500, 400)]))
+    }
+
     /// D202, xr15 on 152: a new note between the legs of a scroll is something found on the way; the count starts again.
     func testANewNoteStartsTheScrollCountAgain() {
         func swipe(_ y1: Int, _ y2: Int) -> JObject {
