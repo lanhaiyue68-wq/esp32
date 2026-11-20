@@ -213,8 +213,11 @@ extension Pointer: Gestures {}
     static func addedToCart(_ rows: [[CandidatePicker.Piece]]) -> Bool {
         // 143 z5 (item 11): a shop page's "5000+人已加购" (how many people have it in their cart) was taken for the
         // toast twice, and the run told the user it had put the cup in the cart twice; nothing had been added.
+        // D191, x1 on 151 (item 9): 美团's cart panel is headed "已加购商品" (the dishes in the cart). Each look at the cart
+        // counted one more add: the notes said "第9项：已加入购物车…第12次" with one cup in it, the run opened and closed the
+        // cart some 25 times to check, item 9 was taken for noted and 10 failed in its place. A heading is no toast.
         let text = AppNames.hans(rows.joined().map(\.text).joined())
-            .replacingOccurrences(of: #"人\s*已加购"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"人\s*已加购|已加购\s*商品"#, with: "", options: .regularExpression)
         return ["加购成功", "已加入购物车", "成功加入购物车", "加入购物车成功", "已加购", "已添加到购物车"].contains { text.contains($0) }
     }
     /// Whether an "added to the cart" text in this app is a shop's toast: an app that sells things, or one not known
@@ -3053,10 +3056,19 @@ extension Pointer: Gestures {}
             } else if a == "note" || observedActions.contains(a) { break }
             if swipes >= 12 { break }
         }
-        guard swipes >= 2, !said.isEmpty else { return nil }
+        // D192, x4 on 151 (item 6): "前4个商品价格分别为12.86、26.7、43.8、32.68元，需要向下滑动查看第5个" and, one swipe on,
+        // the cheapest of the first five was taken from the screen alone (16.8, the sixth); 12.86, the first, had scrolled
+        // off. One swipe is enough when what was said holds two values or more.
+        guard swipes >= 2 || said.contains(where: { Self.valuesIn($0) >= 2 }), !said.isEmpty else { return nil }
         return "What you said while scrolling or holding on this page: " + said.map { "“\($0)”" }.joined(separator: " ")
             + " If any of it is a value the goal asks for, write it down now with note TEXT together with your next action "
             + "(your thoughts are not kept; a value seen on an earlier screen is not scrolled back to)."
+    }
+
+    /// D192: prices, temperatures and counts in a text ("12.86、26.7元", "¥16.8", "18°", "3个").
+    static func valuesIn(_ text: String) -> Int {
+        guard let re = try? NSRegularExpression(pattern: #"[¥￥]\s*\d+(?:\.\d+)?|\d+\.\d+|\d+\s*(?:元|°|℃|万|%|个|件|人)"#) else { return 0 }
+        return re.numberOfMatches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
     }
 
     /// D83, y4 on 138 (item 27), the fourth time on 關於本機 (D19, D48, D53): Doubao said "shows 機型名稱 iPhone 13 mini"
@@ -4916,8 +4928,13 @@ extension Pointer: Gestures {}
     /// seen over its moving sky and no tap counted as one that did nothing. The same spot three times in a row, with
     /// nothing else between, is enough: the next is refused.
     static let sameTapLimit = 3
+    // D193, x4 on 151 (item 10): 美团's coupon sheet ✕ at x 0.943 is past the pointer's calibrated reach; from the right
+    // border it landed at 0.920, 0.205 each time, beside the ✕, eight taps, then the item was given up. A sheet closes
+    // other ways as well.
     static let sameTapReason = "Refused: this spot was just tapped 3 times in a row and the task did not get on. It is not "
-        + "the control you want: look at what else is on the screen, scroll, or go another way."
+        + "the control you want: look at what else is on the screen, scroll, or go another way. A sheet's ✕ that does "
+        + "nothing (a corner the pointer may not reach): swipe the sheet down from its top edge, or tap the dimmed page "
+        + "above it, away from that page's buttons."
     /// D124: a swipe whose finger moves down (older messages, in a chat) while its thought wants newer ones.
     static func wantsNewerByOlderSwipe(_ act: JObject) -> Bool {
         guard let y1 = act["y1"]?.double, let y2 = act["y2"]?.double, y2 - y1 >= 200 else { return false }

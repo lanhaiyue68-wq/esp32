@@ -1787,6 +1787,32 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D191, x1 on 151: 美团's cart panel heading "已加购商品" is no toast.
+    func testTheCartPanelHeadingIsNoToast() {
+        func row(_ t: String) -> [CandidatePicker.Piece] { [CandidatePicker.Piece(text: t, box: CGRect(x: 0.1, y: 0.6, width: 0.3, height: 0.03))] }
+        XCTAssertFalse(AgentLoop.addedToCart([row("已加购商品"), row("面清空"), row("去结算")]))
+        XCTAssertFalse(AgentLoop.addedToCart([row("已加購商品")]))
+        XCTAssertFalse(AgentLoop.addedToCart([row("装入口袋2选用后，加购商品将自动放入该口袋")]))
+        XCTAssertTrue(AgentLoop.addedToCart([row("已加购商品"), row("加购成功")]))
+        XCTAssertTrue(AgentLoop.addedToCart([row("已加购")]))
+    }
+
+    /// D192, x4 on 151: what one swipe's words held (prices) is shown again on the next screen.
+    func testValuesSaidBeforeOneSwipeComeBack() {
+        let swipe: JObject = ["action": .str("swipe"), "x1": .int(40), "y1": .int(800), "x2": .int(40), "y2": .int(400),
+                              "thought": .str("淘宝露营椅搜索结果已加载，前4个商品价格分别为12.86、26.7、43.8、32.68元，需要向下滑动查看第5个商品的价格。")]
+        let open: JObject = ["action": .str("tap"), "x": .int(865), "y": .int(89)]
+        XCTAssertTrue(AgentLoop.scrollingHint([open, swipe])?.contains("12.86") == true)
+        XCTAssertEqual(AgentLoop.valuesIn("¥16.8补贴后，18°，3个"), 3)
+        let plain: JObject = ["action": .str("swipe"), "thought": .str("向下滑动查看更多商品")]
+        XCTAssertNil(AgentLoop.scrollingHint([open, plain]))
+    }
+
+    /// D193, x4 on 151: the same-spot refusal names the other ways a sheet closes.
+    func testTheSameSpotRefusalNamesASheetsOtherWays() {
+        XCTAssertTrue(AgentLoop.sameTapReason.contains("swipe the sheet down"))
+    }
+
     /// D186, x4 on 150: a fail naming its item fails that item's part, even when the item looks noted already.
     func testAFailNamingItsItemFailsThatPart() {
         let task = "帮我做这24件事：" + (1...23).map { "\($0). 查第\($0)样东西" }.joined(separator: "；") + "；24. 把结果告诉我"
