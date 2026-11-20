@@ -1787,6 +1787,52 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D199, xb13 on 151: a thought that says the screen is not the app opens it again.
+    func testNotTheAppIsTakenAtItsWord() {
+        XCTAssertTrue(AgentLoop.saysNotIn("The open command landed on the Calendar app, not X. I need to open X again.", "X"))
+        XCTAssertTrue(AgentLoop.saysNotIn("当前屏幕是日历应用，不是X。我需要打开X应用来完成任务。", "X"))
+        XCTAssertFalse(AgentLoop.saysNotIn("I'm in X, not on the home screen.", "X"))
+        XCTAssertFalse(AgentLoop.saysNotIn("This is X's picture viewer, not xiaohongshu.", "X"))
+    }
+
+    /// D200, xb13 on 151: a note after a move in the same reply is of a screen not seen yet.
+    func testANoteAfterAMoveIsBlind() {
+        let acts: [JObject] = [["action": .str("tap")], ["action": .str("type")], ["action": .str("wait")], ["action": .str("note")]]
+        XCTAssertTrue(AgentLoop.movedBefore(3, acts))
+        XCTAssertFalse(AgentLoop.movedBefore(0, [["action": .str("note")], ["action": .str("swipe")]]))
+        XCTAssertFalse(AgentLoop.movedBefore(1, [["action": .str("wait")], ["action": .str("note")]]))
+    }
+
+    /// D201, xb08 on 151: a tap on the bottom strip for a post is refused; a tab's tap is not.
+    func testAPostTapOnTheBottomBarIsRefused() {
+        func tap(_ y: Int, _ t: String) -> JObject { ["action": .str("tap"), "x": .int(360), "y": .int(y), "thought": .str(t)] }
+        XCTAssertTrue(AgentLoop.postTapOnTheBar(tap(937, "当前可见10月2日的本人帖子及中文翻译，内容尚未显示完整，我先打开帖子。")))
+        XCTAssertFalse(AgentLoop.postTapOnTheBar(tap(937, "点底部的搜索标签，回到搜索页。")))
+        XCTAssertFalse(AgentLoop.postTapOnTheBar(tap(895, "点“显示更多”展开这条帖子。")))
+    }
+
+    /// D197, xb02 on 151: an unfollow button is refused unless the goal asks to unfollow.
+    func testAnUnfollowButtonIsRefusedUnlessAsked() {
+        XCTAssertTrue(AgentLoop.unfollowLabel("取消跟隨"))
+        XCTAssertTrue(AgentLoop.unfollowLabel("Unfollow @viktoroddy"))
+        XCTAssertFalse(AgentLoop.unfollowLabel("取消"))
+        XCTAssertFalse(AgentLoop.unfollowLabel(nil))
+        XCTAssertFalse(AgentLoop.unfollowAsked("如果显示“关注”，点一下关注（已经显示“正在关注”就不要再点，绝不取关）"))
+        XCTAssertFalse(AgentLoop.unfollowAsked("看帖子，不要取消关注任何人"))
+        XCTAssertTrue(AgentLoop.unfollowAsked("打开抖音，把这个博主取关"))
+    }
+
+    /// D198, xb13 on 151: waits on grey placeholders (a change each look) end at four; a download's waits do not.
+    func testWaitsOnPlaceholdersEnd() {
+        let w: JObject = ["action": .str("wait"), "thought": .str("The search results are still skeleton placeholders, so I wait."),
+                          "changed": .bool(true)]
+        XCTAssertTrue(AgentLoop.waitedEnough([w, w, w, w]))
+        XCTAssertFalse(AgentLoop.waitedEnough([w, w, w]))
+        let dl: JObject = ["action": .str("wait"), "thought": .str("App Store is still downloading X, the ring is moving."),
+                           "changed": .bool(true)]
+        XCTAssertFalse(AgentLoop.waitedEnough([dl, dl, dl, dl, dl, dl]))
+    }
+
     /// D195, the X bloggers on 151: "看最新5条本人发的帖子" goes through 5 posts.
     func testTheLatestFivePostsAreFiveThings() {
         XCTAssertEqual(AgentLoop.candidateCount("然后在“帖子”里看最新5条本人发的帖子（跳过置顶和转帖）"), 5)

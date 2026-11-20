@@ -1896,6 +1896,18 @@ extension Pointer: Gestures {}
                                      options: [.regularExpression, .caseInsensitive]) != nil
     }
 
+    /// D199, Hanako on 151 (q152b xb13): "open X" from Search landed on 日历 (the pointer not seen, the tap at its
+    /// estimate), and "The open command landed on the Calendar app, not X" / "当前屏幕是日历应用，不是X" were refused as
+    /// still in X, twice. A thought that says the screen is not that app is taken at its word.
+    static func saysNotIn(_ thought: String, _ app: String) -> Bool {
+        let t = AppNames.hans(thought).lowercased()
+        return AppNames.variants(app).map { AppNames.hans($0).lowercased() }.contains { name in
+            guard !name.isEmpty else { return false }
+            let n = NSRegularExpression.escapedPattern(for: name)
+            return t.range(of: #"(不是|不在|并非|而非|\bnot (in |on |the )?)\s*"# + n + #"(?![a-z0-9])"#, options: .regularExpression) != nil
+        }
+    }
+
     static func stillInAppReason(_ app: String) -> String {
         // 125 in 测试群 11-12: the model sees a step's first 300 characters (recentActions), and how to close the picture
         // came after them. Short, the way out first.
@@ -2827,8 +2839,19 @@ extension Pointer: Gestures {}
 
     /// True when this many waits in a row changed nothing.
     static func waitedEnough(_ steps: [JObject]) -> Bool {
-        let recent = steps.filter { !["refused", "stale plan"].contains($0["action"]?.str ?? "") }.suffix(waitLimit)
-        return recent.count == waitLimit && recent.allSatisfy { $0["action"]?.str == "wait" && $0["changed"] == .bool(false) }
+        let kept = steps.filter { !["refused", "stale plan"].contains($0["action"]?.str ?? "") }
+        let recent = kept.suffix(waitLimit)
+        if recent.count == waitLimit, recent.allSatisfy({ $0["action"]?.str == "wait" && $0["changed"] == .bool(false) }) { return true }
+        // D198, Hanako on 151 (q152b xb13): X's People results stayed grey placeholders through 9 waits; they shimmer, a
+        // change each look. Four waits in a row that each say the page is still loading are enough as well.
+        let loading = kept.suffix(4)
+        return loading.count == 4 && loading.allSatisfy { $0["action"]?.str == "wait" && saysLoading($0["thought"]?.str ?? "") }
+    }
+
+    /// D198: a thought that says the page is still loading (骨架, placeholders); a download ("downloading") is not.
+    static func saysLoading(_ thought: String) -> Bool {
+        AppNames.hans(thought).lowercased().range(of: #"骨架|占位|skeleton|placeholder|加载中|还在加载|仍在加载|正在加载|\bloading\b"#,
+                                                  options: .regularExpression) != nil
     }
 
     /// Build 118 without Codex, 11-10: Weather opened at the bottom of the page, the forecast was above, and the models
@@ -3495,7 +3518,16 @@ extension Pointer: Gestures {}
         var timing = Metrics.Step()
         let replied = try await nextActions()
         timing.llmMs = (replied[0].act["think_s"]?.double ?? 0) * 1000
-        for var planned in replied where planned.act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
+        for k in replied.indices where replied[k].act["action"]?.str == "note" {  // nothing on the phone moves: kept, and shown from here on
+            var planned = replied[k]
+            // D200, Hanako on 151 (q152b xb13): "DO: tap… / type "@hanakoxbt" / key enter / wait 2 / note 搜索结果…第一条就是目标
+            // 账号 Hanako，我点进他的主页" and "note 已打开主页；当前显示正在跟随": notes of screens not seen yet, and they went
+            // into the answer. A note after a move in the same reply is refused; it is written once that screen is seen.
+            if Self.movedBefore(k, replied.map(\.act)) {
+                record(planned.shot, ["action": .str("refused"), "reason": .str(Self.blindNoteReason)])
+                DebugLog.write("note: refused; it came after a move in the same reply, before its screen was seen")
+                continue
+            }
             if let said = planned.act["text"]?.str, !said.isEmpty {
                 // D87: a date fact in a note is put right as in the answer, so what is typed from the notes (a 备忘录 of
                 // the results) holds it right too.
@@ -3628,7 +3660,7 @@ extension Pointer: Gestures {}
             }
             if act["action"]?.str == "open", sameAppRefused == 0, let inApp = Self.appInFront(steps, startedIn: startApp),
                AppNames.variants(inApp).map(AppNames.hans).contains(AppNames.hans(act["app"]?.str ?? "")),
-               !Self.saysAppLeft(act["thought"]?.str ?? "") {
+               !Self.saysAppLeft(act["thought"]?.str ?? ""), !Self.saysNotIn(act["thought"]?.str ?? "", inApp) {
                 sameAppRefused += 1
                 pictureIn = inApp
                 record(planned.shot, ["action": .str("refused"), "reason": .str(Self.stillInAppReason(inApp))])
@@ -4386,6 +4418,17 @@ extension Pointer: Gestures {}
                         return false
                     }
                 }
+                if name == "tap", Self.postTapOnTheBar(act) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.barTapReason)])
+                    return false
+                }
+                // D197, the X bloggers on 151 (xb02): the follow had gone through and the model called the profile's ✓ person
+                // icon "the follow button" and tapped for it again; on X that opens 取消跟隨 (抖音's 已关注 opens 取消关注).
+                // A button reading 取消关注 / 取消跟随 / Unfollow is refused unless the goal asks to unfollow.
+                if name == "tap", Self.unfollowLabel(Self.labelAt(tapAt, in: readRows)), !Self.unfollowAsked(task) {
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.unfollowReason)])
+                    return false
+                }
                 // #17 (122, 11-11): a like, a follow or a 收藏 shows to others like a message, and went unasked. A tap the
                 // model says does one is refused in a goal that says not to, and waits for approval in a task from the cloud.
                 if name == "tap", let what = Self.publicTap(act) {
@@ -4898,6 +4941,43 @@ extension Pointer: Gestures {}
         where t.range(of: pattern, options: .regularExpression) != nil { return what }
         return nil
     }
+
+    /// D200: a move (tap, type, key, swipe, open…) comes before this place in the reply.
+    static func movedBefore(_ k: Int, _ acts: [JObject]) -> Bool {
+        acts.prefix(k).contains { !["note", "wait"].contains($0["action"]?.str ?? "") }
+    }
+
+    static let blindNoteReason = "Refused: this note came after a move in the same reply, before that move's screen was "
+        + "seen. Look at the screen now and note what it shows."
+
+    /// D201, Karpathy on 151 (q152b xb08): "当前可见10月2日的本人帖子…我先打开帖子" tapped at y 937, X's tab bar: Explore
+    /// opened, the profile was lost and searched for again, and the run ran out. A tap that low that the model says is
+    /// for a post is refused: the bar covers that strip.
+    static func postTapOnTheBar(_ act: JObject) -> Bool {
+        guard act["action"]?.str == "tap", (act["y"]?.double ?? 0) >= 925 else { return false }
+        let t = AppNames.hans(((act["thought"]?.str ?? "") + " " + (act["thought_zh"]?.str ?? "")).lowercased())
+        guard t.range(of: #"帖|post|tweet|笔记|文章|显示更多|show more|正文"#, options: .regularExpression) != nil else { return false }
+        return t.range(of: #"底部|底栏|tab|标签|首页|搜索|我的|购物车|消息|通知|\bbar\b|返回|发帖|发布"#, options: .regularExpression) == nil
+    }
+
+    static let barTapReason = "Refused: this low strip (y 925 and below) is the app's bottom bar, tabs that leave this "
+        + "page, not the post above it. Swipe up a little first (swipe 500 750 500 450), then tap the post where it sits higher."
+
+    /// D197: a button that unfollows (取消关注, 取消跟隨, Unfollow), by its words on the screen.
+    static func unfollowLabel(_ label: String?) -> Bool {
+        guard let label else { return false }
+        return AppNames.hans(label).lowercased().range(of: #"取消关注|取消跟随|取关|unfollow"#, options: .regularExpression) != nil
+    }
+
+    /// D197: the goal asks to unfollow (取关, 取消关注…); "绝不取关", "不要取消关注" do not.
+    static func unfollowAsked(_ task: String) -> Bool {
+        let t = AppNames.hans(task).lowercased()
+        guard t.range(of: #"(?<![不别勿])(取关|取消关注|取消跟随|unfollow)"#, options: .regularExpression) != nil else { return false }
+        return !["取关", "取消关注", "取消跟随"].contains { forbids(task, $0) }
+    }
+
+    static let unfollowReason = "Refused: this button unfollows the account, and the goal does not ask for that. Close this "
+        + "menu (取消, or tap outside it) and go on: a ✓ person icon, 正在关注, 正在跟随 or 已关注 means it is followed already."
 
     /// The goal says not to do this (不要点赞, 别关注…).
     static func forbids(_ task: String, _ what: String) -> Bool {
