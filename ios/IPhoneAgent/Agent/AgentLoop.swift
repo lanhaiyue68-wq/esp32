@@ -706,13 +706,25 @@ extension Pointer: Gestures {}
         cutPending = [:]
         for (n, p) in pending.sorted(by: { $0.key < $1.key }) {
             let later = notes.dropFirst(p.at)
-            if (n > 0 ? later.contains(where: { Self.noteItems($0).contains(n) }) : !later.isEmpty) { continue }
+            // D205, x4 on 152 (item 4): the cut note of 小红书's first two titles had no item number, and the next note
+            // (the first title, opened) was taken for it noted again: dropped, and the run spent about 190 steps opening
+            // video notes, whose caption opens the comments. A note with no item is noted again by one with its words.
+            if (n > 0 ? later.contains(where: { Self.noteItems($0).contains(n) }) : later.contains(where: { Self.notesAgain($0, p.text) })) { continue }
             guard !notes.contains(p.text) else { continue }
             notes.append(p.text)
             record(nil, ["action": .str("note"), "text": .str(p.text), "by": .str("run"),
                          "reason": .str("kept as first read: the run went round instead of noting it again")])
             DebugLog.write("note: the cut note for item \(n) is kept as first read; the run was going round")
         }
+    }
+
+    /// D205: a later note takes up the cut text again: it holds the words just before where it was cut.
+    static func notesAgain(_ later: String, _ cut: String) -> Bool {
+        guard let r = cut.range(of: #"…|\.\.\.|被截断"#, options: .regularExpression) else { return true }
+        let drop = " “”\"「」《》#"
+        let stem = String(cut[..<r.lowerBound].filter { !drop.contains($0) }.suffix(4))
+        guard !stem.isEmpty else { return true }
+        return later.filter { !drop.contains($0) }.contains(stem)
     }
 
     /// The board or mirroring went away mid-run: pause ("waiting for the board") until the screen is live
@@ -808,7 +820,15 @@ extension Pointer: Gestures {}
             // actor's 1000 tokens. A goal of 10+ things gets room for its whole answer.
             let room = Self.goalParts(task) >= 10 ? Self.bigGoalTokens : (Self.maxTokens[role] ?? 1000)
             let sys = Self.systemWithGoal(system, task: task, prompt: prompt)  // D149
-            reply = try await llm.chat(system: sys, text: prompt, image: frame, maxTokens: room, temperature: temperature)
+            var got = try await llm.chat(system: sys, text: prompt, image: frame, maxTokens: room, temperature: temperature)
+            // D203, Hanako on 152 (q152r xr13): the answer of 5 posts' 干货 was cut at the actor's 1000 tokens three times
+            // (finish_reason length), the check said so twice and the owner got it cut, marked 未能核实. A done cut at
+            // the room it had is asked for once more, with room for all of it.
+            if got.finishReason == "length", room < Self.bigGoalTokens, Self.endsInDone(got.text) {
+                DebugLog.write("\(role): the answer was cut at \(room) tokens; asking once more with room for all of it")
+                got = try await llm.chat(system: sys, text: prompt, image: frame, maxTokens: Self.bigGoalTokens, temperature: temperature)
+            }
+            reply = got
         } catch {
             if !Task.isCancelled, llm === actor, let planner, planner !== llm, ModelRequestFailure.isAccountClosed(error) {
                 // D47, 136 over the cloud 11-16 (z5, z6): Doubao answered 403 AccountOverdueError and two runs of 50 things
@@ -838,6 +858,11 @@ extension Pointer: Gestures {}
         if lastActed > 0 { rec["frame_after_action_s"] = .num(((screen.capturedAt - lastActed) * 100).rounded() / 100) }
         trace?.write(frame, kind: "llm", rec.merging(reply.diagnostics))
         return (reply.text, seconds, frame)
+    }
+
+    /// D203: a reply whose move is done (its answer follows).
+    static func endsInDone(_ reply: String) -> Bool {
+        reply.range(of: #"DO:\s*done(?![a-z])"#, options: .regularExpression) != nil
     }
 
     /// A lost board or mirror is not the agent's fault. VideoReadinessError says so directly; a bare
@@ -2027,7 +2052,8 @@ extension Pointer: Gestures {}
         cutPending[n] = (text, notes.count)
         return "Refused: this note holds text cut short on the screen (… or ... where it was cut, or 被截断). Open the thing "
             + "it is about (the note, the product, the app's page, the developer's name) and read it whole, then note it. If "
-            + "it is cut there too, note it again as it is and it is kept."
+            + "it is cut there too, or opening it shows something else (a video, its comments), note it again as the list "
+            + "shows it and it is kept."
     }
 
     /// D177, x4 over the cloud 11-19 (148), item 17: on 电池 the model said "电池页面已显示电量100%已充满" and swiped up to
@@ -2993,18 +3019,72 @@ extension Pointer: Gestures {}
         + "look closely for the right control (read its label), try another way, or leave it and say in the answer what "
         + "could not be done."
 
+    /// D202: a note the model wrote (not the run's own) that no earlier note holds.
+    static func newNote(_ s: JObject, after earlier: ArraySlice<JObject>) -> Bool {
+        guard s["action"]?.str == "note", s["by"]?.str != "run", let t = s["text"]?.str, !t.isEmpty else { return false }
+        return !earlier.contains { $0["action"]?.str == "note" && $0["text"]?.str == t }
+    }
+
+    /// D206, x1 on 152 (item 9): 美团's shop cart bar opened the cart and a tap outside closed it, nine times over, each
+    /// "先查看具体商品，避免重复添加" then "购物车目前只有一杯金奖深烘美式，先关闭": the spots drifted along the bar (x 104 to
+    /// 239), past D17's 3%, so no round was seen, and the part ran out (30 steps). Taps going between the same two rows
+    /// three times over, each row's taps saying much the same, are a round too.
+    static func repeatsSaidRound(_ steps: [JObject], next: JObject) -> Bool {
+        guard next["action"]?.str == "tap" else { return false }
+        var taps: [JObject] = [next]
+        for s in steps.reversed() {
+            let a = s["action"]?.str ?? ""
+            if a == "tap" {
+                taps.insert(s, at: 0)
+            } else if observedActions.contains(a) || partEnds.contains(a) || a == "note" { break }
+            if taps.count >= 6 { break }
+        }
+        guard taps.count == 6 else { return false }
+        func y(_ t: JObject) -> Double { t["y"]?.double ?? -1000 }
+        func said(_ t: JObject) -> String { t["thought"]?.str ?? "" }
+        let (a, b) = ([taps[0], taps[2], taps[4]], [taps[1], taps[3], taps[5]])
+        guard abs(y(a[0]) - y(b[0])) > 80 else { return false }
+        for g in [a, b] {
+            guard !g.contains(where: { abs(y($0) - y(g[0])) > 40 }) else { return false }
+            let told = g.map(said).filter { !$0.isEmpty }
+            guard told.count >= 2, told.dropFirst().allSatisfy({ sayAlike($0, told[0]) }) else { return false }
+        }
+        return true
+    }
+
+    /// D206: two thoughts say much the same (half their pairs of characters shared, punctuation and spaces aside).
+    static func sayAlike(_ a: String, _ b: String) -> Bool {
+        func pairs(_ s: String) -> Set<String> {
+            let c = Array(AppNames.hans(s).lowercased().filter { $0.isLetter || $0.isNumber })
+            return c.count < 2 ? [] : Set((0..<(c.count - 1)).map { String(c[$0]) + String(c[$0 + 1]) })
+        }
+        let (p, q) = (pairs(a), pairs(b))
+        guard !p.isEmpty, !q.isEmpty else { return false }
+        return Double(2 * p.intersection(q).count) / Double(p.count + q.count) >= 0.5
+    }
+
+    static func saidRoundReason(_ steps: [JObject]) -> String {
+        let said = steps.last(where: { $0["action"]?.str == "tap" && !($0["thought"]?.str ?? "").isEmpty })?["thought"]?.str ?? ""
+        return "Refused: you opened this and closed it again three times over, and found the same each time"
+            + (said.isEmpty ? "" : " (“\(said.prefix(120))”)") + ". Do not open it again to check: note what you found if "
+            + "the goal needs it, and go on with the next step the goal asks for."
+    }
+
     /// 128 over the cloud 11-13 (second round, g1): with the note written, the executor and then Codex scrolled it up and
     /// down to "check" it, 15 swipes in pairs (about 4 minutes); a list or a menu gets the same. A page scrolled one way,
     /// back, and the first way again has been seen whole: the next turn back is refused.
     static func scrollsBackAgain(_ steps: [JObject], next: JObject) -> Bool {
         guard let d = swipeDirection(next) else { return false }
         var dirs = [d]
-        for s in steps.reversed() {
+        // D202, delost on 152 (q152r xr15): X's profile, 5 posts to read; down, back up to a post's time, down again, a
+        // new post noted between: the next turn was refused as "all of it has been seen", and the run answered with 2 of
+        // 5. A new note the model wrote between the swipes is something found on the way: the count starts there.
+        for (k, s) in steps.enumerated().reversed() {
             let a = s["action"]?.str ?? ""
             if a == "swipe" {
                 guard let e = swipeDirection(s) else { break }
                 dirs.insert(e, at: 0)
-            } else if observedActions.contains(a) || partEnds.contains(a) { break }
+            } else if observedActions.contains(a) || partEnds.contains(a) || newNote(s, after: steps.prefix(k)) { break }
             if dirs.count >= 16 { break }
         }
         let turns = zip(dirs, dirs.dropFirst()).filter { $0 != $1 }.count
@@ -4214,6 +4294,15 @@ extension Pointer: Gestures {}
                     record(planned.shot, ["action": .str("refused"), "reason": .str(Self.roundReason)])
                     return false
                 }
+                if name == "tap", Self.repeatsSaidRound(steps, next: act) {  // D206
+                    roundRefused += 1
+                    if roundRefused >= Self.refusalsInARow {
+                        roundRefused = 0
+                        return try await changeOfPlan(planned.shot, "kept opening and closing the same thing to check it")
+                    }
+                    record(planned.shot, ["action": .str("refused"), "reason": .str(Self.saidRoundReason(steps))])
+                    return false
+                }
                 if name == "swipe", Self.scrollsBackAgain(steps, next: act) {
                     // D19, 134 over the cloud 11-15 (y5): 设置 › 关于本机 scrolled down, up, down; the turn back up to 型号名称
                     // was then refused 20 times. Three refusals are a change of plan, as with a round of taps (D17).
@@ -4935,7 +5024,9 @@ extension Pointer: Gestures {}
         // D196, the X bloggers on 151: 18 follows went through and the owner was asked about none of them: the words
         // were "点一次关注", "tap it once to follow", "按钮显示“跟随”，需要点击一次". (2 runs were asked, about a second
         // tap the model called "the follow button", which ended them.)
-        let follow = #"加关注|点关注|关注按钮|点击关注(?!页|栏|tab)|点[一下次个]{1,3}关注(?!页|栏|tab)|关注(他|她|作者|博主|这个|该)|显示[“"「]?(?:关注|跟随|follow)[”"」]?[，,]?[^。.]{0,10}(?:点|tap)|follow button|\bfollow (him|her|the author|this|the account|it|them)\b|tap (it |the button )?(once )?to follow"#
+        // D204, Florence on 152 (xr17): "关注按钮不在屏幕上，先返回主页顶部" asked the owner about a follow; it was a tap
+        // to the top of the page. A follow button said not to be on the screen is no follow tap.
+        let follow = #"加关注|点关注|关注按钮(?!不在|不可见|看不到|没有|没在|未显示|没显示|不见)|点击关注(?!页|栏|tab)|点[一下次个]{1,3}关注(?!页|栏|tab)|关注(他|她|作者|博主|这个|该)|显示[“"「]?(?:关注|跟随|follow)[”"」]?[，,]?[^。.]{0,10}(?:点|tap)|follow button(?! is not| isn't| not| is off| is\s*[,，.;；]| is\s*$)|\bfollow (him|her|the author|this|the account|it|them)\b|tap (it |the button )?(once )?to follow"#
         let keep = #"收藏按钮|点击收藏|收藏(这|该|一下|视频|笔记)|加入收藏|bookmark (it|this|the)|save (it|this) to"#
         for (pattern, what) in [(like, "点赞"), (follow, "关注"), (keep, "收藏")]
         where t.range(of: pattern, options: .regularExpression) != nil { return what }

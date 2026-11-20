@@ -1787,6 +1787,58 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D202, xr15 on 152: a new note between the legs of a scroll is something found on the way; the count starts again.
+    func testANewNoteStartsTheScrollCountAgain() {
+        func swipe(_ y1: Int, _ y2: Int) -> JObject {
+            ["action": .str("swipe"), "x1": .int(40), "y1": .int(y1), "x2": .int(40), "y2": .int(y2)]
+        }
+        let (down, up) = (swipe(800, 300), swipe(300, 800))
+        let note: JObject = ["action": .str("note"), "text": .str("第3条（2天前）：Harness Engineering 论文")]
+        XCTAssertFalse(AgentLoop.scrollsBackAgain([up, up, note, down, down, up], next: down))
+        XCTAssertTrue(AgentLoop.scrollsBackAgain([note, up, up, down, down, up], next: down))
+        let run: JObject = ["action": .str("note"), "text": .str("（滚动页面时看到，原话）：…"), "by": .str("run")]
+        XCTAssertTrue(AgentLoop.scrollsBackAgain([down, up, run, down], next: up))
+        XCTAssertTrue(AgentLoop.scrollsBackAgain([note, down, up, note, down], next: up), "the same note again is nothing new")
+    }
+
+    /// D203, xr13 on 152: a final answer cut at the actor's tokens is asked for again with room.
+    func testACutFinalAnswerIsAskedAgain() {
+        XCTAssertTrue(AgentLoop.endsInDone("THINK: 现在整理成最终答案。\nDO: done 已关注 Hanako（@hanakoxbt）…"))
+        XCTAssertTrue(AgentLoop.endsInDone("DO: done已关注"))
+        XCTAssertFalse(AgentLoop.endsInDone("THINK: 继续向下。\nDO: swipe 481 980 481 600"))
+    }
+
+    /// D204, xr17 on 152: a follow button said not to be on the screen is no follow tap.
+    func testAFollowButtonNotOnTheScreenIsNoFollowTap() {
+        func tap(_ t: String) -> JObject { ["action": .str("tap"), "x": .int(282), "y": .int(91), "thought": .str(t)] }
+        XCTAssertNil(AgentLoop.publicTap(tap("当前在 Florence 的帖子列表中，关注按钮不在屏幕上，先返回主页顶部。")))
+        XCTAssertNil(AgentLoop.publicTap(tap("The follow button is not visible here, so I tap the top bar to go back up.")))
+        XCTAssertEqual(AgentLoop.publicTap(tap("主页上的关注按钮显示“关注”，点它。")), "关注")
+    }
+
+    /// D205, x4 on 152 (item 4): a cut note with no item is noted again only by a note that takes up its cut words.
+    func testACutNoteIsNotedAgainOnlyByItsWords() {
+        let cut = "第1篇作者Begins，标题显示“我的长期主义户外露营单品 手电：务本x4便携…”"
+        XCTAssertFalse(AgentLoop.notesAgain("笔记标题：我的长期主义户外露营单品；作者Begins。", cut))
+        XCTAssertTrue(AgentLoop.notesAgain("第1篇标题：我的长期主义户外露营单品 手电：务本x4便携灯，作者Begins", cut))
+    }
+
+    /// D206, x1 on 152 (item 9): the cart opened and closed again and again, its spots drifting along the bar.
+    func testOpeningAndClosingToCheckAgainIsARound() {
+        func tap(_ x: Int, _ y: Int, _ t: String) -> JObject { ["action": .str("tap"), "x": .int(x), "y": .int(y), "thought": .str(t)] }
+        let closes = ["购物车目前只有一杯金奖深烘美式，先关闭购物车，选择另一种咖啡。", "购物车目前只有一杯金奖深烘美式；先关闭购物车，选择另一款咖啡。",
+                      "购物车目前只有一杯金奖深烘美式，需要关闭明细再选另一种咖啡。"]
+        let opens = ["购物车显示已有一件，先打开明细确认商品，再决定是否需要添加另一杯。", "店铺购物车显示已有一件，先打开明细确认具体饮品，避免重复添加。",
+                     "店铺购物车显示已有一件，先查看已选咖啡，避免重复添加。"]
+        let steps: [JObject] = [tap(550, 480, closes[0]), tap(239, 922, opens[1]), tap(554, 458, closes[1]), ["action": .str("stale plan")],
+                                tap(165, 927, opens[2]), tap(554, 458, closes[2])]
+        XCTAssertTrue(AgentLoop.repeatsSaidRound(steps, next: tap(104, 944, opens[0])))
+        XCTAssertFalse(AgentLoop.repeatsSaidRound(steps, next: tap(500, 300, "点经典咖啡分类，选第二杯")))
+        let noted: [JObject] = Array(steps.prefix(3)) + [["action": .str("note"), "text": .str("购物车只有金奖深烘美式1杯")]] + Array(steps.suffix(2))
+        XCTAssertFalse(AgentLoop.repeatsSaidRound(noted, next: tap(104, 944, opens[0])))
+        XCTAssertTrue(AgentLoop.saidRoundReason(steps).contains("金奖深烘美式"))
+    }
+
     /// D199, xb13 on 151: a thought that says the screen is not the app opens it again.
     func testNotTheAppIsTakenAtItsWord() {
         XCTAssertTrue(AgentLoop.saysNotIn("The open command landed on the Calendar app, not X. I need to open X again.", "X"))
