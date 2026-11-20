@@ -1787,6 +1787,11 @@ import XCTest
     }
 
     /// D177, x4 on 148: a note saying the level is not shown, right after the swipe said "电量100%", is sent back with it.
+    /// D194, the X install on 151: an allowed install has steps for its download beyond a one-thing run's 45.
+    func testAnAllowedInstallHasStepsForItsDownload() {
+        XCTAssertGreaterThanOrEqual(AgentLoop.installStepAllowance, 45)
+    }
+
     /// D191, x1 on 151: 美团's cart panel heading "已加购商品" is no toast.
     func testTheCartPanelHeadingIsNoToast() {
         func row(_ t: String) -> [CandidatePicker.Piece] { [CandidatePicker.Piece(text: t, box: CGRect(x: 0.1, y: 0.6, width: 0.3, height: 0.03))] }

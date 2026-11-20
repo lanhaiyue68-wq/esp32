@@ -2762,6 +2762,11 @@ extension Pointer: Gestures {}
     var askInstall: ((String) async -> Bool?)?
     /// Apps asked about in this run (once each), and apps looked for a second time before "not on this phone".
     private var installAsked: Set<String> = []
+    /// D194, the X install over the cloud 11-20 (151): the owner said yes, 安裝 went through with no password, and the
+    /// run of one thing (45 steps) spent 30 of them on wait while App Store's ring turned; it ended "步骤用完了还没做完"
+    /// before X was on the phone. Each install the owner allows adds steps for the download.
+    private var installSteps = 0
+    static let installStepAllowance = 60
     /// D28, user 11-15: before 发布 in a video or post app the owner is asked (the cloud's approval, or a panel here);
     /// nil: nobody to ask (a WeChat watch run), and nothing is published. Apps this run may publish in, or was told not to.
     var askPublish: ((String) async -> Bool?)?
@@ -3170,7 +3175,7 @@ extension Pointer: Gestures {}
         (cartAdds, cartToastShown, cartAddsIn, skipAsked) = (0, false, [:], false)
         (failRefusedAt, freeFailRefusals, cartTapsChecked, appErrorLooks, pressRuns, stepsSinceProgress) = (-1, 0, 0, 0, [:], 0)
         (notes, departures, circleRefused, blindLooks, deadRefused, offlineWaits, sendBlocks) = ([], [], 0, 0, 0, 0, 0)
-        (installAsked, lookedAgain) = ([], [])
+        (installAsked, lookedAgain, installSteps) = ([], [], 0)
         (publishAllowed, publishDeclined) = ([], [])
         (coached, tryingTip) = ([], nil)
         (notesAtPart, emptyPartRefused, pasteFrame, sameAppRefused, pictureIn, listenedAll) = (0, -1, nil, 0, nil, false)
@@ -3212,7 +3217,9 @@ extension Pointer: Gestures {}
             }
             let budget = Self.stepBudget(plan: plan, base: stepLimit ?? maxSteps, goal: presetPlan.isEmpty ? task : "")
             if budget > (stepLimit ?? maxSteps) { DebugLog.write("run: \(budget) steps for a plan of several parts") }
-            for _ in 0..<budget {
+            var stepsRun = 0
+            while stepsRun < budget + installSteps {  // D194: an allowed install adds steps for its download
+                stepsRun += 1
                 do {
                     let recordsBefore = steps.count
                     if try await step() {
@@ -4440,6 +4447,7 @@ extension Pointer: Gestures {}
                             if !notes.contains(line) { notes.append(line) }
                             record(planned.shot, ["action": .str("install approved"), "app": .str(app), "reason": .str(line)])
                             gotOn()
+                            installSteps += Self.installStepAllowance  // D194
                             try await replan(stuck: true, first: Self.installFirst(app))
                             return false
                         case false?:
