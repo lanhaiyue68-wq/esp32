@@ -66,7 +66,7 @@ import XCTest
         _ = try await agent.step()
         let prompt = try XCTUnwrap(model?.prompts.last)
         XCTAssertTrue(prompt.contains("Text read on this screen"), prompt)
-        XCTAssertTrue(prompt.contains("Lan Agent 輸入法"))
+        XCTAssertTrue(prompt.contains("Pilot 輸入法"))
     }
 
     func testNoScreenTextUnlessAsked() async throws {
