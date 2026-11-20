@@ -1,5 +1,11 @@
 # 当前进度
 
+## 2026-11-20 13:55（首爾）151 已編好（150＋D185–D190），932 測試 0 失敗，IPA 在桌面；三題複查鏈等安裝
+- 使用者：「出 151 只複查三題」→ 版本 151（04862e0），build151-ci＝04862e0＋4fe5701（9123a7b），`git push --force-with-lease=main:caa4b7d build3200 build151-ci:main`。CI run 44676105187：編譯、打包成功，單元測試 932 個 0 失敗。
+- IPA：E:/桌面/Lan-Agent-build151-unsigned.ipa，4,475,343 bytes，SHA256 e8c47ed69796a5c9a2c99ef2a0ee22bafd2269770dd3f821b70b523c2725243d；三個 bundle 皆 151。148、150 IPA 留著。
+- tools/device-test/chain151.sh 已在背景跑：等 /api/v1/devices 回報 app_build 151 才開始，只跑 q151r（n16、x1、x4），每題前等溫度等級降到 serious 以下（最多 15 分鐘），結果 r151r/，trace logs_151/traces，輸出 chain151.out，停止 touch chain151.stop。
+- 下一步：使用者裝 151 → 三題自動跑完 → 分析並收尾。下次推送 lease＝main:9123a7b。
+
 ## 2026-11-20 06:50（首爾）150 只複查失敗題：12 題跑完，148 的目標問題全過；新找到的問題本機修好（D185–D190），未推送
 - chain150（q150r，每題後休息 4／10 分鐘散熱）03:36–06:21 首爾。結果 r150r/，trace logs_150/traces（x4＝20261120-044659）。iOS 回報溫度等級：nominal 10、fair 2、serious 11，沒有 critical。
 - 短題：n15、h14（只建一條）、h22（D184 在 x=12 起手，一次捲到）、s3、s4、s6 成功；h02 答約 0℃ 合理，s7 筆記本身沒完整步驟、答案如實說明，兩題標「未能核實」。n16 答錯時間（拿下一行「凌晨12:38」當「143夜测一」的時間）→ D185 f9457b2。
