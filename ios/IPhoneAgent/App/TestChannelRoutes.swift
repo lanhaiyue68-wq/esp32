@@ -100,6 +100,13 @@ extension AppModel {
                 case "type": reply["typed"] = .bool(await typeWithLanAgentKeyboard(text("text"), enter: body["enter"] as? Bool ?? false))
                 case "keyboard": reply["up"] = .bool(await showLanAgentKeyboard())
                 case "open": reply["opened"] = .bool(try await openApp(text("app")))
+                case "voicetest":
+                    // SPIKE 157 (throwaway, see VoiceProbe): hold WeChat's 按住说话 while the clip plays; the release sends it.
+                    let mode = text("mode")
+                    try await pointer.longPress(number("x"), number("y"), seconds: 1.0) { await VoiceProbe.play(mode: mode) }
+                    reply["played_s"] = .num(VoiceProbe.lastPlayed)
+                    reply["route"] = .str(VoiceProbe.lastRoute)
+                    if mode == "speaker" { _ = keepAwake.start() }  // the category went back to .playback; the silence goes on
                 default: return .json(["error": .str("unknown gesture")], status: 400)
                 }
                 reply["ms"] = .int(Int((now() - began) * 1000))

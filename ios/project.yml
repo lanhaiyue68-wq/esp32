@@ -55,6 +55,7 @@ targets:
         # Build 121: a video's spoken words. XcodeGen writes Info.plist from here: a key added only there is lost, and
         # asking for speech recognition without it ends the app.
         NSSpeechRecognitionUsageDescription: Pilot turns what a video says into text (spoken words, 口播文案) when you ask it to.
+        NSMicrophoneUsageDescription: Pilot plays a voice clip while WeChat records it (voice message test); it never records you.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true  # plain HTTP / WS to ChatTool and the knowledge server on the LAN
         UIBackgroundModes: [bluetooth-central, audio, screen-capture]
