@@ -290,7 +290,7 @@ enum AppNames {
         "提醒事项": ("提醒事項", "Reminders"), "电话": ("電話", "Phone"), "邮件": ("郵件", "Mail"),
         "音乐": ("音樂", "Music"), "钱包": ("錢包", "Wallet"), "健康": (nil, "Health"), "翻译": ("翻譯", "Translate"),
         "指南针": ("指南針", "Compass"), "图书": ("書籍", "Books"), "播客": ("Podcast", "Podcasts"),
-        "通讯录": ("聯絡人", "Contacts"), "微信": (nil, "WeChat"), "浏览器": (nil, "Safari"), "录音机": ("語音備忘錄", "Voice Memos"),
+        "通讯录": ("聯絡人", "Contacts"), "微信": ("WeChat", "WeChat"), "浏览器": ("Safari", "Safari"), "录音机": ("語音備忘錄", "Voice Memos"),
         // D40: on the Traditional phone of 11-16 京东 reads "JD" under its icon; Search for 京東 found nothing, 4 s each time.
         "京东": ("JD", "JD")]
 
@@ -314,6 +314,11 @@ enum AppNames {
     }
 
     /// The form to type into Search: the phone's own language.
+    /// D218: a name in plain letters (WeChat, Safari, JD), which the board's own keyboard types as it is.
+    static func plainLetters(_ s: String) -> Bool {
+        !s.isEmpty && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == " ") }
+    }
+
     static func searchName(_ name: String, language: String = Locale.preferredLanguages.first ?? "") -> String {
         // An app that has one name everywhere, asked for by it: "Safari" was typed as 瀏覽器 (over USB, 11-09).
         if let alias = aliases[base(name)], alias.tw == nil, alias.en.lowercased() == name.lowercased() { return name }
@@ -590,15 +595,24 @@ extension AppModel {
         }
         let typed = AppNames.searchName(name)
         if typed != name { DebugLog.write("open \(name): searching for \(typed), the phone's own name") }
-        guard await showLanAgentKeyboard() else {
-            DebugLog.write("open \(name): Search did not take the name")
-            return .unusable
-        }
-        try await pointer.key("cmd+a")
-        try await pointer.key("backspace")
-        guard await keyboardBridge.type(typed, enter: false, within: 4) else {
-            DebugLog.write("open \(name): Search did not take the name")
-            return .unusable
+        // D218, 157 over USB (11-22): on a Traditional phone 微信 was searched as 微信 (its name there is WeChat), and
+        // Pilot's keyboard said "已填入：微信" while Spotlight's field stayed empty; "wechat" typed by the board's own
+        // keyboard was taken at once. A name in plain letters goes in by the board.
+        if AppNames.plainLetters(typed) {
+            try await pointer.key("cmd+a")
+            try await pointer.key("backspace")
+            try await pointer.typeQuick(typed)
+        } else {
+            guard await showLanAgentKeyboard() else {
+                DebugLog.write("open \(name): Search did not take the name")
+                return .unusable
+            }
+            try await pointer.key("cmd+a")
+            try await pointer.key("backspace")
+            guard await keyboardBridge.type(typed, enter: false, within: 4) else {
+                DebugLog.write("open \(name): Search did not take the name")
+                return .unusable
+            }
         }
         // The results come a moment later; a Return before them opens nothing (over USB, 11-09).
         try? await Task.sleep(nanoseconds: 1_000_000_000)

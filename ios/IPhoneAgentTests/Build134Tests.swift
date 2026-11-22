@@ -436,6 +436,14 @@ import XCTest
     /// D40, user 11-16: 京东 reads "JD" on a Traditional phone; the Search pill names no page.
     func testJDAndThePillOnAHomePage() {
         XCTAssertEqual(AppNames.searchName("京东", language: "zh-Hant-TW"), "JD")
+        // D218, 157 over USB: on a Traditional phone WeChat and Safari go by those names, typed by the board.
+        XCTAssertEqual(AppNames.searchName("微信", language: "zh-Hant-TW"), "WeChat")
+        XCTAssertEqual(AppNames.searchName("微信", language: "zh-Hans-CN"), "微信")
+        XCTAssertEqual(AppNames.searchName("照片", language: "zh-Hant-TW"), "照片")
+        XCTAssertTrue(AppNames.plainLetters("WeChat"))
+        XCTAssertTrue(AppNames.plainLetters("Voice Memos"))
+        XCTAssertFalse(AppNames.plainLetters("小紅書"))
+        XCTAssertFalse(AppNames.plainLetters(""))
         XCTAssertEqual(AppNames.searchName("京东", language: "zh-Hans-CN"), "京东")
         XCTAssertTrue(AppNames.variants("京东").contains("JD"))
         XCTAssertTrue(AppNames.variants("京东").contains("京東"))

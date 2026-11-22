@@ -1512,7 +1512,11 @@ import Foundation
                     try await Task.sleep(nanoseconds: 400_000_000)
                     try await tap(Self.searchBlank.x, Self.searchBlank.y)
                 } else {
-                    log("home: a search screen (Search or an app's own); flicking home")
+                    // D219, 157 over USB (11-22): six flicks never left Spotlight (its keyboard up), and the run gave up
+                    // on 微信 after 31 s; Esc on the board's keyboard left it at once. Esc first, then the flick.
+                    log("home: a search screen (Search or an app's own); Esc, then flicking home")
+                    try await key("esc")
+                    try await Task.sleep(nanoseconds: 300_000_000)
                     try await flickHome()
                 }
             } else if await keyboardIsUp(rows, shown) {
