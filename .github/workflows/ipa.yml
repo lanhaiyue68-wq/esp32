@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       app:
-        description: "both = Pilot + 小藍 (with tests); xiaolan = only 小藍, no Pilot build or tests (saves Mac minutes)"
+        description: "both = Pilot + 小藍 (with tests); xiaolan = only 小藍 (saves Mac minutes). A push builds only 小藍 unless the commit says [pilot] / [tests]."
         default: xiaolan
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
     # Build 123, 11-12: the user's Actions quota is down to about 10%. The IPA takes ~4 min; the tests took 13 more on
     # this runner (and one hung every time). They run only when asked: "[tests]" in the commit message, or a manual run.
     env:
-      RUN_TESTS: ${{ (github.event_name == 'workflow_dispatch' && inputs.app != 'xiaolan') || contains(github.event.head_commit.message, '[tests]') }}
+      RUN_TESTS: ${{ (github.event_name == 'workflow_dispatch' && inputs.app == 'both') || contains(github.event.head_commit.message, '[tests]') }}
     steps:
       - uses: actions/checkout@v5
       - name: Bezier motion and measured pointer map policy
@@ -45,7 +45,7 @@ jobs:
           brew install xcodegen
           xcodegen generate
       - name: Build (Release, device, unsigned)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.app != 'xiaolan' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.app == 'both') || contains(github.event.head_commit.message, '[pilot]') }}
         run: |
           set -o pipefail
           xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent -configuration Release \
@@ -55,7 +55,7 @@ jobs:
               grep -E ": error:" -A4 build-device.log | head -120; tail -40 build-device.log; exit 65; }
           tail -40 build-device.log
       - name: Package IPA
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.app != 'xiaolan' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.app == 'both') || contains(github.event.head_commit.message, '[pilot]') }}
         run: |
           app=$(ls -d build-device/Build/Products/Release-iphoneos/*.app | head -1)
           build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
