@@ -133,7 +133,8 @@ struct AgentWidgetView: View {
     }
 }
 
-/// Control Center: run the last intent; stop the agent.
+/// Control Center: run the last intent; stop the agent. Control Center controls exist from iOS 18.
+@available(iOS 18.0, *)
 struct RunLastIntentControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "RunLastIntent") {
@@ -146,6 +147,7 @@ struct RunLastIntentControl: ControlWidget {
     }
 }
 
+@available(iOS 18.0, *)
 struct StopAgentControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "StopAgent") {

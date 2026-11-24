@@ -8,8 +8,10 @@ struct AgentActivityBundle: WidgetBundle {
     var body: some Widget {
         AgentLiveActivity()
         AgentStatusWidget()
-        RunLastIntentControl()
-        StopAgentControl()
+        if #available(iOS 18.0, *) {
+            RunLastIntentControl()
+            StopAgentControl()
+        }
     }
 }
 
