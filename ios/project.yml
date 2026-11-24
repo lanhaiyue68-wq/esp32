@@ -142,7 +142,8 @@ targets:
     type: application
     platform: iOS
     sources:
-      - IPhoneAgent
+      - path: IPhoneAgent
+        excludes: [Info.plist]  # Pilot's own; 小藍's is XiaoLan/Info.plist (else two Info.plist land in the app)
       - Shared
       - KeyboardShared
       - path: ../prompts
@@ -202,7 +203,10 @@ targets:
   XiaoLanKeyboard:
     type: app-extension
     platform: iOS
-    sources: [LanAgentKeyboard, KeyboardShared]
+    sources:
+      - path: LanAgentKeyboard
+        excludes: [Info.plist]  # Pilot keyboard's own; this one is XiaoLanKeyboard/Info.plist
+      - KeyboardShared
     info:
       path: XiaoLanKeyboard/Info.plist
       properties:
