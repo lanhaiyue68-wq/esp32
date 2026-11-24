@@ -275,7 +275,11 @@ enum Vision {
         guard !found.isEmpty else { return nil }
         found.sort { $0.score > $1.score }
         var disks: [(score: Double, x: Int, y: Int)] = []
-        for f in found where disks.allSatisfy({ Double((f.x - $0.x) * (f.x - $0.x) + (f.y - $0.y) * (f.y - $0.y)) > 4 * r * r }) {
+        for f in found where disks.allSatisfy({ d in
+            // Split up: Xcode 26's type checker gave up on the one-line form (the stopgap 小藍 build, 11-25).
+            let dx: Int = f.x - d.x, dy: Int = f.y - d.y
+            return Double(dx * dx + dy * dy) > 4 * r * r
+        }) {
             disks.append(f)
         }
         let centres: [CGPoint] = disks.compactMap { d in

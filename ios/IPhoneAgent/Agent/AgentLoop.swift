@@ -1196,11 +1196,14 @@ extension Pointer: Gestures {}
         guard !missing.isEmpty else { return nil }
         // 131 over the cloud 11-13 (g4): "G4全部做完" from an earlier day was in the group; told this, the model went 备忘录 ↔
         // 微信 (each time it saw the old bubble it took the message as sent) until the loop guard stopped it.
-        return "This run never sent " + missing.map { "“\($0)”" }.joined(separator: "、") + ". The same words already in the "
+        // Split up: Xcode 26's type checker gave up on the one long sum (the stopgap 小藍 build, 11-25).
+        let names: String = missing.map { "“\($0)”" }.joined(separator: "、")
+        let rest: String = ". The same words already in the "
             + "chat are an older message from an earlier run, not this run's: type and send each again now in the chat the "
             + "goal names (it is approved there), or say in the answer that it was not sent. When a number or fact the "
             + "message needs could not be found (a thing it comes from was 未能完成), send nothing made up in its place: "
             + "say in the answer that it was not sent and why."
+        return "This run never sent " + names + rest
     }
 
     /// D144, x3 on 145 (rerun): 美团 asked to log in, items 3 and 4 were skipped, and “X3外卖合计N元” (N from item 5) had no
