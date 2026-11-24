@@ -69,12 +69,29 @@ jobs:
           mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
           (cd ipa && zip -qry "../IPhoneAgent-build${build}-unsigned.ipa" Payload)
           shasum -a 256 IPhoneAgent-build*-unsigned.ipa | tee ipa.sha256
+      - name: Build XiaoLan (Release, device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project IPhoneAgent.xcodeproj -scheme XiaoLan -configuration Release             -destination generic/platform=iOS -derivedDataPath build-xiaolan             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build > build-xiaolan.log 2>&1 || {
+              grep -E ": error:" -A4 build-xiaolan.log | head -120; tail -40 build-xiaolan.log; exit 65; }
+          tail -20 build-xiaolan.log
+      - name: Package XiaoLan IPA
+        run: |
+          app=build-xiaolan/Build/Products/Release-iphoneos/XiaoLan.app
+          build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
+          /usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print UIDeviceFamily' "$app/Info.plist"
+          ls -l "$app/XiaoLan" "$app/PlugIns/XiaoLanKeyboard.appex/XiaoLanKeyboard" "$app/Assets.car"
+          mkdir -p ipa-xiaolan/Payload && cp -R "$app" ipa-xiaolan/Payload/
+          (cd ipa-xiaolan && zip -qry "../XiaoLan-build${build}-unsigned.ipa" Payload)
+          shasum -a 256 XiaoLan-build*-unsigned.ipa | tee -a ipa.sha256
       - name: Upload the IPA (before the tests, so a runner-only test hang does not lose the build)
         uses: actions/upload-artifact@v4
         with:
           name: IPhoneAgent-unsigned-ipa
           path: |
             ios/IPhoneAgent-build*-unsigned.ipa
+            ios/XiaoLan-build*-unsigned.ipa
             ios/ipa.sha256
           retention-days: 7
       - name: Unit tests (simulator, unsigned)

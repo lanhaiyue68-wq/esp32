@@ -136,6 +136,95 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
+  # 小藍 iPad 版 (docs/xiaolan-ipad-port-plan.md): the same sources built as its own app, named 小藍, with its own
+  # bundle id so it installs beside Pilot. XIAOLAN switches what differs. Native on iPad: fills the screen.
+  XiaoLan:
+    type: application
+    platform: iOS
+    sources:
+      - IPhoneAgent
+      - Shared
+      - KeyboardShared
+      - path: ../prompts
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: XiaoLanKeyboard
+        embed: true
+    info:
+      path: XiaoLan/Info.plist
+      properties:
+        CFBundleDisplayName: 小藍
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, zh-Hans]
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+        NSSupportsLiveActivities: true
+        CFBundleURLTypes:
+          - CFBundleURLName: $(IA_BUNDLE_ID).xiaolan
+            CFBundleURLSchemes: [xiaolan]
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: 小藍通過藍牙連接開發板，用來看畫面、移動指標和發送語音。
+        NSLocalNetworkUsageDescription: 小藍從開發板接收鏡像畫面，並連接你電腦或伺服器上的指令服務。
+        NSSpeechRecognitionUsageDescription: 小藍在你要求時把影片裡說的話轉成文字。
+        NSMicrophoneUsageDescription: 小藍不會錄你的聲音；語音由語音開發板送出。
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIBackgroundModes: [bluetooth-central, audio, screen-capture]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Pilot runs
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.zip-archive]
+        IAPresetBaseURL: $(IA_PRESET_BASE_URL)
+        IAPresetModel: $(IA_PRESET_MODEL)
+        IAPresetKey: $(IA_PRESET_KEY)
+        IAAppGroup: group.$(IA_BUNDLE_ID).xiaolan
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(IA_BUNDLE_ID).xiaolan
+        PRODUCT_NAME: XiaoLan
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_EMIT_LOC_STRINGS: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) XIAOLAN
+        ASSETCATALOG_COMPILER_APPICON_NAME: XiaoLanIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        CODE_SIGN_ENTITLEMENTS: $(IA_ENTITLEMENTS)
+  XiaoLanKeyboard:
+    type: app-extension
+    platform: iOS
+    sources: [LanAgentKeyboard, KeyboardShared]
+    info:
+      path: XiaoLanKeyboard/Info.plist
+      properties:
+        CFBundleDisplayName: 小藍
+        CFBundleDevelopmentRegion: en
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: zh-Hans
+            RequestsOpenAccess: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(IA_BUNDLE_ID).xiaolan.keyboard
+        PRODUCT_NAME: XiaoLanKeyboard
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
   IPhoneAgentTests:
     type: bundle.unit-test
     platform: iOS
@@ -156,3 +245,7 @@ schemes:
         IPhoneAgentTests: [test]
     test:
       targets: [IPhoneAgentTests]
+  XiaoLan:
+    build:
+      targets:
+        XiaoLan: all
