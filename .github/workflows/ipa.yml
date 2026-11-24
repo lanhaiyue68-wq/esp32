@@ -52,7 +52,7 @@ jobs:
             -destination generic/platform=iOS -derivedDataPath build-device \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build > build-device.log 2>&1 || {
               # The last 150 lines were warnings only and hid the error (build 116's first run).
-              grep -E ": error:" -A4 build-device.log | head -120; tail -40 build-device.log; exit 65; }
+              grep -E "error:" -A4 build-device.log | head -120 || true; tail -60 build-device.log; exit 65; }
           tail -40 build-device.log
       - name: Package IPA
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.app == 'both') || contains(github.event.head_commit.message, '[pilot]') }}
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project IPhoneAgent.xcodeproj -scheme XiaoLan -configuration Release             -destination generic/platform=iOS -derivedDataPath build-xiaolan             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build > build-xiaolan.log 2>&1 || {
-              grep -E ": error:" -A4 build-xiaolan.log | head -120; tail -40 build-xiaolan.log; exit 65; }
+              grep -E "error:" -A4 build-xiaolan.log | head -120 || true; tail -60 build-xiaolan.log; exit 65; }
           tail -20 build-xiaolan.log
       - name: Package XiaoLan IPA
         run: |
