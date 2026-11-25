@@ -2749,12 +2749,6 @@ extension AppModel {
         try? await pointer.tap(Double(cancel.box.midX), Double(cancel.box.midY))
     }
 
-    /// A fresh frame, for the no-model steps.
-    private func freshFrame() async -> Data? {
-        _ = try? await feed.currentFrame()
-        return feed.frame
-    }
-
     /// From wherever the phone is to the chat `chat`, with no model call: the chat itself; its row on the chat list;
     /// back from another WeChat chat; or WeChat again through Lan Agent. Every step is checked on a fresh frame and
     /// anything unclear stops here (the agent's run takes over as before).
