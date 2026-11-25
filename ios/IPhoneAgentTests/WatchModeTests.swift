@@ -292,6 +292,39 @@ import UIKit
         XCTAssertTrue(XiaoLanOrders.openMomentPicture(friend: "王五", locate: "新品到了").contains("第一张图片"))
     }
 
+    /// 164: 小藍 reads a chat with no model — the recognizer's lines and the colour each sits on (iPad WeChat 11-25).
+    func testXiaoLanReadsAChatByTheBubbleColours() {
+        XCTAssertEqual(WatchOCR.kind(of: (147, 236, 106)), .mine)
+        XCTAssertEqual(WatchOCR.kind(of: (254, 254, 254)), .theirs)
+        XCTAssertEqual(WatchOCR.kind(of: (237, 237, 237)), .grey)
+        XCTAssertEqual(WatchOCR.titled("测试群(6)").name, "测试群")
+        XCTAssertTrue(WatchOCR.titled("测试群（6）").group)
+        XCTAssertFalse(WatchOCR.titled("蓝海乐").group)
+        func at(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> CGRect {  // pixels of the 960 x 1280 frame
+            CGRect(x: x0 / 960, y: y0 / 1280, width: (x1 - x0) / 960, height: (y1 - y0) / 1280)
+        }
+        let pieces: [WatchOCR.Piece] = [
+            .init(text: "昨天 05:20", box: at(432, 128, 528, 148), kind: .grey),
+            .init(text: "@蓝海乐【小蓝测试】输入法提醒 5479", box: at(450, 205, 845, 228), kind: .mine),
+            .init(text: "昨天 06:18", box: at(432, 300, 528, 320), kind: .grey),
+            .init(text: "蓝海乐", box: at(97, 355, 146, 372), kind: .grey),
+            .init(text: "在吗", box: at(115, 398, 160, 418), kind: .theirs),
+            .init(text: "第二行", box: at(115, 421, 190, 441), kind: .theirs),  // the same bubble, wrapped
+            .init(text: "柳掌柜(本人号)通过扫描加入群聊", box: at(222, 548, 738, 566), kind: .grey),
+            .init(text: "好的", box: at(800, 620, 845, 642), kind: .mine),
+        ]
+        let screen = WatchOCR.lines(pieces, title: "测试群(6)")
+        XCTAssertEqual(screen.title, "测试群")
+        XCTAssertTrue(screen.group)
+        XCTAssertEqual(screen.lines.map(\.sender), ["我", "蓝海乐", "我"])
+        XCTAssertEqual(screen.lines.map(\.text), ["@蓝海乐【小蓝测试】输入法提醒 5479", "在吗第二行", "好的"])
+        XCTAssertEqual(screen.lines.map(\.mine), [true, false, true])
+        // a private chat: the other side is the chat itself, no names above bubbles
+        let one = WatchOCR.lines([.init(text: "在吗", box: at(115, 398, 160, 418), kind: .theirs)], title: "蓝海乐")
+        XCTAssertEqual(one.lines.first?.sender, "蓝海乐")
+        XCTAssertFalse(one.group)
+    }
+
     /// 163: the engines' robot settings, QA callback and type-101 report (docs/xiaolan-engine-logic.md).
     func testXiaoLanQACallbackLikeTheEngines() throws {
         XCTAssertEqual(ChatToolLink.configURL("127.0.0.1:18971/zwt", robot: "r1")?.absoluteString,

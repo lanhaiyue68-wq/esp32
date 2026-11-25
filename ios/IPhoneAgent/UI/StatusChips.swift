@@ -19,7 +19,9 @@ struct StatusChips: View {
             chip(feed.isNative ? "直接取屏" : "Mirroring", "rectangle.on.rectangle", ok: feed.isNative ? feed.watchable : board.connected && board.status?.ap == "streaming", page: .see)
             chip("Mouse", "cursorarrow", ok: board.connected && board.status?.usb == "ok", page: .act)
             chip(calibrator.busy ? "Calibrating" : "Pointer", "scope", ok: pointer.calibrated, busy: calibrator.busy, page: .act)
+            #if !XIAOLAN  // 164: 小藍 runs no model (its server decides the replies)
             chip("Model", "brain", ok: app.modelReady && app.modelOK != false, page: .brain)
+            #endif
         }
         .padding(.horizontal, Space.l)
     }

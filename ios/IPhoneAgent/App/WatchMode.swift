@@ -1327,7 +1327,9 @@ extension AppModel {
     func startWatch() -> String? {
         guard !watching else { return nil }
         if !MockMode.on {
+            #if !XIAOLAN  // 164: 小藍 runs no model; replies come from its server
             guard settings.isConfigured else { return String(localized: "Set up the model in Settings first.") }
+            #endif
             guard pointer.calibrated else { return String(localized: "Calibrate the pointer in Lan Agent first.") }
             guard board.connected, feed.watchable else {
                 return String(localized: "The board or Screen Mirroring isn't ready. Connect the board and start Screen Mirroring.")
@@ -1749,6 +1751,12 @@ extension AppModel {
             guard let look = await readChat(opened) else { return skipUnread(opened, rules) }
             (chat, screen) = (opened, look)
         } else {
+            #if XIAOLAN
+            // 164: 小藍 runs no model (docs/xiaolan-engine-logic.md). The red mark was not opened on the device: the
+            // next check looks again.
+            DebugLog.write("watch: no unread chat opened on the device; no model in 小藍, so this check ends here")
+            return (false, false)
+            #else
             // Stop on the destination before the actor can return to the list and consume its unread badge.
             // A local title is only a navigation hint: readChat independently verifies the actual destination.
             // Which chat to open depends on the red badges now, never on the last check: no learned route.
@@ -1760,6 +1768,7 @@ extension AppModel {
             rest(open, rules)
             guard let look = await readChat(open) else { return skipUnread(open, rules) }
             (chat, screen) = (open, look)
+            #endif
         }
         return await finishCheck(chat: chat, screen: screen, rules: rules)
     }
@@ -2140,6 +2149,16 @@ extension AppModel {
                 DebugLog.write("watch: no chat title readable on screen for \(chat); not read")
                 return nil
             }
+            #if XIAOLAN
+            // 164: 小藍 reads on the device, no model (WatchOCR: the system's text recognizer and the bubbles' colours).
+            guard let read = WatchOCR.screen(frame, title: title ?? chat) else {
+                DebugLog.write("watch: could not read \(chat) on the device")
+                return nil
+            }
+            let seen = WatchSettings.masked(WatchReport.privateSenders(read, chat: chat), pin: WatchSettings.ownerPIN)
+            DebugLog.write("watch: read \(chat) on the device: \(seen.lines.count) line(s)")
+            return seen
+            #endif
             // Asked twice at most: the model now and then writes broken JSON (logs(13): a missing quote), and a
             // lost read is a lost check.
             let pin = WatchSettings.ownerPIN
@@ -2199,6 +2218,9 @@ extension AppModel {
     /// The days not yet distilled: the listed chats' messages and what was opened go to the planner, which keeps the
     /// knowledge worth having; then every distilled day goes to the server, and what it took leaves the phone.
     private func distillArchive() async {
+        #if XIAOLAN
+        return  // 164: the daily summary asks a model; 小藍 runs none (its server does any summing up)
+        #endif
         let targets = WatchSettings.rules.targets
         for day in WatchArchive.daysToDistill() {
             guard watching, !Task.isCancelled else { return }
