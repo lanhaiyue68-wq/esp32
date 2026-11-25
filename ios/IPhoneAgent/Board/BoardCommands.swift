@@ -227,8 +227,8 @@ extension HIDDevice {
     /// (px / 0.55): what a move should go → what to send. Only for that pace; other paces send as they are.
     static let padShortTable: [(want: Double, send: Double)] = [(0, 0), (76, 160), (184, 320), (332, 480), (568, 640), (640, 700)]
     static let padShortStep = 60, padShortPace = 30
-    static func padShort(_ command: String, step: Int = CommandChannel.padStep, pace: Int = CommandChannel.padPaceMs) -> String? {
-        guard step == padShortStep, pace == padShortPace else { return nil }
+    static func padShort(_ command: String, step: Int? = nil, pace: Int? = nil) -> String? {
+        guard (step ?? padStep) == padShortStep, (pace ?? padPaceMs) == padShortPace else { return nil }
         let parts = command.split(separator: " ")
         guard parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
         let len = hypot(Double(dx), Double(dy))
