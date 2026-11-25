@@ -4,7 +4,7 @@ import UIKit
 /// endpoints visually, then confirm each with a real click before saving.
 extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
-    static let roughStops = [75, 150]
+    static var roughStops: [Int] { [75, 150].map { $0 * Pointer.padScale } }  // 167: iPad 600 / 1200, clear of the status bar
     static let targets: [(Double, Double)] = [
         (0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.75), (0.9, 0.9)]
     // Test each low axis separately, away from the top-left system indicator.

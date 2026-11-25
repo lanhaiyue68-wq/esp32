@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 21:50（首爾）167：iPad 校準的探測距離按比例放大
+- 使用者：166 還是校準不了。日誌：點一下定位成功（0.088, 0.670）、歸零只推過頂 300（沒拉通知中心），但第一下探測點擊是「角落＋75 單位」＝iPad 螢幕的 (0.019, 0.014)，正好點在狀態列時間上（iPad 點時間會開通知中心）→ app: background → probe 1: no confirmed click。
+- 167：Pointer.padScale（iPad 8、iPhone 1）；calibrationMove 200×、calibrationStops [150,350]×、TouchCalibration.roughStops [75,150]×（iPad 600／1200）；nudge iPad 60。
+- 實機驗證（不點擊）：用測試通道照 167 的距離歸零後移 600/600，截圖看到箭頭在 (148,158)px＝(0.154, 0.123)，在校準格線畫面內、避開狀態列。
+
 ## 2026-11-25 21:30（首爾）165／166 編譯、測試全過，IPA 出好
 - 165 CI 45538379889：964 測試 0 失敗。166 第一次 CI 45538810413 失敗（我新加的 freshFrame 與 KeyboardTyping.swift 的 AppModel.freshFrame 重名，刪掉改用原本的），f6558e5 → CI 45539140479：965 測試 0 失敗，小藍相關 9 個測試都過。
 - IPA：E:/桌面/XiaoLan-build166-ios27-unsigned.ipa（SHA256 7f44300f…，與 CI 一致），小藍、166、iphoneos27.1、[1,2]、含 ScreenCaptureKit、含 QA 回調／搜尋／裝置上讀聊天的程式。

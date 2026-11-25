@@ -6,12 +6,17 @@ import Foundation
 /// gestures it slams it into the top-left corner (`home`) again to cancel drift. Coordinates are fractions of
 /// the screen (0..1, origin top-left), so they work for any frame size.
 @MainActor final class Pointer: ObservableObject {
-    static let calibrationMove = 200        // mouse units moved diagonally for a manual (one point) calibration
-    static let calibrationStops = [150, 350]  // automatic calibration finds the pointer at these distances
+    /// 167: an iPad's screen is ~8x the mouse units of an iPhone's (3900 x 5270 measured on the customer's iPad 9, 11-25,
+    /// against ~445 x 620): distances given in units are scaled so they land as far across the screen as on an iPhone.
+    /// 166's calibration probed 75 units from the corner: on the iPad that was the status bar's clock, which opens
+    /// Notification Center, so no probe click ever reached the calibration screen.
+    static var padScale: Int { CommandChannel.onPad() ? 8 : 1 }
+    static var calibrationMove: Int { 200 * padScale }  // mouse units moved diagonally for a manual (one point) calibration
+    static var calibrationStops: [Int] { [150, 350].map { $0 * padScale } }  // automatic calibration finds the pointer here
     static let rehomeEvery = 10             // gestures between re-homing
     static let hold = 0.25                  // s to rest before lifting, so iOS adds no momentum
     static let tapGap = 0.15                // s to stay still after a click, so iOS sees a finished tap
-    static let nudge = 12                   // mouse units the pointer is wiggled by to find it on screen
+    static var nudge: Int { CommandChannel.onPad() ? 60 : 12 }  // units the pointer is wiggled by to find it on screen
     static let aimTolerance = 0.008         // screen fraction; a bigger miss is corrected before pressing
     static let maxMiss = 0.06               // bigger misses are still corrected, but not learned from; they mark the calibration stale
     static let aimPasses = 3                // closed loop: look, correct, look again, at most this many corrections
