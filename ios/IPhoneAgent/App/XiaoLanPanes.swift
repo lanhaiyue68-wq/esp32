@@ -147,9 +147,43 @@ import UIKit
     }
 
     /// 180: a chat's app by what only WeCom's chats show: the quick bar over the input (企业名片, 快捷回复, 发起收款).
-    static func chatApp(_ rows: [[Piece]]) -> XiaoLanOrders.App {
-        let words = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服"]
-        return rows.joined().contains { p in words.contains { p.text.contains($0) } } ? .wework : .wechat
+    static func chatApp(_ rows: [[Piece]]) -> XiaoLanOrders.App { weworkBar(rows) ? .wework : .wechat }
+
+    /// 182 (Echo 181, 11-26: WeCom left in 企微测试群, a title WeChat has too, was nobody's window: "no chat of WeChat or
+    /// WeCom; left alone", its list and the owner's private message never looked at): WeCom's quick bar over the input
+    /// tells its chats wherever they are.
+    static func weworkBar(_ rows: [[Piece]]) -> Bool {
+        let words = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服", "推薦客服"]
+        return rows.joined().contains { p in words.contains { p.text.contains($0) } }
+    }
+
+    /// 182 (Echo 181, 11-26: a chat left on its 按住 说话 bar, the white button taken for the input field: "小蓝输入法没有
+    /// 打出字"): the voice bar's button reads 按住 说话; the switch back to typing is the round button at the bar's left.
+    /// WeCom's typing field reads 发消息或按住…, which does not start with 按住.
+    static func voiceToggle(_ rows: [[Piece]]) -> CGPoint? {
+        rows.joined().first { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return p.box.midY > 0.55 && (t.hasPrefix("按住说") || t.hasPrefix("按住說") || t.hasPrefix("按住讲") || t.hasPrefix("按住講"))
+        }.map { CGPoint(x: 0.055, y: $0.box.midY) }
+    }
+
+    /// 182 (user 11-26: "點聊天空白處收鍵盤"; Esc did not put 小藍's keyboard down, and it covered the other window's
+    /// tab bar): a spot of bare chat background above the input bar, clear across the middle (no bubble, no time line;
+    /// avatars stay outside 0.15–0.85), lowest first. Nil when there is none.
+    static func blankSpot(_ px: WatchOCR.Pixels, above bottom: Double) -> CGPoint? {
+        func bare(_ y: Double) -> Bool {
+            stride(from: 0.15, through: 0.85, by: 0.035).allSatisfy { x in
+                let (r, g, b) = px.rgb(x, y)
+                return (225...244).contains(r) && (225...244).contains(g) && (225...247).contains(b)
+                    && max(r, g, b) - min(r, g, b) <= 8
+            }
+        }
+        var y = bottom - 0.03
+        while y > 0.15 {
+            if bare(y), bare(y - 0.012), bare(y + 0.012) { return CGPoint(x: 0.5, y: y) }
+            y -= 0.006
+        }
+        return nil
     }
 
     /// 180: a chat of WeChat or WeCom by its background down the window's left margin: WeChat (237, 237, 237), WeCom
@@ -342,6 +376,14 @@ import UIKit
     /// The sender is the owner: one of `names` (typed or learned), WeCom's "@微信" tag and spaces left out.
     static func isOwner(_ sender: String, names: [String]) -> Bool {
         let s = XiaoLanPanes.listName(sender)
-        return !s.isEmpty && names.contains { XiaoLanPanes.listName($0) == s }
+        return !s.isEmpty && names.contains { n in XiaoLanPanes.listName(n) == s || person(n) == person(s) }
+    }
+
+    /// 182 (Echo 181, 11-26: "范兆磊＠某公司" in WeChat, learned as the owner, came back after a restart as a new
+    /// sender): a WeCom account seen from WeChat carries "＠company"; the person is the name before it.
+    static func person(_ name: String) -> String {
+        let s = XiaoLanPanes.listName(name)
+        guard let at = s.firstIndex(where: { $0 == "@" || $0 == "＠" }), at > s.startIndex else { return s }
+        return String(s[..<at])
     }
 }

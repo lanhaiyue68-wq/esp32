@@ -1310,9 +1310,18 @@ import Foundation
     /// with a drag left (press, one move, release, no pause between them); WeCom's are the system's swipe actions, which
     /// a pointer's drag only taps (it opened the chat twice, 11-25) and a sideways scroll over the row brings out.
     /// `room`: how far left the drag may go (screen fraction), so it stays inside its window.
+    /// 182 (Echo 181, 11-26: the back arrow not reached for minutes, "pointer not seen below the arrow" each 8 s): the
+    /// position kept is wrong when the pointer is not seen where it should be. Forgotten, the next move finds it first
+    /// (on an iPad by looking for the arrow) and goes from there.
+    func forgetPosition() { pos = nil }
+
+    /// 182 (Echo 181, 11-26, 290 three times: the drag went from where the pointer was thought to be and opened the
+    /// row above or below; the check on the named row then found no 删除 and nothing was deleted): the pointer is first
+    /// seen on the row, as a tap's is; not seen there, nothing is dragged.
     func revealRowActions(_ x: Double, _ y: Double, room: Double, scroll: Bool) async throws {
         try await oneAtATime {
-            try await point(x, y, rehome: pos == nil)
+            try await point(x, y, aim: true, rehome: pos == nil)
+            guard aimSaw else { throw DeviceError(message: "没看到游标停在那一行上，没有滑") }
             lastClick = nil
             if scroll {
                 for _ in 0..<14 { try await device.send("scroll 0 -4") }

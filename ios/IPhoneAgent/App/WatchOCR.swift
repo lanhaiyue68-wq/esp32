@@ -90,13 +90,44 @@ enum WatchOCR {
     /// name is read as a "Q"; one Q right after a CJK character or a bracket is that icon, not the name.
     /// 181 (Echo 180 on the iPad, 11-25: "企微测试群（7）0", the chat not taken for 企微测试群 and its new line kept as
     /// history): right after the head count the logo is read as a 0 or an O too. The（7）is the head count, no name.
+    /// 182 (Echo 181, 11-26: "企微测试群（7）9", the chat not taken for 企微测试群: the reply order failed, and its old
+    /// lines were reported as new under a chat of that name): after the head count nothing of the name follows, so any
+    /// one character there is the logo, whatever it is read as.
     static func withoutIconTail(_ s: String) -> String {
         guard let last = s.last, s.count >= 2 else { return s }
         let before = s[s.index(before: s.index(before: s.endIndex))]
         let afterCount = before == ")" || before == "）"
-        let logo = "QqＱ".contains(last) && (afterCount || before.unicodeScalars.contains(where: { $0.value >= 0x2E80 }))
-            || afterCount && "0OoＯ〇".contains(last)
+        let logo = "QqＱ".contains(last) && before.unicodeScalars.contains(where: { $0.value >= 0x2E80 })
+            || afterCount && last != ")" && last != "）" && !last.isWhitespace
         return logo ? String(s.dropLast()).trimmingCharacters(in: .whitespaces) : s
+    }
+
+    /// 182 (Echo 181, 11-26): words of the apps' own controls read as messages and reported: 文件传输助手's
+    /// "按住说话" (the voice bar, while recording), WeCom's "哦。•转换完成" (a voice note's transcript and its label).
+    /// A line that is only such words is dropped; the label after a transcript is cut off.
+    static let uiPhrases = ["按住说话", "按住說話", "松开发送", "鬆開發送", "松开取消", "鬆開取消", "滑到这里转文字",
+                            "滑到這裡轉文字", "上滑取消"]
+    static let uiTails = ["转换完成", "轉換完成", "转文字完成", "轉文字完成"]
+
+    static func withoutUIWords(_ text: String) -> String {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bare = t.filter { !$0.isWhitespace }
+        if uiPhrases.contains(bare) { return "" }
+        for tail in uiTails where bare.hasSuffix(tail) {
+            if let r = t.range(of: tail, options: .backwards) { t = String(t[..<r.lowerBound]) }
+            t = t.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "•·・●")))
+        }
+        return t
+    }
+
+    /// 182 (Echo 181, 11-26: WeCom's line to 企微测试群 dropped in over WeChat's 测试群 as a banner, and was reported as
+    /// 测试群's): an in-app banner sits in the title bar's band, left-aligned, "name: message". The chat's own title is
+    /// centred and has no colon there. While one shows, the chat is not read (it goes in a few seconds).
+    static func bannerShown(_ pieces: [CandidatePicker.Piece]) -> Bool {
+        pieces.contains { p in
+            (0.02...0.14).contains(Double(p.box.midY)) && Double(p.box.minX) < 0.3 && p.text.count >= 4
+                && (p.text.contains(":") || p.text.contains("："))
+        }
     }
 
     /// A read line: what the recognizer found and what it sits on.
@@ -110,7 +141,7 @@ enum WatchOCR {
         var open: (kind: Kind, text: String, top: Double, bottom: Double, height: Double)?
         func close() {
             if let o = open {
-                let text = o.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = withoutUIWords(o.text)
                 if !text.isEmpty {
                     lines.append(WatchReport.Line(sender: o.kind == .mine ? "我" : (sender.isEmpty ? name : sender), text: text,
                                                   mine: o.kind == .mine))
@@ -157,11 +188,16 @@ enum WatchOCR {
         return r >= 250 && g >= 250 && b >= 250 ? CGPoint(x: 0.45, y: y) : nil
     }
 
-    /// The chat on screen (its title already read and checked by the caller), or nil when the frame cannot be read.
-    static func screen(_ jpeg: Data, title: String) -> WatchReport.Screen? {
+    /// The chat on screen (its title already read and checked by the caller), or nil when the frame cannot be read or
+    /// a banner covers its top. 182 (user 11-26: "速度太慢了"): `rows`, the window's words already read for this very
+    /// frame, are used as they are instead of reading the picture a second time.
+    /// `banner` false: read even under a banner (checking my own newest line after a send; a banner is never mine).
+    static func screen(_ jpeg: Data, title: String, rows: [[CandidatePicker.Piece]]? = nil, banner: Bool = true) -> WatchReport.Screen? {
         guard let px = Pixels(jpeg) else { return nil }
         let bottom = px.inputTop(from: 0.12) ?? 0.95
-        let pieces = CandidatePicker.rows(in: jpeg, top: 0.08, bottom: bottom).joined()
+        let read = Array((rows ?? CandidatePicker.rows(in: jpeg, top: 0.08, bottom: bottom)).joined())
+        if banner && bannerShown(read) { return nil }
+        let pieces = read
             .filter { Double($0.box.minY) > 0.085 && Double($0.box.maxY) < bottom }
             .map { Piece(text: $0.text, box: $0.box, kind: kind($0.box, px)) }
         return lines(bySide(pieces, px), title: title)
@@ -171,12 +207,16 @@ enum WatchOCR {
     /// its colour alone (WeCom's bubbles can be white both ways). A bubble's first line sits beside its avatar: an avatar
     /// on the left only = theirs, on the right only = mine. The lines under it (past the avatar) keep that bubble's
     /// side. Grey (names, times) stays as it is.
+    /// 182 (Echo 181, 11-26: the owner's wide green bubble "【小蓝测试】181 个微发消息 / 0001" had its second line
+    /// reported five times as someone else's): a green (WeChat) or blue (WeCom) bubble is always mine, whatever the
+    /// strips beside it show (a wide bubble's own edge reaches into the left avatar strip). Only a white line is told by
+    /// the side of its avatar.
     static func bySide(_ pieces: [Piece], _ px: Pixels) -> [Piece] {
         let sorted = pieces.sorted { $0.box.midY < $1.box.midY }
         var out: [Piece] = []
         var last: Piece?
         for var p in sorted {
-            if p.kind == .mine || p.kind == .theirs {
+            if p.kind == .theirs {
                 switch avatarSide(p.box, px) {
                 case .some(.theirs): p.kind = .theirs
                 case .some(.mine): p.kind = .mine

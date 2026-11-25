@@ -54,7 +54,8 @@ extension AppModel {
                 guard watching, !Task.isCancelled else { break }
                 await paneHandle(look, &state)
             }
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            // 182 (user 11-26: "速度太慢了…跟安卓機比差遠了"): a shorter rest between passes (was 0.7 s).
+            try? await Task.sleep(nanoseconds: 350_000_000)
         }
     }
 
@@ -70,13 +71,15 @@ extension AppModel {
         if opened { (state.hopped, state.frontSince) = (true, nil) }
     }
 
-    /// Every window on the screen now, read.
-    func paneLooks(after since: Double? = nil) async -> [PaneLook] {
+    /// Every window on the screen now, read. 182 (user 11-26: "速度太慢了"): `side` reads that window only (each
+    /// window's words cost a text recognition; a check after a tap needs only the window tapped).
+    func paneLooks(after since: Double? = nil, side only: Int? = nil) async -> [PaneLook] {
         if let since { await feed.afterAction(since: since) }
         guard let frame = feed.frame, let px = WatchOCR.Pixels(frame) else { return [] }
         let rects = XiaoLanPanes.windows(px)
         var looks: [PaneLook] = []
         for (i, r) in rects.enumerated() {
+            if let only, only != (rects.count == 1 ? 2 : i) { continue }
             guard let crop = XiaoLanPanes.crop(frame, r) else { continue }
             let rows = await CandidatePicker.rowsOffMain(in: crop, top: 0, bottom: 1)
             var view = XiaoLanPanes.view(rows)
@@ -90,15 +93,17 @@ extension AppModel {
     }
 
     /// The same window again after a gesture, up to `tries` looks 0.5 s apart until `done` says so.
+    /// 182: only that window is read, and the waits are shorter (0.3 + 0.2 s were 0.15 + 0.1 s): the wait for a new
+    /// frame after the action is already in `paneLooks(after:)`.
     private func paneLook(_ side: Int, after since: Double, tries: Int = 4, until done: (PaneLook) -> Bool) async -> PaneLook? {
         var last: PaneLook?
         var t = since
         for _ in 0..<tries {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            last = await paneLooks(after: t).first { $0.side == side }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            last = await paneLooks(after: t, side: side).first { $0.side == side }
             if let l = last, done(l) { return l }
             t = now()
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
         return last
     }
@@ -119,6 +124,7 @@ extension AppModel {
     func paneTell(_ looks: [PaneLook], _ state: inout PaneWatchState) {
         let told: [XiaoLanOrders.App?] = looks.map { l in
             if let a = XiaoLanPanes.app(l.rows) { return a }
+            if XiaoLanPanes.weworkBar(l.rows) { return .wework }  // 182: a WeCom chat, by its quick bar
             guard l.view == .list, let px = WatchOCR.Pixels(l.crop) else { return nil }
             return XiaoLanPanes.tabApp(px)  // 181: the chosen tab's colour, when no word was read
         }
@@ -161,7 +167,10 @@ extension AppModel {
     /// pointer is first found on the chat below the arrow, then hops the short way up and clicks; not seen there, nothing
     /// is clicked by the window's top. A window gone after the click stops the watch: the owner brings it back by its
     /// Dock icon.
-    private func paneBack(_ look: PaneLook, _ who: String) async -> Bool {
+    /// 182 (Echo 181, 11-26: half the backs failed, "pointer not seen below the arrow", and a window stayed in a chat for
+    /// minutes, its list and red marks unseen): not seen at either spot, the kept position is forgotten (the next move
+    /// finds the arrow first, ~1.7 s) and the two spots are tried once more. Still nothing is clicked unseen.
+    private func paneBack(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
         let arrow = XiaoLanPanes.onScreen(XiaoLanPanes.back, in: look.rect)
         for stage in XiaoLanPanes.backStages {
             let s = XiaoLanPanes.onScreen(stage, in: look.rect)
@@ -184,6 +193,11 @@ extension AppModel {
                 return false
             }
             return true
+        }
+        if !refound {
+            DebugLog.write("watch: \(who): back: pointer not seen below the arrow; finding it first, then once more")
+            pointer.forgetPosition()
+            return await paneBack(look, who, refound: true)
         }
         DebugLog.write("watch: \(who): back: pointer not seen below the arrow; nothing clicked by the window's top")
         return false
@@ -212,7 +226,8 @@ extension AppModel {
         case .chat(let title):
             // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has their grey background; the Settings app's 键盘 page
             // was taken for a chat and its back arrow tapped. Any other window is left alone.
-            guard let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.chatBackground(px) else {
+            // 182: WeCom's quick bar tells its chats too (11-26: WeCom in 企微测试群 was left alone for minutes).
+            guard let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.chatBackground(px) || XiaoLanPanes.weworkBar(look.rows) else {
                 if state.notChat[look.side] != title {
                     state.notChat[look.side] = title
                     DebugLog.write("watch: a window shows \(title), no chat of WeChat or WeCom; left alone")
@@ -227,8 +242,9 @@ extension AppModel {
             if paneRead(app, look, title: title, fromMark: false, &state) > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
-            // The engines watch the whole list: a chat that stays quiet 8 s is left for the list (its red marks).
-            if let quiet = state.quietSince[look.side], now() - quiet > 8 {
+            // The engines watch the whole list: a chat that stays quiet is left for the list (its red marks). 182 (user
+            // 11-26: "速度太慢了"): 5 s, was 8 s (other chats' messages waited that long first).
+            if let quiet = state.quietSince[look.side], now() - quiet > 5 {
                 DebugLog.write("watch: \(app.rawValue): \(title) quiet; back to the list")
                 _ = await paneBack(look, app.rawValue)
                 state.quietSince[look.side] = nil
@@ -270,7 +286,7 @@ extension AppModel {
     @discardableResult
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool,
                           _ state: inout PaneWatchState) -> Int {
-        guard let read = WatchOCR.screen(look.crop, title: title) else { return 0 }
+        guard let read = WatchOCR.screen(look.crop, title: title, rows: look.rows) else { return 0 }  // 182: read once
         let name = read.title
         let lines = read.lines.map { WatchReport.Line(sender: XiaoLanPanes.listName($0.sender), text: $0.text, mine: $0.mine) }
         let key = "\(app.rawValue)|\(name)"
@@ -374,14 +390,29 @@ extension AppModel {
             }
             look = opened
         }
+        // 182 (Echo 181, 11-26): a chat left on its 按住 说话 bar is switched back to typing first; the switch puts the
+        // field of this window in focus with the keyboard up, so it needs no second tap.
+        var focused = false
+        if let toggle = XiaoLanPanes.voiceToggle(look.rows) {
+            DebugLog.write("watch: \(app.rawValue): \(chat) shows 按住 说话; switching to typing")
+            guard await paneTap(toggle, in: look.rect, wide: 0.03),
+                  let typing = await paneLook(look.side, after: now(), until: { XiaoLanPanes.voiceToggle($0.rows) == nil }),
+                  XiaoLanPanes.voiceToggle(typing.rows) == nil else {
+                return (false, "\(appName)的「\(chat)」停在「按住 说话」，没切回打字")
+            }
+            look = typing
+            focused = true
+        }
         // The input field: the white box at the bottom of the window (WeCom's row of buttons above it is left alone).
         // 180 (Echo 178, 11-25): always tapped, keyboard up or not. The keyboard is the whole screen's: up from a send in
         // WeCom, a reply meant for WeChat was typed into WeCom's field and went out there, as the WeCom account.
-        guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px) else {
-            return (false, "\(appName)里没找到输入框")
+        if !focused {
+            guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px) else {
+                return (false, "\(appName)里没找到输入框")
+            }
+            guard await paneTap(field, in: look.rect, wide: 0.15) else { return (false, ChatToolLink.reasonNotSent) }
         }
-        guard await paneTap(field, in: look.rect, wide: 0.15) else { return (false, ChatToolLink.reasonNotSent) }
-        try? await Task.sleep(nanoseconds: 400_000_000)
+        try? await Task.sleep(nanoseconds: 250_000_000)  // 182: was 0.4 s
         do {
             try await pointer.key("cmd+a")
             try await pointer.key("backspace")
@@ -391,26 +422,38 @@ extension AppModel {
         guard await typeWithLanAgentKeyboard(text, enter: false) else {
             return (false, "小蓝输入法没有打出字（请在\(appName)里把键盘切成小蓝）")
         }
-        try? await Task.sleep(nanoseconds: 400_000_000)
+        try? await Task.sleep(nanoseconds: 200_000_000)  // 182: was 0.4 s
         let returned = await keyboardBridge.type("", enter: true, within: 4)
         DebugLog.write("watch: \(app.rawValue): typed into \(chat); the keyboard's return \(returned ? "pressed" : "not confirmed")")
-        // 180 (Echo 178, 11-25): the keyboard left up covered the windows' tab bars, and the WeChat list was read as a chat
-        // called 微信. Esc puts it down (it does nothing else in WeChat or WeCom).
-        try? await pointer.key("esc")
-        // Sent when my newest line now shows the text.
+        // Sent when my newest line now shows the text (182: read from the words already read for the check).
         let head = String(text.filter { !$0.isWhitespace }.prefix(6))
-        let after = await paneLook(look.side, after: now(), tries: 3) { l in
-            guard case .chat(let t) = l.view, let r = WatchOCR.screen(l.crop, title: t) else { return false }
-            return r.lines.last(where: \.mine).map { $0.text.filter { !$0.isWhitespace }.contains(head) } ?? false
+        func sentShown(_ l: PaneLook) -> WatchReport.Screen? {
+            guard case .chat(let t) = l.view, let r = WatchOCR.screen(l.crop, title: t, rows: l.rows, banner: false),
+                  r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(head) }) == true else { return nil }
+            return r
         }
-        if let a = after, case .chat(let t) = a.view, let r = WatchOCR.screen(a.crop, title: t),
-           r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(head) }) == true {
+        let after = await paneLook(look.side, after: now(), tries: 3) { sentShown($0) != nil }
+        // 180 (Echo 178, 11-25): the keyboard left up covered the windows' tab bars and the list was read as a chat.
+        // 182 (user 11-26: "點聊天空白處收鍵盤"; Esc left 小藍's keyboard up): a tap on bare chat background puts it down.
+        if let a = after { await paneDismissKeyboard(a) }
+        if let a = after, let r = sentShown(a) {
             let key = "\(app.rawValue)|\(r.title)"
             state.history[key] = WatchReport.remember([], screen: r.lines, history: nil)
             state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
             return (true, "")
         }
         return (false, ChatToolLink.reasonNotSent)
+    }
+
+    /// 182: the keyboard down by a tap on the chat's bare background above the input bar (nothing there to open or play).
+    private func paneDismissKeyboard(_ l: PaneLook) async {
+        guard case .chat = l.view, let px = WatchOCR.Pixels(l.crop) else { return }
+        let bar = px.inputTop(from: 0.3) ?? 0.85
+        guard let spot = XiaoLanPanes.blankSpot(px, above: bar) else {
+            DebugLog.write("watch: no bare chat background to tap; the keyboard left up")
+            return
+        }
+        _ = await paneTap(spot, in: l.rect, wide: 0.1)
     }
 
     /// 174 (user 11-25): delete `chat` from its app's chat list in its window: the row's buttons brought out (WeChat by a
@@ -430,11 +473,20 @@ extension AppModel {
             return (false, "\(appName)的会话列表上看不到「\(chat)」")
         }
         let start = XiaoLanPanes.onScreen(CGPoint(x: 0.75, y: title.midY), in: look.rect)
-        do {
-            try await pointer.revealRowActions(Double(start.x), Double(start.y), room: Double(start.x - look.rect.minX) - 0.03,
-                                               scroll: app == .wework)
-        } catch {
-            return (false, "\(appName)里滑不出「\(chat)」的按钮：\(error.localizedDescription)")
+        // 182: the pointer is seen on the row before the drag; not seen, it is found first and tried once more.
+        for attempt in 0..<2 {
+            do {
+                try await pointer.revealRowActions(Double(start.x), Double(start.y), room: Double(start.x - look.rect.minX) - 0.03,
+                                                   scroll: app == .wework)
+                break
+            } catch {
+                if attempt == 0 {
+                    DebugLog.write("watch: \(app.rawValue): delete \(chat): \(error.localizedDescription); finding the pointer, once more")
+                    pointer.forgetPosition()
+                    continue
+                }
+                return (false, "\(appName)里滑不出「\(chat)」的按钮：\(error.localizedDescription)")
+            }
         }
         func button(_ l: PaneLook) -> CGPoint? {
             guard let image = UIImage(data: l.crop)?.cgImage else { return nil }

@@ -57,9 +57,12 @@ enum CandidatePicker {
 
     /// The keyboard's status line, bare and lowercased: its old name (Lan Agent), or Pilot's own words (156: the
     /// keyboard is called Pilot now; a phone still on an older build shows the old line).
-    static let ourKeyboardMarks = ["lanagent", "pilot輸入法", "pilot输入法", "pilot已填入", "連不上pilot", "连不上pilot"]
-    /// The keyboard's name in the globe key's menu, bare and lowercased (Pilot from 156, Lan Agent before).
-    static let ourKeyboardNames: Set<String> = ["pilot", "lanagent"]
+    /// 182 (Echo 181, 11-26: after the iPad restarted, WeChat's keyboard was 简体拼音 again; the globe menu opened but
+    /// "has no Lan Agent row": 小藍's keyboard is listed as 小藍 — Echo): 小藍's names and status words too.
+    static let ourKeyboardMarks = ["lanagent", "pilot輸入法", "pilot输入法", "pilot已填入", "連不上pilot", "连不上pilot",
+                                   "小藍輸入法", "小蓝输入法", "小藍已填入", "小蓝已填入"]
+    /// The keyboard's name in the globe key's menu, bare and lowercased (Pilot from 156, Lan Agent before, 小藍 — Echo).
+    static let ourKeyboardNames: Set<String> = ["pilot", "lanagent", "小藍echo", "小蓝echo", "小藍", "小蓝"]
 
     static func keyboardMenuOpen(rows: [[Piece]]) -> Bool {
         rows.contains { row in keyboardMenuWords.contains { bare(row.map(\.text).joined()).lowercased().hasPrefix($0) } }
