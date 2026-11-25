@@ -1,5 +1,12 @@
 # 当前进度
 
+## 2026-11-25 23:50（首爾）170＋滑鼠板韌體 v35：速度調到最快（推邊仍慢）
+- 使用者：速度要調到最快。兩個槓桿：①iPad 辅助触控「跟踪速度」拉到最快（使用者自己調，169 起校準會重新量螢幕單位，推邊量按比例）；②板子韌體步幅。
+- 韌體 v35（E:/AgentStorage/esp32/esp32-iphone-agent/hardware/hid_bridge/hid_bridge.ino，未提交）：STEP 改成可變，預設快（40／每報告，原本 10），新指令 `step N|fast|slow`。改之前把整份韌體原始碼備份到 E:/AgentStorage/esp32/backups/mouse-board-v34-20261125/hardware-source-v34.zip（板子實際快閃記憶體還要等板子接電腦再 read_flash）。
+- 170：CommandChannel.padPace —— iPad 推邊（歸零左／上、遠邊點擊的底／右、校準定位）前切 `step slow`、推完切回 `step fast`；padTrack 認得 step。舊韌體回 unknown command 會略過。
+- 工具：arduino-cli 1.6.0（官方，sha256 核對）裝在 D:/AIProjects/arduino-cli（設定檔 arduino-cli.yaml，資料都在 D 槽），背景安裝 esp32:esp32@3.3.12＋NimBLE-Arduino@2.5.1（與之前建置相同）。
+- 模擬伺服器：mockqiwei.js 加 MOCK_HOST（0.0.0.0 給 iPad 連）、/robot/robotInfo/get、/qa（只有含「测试回复」才回），18970／18971 已在電腦背景跑；UTF-8 測試回覆正常。
+
 ## 2026-11-25 23:30（首爾）169 續：CI 修正、遠端填伺服器、名稱圖示改成 Echo（K40 安卓小藍）
 - 169 第一次 CI 45546440932 失敗：pointer-motion 測試包把 ProbeMap.swift 單獨編，不認得 CommandChannel → ProbeMotion.onePiece 開關（AppModel 依 iPad 設定）。
 - 使用者：測試要填電腦模擬伺服器位址。測試通道加 POST /servers（serverOn/serverURL/robot/weworkOn/weworkURL/weworkCode），工具 `lan_usb_ipad.py servers '<json>'`；電腦 WLAN IP 192.168.3.79（個微 :18971/zwt、企微 :18970/qiwei）。mockqiwei.js 目前只聽 127.0.0.1，要改成可給 iPad 連。

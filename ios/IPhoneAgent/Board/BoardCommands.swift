@@ -192,7 +192,7 @@ extension HIDDevice {
             }
             return p
         case "click", "press", "release", "scroll", "type", "key", "ping", "curve", "status", "snap", "stream", "fps",
-             "res", "log", "bench", "phy", "coex", "hid", "app": return pos
+             "res", "log", "bench", "phy", "coex", "hid", "app", "step": return pos
         default: return nil  // abort, flickhome, homescreen, unpair, …
         }
     }
@@ -221,6 +221,13 @@ extension HIDDevice {
         }
     }
 
+    /// v35 boards move fast (`step fast`, 40 counts a report); a push past an iPad's edge goes at the slow pace every
+    /// edge test of 11-25 was made at (a fast one opens Notification Center or goes Home). Older boards answer
+    /// "unknown command": nothing changes there.
+    func padPace(slow: Bool) async {
+        _ = try? await send(slow ? "step slow" : "step fast", timeout: nil)
+    }
+
     private func padHomeNow() async throws -> String {
         var located: Double?
         if Self.padPos == nil, let locate = Self.padLocateY { located = await locate() }
@@ -230,7 +237,14 @@ extension HIDDevice {
         }
         DebugLog.write("ipad home: " + steps.joined(separator: " · "))
         Self.padPos = nil
-        for step in steps { _ = try await sendWatched(step) }
+        await padPace(slow: true)
+        do {
+            for step in steps { _ = try await sendWatched(step) }
+        } catch {
+            await padPace(slow: false)
+            throw error
+        }
+        await padPace(slow: false)
         Self.padPos = (0, 0)
         return ""
     }

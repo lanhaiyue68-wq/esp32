@@ -28,8 +28,10 @@ extension AutoCalibrator {
         CommandChannel.padPos = nil
         do {
             try await device.send("abort")  // also releases; the firmware forgets its corner, so no curve bows up or left
+            _ = try? await device.send("step slow")  // v35 boards: these pushes go at the pace the edges were tested at
             try await device.send("move -\(CommandChannel.padSpan.w * 2 + CommandChannel.padMargin) 0")  // harmless however far
             try await device.send("move 300 -150")
+            _ = try? await device.send("step fast")
             var first: CGPoint?
             for attempt in 0..<2 where first == nil {
                 if attempt > 0 {

@@ -548,7 +548,9 @@ import Foundation
             // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
             // ordinary move; after the short way back it follows a move like the calibrated ones.
             let push = pad ? mx.units(for: 1) + CommandChannel.padMargin : max(mx.units(for: 1) * 3 / 2, 400)
+            if pad { _ = try? await device.send("step slow") }  // v35 boards: a push past an edge at the slow pace
             try await ProbeMotion.move(device, push, 0)
+            if pad { _ = try? await device.send("step fast") }
             try await Task.sleep(nanoseconds: 150_000_000)
             try await ProbeMotion.move(device, -back, 0)
             try await Task.sleep(nanoseconds: 150_000_000)
@@ -558,7 +560,9 @@ import Foundation
         if bottom {
             let up = my.units(for: 1 - y)
             let push = pad ? my.units(for: 1) + CommandChannel.padMargin : max(my.units(for: 1) * 3 / 2, 600)
+            if pad { _ = try? await device.send("step slow") }
             try await ProbeMotion.move(device, 0, push)
+            if pad { _ = try? await device.send("step fast") }
             try await Task.sleep(nanoseconds: 150_000_000)
             try await ProbeMotion.move(device, 0, -up)
             log(String(format: "point (%.3f, %.3f): a bottom row; from the bottom border, %ld units up", x, y, up))
