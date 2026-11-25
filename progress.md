@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 14:20（首爾）162 編譯、測試全過，IPA 出好
+- 第一次 CI 45530934622 失敗：iPad 歸零寫在 BoardCommands.swift 的類別 CommandChannel 裡，我在 Pointer／AppModel／測試引用成「BoardCommands」（3 處 cannot find in scope）。c7ea54c 改名後 CI 45531319928：BUILD／TEST SUCCEEDED，962 測試 0 失敗（新 6 個都過）。
+- IPA：E:/桌面/XiaoLan-build162-ios27-unsigned.ipa（SHA256 d5e37069…647071c33，與 CI 一致）；核對：顯示名小藍，en／zh-Hans InfoPlist.strings 都是小藍（不再是 Pilot），版本 162，[1,2]，iphoneos27.1，含 ScreenCaptureKit，含 XiaoLanRoot／XiaoLanToolbox。
+- 還沒做：iPad 安裝、校準實測、三分頁真機看；Onboarding 還是大藍頁面。
+
 ## 2026-11-25 13:40（首爾）162：iPad 校準不再拉下通知中心；小藍自己的介面與名稱（未推送）
 - 使用者回報兩件事：①校準時歸零會拉下通知中心、校準不了；②裝的是小藍，但 App 還是大藍。
 - ①實測（iPad 用 USB＋測試通道，tools/ipad/lan_usb_ipad.py 改成小藍 bundle com.example.esp32agent.xiaolan.67AUY82AXY）：共享畫面看得到游標，量出 iPad 一屏≈3900×5270 app 單位（iPhone 約 445×620）。往左推多少都沒事；單次推過頂邊 150／400／800 沒事；韌體 home（6 下 -127 高速）、推過頂邊約 2000、頂端連推 5 次 700、往下推過底 6000（回主畫面）都會觸發。日誌也證實 161 校準失敗是 home 後 App 被蓋住、探測點擊沒到。

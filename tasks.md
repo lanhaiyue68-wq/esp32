@@ -5,7 +5,8 @@
 - [x] 161 指令層：智微兔 35＋智企微行 54 個指令全接（XiaoLanOrders／XiaoLanMedia／ChatToolLink 企微連線／WatchMode.runOrder），跟圈有圖貼文改截螢幕上傳。
 - [x] 161 提交 cdf9fc3 推 build477 main；CI 45524329990 編譯＋960 測試 0 失敗；IPA E:/桌面/XiaoLan-build161-ios27-unsigned.ipa。
 - [x] 使用者已裝 161；回報校準拉下通知中心、介面是大藍 → 162 修（iPad 歸零、小藍名稱與三分頁介面），待推 CI。
-- [ ] 162 推 build477 → CI → 裝 iPad → 校準實測（共享整個螢幕要開）。
+- [x] 162 CI 45531319928 編譯＋962 測試 0 失敗；IPA E:/桌面/XiaoLan-build162-ios27-unsigned.ipa。
+- [ ] 使用者裝 162 → 打開共享整個螢幕 → 校準實測（看會不會再拉通知中心）→ 看三分頁。
 - [ ] iPad 真機在测试群逐項測指令（先 203／204／205、查詢類），按實測調目標文字。
 - [ ] 推測欄位實測確認：215–217、225、230、235、305。
 - [ ] 跟圈截圖上傳連 owner-gequan 後台實測。
