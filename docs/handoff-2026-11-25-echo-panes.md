@@ -1,4 +1,6 @@
-# 新視窗交接：Echo（小藍 iPad）173 — 個微＋企微分屏同時守候（2026-11-25 下午，Claude Code）
+# 新視窗交接：Echo（小藍 iPad）174 — 快又準、不碰上左下邊、刪除會話（2026-11-25 傍晚更新，Claude Code）
+
+> **最新狀態（17:55）**：174 已編好（CI 45578426817，971 測試 0 失敗，Xcode 27.1），桌面只剩 `E:\桌面\XiaoLan-build174-ios27-unsigned.ipa`（173 已刪）。滑鼠板已是 v38。下一步：使用者用愛思裝 174 → 開 Echo、共享整個螢幕、校準 → 讀日誌 `ipad home: the arrow at`、`probe feedback check`、`slow pace ratio` → 分屏守候實測 → 找可刪的聊天實測「删除会话」（工具箱 290）。**173 在 v38 板子設定下不要校準。** 細節看第六節與 progress.md 最上面 174 段。
 
 回覆一律繁體中文。先讀這份，再讀 `progress.md` 最上面四段（171、172、173）、`docs/xiaolan-engine-logic.md`。
 上一份交接 `docs/handoff-2026-11-25-echo-ipad-night.md` 的事（滑鼠板備份、v35 燒錄、170 安裝）都已完成。
