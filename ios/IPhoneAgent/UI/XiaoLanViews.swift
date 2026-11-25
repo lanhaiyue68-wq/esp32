@@ -44,7 +44,7 @@ struct XiaoLanWatchTab: View {
                         Text(app.watching ? "守候中" : "尚未開始").font(.largeTitle.bold())
                         if !app.watchStatus.isEmpty { Text(verbatim: app.watchStatus).font(.subheadline) }
                         Text(app.watching ? "已讀 \(app.watchRead) 則訊息。伺服器和工具箱的指令會依序執行。"
-                                          : "開始後小藍會看著微信，伺服器（個微、企微）和工具箱的指令也在這時執行。")
+                                          : "開始後 Echo 會看著微信，伺服器（個微、企微）和工具箱的指令也在這時執行。")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button {
                             if app.watching {
@@ -67,7 +67,7 @@ struct XiaoLanWatchTab: View {
                 } header: {
                     Text("開發板與畫面")
                 } footer: {
-                    Text("點橘色的項目完成設定。校準時請讓小藍留在最前面、打開共享整個螢幕。")
+                    Text("點橘色的項目完成設定。校準時請讓 Echo 留在最前面、打開共享整個螢幕。")
                 }
                 Section("指令連線") {
                     XiaoLanLinkRow(title: "個人微信（智微兔指令）", link: chat, on: serverOn)
@@ -90,7 +90,7 @@ struct XiaoLanWatchTab: View {
                     }
                 }
             }
-            .navigationTitle("小藍")
+            .navigationTitle("Echo")
             .sheet(isPresented: $watchSettings) { WatchView(app: app) }
         }
     }
@@ -303,7 +303,7 @@ struct XiaoLanSettingsTab: View {
                     }
                 }
                 Section("關於") {
-                    LabeledContent("小藍版本", value: Self.version)
+                    LabeledContent("Echo 版本", value: Self.version)
                 }
             }
             .navigationTitle("設定")

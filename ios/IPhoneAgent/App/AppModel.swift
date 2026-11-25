@@ -157,6 +157,7 @@ import UIKit
                            screen: feed)
         pointer = made
         CommandChannel.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
+        ProbeMotion.onePiece = CommandChannel.onPad()  // 169: on an iPad one curved move, not x then y
         agent = AgentLoop(phone: made, screen: feed, actor: nil, planner: nil, trace: traces)
         if !MockMode.on {
             let memory = ExperienceStore(file: support.appendingPathComponent("experience-v1.json"))

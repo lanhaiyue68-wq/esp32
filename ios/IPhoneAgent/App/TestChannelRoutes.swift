@@ -56,6 +56,22 @@ extension AppModel {
             if !feed.restartCapture() { feed.startNativeSharing() }
             return .json(["status": .str(feed.nativeStatus)])
 
+        case ("POST", "/servers"):
+            // 169 (user 11-25: "做測試，把那個服務器地址填一下"): the order servers set from the computer over USB, e.g.
+            // the mock servers on it. Only the keys given change; restart the watch to use them.
+            let d = UserDefaults.standard
+            for (key, field) in [(WatchSettings.serverURLKey, "serverURL"), (WatchSettings.robotKey, "robot"),
+                                 (WatchSettings.weworkURLKey, "weworkURL"), (WatchSettings.weworkCodeKey, "weworkCode")]
+            where body[field] is String {
+                d.set(text(field), forKey: key)
+            }
+            for (key, field) in [(WatchSettings.serverOnKey, "serverOn"), (WatchSettings.weworkOnKey, "weworkOn")] {
+                if let on = body[field] as? Bool { d.set(on, forKey: key) }
+            }
+            return .json(["serverOn": .bool(WatchSettings.serverOn), "serverURL": .str(WatchSettings.serverURL),
+                          "robot": .str(WatchSettings.robotId), "weworkOn": .bool(WatchSettings.weworkOn),
+                          "weworkURL": .str(WatchSettings.weworkURL), "weworkCode": .str(WatchSettings.weworkCode)])
+
         case ("POST", "/watch"):
             if body["on"] as? Bool == true {
                 if let problem = startWatch() { return .json(["error": .str(problem)], status: 409) }

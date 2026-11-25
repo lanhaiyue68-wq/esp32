@@ -1,5 +1,11 @@
 # 当前进度
 
+## 2026-11-25 23:30（首爾）169 續：CI 修正、遠端填伺服器、名稱圖示改成 Echo（K40 安卓小藍）
+- 169 第一次 CI 45546440932 失敗：pointer-motion 測試包把 ProbeMap.swift 單獨編，不認得 CommandChannel → ProbeMotion.onePiece 開關（AppModel 依 iPad 設定）。
+- 使用者：測試要填電腦模擬伺服器位址。測試通道加 POST /servers（serverOn/serverURL/robot/weworkOn/weworkURL/weworkCode），工具 `lan_usb_ipad.py servers '<json>'`；電腦 WLAN IP 192.168.3.79（個微 :18971/zwt、企微 :18970/qiwei）。mockqiwei.js 目前只聽 127.0.0.1，要改成可給 iPad 連。
+- 使用者：小藍名稱與圖示要跟 K40 上的安卓小藍一樣 → 名稱 Echo（suite/res bluebridge_label，使用者確認），圖示照 bluebridge_launcher（底 #0B1030、大圓 #3862EB、小圓 #57B5E0／重疊 #5DC2FC、白點）畫成 1024 圖；畫面標題與權限說明也改 Echo。
+- 使用者：板子韌體可以改快，但先把這塊滑鼠板的韌體完整備份（明天新板子到，燒同一份給 iPhone 用）。板子目前沒接電腦（沒有 COM）。
+
 ## 2026-11-25 23:00（首爾）169：iPad 走貝塞爾曲線、從上一點出發、校準更快
 - 使用者裝 168：校準成功（日誌 calibration: ±0.5%，span 3683×5033），但嫌慢、走直線、每下都從左上角出發（使用者說過多次：從上一次點的位置用貝塞爾曲線去下一點，要快）。
 - 原因：ProbeMotion.move 把移動拆成先 x 後 y 兩段，單軸移動板子不畫曲線 → 直角兩直線（一般跳點也是）；校準每個探測點都先歸零。

@@ -158,7 +158,7 @@ targets:
     info:
       path: XiaoLan/Info.plist
       properties:
-        CFBundleDisplayName: 小藍
+        CFBundleDisplayName: Echo  # 11-25 user: the same name and logo as Android 小藍 on the K40
         CFBundleDevelopmentRegion: en
         CFBundleLocalizations: [en, zh-Hans]
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -174,11 +174,11 @@ targets:
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait]
-        NSBluetoothAlwaysUsageDescription: 小藍通過藍牙連接開發板，用來看畫面、移動指標和發送語音。
-        NSLocalNetworkUsageDescription: 小藍從開發板接收鏡像畫面，並連接你電腦或伺服器上的指令服務。
+        NSBluetoothAlwaysUsageDescription: Echo 通過藍牙連接開發板，用來看畫面、移動指標和發送語音。
+        NSLocalNetworkUsageDescription: Echo 從開發板接收鏡像畫面，並連接你電腦或伺服器上的指令服務。
         NSSpeechRecognitionUsageDescription: 小藍在你要求時把影片裡說的話轉成文字。
         NSMicrophoneUsageDescription: 小藍不會錄你的聲音；語音由語音開發板送出。
-        NSPhotoLibraryAddUsageDescription: 伺服器指令要發圖片、影片、二維碼或朋友圈時，小藍先把它存進相簿，再由你在微信裡選它。
+        NSPhotoLibraryAddUsageDescription: 伺服器指令要發圖片、影片、二維碼或朋友圈時，Echo 先把它存進相簿，再由你在微信裡選它。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIBackgroundModes: [bluetooth-central, audio, screen-capture]

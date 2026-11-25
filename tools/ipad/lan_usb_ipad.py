@@ -105,6 +105,8 @@ async def main():
         return show(*await call("POST", "/board", {"cmd": " ".join(rest)}))
     if what == "watch":
         return show(*await call("POST", "/watch", {"on": rest[0] == "on"}))
+    if what == "servers":  # build 169+: servers '{"serverOn":true,"serverURL":"http://192.168.3.79:18971/zwt",...}'
+        return show(*await call("POST", "/servers", json.loads(rest[0]) if rest else {}))
     raise SystemExit(__doc__)
 
 

@@ -88,6 +88,9 @@ struct ProbeMap: Codable {
 /// incorrectly persisted curve=off; recover that state before measured positioning.
 @MainActor enum ProbeMotion {
     static let version = 4
+    /// 169: moves go as one curved move rather than x then y (set on an iPad by AppModel; this file also builds alone
+    /// in the pointer-motion harness, so it names no app type).
+    static var onePiece = false
 
     static func home(_ device: HIDDevice) async throws {
         try Task.checkCancellation()
@@ -117,7 +120,7 @@ struct ProbeMap: Codable {
         // 169 (user 11-25, iPad: "還是直線去點，不是貝塞爾曲線"): split into x then y, each a straight line (the board
         // only curves a move with both), the pointer drew an L. On an iPad it is one move, which the board curves; the
         // firmware's corridor keeps the curve inside the move's own box once a home has forgotten the corner (abort).
-        if CommandChannel.onPad(), x != 0, y != 0 {
+        if onePiece, x != 0, y != 0 {
             try await device.send("move \(x) \(y)")
             try await Task.sleep(nanoseconds: 100_000_000)
             return
