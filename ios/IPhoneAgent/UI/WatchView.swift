@@ -21,6 +21,9 @@ struct WatchView: View {
     @AppStorage(WatchSettings.serverOnKey) private var serverOn = false
     @AppStorage(WatchSettings.serverURLKey) private var serverURL = ""
     @AppStorage(WatchSettings.robotKey) private var robot = WatchSettings.defaultRobot
+    @AppStorage(WatchSettings.weworkOnKey) private var weworkOn = false
+    @AppStorage(WatchSettings.weworkURLKey) private var weworkURL = ""
+    @AppStorage(WatchSettings.weworkCodeKey) private var weworkCode = ""
     @AppStorage(WatchSettings.serverRepliesKey) private var serverReplies = false
     @AppStorage(WatchSettings.privateWordsKey) private var privateWords = ""
     @AppStorage(WatchSettings.blockNumbersKey) private var blockNumbers = true
@@ -263,6 +266,15 @@ struct WatchView: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 Toggle("ChatTool decides the replies", isOn: $serverReplies)
                 ChatToolStatus(link: app.chatTool)
+            }
+            // 小藍 iPad 版: the WeCom engine's orders (智企微行), done in 企业微信 on this iPad.
+            Toggle("Take WeCom orders too", isOn: $weworkOn)
+            if weworkOn {
+                TextField("WeCom order server, like http://192.168.31.85:18970/qiwei", text: $weworkURL)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                TextField("WeCom robot code", text: $weworkCode)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                ChatToolStatus(link: app.weworkTool)
             }
         } header: {
             Text("Computer (ChatTool)")

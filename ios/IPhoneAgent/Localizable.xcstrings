@@ -1,6 +1,56 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Take WeCom orders too" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时接企业微信的指令"
+          }
+        }
+      }
+    },
+    "WeCom order server, like http://192.168.31.85:18970/qiwei" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "企业微信指令服务器，例如 http://192.168.31.85:18970/qiwei"
+          }
+        }
+      }
+    },
+    "WeCom robot code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "企业微信机器人编号"
+          }
+        }
+      }
+    },
+    "Server order: %@ · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器指令：%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "Enter the WeCom order server's address and robot code." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请填写企业微信指令服务器的地址和机器人编号。"
+          }
+        }
+      }
+    },
     "Learning" : {
       "extractionState" : "manual",
       "localizations" : {

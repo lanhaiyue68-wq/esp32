@@ -1,5 +1,37 @@
 # 当前进度
 
+## 2026-11-25 12:10（首爾）161：跟圈有圖的貼文也能發（截螢幕上的圖，未推送、未編譯）
+- 使用者糾正：「抓不到原圖，能打開它也行，主要是看圖片內容」。我之前說 iPad 抓不到朋友圈圖片所以發不了，太保守了。
+- 改法：WatchMode.captureMomentPictures —— 260 讀完後，對每條有圖的貼文跑代理任務「打開第一張圖全螢幕、停住」，等 2.5 秒讓指標淡掉，拿當下畫面 → XiaoLanMedia.trimmed 裁掉黑邊（只把接近純黑當背景、取最長一段連續有內容的列與欄，狀態列、頁碼點、指標這種短段會被排除）→ XiaoLanMedia.upload POST 到跟圈 uploadUrl?robotId&token（owner-gequan 回 {"url": …/files/<sha>.jpg}）→ pointer.swipe 往左換下一張；全部成功才 imagesComplete=true＋imageUrls，後台就會派 261，iPad 再把這些圖下載進相簿照發。
+- 驗證：Python 用同樣規則模擬三種畫面（橫圖帶暗色上緣、直圖兩側黑邊、全黑）裁切位置都對；Swift 新增 testMomentPictureLosesTheViewerBlack（UIKit 畫黑底＋狀態列＋圖片）與 uploadURL 斷言，都還沒在 CI 跑。
+
+## 2026-11-25 11:30（首爾）161：智微兔＋智企微行全部指令接上（未推送、未編譯）
+- 使用者：「不要推，把企微、個微的功能全部加進去」。新增 `ios/IPhoneAgent/Services/XiaoLanOrders.swift`（指令目錄：個微 35 個、企微 54 個，每個變成代理中文目標／只看不改的查詢／App 自己回答）與 `XiaoLanMedia.swift`（fileUrl 下載存相簿或 Documents/orders、509/510/513/514 本機回答、跟圈結果 POST）。
+- `ChatToolLink`：分 wechat／wework 兩種連線（…/webserver/wework/<code>）；除 201/202/303/304/305 外全部排隊給守候；缺欄位立刻回 101011＋原因；不屬於該引擎的回 501000；`sendData` 回 socketType 2 資料封包；`host` 給跟圈檢查回呼位址。
+- `WatchMode.runOrder`：微信 203 無 @ 走原本快速發送；其他全走 `watchRun`（隱私檢查先過、先下載檔案、查詢 JSON→資料封包、504 截圖放 qrcode 再回列表、跟圈 POST 結果、fail 原因帶回 errorReason）。AppModel 加 `weworkTool`；設定頁加「同時接企業微信的指令」＋位址＋編號；project.yml 小藍加 NSPhotoLibraryAddUsageDescription；Localizable 加 5 條簡中。
+- 欄位來源：chattool-apk-recovery jadx（CustomMessageQueue／s3/ni.java 每個 REQUEST 用到的欄位）、WTPro2 WeworkMessageBean、owner-gequan 跟圈協定。推測欄位：215–217、225、230、235、305。
+- 測試：WatchModeTests 新增 testXiaoLanTakesEveryOrderOfBothEngines、testXiaoLanWeComLinkAndQueueOrders（兩引擎每個指令都產生任務、缺欄位、資料封包、跟圈指紋、305/303、企微位址）。**都還沒編譯／跑過**；iPad 上一個代理任務都還沒實測。
+- 下一步：使用者點頭後推 build477 main（訊息帶 [tests]）→ 修編譯錯 → iPad 真機在测试群逐項測（先 203/204/205、查詢類）→ 按實測調目標文字。
+
+## 2026-11-25 09:40（首爾）小藍 iPad 版 iOS 27 正式版 IPA 到手；161 指令層第一步（未推送）
+- CI run 45495463189（xcode-27-arm64、Xcode 27.1、iphoneos27.1 SDK）成功：E:/桌面/XiaoLan-build160-ios27-unsigned.ipa（SHA256 6c0e4e8b…8e8813ca84，與 ipa.sha256 一致）。核對：Payload/XiaoLan.app、PlugIns/XiaoLanKeyboard.appex、二進位含 ScreenCaptureKit、顯示名「小藍」、com.example.esp32agent.xiaolan、CFBundleVersion 160、UIDeviceFamily [1,2]、min 17.0、UIRequiresFullScreen、iPad 只直向。retry-xiaolan.yml 之後幾次都判定已成功、沒再送。
+- 161 指令層（ChatToolLink.swift，大藍小藍共用）：照智微兔個微協定（smali：WeworkMessageListBean socketType 0 心跳／1 收到／2 指令列表／3 結果；ExecCallbackBean rawMsg、errorCode、errorReason、runTime、timeCost、successList、failList）—— 收到 socketType 2 立刻回 1；每 30 秒心跳 {socketType:0,list:[{type:11}]}；203／204 排隊（titleList 多個聊天拆開、全部做完才回一個結果）；201／304 清空排隊並逐一回「指令已被清除」再回自己的結果；202 照舊忽略；其他指令回 501000「還不支持」；位址保留路徑（127.0.0.1:18971/zwt、…/relay/zwt 都能接）。WatchMode：發完回成功／失敗，隱私擋下回失敗。204 引用與 203 的 @ 還沒做（只發文字，記日誌）。
+- 驗證：單元測試新增 testXiaoLanOrdersGetAReceiptAndOneResultEach（還沒在 CI 跑）；本機用 mockqiwei.js（臨時埠 18981）模擬 iPad 用同樣封包形狀：心跳回 {type:11}、指令 socketType 2、結果被 /send 配對成功 → PASS。Swift 本機不能編，要推 CI 才知道能不能編過。
+- 版本號 161（ios/Config/Shared.xcconfig）。未提交、未推送（等使用者點頭）。
+
+## 2026-11-25 01:30（首爾）小藍 iPad 版 160 應急版出好（Xcode 26.3）
+- 新 target「小藍」（XiaoLan）：com.example.esp32agent.xiaolan、輸入法 .xiaolan.keyboard、藍底白字圖示、XIAOLAN 編譯旗標、iPad 原生直向全螢幕（UIDeviceFamily [1,2]）、最低 iOS 17。
+- CI 換到使用者給的 lan477699-code/esp32（lanhaile6868-star 與新帳號的 xcode-27 都排不到機器；探測只有 macos-15 排得到，最高 Xcode 26.3）。ipa.yml：推送預設只編小藍（[pilot]/[tests] 才編大藍與測試），失敗一定印記錄尾。應急分支 xiaolan-x26（macos-15＋Xcode 26.3）。
+- 修正：小藍 target 誤含大藍 Info.plist（Multiple commands produce Info.plist）→ excludes；Xcode 26 型別檢查超時兩處（Vision.swift 圓點間距、AgentLoop unsentGoalReason）拆成小段，結果與文字不變。
+- 產物：E:/桌面/XiaoLan-build160-unsigned.ipa（3,341,292 bytes，SHA256 745f7964…cf9b23c1，與 CI 一致），run 45437090993。限制：Xcode 26.3 沒有 iOS 27 SDK → 這版沒有「共享整個螢幕」，看畫面走鏡像。正式版（xcode-27，有直接截屏）已推 main，等機器。
+- iPad 已升 iPadOS 27.2.1。
+
+## 2026-11-24 23:10（首爾）158：最低 iOS 17（客戶租的 iPad 9，iPadOS 17.4.1 不能升級）
+- 改動（e522ee8，build123）：ios/project.yml deploymentTarget 18.0→17.0；控制中心兩個 ControlWidget 加 @available(iOS 18) 並在 WidgetBundle 用 if #available 包；Shared.xcconfig 158。一併帶上 157 後本機未推的 1765f2d（D218–D219）。
+- 出版：build158-ci＝e522ee8＋cherry-pick 4fe5701（7e96371）。強制覆蓋 build3200 main 被權限擋下 → 改推新分支 `build3200/build158`＋`gh workflow run ipa.yml --ref build158`（main 仍是 157 的 72bbea6）。CI 45407910836：編譯打包成功、單元測試 956/0。
+- IPA：E:/桌面/Pilot-build158-unsigned.ipa（3,433,100 bytes，SHA256 66b15b3d…5cb89b3338，與 CI ipa.sha256 一致）；App／AgentActivity／LanAgentKeyboard 三個 Info.plist 都是 MinimumOSVersion 17.0、CFBundleVersion 158、UIDeviceFamily [1]（iPad 以 iPhone 相容視窗執行）。
+- 未驗證：iPad 真機安裝與執行（使用者用爱思助手 Apple ID 簽名；iPad 開發者模式選項已顯示、未開）。
+
 ## 2026-11-22 20:20（首爾）不外放的語音方案；手機需使用者重新共享螢幕
 - 使用者：不能用 USB（手機要充電）、要不外放的方案。不外放的兩條：①「收藏再發送」：客戶在微信裡自己錄一次語音 → Pilot 收藏 → 群發助手（≤200 人）用「＋ › 收藏」發出；零硬體、不出聲，但只適用微信裡錄的語音（不含 mp3／複刻合成），待實測收到的是不是正常語音氣泡。②方案 E：另一塊傳統藍牙 ESP32（約 20 元）模擬藍牙耳機，數位直送任何音訊；連著時手機聲音會轉到它，韌體較重。外放的方案 D（板子加 I2S 功放＋小喇叭）也可行。
 - USB 回歸 r157u：y08 中文搜尋失敗是環境（X「貼文目前無法載入」）；Pilot 輸入法在 X 搜尋框打中文正常。其餘 4 題為了做收藏實驗而停掉。

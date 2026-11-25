@@ -175,6 +175,7 @@ targets:
         NSLocalNetworkUsageDescription: 小藍從開發板接收鏡像畫面，並連接你電腦或伺服器上的指令服務。
         NSSpeechRecognitionUsageDescription: 小藍在你要求時把影片裡說的話轉成文字。
         NSMicrophoneUsageDescription: 小藍不會錄你的聲音；語音由語音開發板送出。
+        NSPhotoLibraryAddUsageDescription: 伺服器指令要發圖片、影片、二維碼或朋友圈時，小藍先把它存進相簿，再由你在微信裡選它。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIBackgroundModes: [bluetooth-central, audio, screen-capture]

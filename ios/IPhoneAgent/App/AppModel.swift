@@ -117,6 +117,8 @@ import UIKit
     var watchJob: Task<Void, Never>?
     /// ChatTool on the computer (ChatToolLink.swift), connected while watching with it switched on.
     let chatTool = ChatToolLink()
+    /// 小藍 iPad 版: the WeCom engine's orders (智企微行 protocol), connected while watching with it switched on.
+    let weworkTool = ChatToolLink(app: .wework)
     var computerKnowledgeCache = ""  // the last knowledge fetched from the computer, for when it is out of reach
     /// Per chat: the last 20 messages seen, to tell what is new (WatchReport.new, as ChatTool keeps them). Kept
     /// across watches and launches, so a new watch takes up where the last one stopped.

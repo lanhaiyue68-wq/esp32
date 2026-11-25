@@ -30,6 +30,8 @@ enum WatchSettings {
     static let inputBoxKey = "watchInputBoxV1"
     static let serverOnKey = "watchServerOnV1", serverURLKey = "watchServerURLV1", robotKey = "watchRobotIdV1"
     static let serverRepliesKey = "watchServerRepliesV1"
+    /// 小藍 iPad 版: the WeCom engine's server (智企微行 protocol, …/webserver/wework/<code>).
+    static let weworkOnKey = "watchWeworkOnV1", weworkURLKey = "watchWeworkURLV1", weworkCodeKey = "watchWeworkCodeV1"
     static let knowledgeFromComputerKey = "watchKnowledgeComputerV1", computerURLKey = "watchComputerURLV1"
     static let computerTokenKey = "watchComputerTokenV1", computerFilesKey = "watchComputerFilesV1"
     static let defaultInstruction = "用简短、礼貌、自然的中文回复，像真人聊天一样，正面回答对方的问题。"
@@ -95,6 +97,9 @@ enum WatchSettings {
     static var serverOn: Bool { d.bool(forKey: serverOnKey) }
     static var serverURL: String { text(serverURLKey, "") }
     static var robotId: String { text(robotKey, defaultRobot) }
+    static var weworkOn: Bool { d.bool(forKey: weworkOnKey) }
+    static var weworkURL: String { text(weworkURLKey, "") }
+    static var weworkCode: String { text(weworkCodeKey, "") }
     /// ChatTool decides the replies; this iPhone only reads, reports and types what it is told.
     static var serverReplies: Bool { serverOn && d.bool(forKey: serverRepliesKey) }
     static var knowledgeFromComputer: Bool { d.bool(forKey: knowledgeFromComputerKey) }
@@ -1340,6 +1345,9 @@ extension AppModel {
         if WatchSettings.serverOn, ChatToolLink.socketURL(WatchSettings.serverURL, robot: WatchSettings.robotId) == nil {
             return String(localized: "Enter the computer's ChatTool address, like http://192.168.31.85:8881.")
         }
+        if WatchSettings.weworkOn, ChatToolLink.socketURL(WatchSettings.weworkURL, robot: WatchSettings.weworkCode, app: .wework) == nil {
+            return String(localized: "Enter the WeCom order server's address and robot code.")
+        }
         watching = true
         watchHandled = 0
         watchRead = 0
@@ -1364,6 +1372,7 @@ extension AppModel {
         watchStatus = String(localized: "Starting…")
         keepAwake.start()
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
+        if WatchSettings.weworkOn { weworkTool.connect(server: WatchSettings.weworkURL, robot: WatchSettings.weworkCode) }
         watchStartedAt = now()
         watchJob = Task { [weak self] in await self?.watchLoop() }
         let r = WatchSettings.rules, pin = WatchSettings.ownerPIN
@@ -1383,6 +1392,7 @@ extension AppModel {
         watchJob?.cancel()
         watchJob = nil
         chatTool.disconnect()
+        weworkTool.disconnect()
         watchStatus = String(localized: "Stopped: \(why)")
         DebugLog.write("watch: stopped (\(why))")
         if !agent.running && !startingAgent {
@@ -1473,14 +1483,8 @@ extension AppModel {
                 await resumePausedTask()
                 guard watching else { break }
                 (baseline, changedAt, quietUntil) = (nil, nil, now() + 6)
-            } else if let send = chatTool.nextCommand() {
-                watchStatus = String(localized: "Sending ChatTool's reply to \(send.chat)…")
-                DebugLog.write("watch: ChatTool asks to send to \(send.chat)")
-                if let why = PrivacyGuard.check(send.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
-                    DebugLog.write("watch: ChatTool's reply withheld: \(why)")
-                } else {
-                    _ = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single)
-                }
+            } else if let send = chatTool.nextCommand() ?? weworkTool.nextCommand() {
+                await runOrder(send)
                 guard watching else { break }
                 (baseline, changedAt, quietUntil) = (nil, nil, watchListReturn.pending != nil ? 0 : now() + 6)
             } else {
@@ -2320,6 +2324,116 @@ extension AppModel {
             DebugLog.write("watch: writing the reply failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// 小藍 iPad 版 (161): one order from a server (ChatToolLink, either engine), done and answered. A plain 203 into WeChat
+    /// takes the quick send as before; every other order is an agent task from XiaoLanOrders: its typed texts checked for
+    /// privacy first, its files fetched first, a read answered with its data bean, a 跟圈 run reported to its backend.
+    private func runOrder(_ send: ChatToolLink.Command) async {
+        let link = send.app == .wework ? weworkTool : chatTool
+        let label = XiaoLanOrders.label(send.type, send.app) ?? "\(send.type)"
+        watchStatus = String(localized: "Server order: \(label) · \(send.chat)")
+        DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) for \(send.chat)")
+        let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
+        if send.app == .wechat, send.type == ChatToolLink.sendMessage, send.at.isEmpty {
+            if let why = PrivacyGuard.check(send.text, words: words, numbers: numbers) {
+                DebugLog.write("watch: order withheld: \(why)")
+                link.finish(send, ok: false, reason: ChatToolLink.reasonPrivacy)
+            } else {
+                let sent = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single)
+                link.finish(send, ok: sent, reason: sent ? "" : ChatToolLink.reasonNotSent)
+            }
+            return
+        }
+        let fields = XiaoLanOrders.Fields(send.raw)
+        guard let job = XiaoLanOrders.job(type: send.type, app: send.app, f: fields, chat: send.chat) else {
+            link.finish(send, ok: false, reason: ChatToolLink.reasonUnsupported(send.type))
+            return
+        }
+        if let why = job.texts.lazy.compactMap({ PrivacyGuard.check($0, words: words, numbers: numbers) }).first {
+            DebugLog.write("watch: order withheld: \(why)")
+            link.finish(send, ok: false, reason: ChatToolLink.reasonPrivacy)
+            return
+        }
+        if let local = job.local {
+            link.sendData(XiaoLanMedia.local(local, type: send.type))
+            link.finish(send, ok: true)
+            return
+        }
+        if !job.media.isEmpty {
+            do {
+                try await XiaoLanMedia.fetch(job.media, kind: job.mediaKind,
+                                             names: job.mediaKind == .files ? [XiaoLanOrders.fileName(fields)] : [])
+            } catch {
+                link.finish(send, ok: false, reason: "文件准备失败：" + error.localizedDescription)
+                return
+            }
+        }
+        let answer = await watchRun(job.task, stepLimit: job.steps, readOnly: job.readOnly)
+        var ok = answer != nil
+        var reason = ok ? "" : (lastFailReason() ?? "没有做完")
+        var entries: [[String: Any]]?
+        if ok, let answer, send.type == 260, let m = job.moments {
+            entries = await captureMomentPictures(XiaoLanOrders.momentEntries(friend: m.friend, answer: answer), moments: m, host: link.host)
+        } else if ok, let answer, job.query {
+            if var bean = XiaoLanOrders.dataBean(type: send.type, chat: send.chat, f: fields, answer: answer) {
+                if send.type == 504 {
+                    _ = try? await feed.currentFrame()
+                    if let frame = feed.frame { bean["qrcode"] = frame.base64EncodedString() }
+                }
+                link.sendData(bean)
+            } else {
+                ok = false
+                reason = "读到的内容不是 JSON：" + String(answer.prefix(80))
+            }
+        }
+        if send.type == 504, watching { _ = await watchRun(XiaoLanOrders.backToList, stepLimit: 8, readOnly: true) }
+        if let m = job.moments {
+            _ = await XiaoLanMedia.postMoments(m, ok: ok, entries: entries, reason: reason, host: link.host)
+        }
+        DebugLog.write("watch: order \(send.type) " + (ok ? "done" : "failed: \(reason)"))
+        link.finish(send, ok: ok, reason: reason)
+    }
+
+    /// 跟圈 260: each post with pictures is opened on its first picture; every picture is kept as the screen shows it
+    /// (the viewer's black border cut off), the board's pointer swiping to the next, and uploaded to the run. A post
+    /// whose pictures all went up is complete, so the backend can repost it (261 then brings them back into Photos).
+    /// Not the originals, the screen: enough to see and repost what the friend posted (user 11-25).
+    private func captureMomentPictures(_ entries: [[String: Any]], moments m: XiaoLanOrders.Moments, host: String?) async -> [[String: Any]] {
+        var out = entries, opened = false
+        for i in out.indices {
+            let count = min(out[i]["imageCount"] as? Int ?? 0, 9)
+            guard count > 0, watching, !Task.isCancelled else { continue }
+            let locate = out[i]["locateText"] as? String ?? ""
+            opened = true
+            guard await watchRun(XiaoLanOrders.openMomentPicture(friend: m.friend, locate: locate), stepLimit: 20, readOnly: true) != nil else {
+                DebugLog.write("watch: 跟圈 could not open the pictures of one post")
+                continue
+            }
+            var urls: [String] = []
+            for k in 0..<count {
+                if k > 0 { try? await pointer.swipe(0.82, 0.5, 0.18, 0.5) }
+                try? await Task.sleep(nanoseconds: 2_500_000_000)  // the pointer fades and the picture settles
+                _ = try? await feed.currentFrame()
+                guard let frame = feed.frame else { break }
+                let jpeg = await Task.detached { XiaoLanMedia.trimmed(frame) }.value
+                guard let jpeg, let url = await XiaoLanMedia.upload(jpeg, moments: m, host: host) else { break }
+                urls.append(url)
+            }
+            DebugLog.write("watch: 跟圈 kept \(urls.count) of \(count) picture(s)")
+            if urls.count == count {
+                out[i]["imageUrls"] = urls
+                out[i]["imagesComplete"] = true
+            }
+        }
+        if opened, watching { _ = await watchRun(XiaoLanOrders.backToList, stepLimit: 8, readOnly: true) }
+        return out
+    }
+
+    /// The reason the last agent run gave when it failed with `fail`, if it did.
+    private func lastFailReason() -> String? {
+        guard let last = agent.steps.last, last["action"]?.str == "fail" else { return nil }
+        return last["reason"]?.str
     }
 
     /// An ordinary run with the privacy check on every `type`; the done answer, or nil when it did not finish.

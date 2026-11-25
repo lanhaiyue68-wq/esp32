@@ -1,5 +1,18 @@
 # 任务状态
 
+## 小藍 iPad 版（2026-11-25）
+- [x] 160 iOS 27 正式版 IPA（Xcode 27.1，run 45495463189）→ E:/桌面/XiaoLan-build160-ios27-unsigned.ipa，已核對 ScreenCaptureKit／小藍／[1,2]／min 17。
+- [x] 161 指令層：智微兔 35＋智企微行 54 個指令全接（XiaoLanOrders／XiaoLanMedia／ChatToolLink 企微連線／WatchMode.runOrder），跟圈有圖貼文改截螢幕上傳。
+- [ ] 161 提交＋推 build477 main（訊息帶 [tests]）→ CI 編譯、跑測試、修錯（等使用者點頭；使用者說過「不要推」）。
+- [ ] 使用者用爱思簽名把 160 iOS 27 版裝到 iPad，信任 App；之後 161 再裝一次。
+- [ ] iPad 真機在测试群逐項測指令（先 203／204／205、查詢類），按實測調目標文字。
+- [ ] 推測欄位實測確認：215–217、225、230、235、305。
+- [ ] 跟圈截圖上傳連 owner-gequan 後台實測。
+- [ ] 小藍首頁畫面（伺服器／機器人 ID／板子／鏡像／指令記錄）。
+- [ ] 語音板 LE 接進小藍（app-protocol.md：connect → headset link up → 按住說話 → disconnect）。
+- [ ] iPad 歸零角（滑鼠推左上角）會不會拉下通知中心，要真機測。
+- [ ] 測試通道工具 tools/ipad/lan_usb_ipad.py 的 BUNDLE 改成小藍裝好後的 bundle id。
+
 - [x] 148（D153–D160）已裝並回歸（11-19 13:16 – 11-20 00:34 首爾）：x 5/6＋x5 正確停下、y 3 題缺 App 依規則結束、n 15/16、h 19/21、s 5/10＋3（補測 6/10＋3）、h2 21/22（補測 20/22）、x 補測 5/6＋1。
 - [x] 150 已編（149＋D168b；run 44584114424：929 測試 0 失敗），IPA E:/桌面/Lan-Agent-build150-unsigned.ipa，SHA256 d6c08cce…7834；147、149 IPA 已送回收筒。
 - [x] 150 複查失敗題（r150r）：148 的目標問題全過；n16 時間答錯（D185），x1 的 11、13 與 x4 的 19、20、23 新錯（D186–D190），皆本機修好未推送。

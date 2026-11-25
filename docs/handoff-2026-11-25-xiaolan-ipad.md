@@ -23,6 +23,13 @@
 - 應急分支 `xiaolan-x26`：macos-15＋Xcode 26.3（探測：只有 macos-15 排得到；xcode-27／macos-26／macos-27／macos-latest 都排不到）。
 - 睡前狀態：main 最新 0cff700，ipa run **45443865625** 排隊中（xcode-27）。
 
+### 11-25 09:40 更新（Claude Code）
+- **iOS 27 正式版已出**：run 45495463189（Xcode 27.1）→ `E:\桌面\XiaoLan-build160-ios27-unsigned.ipa`（SHA256 6c0e4e8b…8e8813ca84），已核對 ScreenCaptureKit、小藍、[1,2]、min 17.0。下面「早上第一步」已做完，等使用者用爱思簽名裝 iPad。
+- **161 指令層第一步寫好、未提交未推送**：`ChatToolLink.swift` 補齊個微協定（收到回執／心跳／結果回報／201、304 清隊／不支援的指令回 501000）、`WatchMode.swift` 發完回報、`WatchModeTests` 新測試、版本 161。本機模擬伺服器封包檢查 PASS；Swift 還沒編過（要推 build477 main 讓 CI 編，推之前問使用者）。細節見 progress.md 最上面。
+- 下一步：CI 編過＋跑測試（commit 訊息帶 `[tests]`）→ 小藍首頁畫面（伺服器／機器人 ID／板子／鏡像／指令記錄）→ iPad 真機測 203（只在测试群）→ 204 引用、@。
+- **11:30 更新**：使用者要「不要推，企微、個微全部加進去」→ 已把智微兔 35 個＋智企微行 54 個指令全接上（`XiaoLanOrders.swift`、`XiaoLanMedia.swift`、ChatToolLink 企微連線、`WatchMode.runOrder`），總表在 `docs/xiaolan-ipad-port-plan.md` 最後一段。仍未提交、未推送、未編譯；推之前要使用者點頭。
+- **12:10 更新**：跟圈有圖的貼文改成「打開圖片截螢幕、裁黑邊、上傳跟圈後台」（WatchMode.captureMomentPictures、XiaoLanMedia.trimmed／upload），使用者說不需要原圖、看得到圖片內容就行。
+
 ### 早上第一步
 1. `gh run list -R lan477699-code/esp32 --workflow ipa.yml -L 5` 看有沒有 success。
 2. 有就 `gh run download <id> -R lan477699-code/esp32 -n IPhoneAgent-unsigned-ipa -D <資料夾>`，核對 `ipa.sha256`，再確認 `Payload/XiaoLan.app/XiaoLan` 裡有 `ScreenCaptureKit.framework` 字串（有才是 iOS 27 正式版），Info.plist：小藍、UIDeviceFamily [1,2]、min 17.0。
