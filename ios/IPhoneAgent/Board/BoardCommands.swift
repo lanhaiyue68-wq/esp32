@@ -254,7 +254,7 @@ extension HIDDevice {
     /// Finds the pointer's height on screen (0 top … 1 bottom) when padPos is not known (Pointer, from the frames).
     static var padLocateY: (() async -> Double?)?
     /// 174: an iPad's home, by looking (Pointer.padHome): the middle of the screen, never a corner.
-    static var padHomeVisual: (() async -> Bool)?
+    static var padHomeVisual: (() async -> String?)?  // why it failed; nil: home
     static func onPad() -> Bool { UIDevice.current.model.hasPrefix("iPad") }  // also an iPhone app run on an iPad
 
     /// An iPad home's commands: `abort` first (the firmware forgets its corner, so its curves never bow up or left),
@@ -384,9 +384,7 @@ extension HIDDevice {
             await padPace()
             _ = try await sendWatched("abort")
             padHeld = false
-            guard await visual() else {
-                throw DeviceError(message: "iPad 上看不到游标：请确认「共享整个屏幕」开着、Echo 看得到画面，再试一次。")
-            }
+            if let why = await visual() { throw DeviceError(message: why) }  // 175: what really went wrong
             return ""
         }
         var located: Double?

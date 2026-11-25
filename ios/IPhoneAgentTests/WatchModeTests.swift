@@ -618,6 +618,11 @@ import UIKit
         XCTAssertEqual(Double(Pointer.pickBefore(tips, near: CGPoint(x: 0.5, y: 0.5), nudge: -60)!.x) * 960, 340, accuracy: 2)
         // nothing moved, or the whole screen changed: no arrow
         XCTAssertTrue(Vision.arrows(before, before, near: CGPoint(x: 0.5, y: 0.5), window: 0.5).isEmpty)
+        // 175: after a move the arrow's new spot is the tip away from where it was; one tip is taken as it is
+        let moved = Pointer.movedArrow([CGPoint(x: 0.2, y: 0.3), CGPoint(x: 0.6, y: 0.5)], from: CGPoint(x: 0.2, y: 0.3))!
+        XCTAssertEqual(Double(moved.x), 0.6, accuracy: 1e-9)
+        XCTAssertEqual(Double(Pointer.movedArrow([CGPoint(x: 0.4, y: 0.4)], from: CGPoint(x: 0.2, y: 0.3))!.x), 0.4, accuracy: 1e-9)
+        XCTAssertNil(Pointer.movedArrow([], from: .zero))
     }
 
     /// 174: inside the screen fast, past an edge slow (Stage Manager, Notification Center, Home); short moves lengthened.

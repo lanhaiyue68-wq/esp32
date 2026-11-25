@@ -59,9 +59,9 @@ import Foundation
     /// screen, found by looking, never a corner (pushes past the top, the left and the bottom brought in Notification
     /// Center, Stage Manager's recent apps and the Dock). Find the arrow (a nudge sideways, Vision.arrows), move to the
     /// middle, look again, up to three times; where it was last seen is the home (padHomeSpot). Not seen: a slow push
-    /// right, the edge that brings nothing in, and look again. false when it was never seen.
-    func padHome() async -> Bool {
-        guard CommandChannel.onPad(), let screen, screen.live else { return false }
+    /// right, the edge that brings nothing in, and look again. Returns why it failed (nil: home).
+    func padHome() async -> String? {
+        guard CommandChannel.onPad(), let screen, screen.live else { return "iPad 上 Echo 收不到画面：请确认「共享整个屏幕」开着" }
         CommandChannel.padPos = nil
         var spot = await padSpot(nudge: 60)
         if spot == nil { spot = await padSpot(nudge: -60) }
@@ -72,26 +72,44 @@ import Foundation
         }
         guard var p = spot else {
             log("ipad home: arrow not seen")
-            return false
+            return "画面里找不到游标箭头（晃动游标也没看到变化）：请把 Echo 留在最前面再校准一次"
         }
-        let w = Double(CommandChannel.padSpan.w), h = Double(CommandChannel.padSpan.h)
-        for _ in 0..<3 {
+        // 175 (174 on the iPad, 11-25: "arrow lost on the way to the middle", twice): the span kept from the last
+        // calibration was 173's, measured at 20 counts a report, twice the units a screen of today's pace, so the move
+        // went twice as far, out of the window looked in. The first move goes half way; what it really moved sets the
+        // units a screen (kept as padSpan); the arrow is looked for on the whole screen, the tip away from where it was.
+        var w = Double(CommandChannel.padSpan.w), h = Double(CommandChannel.padSpan.h)
+        for pass in 0..<4 {
             let ex = 0.5 - Double(p.x), ey = 0.5 - Double(p.y)
             if abs(ex) <= 0.015 && abs(ey) <= 0.015 { break }
+            let k = pass == 0 ? 0.5 : 1.0
+            let ux = Int(ex * k * w), uy = Int(ey * k * h)
             CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
             let before = screen.frame, sent = now()
-            guard (try? await device.send("move \(Int(ex * w)) \(Int(ey * h))")) != nil, let before,
+            guard (try? await device.send("move \(ux) \(uy)")) != nil, let before,
                   let after = await stopped(since: sent, on: screen, wait: 0.9),
-                  let seen = Vision.arrow(before, after, near: CGPoint(x: 0.5, y: 0.5)) else {
+                  let seen = Self.movedArrow(Vision.arrows(before, after, near: CGPoint(x: 0.5, y: 0.5), window: 0.6), from: p) else {
                 log("ipad home: arrow lost on the way to the middle")
-                return false
+                return "游标往屏幕中间移动时跟丢了箭头：请再按一次校准"
             }
+            let mx = Double(seen.x - p.x), my = Double(seen.y - p.y)
+            if abs(ux) >= 40, abs(mx) >= 0.02 { w = min(max(Double(ux) / mx, w / 3), w * 3) }
+            if abs(uy) >= 40, abs(my) >= 0.02 { h = min(max(Double(uy) / my, h / 3), h * 3) }
             p = seen
         }
-        log(String(format: "ipad home: the arrow at (%.3f, %.3f)", Double(p.x), Double(p.y)))
+        log(String(format: "ipad home: the arrow at (%.3f, %.3f); a screen ~%.0f x %.0f units", Double(p.x), Double(p.y), w, h))
+        CommandChannel.padSpan = (Int(w), Int(h))
         CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
         Self.padHomeSpot = p
-        return true
+        return nil
+    }
+
+    /// 175: after a move, the arrow's new spot among the tips seen: the one away from where it was (`from`); a single tip
+    /// (the old spot not seen, or the two overlapping) is taken as it is.
+    static func movedArrow(_ tips: [CGPoint], from: CGPoint) -> CGPoint? {
+        if tips.count == 1 { return tips[0] }
+        return tips.filter { hypot($0.x - from.x, $0.y - from.y) > 0.012 }
+            .max { hypot($0.x - from.x, $0.y - from.y) < hypot($1.x - from.x, $1.y - from.y) }
     }
 
     /// Where an iPad's home left the arrow (screen fractions); nil before one.
