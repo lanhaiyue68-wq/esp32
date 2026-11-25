@@ -23,11 +23,18 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           head=$(gh api "repos/$REPO/commits/main" --jq .sha)
-          ok=$(gh run list -R "$REPO" --workflow ipa.yml --commit "$head" --limit 50 --json conclusion \
-                 --jq '[.[] | select(.conclusion=="success")] | length')
+          # A docs-only commit says [skip ci]: the newest commit without it is the one whose build counts too.
+          code=$(gh api "repos/$REPO/commits?sha=main&per_page=30" \
+                   --jq '[.[] | select(.commit.message | contains("[skip ci]") | not)][0].sha // ""')
+          ok=0
+          for sha in $head $code; do
+            n=$(gh run list -R "$REPO" --workflow ipa.yml --commit "$sha" --limit 50 --json conclusion \
+                  --jq '[.[] | select(.conclusion=="success")] | length')
+            ok=$((ok + n))
+          done
           busy=$(gh run list -R "$REPO" --workflow ipa.yml --limit 50 --json status \
                    --jq '[.[] | select(.status=="queued" or .status=="in_progress" or .status=="waiting" or .status=="pending")] | length')
-          echo "main=$head successful=$ok queued_or_running=$busy"
+          echo "main=$head code=$code successful=$ok queued_or_running=$busy"
           if [ "$ok" = "0" ] && [ "$busy" = "0" ]; then
             gh workflow run ipa.yml -R "$REPO" --ref main -f app=xiaolan
             echo "started a new 小藍 build"
