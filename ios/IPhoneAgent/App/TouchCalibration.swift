@@ -91,7 +91,10 @@ extension AutoCalibrator {
         // 174 (user 11-25: "不要让它走上边、左边和下面"): on an iPad no locating pushes; the home is the middle of the
         // screen, found by looking (Pointer.padHome, through reset), and the probes start from there.
         if !CommandChannel.onPad() { await locatePadPointer(probe: probe, device: device) }
+        Pointer.padHomeToMiddle = true  // 180: only calibration starts from the middle
+        defer { Pointer.padHomeToMiddle = false }
         try await pointer.reset()
+        Pointer.padHomeToMiddle = false
         /// Where an iPad's home left the pointer, in the probes' units (from the corner at the span measured last).
         func padHomeUnits() -> (Int, Int) {
             let spot = Pointer.padHomeSpot ?? CGPoint(x: 0.5, y: 0.5)

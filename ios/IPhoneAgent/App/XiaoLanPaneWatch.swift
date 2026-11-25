@@ -13,6 +13,8 @@ struct PaneWatchState {
     /// Since when each side has been in a chat with nothing new (back to the list after a while).
     var quietSince: [Int: Double] = [:]
     var frontSince: Double?, lastHop = -Double.infinity, hopped = false
+    /// 180: what each side showed that is no chat of WeChat or WeCom (logged once, left alone).
+    var notChat: [Int: String] = [:]
 }
 
 extension AppModel {
@@ -120,12 +122,20 @@ extension AppModel {
             paneRead(app, chat, title: title, fromMark: true, &state)
             state.quietSince[look.side] = now()
         case .chat(let title):
-            guard let app = state.apps[look.side] else {
-                // Not seen on its list yet (the watch started inside a chat): back to the list to tell the app.
-                DebugLog.write("watch: a window opens on a chat (\(title)) before its app is known; back to its list")
-                _ = await paneTap(XiaoLanPanes.back, in: look.rect, wide: 0.02)
+            // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has its input bar at the bottom; the Settings app's 键盘
+            // page was taken for a chat and its back arrow tapped. A window without one is left alone.
+            guard let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.inputField(px) != nil else {
+                if state.notChat[look.side] != title {
+                    state.notChat[look.side] = title
+                    DebugLog.write("watch: a window shows \(title), no chat of WeChat or WeCom; left alone")
+                }
                 return
             }
+            state.notChat[look.side] = nil
+            // 180: the app told by the chat itself (WeCom's quick bar), not by going back to its list (the back arrow of
+            // the left window sits by the screen's top-left corner).
+            if state.apps[look.side] == nil { state.apps[look.side] = XiaoLanPanes.chatApp(look.rows) }
+            guard let app = state.apps[look.side] else { return }
             if paneRead(app, look, title: title, fromMark: false, &state) > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
@@ -274,6 +284,9 @@ extension AppModel {
         try? await Task.sleep(nanoseconds: 400_000_000)
         let returned = await keyboardBridge.type("", enter: true, within: 4)
         DebugLog.write("watch: \(app.rawValue): typed into \(chat); the keyboard's return \(returned ? "pressed" : "not confirmed")")
+        // 180 (Echo 178, 11-25): the keyboard left up covered the windows' tab bars, and the WeChat list was read as a chat
+        // called 微信. Esc puts it down (it does nothing else in WeChat or WeCom).
+        try? await pointer.key("esc")
         // Sent when my newest line now shows the text.
         let head = String(text.filter { !$0.isWhitespace }.prefix(6))
         let after = await paneLook(look.side, after: now(), tries: 3) { l in

@@ -60,7 +60,7 @@ import Foundation
     /// Center, Stage Manager's recent apps and the Dock). Find the arrow (a nudge sideways, Vision.arrows), move to the
     /// middle, look again, up to three times; where it was last seen is the home (padHomeSpot). Not seen: down a little
     /// and look again (177: never a push past an edge). Returns why it failed (nil: home).
-    func padHome() async -> String? {
+    func padHome(toMiddle: Bool = false) async -> String? {
         guard CommandChannel.onPad(), let screen, screen.live else { return "iPad 上 Echo 收不到画面：请确认「共享整个屏幕」开着" }
         CommandChannel.padPos = nil
         var spot = await padSpot(nudge: 60)
@@ -83,7 +83,9 @@ import Foundation
         // went twice as far, out of the window looked in. The first move goes half way; what it really moved sets the
         // units a screen (kept as padSpan); the arrow is looked for on the whole screen, the tip away from where it was.
         var w = Double(CommandChannel.padSpan.w), h = Double(CommandChannel.padSpan.h)
-        for pass in 0..<4 {
+        // 180 (user 11-25: no detours): an ordinary home takes the arrow where it is seen; only calibration brings it to
+        // the middle (and learns the units a screen on the way).
+        for pass in 0..<(toMiddle ? 4 : 0) {
             let ex = 0.5 - Double(p.x), ey = 0.5 - Double(p.y)
             if abs(ex) <= 0.015 && abs(ey) <= 0.015 { break }
             let k = pass == 0 ? 0.5 : 1.0
@@ -115,6 +117,9 @@ import Foundation
         return tips.filter { hypot($0.x - from.x, $0.y - from.y) > 0.012 }
             .max { hypot($0.x - from.x, $0.y - from.y) < hypot($1.x - from.x, $1.y - from.y) }
     }
+
+    /// 180: calibration's home brings the arrow to the middle (TouchCalibration sets it around its first home).
+    static var padHomeToMiddle = false
 
     /// Where an iPad's home left the arrow (screen fractions); nil before one.
     static var padHomeSpot: CGPoint?
@@ -601,7 +606,9 @@ import Foundation
             try await device.send("release")
             (pos, link) = (nil, device.links)
         }
-        if pos == nil || (rehome && (maps != nil || moves >= Self.rehomeEvery)) {
+        // 180 (user 11-25: "从这边到那边要立马过来，而不是中间还要差一个路"): on an iPad, where the arrow is seen and
+        // every sighting sets `pos`, a move goes straight from where the pointer is; it looks for it only when lost.
+        if pos == nil || (!CommandChannel.onPad() && rehome && (maps != nil || moves >= Self.rehomeEvery)) {
             let homing = now()
             if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
             (pos, moves, hops) = (homeUnits(), 0, 0)
@@ -756,12 +763,8 @@ import Foundation
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
             // an aimed tap (after one that changed nothing) always starts from the corner.
-            var (ux, uy) = hopUnits(from: last, to: x, y, units: p)
-            // 176: on an iPad a long hop toward the top, left or bottom edge goes 85% of the way and the arrival's look
-            // finishes it, so a model that runs long (175: 0.36 of the screen for 0.20) never reaches the Dock or an edge.
-            if CommandChannel.onPad(), Self.nearGuardedEdge(x, y), hypot(x - last.x, y - last.y) > 0.15 {
-                (ux, uy) = (Int(Double(ux) * 0.85), Int(Double(uy) * 0.85))
-            }
+            // 180: one move, no stop short (176's 85%); the look corrects, the gate keeps it off the edges.
+            let (ux, uy) = hopUnits(from: last, to: x, y, units: p)
             lastClick = nil
             pos = nil
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
@@ -1021,6 +1024,7 @@ import Foundation
         }
         firstSeen = seen
         Self.syncPad(seen)  // 176
+        if CommandChannel.onPad() { pos = (dx(Double(seen.x)), dy(Double(seen.y))) }  // 180: where it really is
         var corrections = 0, unmoved = 0
         while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)
@@ -1079,6 +1083,7 @@ import Foundation
             if ux != 0 { fineX = Self.learned(fineX ?? 1 / Double(span.w), moved: Double(next.x - seen.x), units: ux) }
             if uy != 0 { fineY = Self.learned(fineY ?? 1 / Double(span.h), moved: Double(next.y - seen.y), units: uy) }
             seen = next
+            if CommandChannel.onPad() { pos = (dx(Double(seen.x)), dy(Double(seen.y))) }  // 180
         }
     }
 

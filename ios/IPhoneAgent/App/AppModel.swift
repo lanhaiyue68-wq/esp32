@@ -159,7 +159,7 @@ import UIKit
         CommandChannel.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
         CommandChannel.padHomeVisual = { [weak made] in  // 174: iPad home, by looking; 175: why it failed
             guard let made else { return "Echo 的游标模块还没准备好" }
-            return await made.padHome()
+            return await made.padHome(toMiddle: Pointer.padHomeToMiddle)
         }
         ProbeMotion.onePiece = CommandChannel.onPad()  // 169: on an iPad one curved move, not x then y
         agent = AgentLoop(phone: made, screen: feed, actor: nil, planner: nil, trace: traces)
@@ -220,6 +220,7 @@ import UIKit
         DebugLog.write("app launched \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "")"
                        + " (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? ""))")
         DebugLog.write("capture: \(feed.source.rawValue), iOS \(UIDevice.current.systemVersion)")
+        resumeWatchAfterRelaunch()  // 180
         settingsSink = settings.$configurationRevision.dropFirst().sink { [weak self] _ in
             self?.modelOK = nil
             self?.modelError = nil

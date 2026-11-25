@@ -97,8 +97,20 @@ import UIKit
             .sorted { ($0.map(\.box.midY).min() ?? 1) < ($1.map(\.box.midY).min() ?? 1) }
         let title = (lines.first ?? []).sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
             .trimmingCharacters(in: .whitespaces)
+        // 180 (Echo 178, 11-25): with 小藍's keyboard up the tab bar is covered, and the WeChat list was read as a chat
+        // called 微信 (every row reported as a message), WeCom's as one called 消息. Their titles say they are lists.
+        if listTitles.contains(WatchOCR.titled(title).name) { return .list }
         return title.isEmpty ? .unknown : .chat(title)
     }
+
+    /// 180: a chat's app by what only WeCom's chats show: the quick bar over the input (企业名片, 快捷回复, 发起收款).
+    static func chatApp(_ rows: [[Piece]]) -> XiaoLanOrders.App {
+        let words = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服"]
+        return rows.joined().contains { p in words.contains { p.text.contains($0) } } ? .wework : .wechat
+    }
+
+    /// The chat lists' own titles (WeChat's carries the unread count: 微信(3)).
+    static let listTitles: Set<String> = ["微信", "消息", "WeChat", "Chats", "Messages"]
 
     /// Where to tap to type: the white field at the bottom of a chat window, found from the bottom up (WeCom's row of
     /// buttons above it, 企业名片 / 快捷回复, is grey-white and left alone). Three columns, two of them white: the hint
@@ -132,7 +144,7 @@ import UIKit
 
     /// A list title as a chat's name: no time read with it, no WeCom tag after it ("外部", "@微信").
     static func listName(_ text: String) -> String {
-        var t = WatchChatOpen.withoutTime(text.filter { !$0.isWhitespace })
+        var t = WatchOCR.withoutIconTail(WatchChatOpen.withoutTime(text.filter { !$0.isWhitespace }))
         for tag in ["外部", "@微信", "＠微信"] where t.hasSuffix(tag) && t.count > tag.count { t = String(t.dropLast(tag.count)) }
         return t
     }

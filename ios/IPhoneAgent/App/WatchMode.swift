@@ -1333,6 +1333,25 @@ enum PrivacyGuard {
 extension AppModel {
     /// Start watching. Checked like a Shortcuts run: once it is away there is no screen to fix things on.
     /// Returns why it cannot start, or nil.
+    /// 180 (Echo 178, 11-25: iOS restarts Echo when its keyboard's Full Access is changed, and the watch stayed off; the
+    /// user: "真正到工作的时候，不能工作着它突然间就断了"): a watch that was on when the app went away (not stopped on purpose)
+    /// starts again by itself once the board and the screen sharing are back, tried every 10 s for 20 minutes.
+    static let resumeWatchKey = "watchResumeV1"
+    func resumeWatchAfterRelaunch() {
+        guard UserDefaults.standard.bool(forKey: Self.resumeWatchKey) else { return }
+        DebugLog.write("watch: was on when the app went away; it comes back once the board and the screen sharing are")
+        Task { @MainActor [weak self] in
+            for _ in 0..<120 {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard let self, !self.watching else { return }
+                if self.startWatch() == nil {
+                    DebugLog.write("watch: resumed after a relaunch")
+                    return
+                }
+            }
+        }
+    }
+
     func startWatch() -> String? {
         guard !watching else { return nil }
         if !MockMode.on {
@@ -1367,6 +1386,7 @@ extension AppModel {
             return String(localized: "Enter the WeCom order server's address and robot code.")
         }
         watching = true
+        UserDefaults.standard.set(true, forKey: Self.resumeWatchKey)  // 180: back after a relaunch
         watchHandled = 0
         watchRead = 0
         watchLast = WatchReport.savedLooks()
@@ -1416,6 +1436,7 @@ extension AppModel {
     func stopWatch(_ why: String) {
         guard watching else { return }
         watching = false
+        UserDefaults.standard.set(false, forKey: Self.resumeWatchKey)  // 180: stopped on purpose, stays stopped
         watchJob?.cancel()
         watchJob = nil
         chatTool.disconnect()

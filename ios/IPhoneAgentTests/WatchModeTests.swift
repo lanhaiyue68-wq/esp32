@@ -550,6 +550,25 @@ import UIKit
         XCTAssertEqual(CommandChannel.padSlowStep, 15)  // the edge tests' speed
     }
 
+    /// 180 (Echo 178 on the iPad, 11-25): a list is known by its title when the keyboard covers its tab bar; the WeCom
+    /// logo's "Q" and a member count do not make another chat; a chat's app is told by WeCom's quick bar.
+    func testPaneListsTitlesAndIconTails() {
+        typealias P = CandidatePicker.Piece
+        func titled(_ t: String) -> [[P]] { [[P(text: t, box: CGRect(x: 0.42, y: 0.05, width: 0.16, height: 0.03))]] }
+        XCTAssertEqual(XiaoLanPanes.view(titled("微信(3)")), .list)
+        XCTAssertEqual(XiaoLanPanes.view(titled("微信")), .list)
+        XCTAssertEqual(XiaoLanPanes.view(titled("消息")), .list)
+        XCTAssertEqual(XiaoLanPanes.view(titled("测试群(6)")), .chat("测试群(6)"))
+        XCTAssertEqual(WatchOCR.withoutIconTail("企微测试群Q"), "企微测试群")
+        XCTAssertEqual(WatchOCR.withoutIconTail("企微测试群（7）Q"), "企微测试群（7）")
+        XCTAssertEqual(WatchOCR.withoutIconTail("QQ"), "QQ")
+        XCTAssertEqual(WatchOCR.titled("企微测试群（7）Q").name, "企微测试群")
+        XCTAssertEqual(XiaoLanPanes.listName("企微测试群Q"), "企微测试群")
+        XCTAssertTrue(WatchChatOpen.sameChat(WatchOCR.titled("企微测试群（7）Q").name, listName: XiaoLanPanes.listName("企微测试群Q")))
+        XCTAssertEqual(XiaoLanPanes.chatApp([[P(text: "企业名片", box: .zero), P(text: "快捷回复", box: .zero)]]), .wework)
+        XCTAssertEqual(XiaoLanPanes.chatApp([[P(text: "你好", box: .zero)]]), .wechat)
+    }
+
     /// 174: deleting a chat: the red 删除 on its swiped row (read, or the red block), and the row gone afterwards.
     func testPaneDeleteFindsTheRedButtonAndSeesTheRowGone() {
         typealias P = CandidatePicker.Piece

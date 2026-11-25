@@ -79,11 +79,20 @@ enum WatchOCR {
 
     /// "测试群(6)" → ("测试群", group); a private chat has no head count.
     static func titled(_ title: String) -> (name: String, group: Bool) {
-        let t = title.trimmingCharacters(in: .whitespaces)
+        let t = withoutIconTail(title.trimmingCharacters(in: .whitespaces))
         guard let open = t.lastIndex(where: { $0 == "(" || $0 == "（" }), t.hasSuffix(")") || t.hasSuffix("）") else { return (t, false) }
         let inside = t[t.index(after: open)..<t.index(before: t.endIndex)]
         guard !inside.isEmpty, inside.allSatisfy(\.isNumber) else { return (t, false) }
         return (String(t[..<open]).trimmingCharacters(in: .whitespaces), true)
+    }
+
+    /// 180 (Echo 178 on the iPad, 11-25: "企微测试群（7）Q", list "企微测试群Q"): the WeCom logo after an external group's
+    /// name is read as a "Q"; one Q right after a CJK character or a bracket is that icon, not the name.
+    static func withoutIconTail(_ s: String) -> String {
+        guard let last = s.last, "QqＱ".contains(last), s.count >= 2 else { return s }
+        let before = s[s.index(before: s.index(before: s.endIndex))]
+        guard before == ")" || before == "）" || before.unicodeScalars.contains(where: { $0.value >= 0x2E80 }) else { return s }
+        return String(s.dropLast()).trimmingCharacters(in: .whitespaces)
     }
 
     /// A read line: what the recognizer found and what it sits on.
