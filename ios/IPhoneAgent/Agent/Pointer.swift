@@ -58,17 +58,21 @@ import Foundation
     /// 174 (user 11-25: "不要让它走上边、左边和下面…尽量叫它走右边，也不要走右上角"): an iPad's home is the middle of the
     /// screen, found by looking, never a corner (pushes past the top, the left and the bottom brought in Notification
     /// Center, Stage Manager's recent apps and the Dock). Find the arrow (a nudge sideways, Vision.arrows), move to the
-    /// middle, look again, up to three times; where it was last seen is the home (padHomeSpot). Not seen: a slow push
-    /// right, the edge that brings nothing in, and look again. Returns why it failed (nil: home).
+    /// middle, look again, up to three times; where it was last seen is the home (padHomeSpot). Not seen: down a little
+    /// and look again (177: never a push past an edge). Returns why it failed (nil: home).
     func padHome() async -> String? {
         guard CommandChannel.onPad(), let screen, screen.live else { return "iPad 上 Echo 收不到画面：请确认「共享整个屏幕」开着" }
         CommandChannel.padPos = nil
         var spot = await padSpot(nudge: 60)
         if spot == nil { spot = await padSpot(nudge: -60) }
-        if spot == nil {
-            log("ipad home: arrow not seen; a slow push right")
-            _ = try? await device.send("move \(CommandChannel.padSpan.w * 13 / 10) 0")  // place unknown: slow (padPush)
-            spot = await padSpot(nudge: -60)
+        // 177 (user 11-25: "右上角、右下角都不要有"): 176 pushed right when the arrow was not seen; it sat in the status
+        // bar (not looked at: the clock changes there), and the push took it along the top into the top-right corner.
+        // Unseen, it now goes down a little (a status-bar arrow comes out under it), at most three times, no edge pushed.
+        for step in 1...3 where spot == nil {
+            log("ipad home: arrow not seen; down a little (\(step))")
+            _ = try? await device.send("move 0 \(CommandChannel.padSpan.h * 8 / 100)")  // place unknown: slow (padPush)
+            spot = await padSpot(nudge: 60)
+            if spot == nil { spot = await padSpot(nudge: -60) }
         }
         guard var p = spot else {
             log("ipad home: arrow not seen")
