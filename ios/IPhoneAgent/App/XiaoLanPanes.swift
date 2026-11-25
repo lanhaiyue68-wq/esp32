@@ -90,6 +90,7 @@ import UIKit
     /// The chat list (its tab bar), a chat (its centred title, no tab bar), or neither.
     static func view(_ rows: [[Piece]]) -> View {
         if app(rows) != nil { return .list }
+        if cancelButton(rows) != nil { return .unknown }  // searching: the field's words are no chat's title
         // The first line in the title band: WeCom puts "外部群 | 群主: …" under a group's name (0.071 vs 0.050).
         let lines = rows.map { $0.filter { (0.035...0.09).contains($0.box.midY) && (0.18...0.82).contains($0.box.midX) } }
             .filter { !$0.isEmpty }
@@ -166,4 +167,30 @@ import UIKit
 
     /// Back from a chat to the list: the arrow at the window's top-left.
     static let back = CGPoint(x: 0.055, y: 0.058)
+
+    // MARK: Search (173, user 11-25: a chat not in view is found by the list's search box, "這不是兩邊都有嗎")
+
+    /// The list's search box.
+    static func searchBox(_ rows: [[Piece]]) -> CGPoint? {
+        rows.joined().first { p in p.box.midY < 0.25 && ["搜索", "搜尋", "Search"].contains { p.text.contains($0) } }
+            .map { CGPoint(x: 0.5, y: $0.box.midY) }
+    }
+
+    /// Searching: the 取消 by the search field at the top (no chat has it there).
+    static func cancelButton(_ rows: [[Piece]]) -> CGPoint? {
+        rows.joined().first { $0.box.midY < 0.13 && ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) }
+            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
+    /// The result row named `chat` under the search field, topmost first.
+    static func searchResult(_ chat: String, _ rows: [[Piece]]) -> CGPoint? {
+        rows.map { row in row.filter { $0.box.minX < 0.75 } }
+            .compactMap { row -> (text: String, box: CGRect)? in
+                guard !row.isEmpty else { return nil }
+                return (listName(row.map(\.text).joined()), row.reduce(CGRect.null) { $0.union($1.box) })
+            }
+            .filter { (0.12...0.9).contains($0.box.midY) && WatchChatOpen.sameChat(chat, listName: $0.text) }
+            .min { $0.box.midY < $1.box.midY }
+            .map { CGPoint(x: 0.5, y: $0.box.midY) }
+    }
 }

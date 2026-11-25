@@ -136,8 +136,36 @@ extension AppModel {
                 state.quietSince[look.side] = nil
             }
         case .unknown:
-            return
+            // A search left open (a chat found by search, then back): 取消, back to the list.
+            if let cancel = XiaoLanPanes.cancelButton(look.rows) {
+                DebugLog.write("watch: a window is on a search page; 取消 back to its list")
+                _ = await paneTap(cancel, in: look.rect, wide: 0.03)
+            }
         }
+    }
+
+    /// 173 (user 11-25: "這不是兩邊都有嗎"): a chat not in view on the list: its search box, the name typed with 小藍's
+    /// keyboard, the result row with that name. Nil (and the search closed) when it is not found.
+    private func paneSearch(_ chat: String, _ look: PaneLook) async -> CGPoint? {
+        let box = XiaoLanPanes.searchBox(look.rows) ?? CGPoint(x: 0.5, y: 0.11)
+        DebugLog.write("watch: \(chat) is not in view on the list; searching for it")
+        guard await paneTap(box, in: look.rect) else { return nil }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard await typeWithLanAgentKeyboard(chat, enter: false) else {
+            DebugLog.write("watch: search: 小藍's keyboard did not type the name")
+            await paneCloseSearch(look.side)
+            return nil
+        }
+        let found = await paneLook(look.side, after: now(), tries: 5) { XiaoLanPanes.searchResult(chat, $0.rows) != nil }
+        if let f = found, let row = XiaoLanPanes.searchResult(chat, f.rows) { return row }
+        DebugLog.write("watch: search: \(chat) is not among the results")
+        await paneCloseSearch(look.side)
+        return nil
+    }
+
+    private func paneCloseSearch(_ side: Int) async {
+        guard let l = await paneLooks().first(where: { $0.side == side }) else { return }
+        if let cancel = XiaoLanPanes.cancelButton(l.rows) { _ = await paneTap(cancel, in: l.rect, wide: 0.03) }
     }
 
     /// The new messages of the chat in a window, reported to that app's server. Returns how many were new.
@@ -209,11 +237,12 @@ extension AppModel {
                 }
                 look = back
             }
-            guard look.view == .list,
-                  let row = XiaoLanPanes.entries(look.rows).first(where: { WatchChatOpen.sameChat(chat, listName: $0.name) }) else {
-                return (false, "\(appName)的会话列表上看不到「\(chat)」（小蓝还没有分屏搜索的固定步骤）")
-            }
-            guard await paneTap(CGPoint(x: 0.5, y: row.box.midY), in: look.rect),
+            guard look.view == .list else { return (false, "\(appName)没有回到会话列表") }
+            var target = XiaoLanPanes.entries(look.rows).first { WatchChatOpen.sameChat(chat, listName: $0.name) }
+                .map { CGPoint(x: 0.5, y: $0.box.midY) }
+            if target == nil { target = await paneSearch(chat, look) }  // not in view: the list's search box
+            guard let row = target else { return (false, "\(appName)里搜不到「\(chat)」") }
+            guard await paneTap(row, in: look.rect),
                   let opened = await paneLook(look.side, after: now(), until: isChat), isChat(opened) else {
                 return (false, "\(appName)里没有打开「\(chat)」")
             }

@@ -463,6 +463,14 @@ import UIKit
         XCTAssertEqual(XiaoLanPanes.view([[at("1", 0.15, 0.3)]]), .unknown)
         XCTAssertEqual(XiaoLanPanes.listName("蓝海乐@微信"), "蓝海乐")
         XCTAssertEqual(XiaoLanPanes.listName("主人蓝海乐下午1:31"), "主人蓝海乐")
+        // 173: a chat not in view is searched for; a search page is no chat (its field's words are no title)
+        XCTAssertEqual(XiaoLanPanes.searchBox([[at("搜索", 0.40, 0.115)]])?.y ?? 0, 0.115, accuracy: 0.001)
+        let searching: [[P]] = [[at("测试群", 0.15, 0.058, 0.4), at("取消", 0.85, 0.058, 0.1)], [at("群聊", 0.05, 0.14)],
+                                [at("企微测试群", 0.18, 0.20, 0.3)], [at("测试群", 0.18, 0.28, 0.2)]]
+        XCTAssertEqual(XiaoLanPanes.view(searching), .unknown)
+        XCTAssertNotNil(XiaoLanPanes.cancelButton(searching))
+        XCTAssertEqual(XiaoLanPanes.searchResult("测试群", searching)?.y ?? 0, 0.28, accuracy: 0.001)
+        XCTAssertNil(XiaoLanPanes.searchResult("别的群", searching))
 
         // the input field: WeCom's white buttons above it are not it
         let chat = picture(CGSize(width: 473, height: 1035)) { c in
@@ -474,6 +482,26 @@ import UIKit
         let field = try XCTUnwrap(XiaoLanPanes.inputField(try XCTUnwrap(WatchOCR.Pixels(chat))))
         XCTAssertEqual(Double(field.y), 995.0 / 1035, accuracy: 0.01)
         XCTAssertEqual(Double(field.x), 0.30, accuracy: 0.001)
+        // 173: who wrote a white bubble is the side of its avatar; a later line keeps its bubble's side; the window's
+        // shading by the gap (222 fading to 205) is no avatar
+        let talk = picture(CGSize(width: 473, height: 600)) { c in
+            fill(c, CGRect(x: 0, y: 0, width: 473, height: 600), (236, 237, 241))
+            for (i, v) in stride(from: 222.0, to: 204, by: -2).enumerated() {
+                fill(c, CGRect(x: 405 + Double(i) * 7, y: 280, width: 7, height: 100), (CGFloat(v), CGFloat(v), CGFloat(v)))
+            }
+            fill(c, CGRect(x: 408, y: 100, width: 52, height: 25), (200, 60, 40))  // my avatar, right
+            fill(c, CGRect(x: 200, y: 100, width: 193, height: 55), (255, 255, 255))  // my bubble, white
+            fill(c, CGRect(x: 14, y: 300, width: 52, height: 52), (60, 120, 200))  // their avatar, left
+            fill(c, CGRect(x: 80, y: 305, width: 200, height: 40), (255, 255, 255))
+        }
+        let tpx = try XCTUnwrap(WatchOCR.Pixels(talk))
+        func line(_ t: String, _ x: Double, _ y0: Double, _ y1: Double) -> WatchOCR.Piece {
+            let box = CGRect(x: x / 473, y: y0 / 600, width: 0.3, height: (y1 - y0) / 600)
+            return WatchOCR.Piece(text: t, box: box, kind: WatchOCR.kind(box, tpx))
+        }
+        let sided = WatchOCR.bySide([line("好的第一行", 215, 104, 124), line("第二行", 215, 130, 150), line("在吗", 95, 312, 332)], tpx)
+        XCTAssertEqual(sided.map(\.kind), [.mine, .mine, .theirs])
+        XCTAssertEqual(WatchOCR.lines(sided, title: "企微测试群(7)").lines.map(\.mine), [true, false])
         // WeCom's own bubble (light blue) is mine; its background is not
         XCTAssertEqual(WatchOCR.kind(of: (200, 225, 250)), .mine)
         XCTAssertEqual(WatchOCR.kind(of: (236, 237, 241)), .grey)

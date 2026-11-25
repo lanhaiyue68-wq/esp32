@@ -151,6 +151,55 @@ enum WatchOCR {
         let pieces = CandidatePicker.rows(in: jpeg, top: 0.08, bottom: bottom).joined()
             .filter { Double($0.box.minY) > 0.085 && Double($0.box.maxY) < bottom }
             .map { Piece(text: $0.text, box: $0.box, kind: kind($0.box, px)) }
-        return lines(pieces, title: title)
+        return lines(bySide(pieces, px), title: title)
+    }
+
+    /// 173 (user 11-25 on WeCom: "我發的那個泡泡…他就還是白色嘛"): who wrote a bubble is the side its avatar is on, not
+    /// its colour alone (WeCom's bubbles can be white both ways). A bubble's first line sits beside its avatar: an avatar
+    /// on the left only = theirs, on the right only = mine. The lines under it (past the avatar) keep that bubble's
+    /// side. Grey (names, times) stays as it is.
+    static func bySide(_ pieces: [Piece], _ px: Pixels) -> [Piece] {
+        let sorted = pieces.sorted { $0.box.midY < $1.box.midY }
+        var out: [Piece] = []
+        var last: Piece?
+        for var p in sorted {
+            if p.kind == .mine || p.kind == .theirs {
+                switch avatarSide(p.box, px) {
+                case .some(.theirs): p.kind = .theirs
+                case .some(.mine): p.kind = .mine
+                default:
+                    // No avatar beside it: a later line of the bubble above, if it follows on closely in the same colour.
+                    if let l = last, l.kind == .mine || l.kind == .theirs,
+                       Double(p.box.minY - l.box.maxY) < 0.8 * Double(max(p.box.height, l.box.height)),
+                       kind(p.box, px) == kind(l.box, px) {
+                        p.kind = l.kind
+                    }
+                }
+            }
+            if p.kind != .other { last = p }
+            out.append(p)
+        }
+        return out
+    }
+
+    /// Which side has an avatar level with the top of this line: a picture in the left strip (0.01–0.14 across) or the
+    /// right one (0.86–0.99), told by its contrast or colour. A window's own shading by the gap between split windows
+    /// (11-25: 222 fading to 205 over the right strip) is neither.
+    static func avatarSide(_ box: CGRect, _ px: Pixels) -> Kind? {
+        let y = Double(box.minY) + 0.004
+        func avatar(_ from: Double) -> Bool {
+            var lo = 255, hi = 0
+            for i in 0..<14 {
+                let (r, g, b) = px.rgb(from + Double(i) * 0.01, y)
+                if max(r, g, b) - min(r, g, b) > 40 { return true }
+                let l = (r * 3 + g * 6 + b) / 10
+                (lo, hi) = (min(lo, l), max(hi, l))
+            }
+            return hi - lo > 45
+        }
+        let left = avatar(0.01), right = avatar(0.86)
+        if left && !right { return .theirs }
+        if right && !left { return .mine }
+        return nil
     }
 }
