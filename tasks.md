@@ -2,9 +2,12 @@
 
 ## 小藍 iPad 版（2026-11-25）
 - [x] 拆智微兔／智企微行：手機不跑大模型；回覆由伺服器 QA 回調決定（data.info.text → 203）；接話／監察在後台叫大模型。報告 docs/xiaolan-engine-logic.md。
-- [ ] 照引擎補 QA 回調與機器人設定（robotInfo/get、qaUrl、replyAll、autoReply、robotType），iPad 不再寫回覆。（等使用者確認）
-- [ ] 小藍不再要求填模型；守候讀新訊息不叫大模型。（等使用者確認）
-- [ ] 指令執行照 s3/ni 固定步驟改寫，用 iPad 內建文字辨識代替安卓無障礙讀字。（等使用者確認）
+- [x] 164：QA 回調與機器人設定，iPad 不再寫回覆。
+- [x] 165：小藍不要求模型；讀聊天用裝置上文字辨識＋泡泡底色。
+- [x] 166：發訊息（203）全程無模型（搜尋進會話、找輸入框、快速發送）。
+- [ ] 其餘指令逐項寫固定步驟（@ 成員、群資訊、建群、改群…），每項在测试群實測。
+- [ ] 接茬／AI 回覆：iPad 接北京總網關 /device/models/reply/route（要配對碼）。
+- [ ] 166 真機實測：校準、讀訊息、發訊息（鍵盤要切小藍）。
 - [x] 160 iOS 27 正式版 IPA（Xcode 27.1，run 45495463189）→ E:/桌面/XiaoLan-build160-ios27-unsigned.ipa，已核對 ScreenCaptureKit／小藍／[1,2]／min 17。
 - [x] 161 指令層：智微兔 35＋智企微行 54 個指令全接（XiaoLanOrders／XiaoLanMedia／ChatToolLink 企微連線／WatchMode.runOrder），跟圈有圖貼文改截螢幕上傳。
 - [x] 161 提交 cdf9fc3 推 build477 main；CI 45524329990 編譯＋960 測試 0 失敗；IPA E:/桌面/XiaoLan-build161-ios27-unsigned.ipa。
