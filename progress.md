@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 22:20（首爾）167／168 編譯、測試全過；168 放桌面
+- 167 CI 45541769314、168 CI 45543112091：都是 965 測試 0 失敗。
+- 168（bf719bf）＝167＋iPad 遠邊點擊（底部那排、最右邊）只推過邊 padMargin（不再推 1.5 個螢幕，避免回主畫面／Slide Over）。
+- IPA：E:/桌面/XiaoLan-build168-ios27-unsigned.ipa（SHA256 41c7dd6e…），舊的小藍 IPA 已刪（使用者規則：出新版刪舊版）。使用者選擇等 168 再裝，還沒實測校準。
+
 ## 2026-11-25 21:50（首爾）167：iPad 校準的探測距離按比例放大
 - 使用者：166 還是校準不了。日誌：點一下定位成功（0.088, 0.670）、歸零只推過頂 300（沒拉通知中心），但第一下探測點擊是「角落＋75 單位」＝iPad 螢幕的 (0.019, 0.014)，正好點在狀態列時間上（iPad 點時間會開通知中心）→ app: background → probe 1: no confirmed click。
 - 167：Pointer.padScale（iPad 8、iPhone 1）；calibrationMove 200×、calibrationStops [150,350]×、TouchCalibration.roughStops [75,150]×（iPad 600／1200）；nudge iPad 60。
