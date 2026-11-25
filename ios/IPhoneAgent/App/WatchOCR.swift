@@ -88,11 +88,15 @@ enum WatchOCR {
 
     /// 180 (Echo 178 on the iPad, 11-25: "企微测试群（7）Q", list "企微测试群Q"): the WeCom logo after an external group's
     /// name is read as a "Q"; one Q right after a CJK character or a bracket is that icon, not the name.
+    /// 181 (Echo 180 on the iPad, 11-25: "企微测试群（7）0", the chat not taken for 企微测试群 and its new line kept as
+    /// history): right after the head count the logo is read as a 0 or an O too. The（7）is the head count, no name.
     static func withoutIconTail(_ s: String) -> String {
-        guard let last = s.last, "QqＱ".contains(last), s.count >= 2 else { return s }
+        guard let last = s.last, s.count >= 2 else { return s }
         let before = s[s.index(before: s.index(before: s.endIndex))]
-        guard before == ")" || before == "）" || before.unicodeScalars.contains(where: { $0.value >= 0x2E80 }) else { return s }
-        return String(s.dropLast()).trimmingCharacters(in: .whitespaces)
+        let afterCount = before == ")" || before == "）"
+        let logo = "QqＱ".contains(last) && (afterCount || before.unicodeScalars.contains(where: { $0.value >= 0x2E80 }))
+            || afterCount && "0OoＯ〇".contains(last)
+        return logo ? String(s.dropLast()).trimmingCharacters(in: .whitespaces) : s
     }
 
     /// A read line: what the recognizer found and what it sits on.

@@ -417,6 +417,7 @@ import Foundation
     private func aim(_ x: Double, _ y: Double, edgeStart: Bool = false, required: Bool = false) async throws {
         guard let span else { throw DeviceError(message: "pointer not calibrated") }
         let unseenClicks = !required || trusted
+        aimSaw = false
         guard var found = try await find(x, y) else {
             guard unseenClicks else {
                 log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
@@ -501,7 +502,12 @@ import Foundation
             throw DeviceError(message: "Pointer is still off target after correction; no click was sent. Keep the current draft and inspect another route.")
         }
         log(String(format: "aim (%.3f, %.3f): verified at (%.3f, %.3f)", x, y, found.x, found.y))
+        aimSaw = true
     }
+
+    /// 181: the last aim saw the pointer on its target (not clicked at an estimate). 小藍's back arrow by a window's top
+    /// is clicked only by a short hop from a spot where the pointer was seen like this.
+    private(set) var aimSaw = false
 
     private func find(_ x: Double, _ y: Double) async throws -> CGPoint? {
         if let finder { return try await finder(x, y) }

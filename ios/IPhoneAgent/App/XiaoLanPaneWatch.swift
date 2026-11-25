@@ -15,6 +15,10 @@ struct PaneWatchState {
     var frontSince: Double?, lastHop = -Double.infinity, hopped = false
     /// 180: what each side showed that is no chat of WeChat or WeCom (logged once, left alone).
     var notChat: [Int: String] = [:]
+    /// 181: what 小藍 sent lately, to know the owner's other account when its line shows up on the other side.
+    var sent: [XiaoLanSelf.Sent] = []
+    /// 181: the windows whose app could not be told, logged once each.
+    var untold: Set<String> = []
 }
 
 extension AppModel {
@@ -44,7 +48,9 @@ extension AppModel {
             }
             state.frontSince = nil
             watchStatus = "正在同时守候微信和企业微信…"
-            for look in await paneLooks() {
+            let looks = await paneLooks()
+            paneTell(looks, &state)
+            for look in looks {
                 guard watching, !Task.isCancelled else { break }
                 await paneHandle(look, &state)
             }
@@ -73,7 +79,12 @@ extension AppModel {
         for (i, r) in rects.enumerated() {
             guard let crop = XiaoLanPanes.crop(frame, r) else { continue }
             let rows = await CandidatePicker.rowsOffMain(in: crop, top: 0, bottom: 1)
-            looks.append(PaneLook(side: rects.count == 1 ? 2 : i, rect: r, crop: crop, rows: rows, view: XiaoLanPanes.view(rows)))
+            var view = XiaoLanPanes.view(rows)
+            // 181: a list whose words were not read (title nor tab bar) is still told by its tab's colour, at any width.
+            if view == .unknown, XiaoLanPanes.cancelButton(rows) == nil, let px = WatchOCR.Pixels(crop), XiaoLanPanes.tabApp(px) != nil {
+                view = .list
+            }
+            looks.append(PaneLook(side: rects.count == 1 ? 2 : i, rect: r, crop: crop, rows: rows, view: view))
         }
         return looks
     }
@@ -99,6 +110,83 @@ extension AppModel {
             DebugLog.write("watch: tap at (\(String(format: "%.3f, %.3f", s.x, s.y))) failed: \(error.localizedDescription)")
             return false
         }
+    }
+
+    /// 181 (Echo 180, 11-25: after the owner changed the windows' widths WeChat's window was nobody's: nothing was sent
+    /// there, its red marks were left): each window's app by its tab bar or list title; of two windows, one told and
+    /// the other showing a WeChat/WeCom chat, that one is the other app. A window still untold is logged (and its screen
+    /// kept in diagnostics) once.
+    func paneTell(_ looks: [PaneLook], _ state: inout PaneWatchState) {
+        let told: [XiaoLanOrders.App?] = looks.map { l in
+            if let a = XiaoLanPanes.app(l.rows) { return a }
+            guard l.view == .list, let px = WatchOCR.Pixels(l.crop) else { return nil }
+            return XiaoLanPanes.tabApp(px)  // 181: the chosen tab's colour, when no word was read
+        }
+        for (i, l) in looks.enumerated() {
+            if let a = told[i] { state.apps[l.side] = a; continue }
+            if looks.count == 2, let o = told[1 - i] ?? state.apps[looks[1 - i].side],
+               state.apps[l.side] == nil || state.apps[l.side] == o,
+               let px = WatchOCR.Pixels(l.crop), XiaoLanPanes.chatBackground(px) {
+                state.apps[l.side] = o == .wework ? .wechat : .wework
+            }
+            guard state.apps[l.side] == nil, state.untold.count < 20 else { continue }
+            let note = String(format: "side %ld x %.3f-%.3f h %.3f", l.side, Double(l.rect.minX), Double(l.rect.maxX), Double(l.rect.height))
+                + " title「\(XiaoLanPanes.titleLine(l.rows))」 bottom「\(XiaoLanPanes.bottomText(l.rows))」"
+            if state.untold.insert(note).inserted {
+                DebugLog.write("watch: a window's app not told: \(note)")
+                if state.untold.count <= 3 { WatchChatOpen.keepFrame(feed.frame) }
+            }
+        }
+    }
+
+    /// 181: the window of `app` now, told as paneTell does.
+    private func paneFind(_ app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> PaneLook? {
+        let looks = await paneLooks()
+        paneTell(looks, &state)
+        return looks.first { state.apps[$0.side] == app }
+    }
+
+    /// 181: how many windows the screen shows (after `since`, and the animation of a window going away); -1 unknown.
+    private func paneWindowCount(after since: Double? = nil) async -> Int {
+        if let since {
+            await feed.afterAction(since: since)
+            try? await Task.sleep(nanoseconds: 800_000_000)
+        }
+        guard let frame = feed.frame, let px = WatchOCR.Pixels(frame) else { return -1 }
+        return XiaoLanPanes.windows(px).count
+    }
+
+    /// 181 (Echo 180, 11-25: the left window's back arrow was clicked with the pointer unseen, then again in place, and
+    /// the second click hit the window's close: WeChat was gone. User: "你為什么要把它點叉掉呢…記住你這個錯誤"): the
+    /// pointer is first found on the chat below the arrow, then hops the short way up and clicks; not seen there, nothing
+    /// is clicked by the window's top. A window gone after the click stops the watch: the owner brings it back by its
+    /// Dock icon.
+    private func paneBack(_ look: PaneLook, _ who: String) async -> Bool {
+        let arrow = XiaoLanPanes.onScreen(XiaoLanPanes.back, in: look.rect)
+        for stage in XiaoLanPanes.backStages {
+            let s = XiaoLanPanes.onScreen(stage, in: look.rect)
+            do { try await pointer.point(Double(s.x), Double(s.y), aim: true, rehome: false) } catch {
+                DebugLog.write("watch: \(who): back: pointer not placed below the arrow: \(error.localizedDescription)")
+                continue
+            }
+            guard pointer.aimSaw else { continue }
+            let windows = await paneWindowCount()
+            let t = now()
+            do { try await pointer.clickBy(Double(arrow.x - s.x), Double(arrow.y - s.y)) } catch {
+                DebugLog.write("watch: \(who): back: the click failed: \(error.localizedDescription)")
+                return false
+            }
+            DebugLog.write("watch: \(who): back: pointer seen at "
+                + String(format: "(%.3f, %.3f), then up to the arrow (%.3f, %.3f)", Double(s.x), Double(s.y), Double(arrow.x), Double(arrow.y)))
+            if windows == 2, await paneWindowCount(after: t) == 1 {
+                DebugLog.write("watch: a window is gone after the back arrow; watch stopped")
+                stopWatch("有一个窗口不见了：请点 Dock 上它的图标叫回来，再开守候")
+                return false
+            }
+            return true
+        }
+        DebugLog.write("watch: \(who): back: pointer not seen below the arrow; nothing clicked by the window's top")
+        return false
     }
 
     private func paneHandle(_ look: PaneLook, _ state: inout PaneWatchState) async {
@@ -142,7 +230,7 @@ extension AppModel {
             // The engines watch the whole list: a chat that stays quiet 8 s is left for the list (its red marks).
             if let quiet = state.quietSince[look.side], now() - quiet > 8 {
                 DebugLog.write("watch: \(app.rawValue): \(title) quiet; back to the list")
-                _ = await paneTap(XiaoLanPanes.back, in: look.rect, wide: 0.02)
+                _ = await paneBack(look, app.rawValue)
                 state.quietSince[look.side] = nil
             }
         case .unknown:
@@ -195,7 +283,33 @@ extension AppModel {
         }
         state.history[key] = WatchReport.remember(fresh, screen: lines, history: before)
         let names = WatchSettings.myNames
-        let messages = fresh.filter { !$0.mine }.map { line in
+        // 181 (user 11-25: "兩個號在一個群里…就相當于是同一個人，就不用回復了"; "應該點開把那個紅點給點掉，而不是應該回復"):
+        // the owner's own lines here are what this side's other account can see; a line on this side that is one of the
+        // owner's on the other (sent by 小藍 or read there as mine) is from the owner's other account: opened, never
+        // reported, and its sender learned.
+        let t = now()
+        state.sent.removeAll { t - $0.at > XiaoLanSelf.sentWindow }
+        for line in fresh where line.mine { state.sent.append(XiaoLanSelf.Sent(app: app, chat: name, text: line.text, at: t)) }
+        if state.sent.count > 60 { state.sent.removeFirst(state.sent.count - 60) }
+        var own: [String] = []
+        let others = fresh.filter { line in
+            guard !line.mine else { return false }
+            let owners = names + XiaoLanSelf.learned
+            if XiaoLanSelf.sentByOther(line.text, chat: name, app: app, sent: state.sent, now: t) {
+                if !line.sender.isEmpty && !XiaoLanSelf.isOwner(line.sender, names: owners) {
+                    XiaoLanSelf.learn(XiaoLanPanes.listName(line.sender))
+                    DebugLog.write("watch: \(app.rawValue): \(name): \(line.sender) said what the owner said on the other app: the owner's other account, learned")
+                }
+                own.append(line.sender)
+                return false
+            }
+            if XiaoLanSelf.isOwner(line.sender, names: owners) { own.append(line.sender); return false }
+            return true
+        }
+        if !own.isEmpty {
+            DebugLog.write("watch: \(app.rawValue): \(name): \(own.count) line(s) from the owner's other account (\(Set(own).sorted().joined(separator: "、"))): opened, not reported")
+        }
+        let messages = others.map { line in
             ReadMessage(chat: name, group: read.group, sender: line.sender, text: line.text,
                         atMe: names.contains { line.text.contains("@" + $0) })
         }
@@ -232,13 +346,7 @@ extension AppModel {
     private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App,
                           _ state: inout PaneWatchState) async -> (ok: Bool, why: String) {
         let appName = app == .wework ? "企业微信" : "微信"
-        let sides = state.apps
-        var found: PaneLook?
-        for l in await paneLooks() {
-            if let a = XiaoLanPanes.app(l.rows) { state.apps[l.side] = a }
-            if found == nil, (state.apps[l.side] ?? sides[l.side]) == app { found = l }
-        }
-        guard var look = found else {
+        guard var look = await paneFind(app, &state) else {
             return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）")
         }
         // 180: a list's title is no chat to send to (178 replied "into 微信", the WeChat list read as a chat).
@@ -249,7 +357,7 @@ extension AppModel {
         }
         if !isChat(look) {
             if case .chat = look.view {  // another chat: back to the list first
-                _ = await paneTap(XiaoLanPanes.back, in: look.rect, wide: 0.02)
+                guard await paneBack(look, app.rawValue) else { return (false, "\(appName)没有回到会话列表（返回键旁看不到鼠标，没有点）") }
                 guard let back = await paneLook(look.side, after: now(), until: { $0.view == .list }) else {
                     return (false, "\(appName)没有回到会话列表")
                 }
@@ -299,6 +407,7 @@ extension AppModel {
            r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(head) }) == true {
             let key = "\(app.rawValue)|\(r.title)"
             state.history[key] = WatchReport.remember([], screen: r.lines, history: nil)
+            state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
             return (true, "")
         }
         return (false, ChatToolLink.reasonNotSent)
@@ -308,15 +417,9 @@ extension AppModel {
     /// drag, WeCom by a sideways scroll), the red 删除, a confirmation's 删除 when one comes, then the row is gone.
     private func paneDelete(_ chat: String, app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> (ok: Bool, why: String) {
         let appName = app == .wework ? "企业微信" : "微信"
-        let sides = state.apps
-        var found: PaneLook?
-        for l in await paneLooks() {
-            if let a = XiaoLanPanes.app(l.rows) { state.apps[l.side] = a }
-            if found == nil, (state.apps[l.side] ?? sides[l.side]) == app { found = l }
-        }
-        guard var look = found else { return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）") }
+        guard var look = await paneFind(app, &state) else { return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）") }
         if case .chat = look.view {  // in a chat: back to the list first
-            _ = await paneTap(XiaoLanPanes.back, in: look.rect, wide: 0.02)
+            guard await paneBack(look, app.rawValue) else { return (false, "\(appName)没有回到会话列表（返回键旁看不到鼠标，没有点）") }
             guard let back = await paneLook(look.side, after: now(), until: { $0.view == .list }) else {
                 return (false, "\(appName)没有回到会话列表")
             }

@@ -62,6 +62,34 @@ enum XiaoLanMedia {
         }
     }
 
+    /// 181 (Echo 180, 11-25: 514 for 2026-11-25 to 2026-11-25 returned nothing; the day's stamps sort after
+    /// "2026-11-25"): 514's range as the debug log's own UTC stamps ("yyyy-MM-ddTHH:mm:ss"). The times given are on the
+    /// device's clock, whatever zone it is set to (user: "按照設備上的實際時間…換個設備是首爾時間，來自動對到首爾"); the end
+    /// is exclusive and a day or a minute alone means all of it. A bound not read is open ("").
+    static func logBounds(_ from: String, _ to: String, zone: TimeZone = .current) -> (String, String) {
+        func parse(_ s: String) -> (date: Date, span: TimeInterval)? {
+            let t = s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "T", with: " ")
+            guard !t.isEmpty else { return nil }
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = zone
+            let formats: [(String, TimeInterval)] = [("yyyy-MM-dd HH:mm:ss", 1), ("yyyy-MM-dd HH:mm", 60), ("yyyy-MM-dd", 86_400),
+                                                     ("yyyy/MM/dd HH:mm:ss", 1), ("yyyy/MM/dd HH:mm", 60), ("yyyy/MM/dd", 86_400)]
+            for (format, span) in formats {
+                f.dateFormat = format
+                if let d = f.date(from: t) { return (d, span) }
+            }
+            return nil
+        }
+        let utc = DateFormatter()
+        utc.locale = Locale(identifier: "en_US_POSIX")
+        utc.timeZone = TimeZone(identifier: "UTC")
+        utc.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let a = parse(from).map { utc.string(from: $0.date) } ?? ""
+        let b = parse(to).map { utc.string(from: $0.date.addingTimeInterval($0.span)) } ?? ""
+        return (a, b)
+    }
+
     /// 509 / 510 / 513 / 514: the order's data bean, made here.
     @MainActor static func local(_ what: XiaoLanOrders.Local, type: Int) -> [String: Any] {
         switch what {
@@ -71,10 +99,10 @@ enum XiaoLanMedia {
         case .log:
             return ["type": type, "log": DebugLog.tail(400).joined(separator: "\n")]
         case .logRange(let from, let to):
-            let a = from.replacingOccurrences(of: " ", with: "T").prefix(19), b = to.replacingOccurrences(of: " ", with: "T").prefix(19)
+            let (a, b) = logBounds(from, to)
             let lines = DebugLog.tail(5000).filter { line in
-                let stamp = line.prefix(19)
-                return (a.isEmpty || stamp >= a) && (b.isEmpty || stamp <= b)
+                let stamp = String(line.prefix(19))
+                return (a.isEmpty || stamp >= a) && (b.isEmpty || stamp < b)
             }
             return ["type": type, "startDate": from, "endDate": to, "log": lines.suffix(800).joined(separator: "\n")]
         case .resources:

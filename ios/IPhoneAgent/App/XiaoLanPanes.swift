@@ -34,16 +34,22 @@ import UIKit
         // The gap: two such edges close together (the wallpaper between them, 0.3–4% of the width).
         var best: (a: Int, b: Int, s: Double)?
         for e in scored {
-            for f in scored where f.x - e.x >= max(2, w * 3 / 1000) && f.x - e.x <= w * 4 / 100 {
+            // 181 (user 11-25: "寬度他可能會自由調整…有時候左邊寬一些，有時候右邊寬一些"): the owner drags the windows;
+            // the gap is wherever it is and may be wider than 180's 4% (now up to 10%).
+            for f in scored where f.x - e.x >= max(2, w * 3 / 1000) && f.x - e.x <= w / 10 {
                 let s = e.s + f.s
                 if best == nil || s > best!.s { best = (e.x, f.x, s) }
             }
         }
         guard let gap = best else { return [CGRect(x: 0, y: 0, width: 1, height: 1)] }
-        let left = Double(gap.a) / Double(w), right = Double(gap.b) / Double(w)
-        let bottom = windowBottom(luma, w: w, h: h, from: 0, to: gap.a)
-        return [CGRect(x: 0, y: 0, width: left, height: bottom),
-                CGRect(x: right, y: 0, width: 1 - right, height: windowBottom(luma, w: w, h: h, from: gap.b, to: w))]
+        // 181: a window moved in from the screen's side has an outer edge too; the wallpaper outside it is no part of
+        // it (its taps are fractions of the window). Each window stays at least a fifth of the screen wide.
+        let outerLeft = (1..<max(1, gap.a - w / 5)).first { edge($0) >= 0.7 } ?? 0
+        let outerRight = stride(from: w - 1, to: min(w - 1, gap.b + w / 5), by: -1).first { edge($0) >= 0.7 } ?? w
+        let (l0, l1) = (Double(outerLeft) / Double(w), Double(gap.a) / Double(w))
+        let (r0, r1) = (Double(gap.b) / Double(w), Double(outerRight) / Double(w))
+        return [CGRect(x: l0, y: 0, width: l1 - l0, height: windowBottom(luma, w: w, h: h, from: outerLeft, to: gap.a)),
+                CGRect(x: r0, y: 0, width: r1 - r0, height: windowBottom(luma, w: w, h: h, from: gap.b, to: outerRight))]
     }
 
     /// Where a window ends above the Dock: the first row from 0.75 down that changes sharply nearly all the way across.
@@ -84,19 +90,56 @@ import UIKit
             return .wework
         }
         if (bar.contains("通讯录") || bar.contains("通訊錄")) && (bar.contains("发现") || bar.contains("發現")) { return .wechat }
+        // 181 (Echo 180, 11-25, after the owner changed the windows' widths): WeChat's tab bar was not read in its window,
+        // its list title 微信 was; the window was nobody's, so nothing was sent there and its red marks were left.
+        return listApp(WatchOCR.titled(titleLine(rows)).name)
+    }
+
+    /// 181 (user 11-25: "它兩邊不論怎么多寬，它自由的寬度都可以看到"): a chat list told without reading a word: the chosen
+    /// tab at the bottom left is WeChat's green or WeCom's blue. Measured on the customer's iPad at four widths (11-25):
+    /// WeChat 41–54 green samples and no blue, WeCom 28–30 blue and no green.
+    static func tabApp(_ px: WatchOCR.Pixels) -> XiaoLanOrders.App? {
+        var green = 0, blue = 0
+        for fy in stride(from: 0.90, through: 0.995, by: 0.005) {
+            for fx in stride(from: 0.02, through: 0.35, by: 0.005) {
+                let (r, g, b) = px.rgb(fx, fy)
+                if g > 150 && r < 90 && b < 150 && g - r > 80 { green += 1 }
+                if b > 190 && r < 110 && b - r > 100 && g < 190 { blue += 1 }
+            }
+        }
+        if green >= 12 && blue <= 3 { return .wechat }
+        if blue >= 12 && green <= 3 { return .wework }
         return nil
+    }
+
+    /// 181: the app whose chat list carries this title (WeChat's 微信, WeCom's 消息).
+    static func listApp(_ title: String) -> XiaoLanOrders.App? {
+        switch title {
+        case "微信", "WeChat", "Chats": return .wechat
+        case "消息", "Messages": return .wework
+        default: return nil
+        }
+    }
+
+    /// The first line in a window's title band: WeCom puts "外部群 | 群主: …" under a group's name (0.071 vs 0.050).
+    static func titleLine(_ rows: [[Piece]]) -> String {
+        let lines = rows.map { $0.filter { (0.035...0.09).contains($0.box.midY) && (0.18...0.82).contains($0.box.midX) } }
+            .filter { !$0.isEmpty }
+            .sorted { ($0.map(\.box.midY).min() ?? 1) < ($1.map(\.box.midY).min() ?? 1) }
+        return (lines.first ?? []).sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 181: what a window's bottom band reads (its tab bar on a list), for the log when its app is not told.
+    static func bottomText(_ rows: [[Piece]]) -> String {
+        rows.joined().filter { $0.box.midY > 0.85 }.map(\.text).joined(separator: " ")
     }
 
     /// The chat list (its tab bar), a chat (its centred title, no tab bar), or neither.
     static func view(_ rows: [[Piece]]) -> View {
         if app(rows) != nil { return .list }
         if cancelButton(rows) != nil { return .unknown }  // searching: the field's words are no chat's title
-        // The first line in the title band: WeCom puts "外部群 | 群主: …" under a group's name (0.071 vs 0.050).
-        let lines = rows.map { $0.filter { (0.035...0.09).contains($0.box.midY) && (0.18...0.82).contains($0.box.midX) } }
-            .filter { !$0.isEmpty }
-            .sorted { ($0.map(\.box.midY).min() ?? 1) < ($1.map(\.box.midY).min() ?? 1) }
-        let title = (lines.first ?? []).sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
-            .trimmingCharacters(in: .whitespaces)
+        let title = titleLine(rows)
         // 180 (Echo 178, 11-25): with 小藍's keyboard up the tab bar is covered, and the WeChat list was read as a chat
         // called 微信 (every row reported as a message), WeCom's as one called 消息. Their titles say they are lists.
         if listTitles.contains(WatchOCR.titled(title).name) { return .list }
@@ -168,9 +211,11 @@ import UIKit
             return (pieces.map(\.text).joined(), pieces.reduce(CGRect.null) { $0.union($1.box) })
         }
         return body.compactMap { t in
-            guard body.contains(where: { p in
-                (0.015...0.045).contains(p.box.midY - t.box.midY) && abs(p.box.minX - t.box.minX) <= 0.04
-            }) else { return nil }
+            let gaps: [CGFloat] = body.filter { p in abs(p.box.minX - t.box.minX) <= 0.04 }.map { p in p.box.midY - t.box.midY }
+            guard let below = gaps.filter({ d in (0.015...0.045).contains(d) }).min() else { return nil }
+            // 181 (Echo 180, 11-25: "同事们在看《安克被告…》", 行业资讯's preview, was opened as a chat once the window's
+            // scale changed): a line with a title right above it, closer than 1.5 times the line under it, is a preview.
+            if gaps.contains(where: { d in (0.005...(below * 1.5)).contains(-d) }) { return nil }
             let name = listName(t.text)
             return name.isEmpty ? nil : (name: name, box: t.box)
         }
@@ -190,6 +235,10 @@ import UIKit
 
     /// Back from a chat to the list: the arrow at the window's top-left.
     static let back = CGPoint(x: 0.055, y: 0.058)
+    /// 181 (Echo 180, 11-25: the left window's back arrow was clicked unseen, then again in place, and the second click
+    /// closed WeChat; its ••• and close sit ~50 px above the arrow): where the pointer is found first, on the chat below
+    /// the arrow (hovering there does nothing), before the short hop up to the arrow. A second spot if not seen there.
+    static let backStages = [CGPoint(x: 0.16, y: 0.14), CGPoint(x: 0.30, y: 0.22)]
 
     // MARK: Delete (174, user 11-25: "苹果设备删除聊天窗口长按删不了，要横滑，有一个红色的删除")
 
@@ -250,5 +299,49 @@ import UIKit
             .filter { (0.12...0.9).contains($0.box.midY) && WatchChatOpen.sameChat(chat, listName: $0.text) }
             .min { $0.box.midY < $1.box.midY }
             .map { CGPoint(x: 0.5, y: $0.box.midY) }
+    }
+}
+
+/// 181 (user 11-25: "兩個號在一個群里…就相當于是同一個人，就不用回復了"; "發了過后，他應該點開把那個紅點給點掉，而不是
+/// 應該回復"): WeChat's and WeCom's own accounts are one person. What one of them says in a group both are in is opened on
+/// the other side (its red mark goes) and never reported, so it is never answered. Who that is: the owner's names typed in
+/// the watch settings, and any sender whose line is what 小藍 just sent there from the other app (learned, kept).
+@MainActor enum XiaoLanSelf {
+    struct Sent { var app: XiaoLanOrders.App; var chat: String; var text: String; var at: Double }
+
+    static let learnedKey = "xiaolanSelvesV1"
+    static let sentWindow = 600.0  // seconds a sent line is looked for on the other side
+
+    /// The names learned so far (newest last, ten at most).
+    static var learned: [String] { UserDefaults.standard.stringArray(forKey: learnedKey) ?? [] }
+
+    static func learn(_ name: String) {
+        let n = name.filter { !$0.isWhitespace }
+        guard !n.isEmpty, !learned.contains(n) else { return }
+        UserDefaults.standard.set(Array((learned + [n]).suffix(10)), forKey: learnedKey)
+    }
+
+    /// A line's words without spaces and punctuation (【】 and full-width signs too: the reader often gets those wrong),
+    /// for matching what was sent with what is read. Letters include Chinese.
+    static func plain(_ s: String) -> String {
+        String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map { Character($0) })
+    }
+
+    /// The line read in `chat` on `app` is one 小藍 sent there from the other app within the window.
+    static func sentByOther(_ text: String, chat: String, app: XiaoLanOrders.App, sent: [Sent], now: Double) -> Bool {
+        let t = plain(text)
+        guard t.count >= 2 else { return false }
+        return sent.contains { s in
+            guard s.app != app, now - s.at <= sentWindow,
+                  WatchChatOpen.sameChat(chat, listName: s.chat) || WatchChatOpen.sameChat(s.chat, listName: chat) else { return false }
+            let p = plain(s.text)
+            return p == t || (min(p.count, t.count) >= 4 && (p.contains(t) || t.contains(p)))
+        }
+    }
+
+    /// The sender is the owner: one of `names` (typed or learned), WeCom's "@微信" tag and spaces left out.
+    static func isOwner(_ sender: String, names: [String]) -> Bool {
+        let s = XiaoLanPanes.listName(sender)
+        return !s.isEmpty && names.contains { XiaoLanPanes.listName($0) == s }
     }
 }
