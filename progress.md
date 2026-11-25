@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 12:40（首爾）161 編譯、測試全過，IPA 出好
+- 提交 cdf9fc3 推 build477 main（使用者同意）。CI run 45524329990（xcode-27、Xcode 27.1）：BUILD SUCCEEDED、TEST SUCCEEDED，960 個測試 0 失敗（新增 4 個：testXiaoLanOrdersGetAReceiptAndOneResultEach、testXiaoLanTakesEveryOrderOfBothEngines、testMomentPictureLosesTheViewerBlack、testXiaoLanWeComLinkAndQueueOrders 都過）。
+- IPA：E:/桌面/XiaoLan-build161-ios27-unsigned.ipa（3,400,728 bytes，SHA256 70c6a677…3109d893，與 CI ipa.sha256 一致）；核對：小藍、com.example.esp32agent.xiaolan、CFBundleVersion 161、[1,2]、min 17.0、iphoneos27.1、含 ScreenCaptureKit、含 NSPhotoLibraryAddUsageDescription、PlugIns/XiaoLanKeyboard.appex。
+- 還沒做：iPad 安裝（使用者用爱思簽名）與逐項真機測試。
+
 ## 2026-11-25 12:10（首爾）161：跟圈有圖的貼文也能發（截螢幕上的圖，未推送、未編譯）
 - 使用者糾正：「抓不到原圖，能打開它也行，主要是看圖片內容」。我之前說 iPad 抓不到朋友圈圖片所以發不了，太保守了。
 - 改法：WatchMode.captureMomentPictures —— 260 讀完後，對每條有圖的貼文跑代理任務「打開第一張圖全螢幕、停住」，等 2.5 秒讓指標淡掉，拿當下畫面 → XiaoLanMedia.trimmed 裁掉黑邊（只把接近純黑當背景、取最長一段連續有內容的列與欄，狀態列、頁碼點、指標這種短段會被排除）→ XiaoLanMedia.upload POST 到跟圈 uploadUrl?robotId&token（owner-gequan 回 {"url": …/files/<sha>.jpg}）→ pointer.swipe 往左換下一張；全部成功才 imagesComplete=true＋imageUrls，後台就會派 261，iPad 再把這些圖下載進相簿照發。
