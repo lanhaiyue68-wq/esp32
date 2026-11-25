@@ -1428,7 +1428,9 @@ extension AppModel {
         // W4: when the list was last looked at for a red mark, and checks in a row a mark started (a mark a check does
         // not clear starts no more until it goes).
         var lastMarkLook = -Double.infinity, markChecks = 0, lastMarkSig: [UInt8]?
+        var frontSince: Double?, lastHopTry = -Double.infinity, hopped = false  // 171, 小藍: Echo in front while watching
         while watching && !Task.isCancelled {
+            if UIApplication.shared.applicationState != .active { frontSince = nil }
             if agent.running || startingAgent || help != nil {
                 baseline = nil  // a check (or a question to the user) is under way
             } else if !MockMode.on && !(board.connected && feed.watchable) {
@@ -1441,6 +1443,24 @@ extension AppModel {
             } else if !MockMode.on && gate.shouldPause(foreground: UIApplication.shared.applicationState == .active) {
                 watchStatus = String(localized: "Paused while Lan Agent is in front…")
                 (baseline, changedAt) = (nil, nil)
+                #if XIAOLAN
+                // 171 (user 11-25 on 170: "我點的時候他也沒有去我的微信上面…他一直還在這個主頁面"): 小藍 watches WeChat,
+                // not itself. The first check's hop to WeChat was missed (Echo was not active: iOS was asking about the
+                // local network), and every check after paused with Echo in front. Echo in front while watching: back
+                // to WeChat by its URL, at once the first time, then after 8 s in front (a look at Echo is not cut short).
+                let t = now()
+                if frontSince == nil { frontSince = t }
+                if let since = frontSince, t - since >= (hopped ? 8 : 1), t - lastHopTry >= 5 {
+                    lastHopTry = t
+                    let opened = await hopToWeChat(seesWeChat: { false })
+                    DebugLog.write("watch: Echo in front while watching; WeChat opened by its URL: \(opened ? "yes" : "no")")
+                    if opened {
+                        (hopped, frontSince) = (true, nil)
+                        _ = await feed.fresh(since: t, timeout: 3)
+                        await feed.settled()
+                    }
+                }
+                #endif
             } else if let chat = watchListReturn.pending {
                 // 124 in 测试群 11-12: "@蓝 这张图是哪个城市" came in while the watch was still in the chat reading the
                 // picture before it. Inside a chat WeChat shows no red mark, and back on the list nothing called it again.

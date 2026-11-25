@@ -72,6 +72,16 @@ extension AppModel {
                           "robot": .str(WatchSettings.robotId), "weworkOn": .bool(WatchSettings.weworkOn),
                           "weworkURL": .str(WatchSettings.weworkURL), "weworkCode": .str(WatchSettings.weworkCode)])
 
+        case ("POST", "/padstep"):
+            // 171: try another iPad pace (counts a report, 2…40; 0 back to 10) without a new build; recalibrate after.
+            UserDefaults.standard.set(Int(number("n")), forKey: CommandChannel.padStepKey)
+            return .json(["padStep": .num(Double(CommandChannel.padStep))])
+
+        case ("POST", "/calibrate"):
+            // 171: the Calibrate button, from the computer (it moves the iPad's pointer: only with the user there).
+            calibrator.calibrate(why: "test channel")
+            return .json(["started": .bool(true)])
+
         case ("POST", "/watch"):
             if body["on"] as? Bool == true {
                 if let problem = startWatch() { return .json(["error": .str(problem)], status: 409) }

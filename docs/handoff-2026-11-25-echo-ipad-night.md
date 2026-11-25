@@ -20,6 +20,7 @@
 3. **電腦模擬伺服器**（node ×2，聽 0.0.0.0）：個微 `http://192.168.3.79:18971/zwt`、企微 `http://192.168.3.79:18970/qiwei`。舊視窗關掉就會停，重開：在 `E:\AIProjects\worktool-lan-watch\tests\device-tools` 設 `WS_MODULE=E:\AIProjects\worktool-lan-watch\suite\backends\zhiqiweixing\node_modules\ws`、`MOCK_HOST=0.0.0.0`，分別 `MOCK_PORT=18971 MOCK_LOG=mockgeren.jsonl` 與 `MOCK_PORT=18970 MOCK_LOG=mockqiwei.jsonl` 跑 `node mockqiwei.js`。它有 `/robot/robotInfo/get`（回調指回自己）與 `/qa`（**只有訊息含「测试回复」才回**「【模拟服务器】收到：…」）。Windows 跳防火牆詢問要使用者按允許。
 
 ## 二、接下來（照順序）
+> 14:20 進度（新視窗）：1 完成（verify OK，sha256 寫在 README.txt）；2 已燒 v35 合併檔＋把備份的 NVS（0x9000 長 0x5000，配對與主人資料，分割表與 v34 相同）寫回並驗證，使用者按 RST 後確認 fw v35、step 40/10 正常、藍牙已連（RTS 重開對這塊無效）；3 的 170 已裝（愛思排隊是因為覆蓋安裝前先備份 App 資料，81 MB），`servers` 已填好。
 1. 備份完成並驗證 → 告訴使用者備份好了。
 2. **燒 v35**（使用者已同意）：板子在下載模式時 `esptool --chip esp32s3 -p COM4 write_flash 0 build-v35/hid_bridge.ino.merged.bin`（或分開燒 bootloader 0x0、partitions 0x8000、boot_app0 0xe000、app 0x10000），再請使用者按 RST；回到 COM5 後用 `E:\AgentStorage\esp32\voice-board\tools\serial_cmd.py COM5 --dtr '1 status'` 看版本 v35、`step` 回 `ok 40`。確認後才告訴使用者可以拔板子。
 3. 使用者裝 **170**（`E:\桌面\XiaoLan-build170-ios27-unsigned.ipa`，App 名「Echo」），iPad 接 USB：

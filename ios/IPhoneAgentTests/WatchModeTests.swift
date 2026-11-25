@@ -409,6 +409,45 @@ import UIKit
         XCTAssertNotNil(link.enqueueLocal(["type": 222]))  // 打卡 is WeCom's only
     }
 
+    /// 171: an iPad move goes as one curved stroke that bows visibly, stays on the screen and lands where the move would.
+    func testIPadMoveIsACurveThatStaysOnTheScreen() {
+        let span = (w: 1733, h: 2380)
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }
+        let moves: [((Int, Int), (Int, Int))] = [((0, 0), (600, 600)), ((866, 1190), (0, -900)),
+                                                 ((1700, 2300), (-1600, -10)), ((10, 1190), (1200, 5))]
+        for (from, by) in moves {
+            guard let s = PadCurve.stroke(from: from, by: by, span: span, random: mid) else {
+                XCTFail("no curve for \(by)")
+                continue
+            }
+            let v = s.split(separator: " ").dropFirst().compactMap { Int($0) }
+            XCTAssertTrue(s.hasPrefix("stroke "))
+            XCTAssertLessThanOrEqual(v.count / 2, 40)  // the board takes 40 pieces
+            var p = from, bow = 0.0
+            let len = hypot(Double(by.0), Double(by.1))
+            for i in stride(from: 0, to: v.count - 1, by: 2) {
+                p = (p.0 + v[i], p.1 + v[i + 1])
+                XCTAssertTrue((0...span.w).contains(p.0) && (0...span.h).contains(p.1), "\(p) is off the screen")
+                let rx = Double(p.0 - from.0), ry = Double(p.1 - from.1)
+                bow = max(bow, abs(rx * Double(by.1) - ry * Double(by.0)) / len)
+            }
+            XCTAssertEqual(p.0, from.0 + by.0)
+            XCTAssertEqual(p.1, from.1 + by.1)
+            XCTAssertGreaterThan(bow, len * 0.04, "a bow that shows")
+        }
+        // short, past an edge, place unknown, button down, not a move: sent as they are
+        XCTAssertNil(PadCurve.stroke(from: (100, 100), by: (200, 100), span: span))
+        XCTAssertNil(PadCurve.stroke(from: (0, 0), by: (2500, 0), span: span))
+        XCTAssertNil(CommandChannel.padCurved("move 600 600", from: nil, span: span, held: false))
+        XCTAssertNil(CommandChannel.padCurved("move 600 600", from: (0, 0), span: span, held: true))
+        XCTAssertNotNil(CommandChannel.padCurved("move 600 600", from: (0, 0), span: span, held: false, random: mid))
+        XCTAssertNil(CommandChannel.padCurved("click", from: (0, 0), span: span, held: false))
+        XCTAssertTrue(CommandChannel.heldAfter("press", was: false))
+        XCTAssertFalse(CommandChannel.heldAfter("release", was: true))
+        XCTAssertTrue(CommandChannel.heldAfter("move 5 5", was: true))
+        XCTAssertEqual(CommandChannel.padStep, 10)  // one pace for every iPad move
+    }
+
     /// 162: an iPad home pushes only a little past the top (from where the pointer is), never blindly.
     func testIPadHomeNeverPushesFarPastTheTop() {
         let span = (w: 3900, h: 5270)

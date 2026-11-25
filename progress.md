@@ -1,5 +1,18 @@
 # 当前进度
 
+## 2026-11-25 14:50（電腦時間）171：iPad 曲線移動、單一步幅、守候自己回微信
+- 使用者實測 170：校準全是直線；誤差 >1.5% 一直失敗（168 是 ±0.5%）；按守候停在 Echo 主頁，不去微信／企微。
+- 日誌原因：①直線：iPad 歸零用 abort，板子不知道角落，曲線只能在這次移動的方框內，多數移動幾乎直線。②誤差：170 移動用 40、推邊用 10，iPadOS 指標加速讓快的每格走得遠（約 1.5 倍），慢速歸零推不到角落（擬合偏移 0.15／0.20），探測散布 6.8%／9.2%。③守候：第一次檢查時 iOS 正在問「區域網路」權限，Echo 不是 active，跳微信那步沒做；之後 Echo 在前面就一直暫停。
+- 171：iPad 全部移動同一步幅 10（CommandChannel.padStep，每次連線先送 `step 10`；測試通道 /padstep 可在實機換步幅），推邊仍直線；長於 300 單位、知道位置、沒按住時，`move` 改成 App 畫的貝塞爾曲線（PadCurve：偏 10–18%、方向隨機、四個控制點都在螢幕內），一個 `stroke` 送出；小藍守候時 Echo 在前面：第一次 1 秒、之後 8 秒就自己用網址回微信。測試通道加 /calibrate。
+- 企微守候讀訊息還沒做（要先看 iPad 企微畫面配色）；守候名單現在只有「蓝海乐」，测试群要加進名單才會看。
+
+## 2026-11-25 14:25（電腦時間）新視窗：滑鼠板備份驗證、v35 燒錄並開機、170 已裝、填好模擬伺服器
+- 備份：E:/AgentStorage/esp32/backups/mouse-board-v34-20261125/mouse-board-v34-full-16MB.bin（16,777,216 bytes，sha256 e724f117…1da6），verify_flash digest matched；README.txt 寫燒回方法（新板子燒完長按 BOOT 2 秒認 iPhone）。
+- v35：write_flash 0 build-v35/hid_bridge.ino.merged.bin（合併檔會把 NVS 清成 FF）→ 分割表與 v34 相同，把備份 0x9000 長 0x5000 的 NVS 寫回並驗證，iPad 配對保住。RTS 重開無效，使用者按 RST；COM5 `1 status` → fw v35、ble n 1；`2 step` → ok 40、`step slow` → 10、`step fast` → 40（指令要帶序號）。
+- 愛思「排隊中」：Echo 170 其實已裝（CFBundleVersion 170，開發者簽名）；覆蓋安裝前愛思先備份 App 資料（cache/backup_doc，這次 81 MB／57 檔，每版變大），所以慢。
+- `lan_usb_ipad.py servers` 已把個微 :18971/zwt、企微 :18970/qiwei、代號 xiaolan_ipad 填進 Echo；模擬伺服器尚未收到 Echo 連線（要開 Echo 守候）。
+- 下一步：使用者調 iPad 跟踪速度最快 → Echo 重新校準（讀日誌 the screen is about / calibration ±）→ 测试群實測（守候、工具箱發訊息、「测试回复 你好」）。
+
 ## 2026-11-25 23:50（首爾）170＋滑鼠板韌體 v35：速度調到最快（推邊仍慢）
 - 使用者：速度要調到最快。兩個槓桿：①iPad 辅助触控「跟踪速度」拉到最快（使用者自己調，169 起校準會重新量螢幕單位，推邊量按比例）；②板子韌體步幅。
 - 韌體 v35（E:/AgentStorage/esp32/esp32-iphone-agent/hardware/hid_bridge/hid_bridge.ino，未提交）：STEP 改成可變，預設快（40／每報告，原本 10），新指令 `step N|fast|slow`。改之前把整份韌體原始碼備份到 E:/AgentStorage/esp32/backups/mouse-board-v34-20261125/hardware-source-v34.zip（板子實際快閃記憶體還要等板子接電腦再 read_flash）。

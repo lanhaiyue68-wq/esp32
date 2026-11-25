@@ -153,6 +153,16 @@ extension HIDDevice {
     /// at its pointer speed of 11-25; 800 there tested harmless), so it stays as small a push if the speed changes.
     static func margin(_ span: (w: Int, h: Int)) -> Int { max(80, span.h * 57 / 1000) }
     static var padMargin: Int { margin(padSpan) }
+    /// 171: one pace for every move on an iPad, counts a report (v35 boards; older ones keep their own 10). 170 moved at
+    /// 40 and pushed edges at 10: iPadOS speeds a fast pointer up, so a fast count went ~1.5x as far as a slow one, the
+    /// slow home stopped short of the corner (fit offset 0.15 / 0.20, 11-25 14:16) and calibration failed at ±7–9%.
+    /// Every move at 10, as 168 was (±0.5%). Speed comes from the iPad's own 跟踪速度 (twice as fast, same pace).
+    /// `padStepV1` (test channel /padstep) tries another pace on the device.
+    static let padStepKey = "padStepV1"
+    static var padStep: Int {
+        let n = UserDefaults.standard.integer(forKey: padStepKey)
+        return n == 0 ? 10 : min(max(n, 2), 40)
+    }
     static let padPosKey = "padPointerPosV1"
     /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches
     /// (the iPad keeps its pointer where it was), forgotten after anything that can move it unseen.
@@ -202,13 +212,35 @@ extension HIDDevice {
     func send(_ command: String) async throws -> String {
         guard Self.onPad() else { return try await sendWatched(command) }
         if command == "home" { return try await padHomeNow() }
+        await padPace()
+        let sent = Self.padCurved(command, from: Self.padPos, span: Self.padSpan, held: padHeld) ?? command
         do {
-            let reply = try await sendWatched(command)
-            Self.padPos = Self.padTrack(command, from: Self.padPos, span: Self.padSpan)
+            let reply = try await sendWatched(sent)
+            Self.padPos = Self.padTrack(sent, from: Self.padPos, span: Self.padSpan)
+            padHeld = Self.heldAfter(sent, was: padHeld)
             return reply
         } catch {
             Self.padPos = nil  // a command that failed may have moved part of the way
             throw error
+        }
+    }
+
+    /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known, no button is down (a drag
+    /// keeps its line) and the move is long enough to show one; otherwise nil (sent as it is).
+    static func padCurved(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int), held: Bool,
+                          random: (ClosedRange<Double>) -> Double = { Double.random(in: $0) }) -> String? {
+        let parts = command.split(separator: " ")
+        guard !held, let pos, parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else {
+            return nil
+        }
+        return PadCurve.stroke(from: pos, by: (dx, dy), span: span, random: random)
+    }
+
+    static func heldAfter(_ command: String, was held: Bool) -> Bool {
+        switch command.split(separator: " ").first ?? "" {
+        case "press": return true
+        case "release", "click", "abort": return false
+        default: return held
         }
     }
 
@@ -221,11 +253,15 @@ extension HIDDevice {
         }
     }
 
-    /// v35 boards move fast (`step fast`, 40 counts a report); a push past an iPad's edge goes at the slow pace every
-    /// edge test of 11-25 was made at (a fast one opens Notification Center or goes Home). Older boards answer
-    /// "unknown command": nothing changes there.
-    func padPace(slow: Bool) async {
-        _ = try? await send(slow ? "step slow" : "step fast", timeout: nil)
+    /// 171: the board starts at 40 counts a report (v35): set the one iPad pace (padStep) once per link, before anything
+    /// moves. Every push past an edge of 11-25 was tested at 10. Older boards answer "unknown command": asked once a link.
+    private var pacedLink = -1, pacedStep = 0
+    private var padHeld = false
+    func padPace() async {
+        let step = Self.padStep
+        guard pacedLink != links || pacedStep != step else { return }
+        (pacedLink, pacedStep) = (links, step)
+        _ = try? await send("step \(step)", timeout: nil)
     }
 
     private func padHomeNow() async throws -> String {
@@ -237,14 +273,9 @@ extension HIDDevice {
         }
         DebugLog.write("ipad home: " + steps.joined(separator: " · "))
         Self.padPos = nil
-        await padPace(slow: true)
-        do {
-            for step in steps { _ = try await sendWatched(step) }
-        } catch {
-            await padPace(slow: false)
-            throw error
-        }
-        await padPace(slow: false)
+        await padPace()
+        for step in steps { _ = try await sendWatched(step) }  // straight pushes, never curved
+        padHeld = false
         Self.padPos = (0, 0)
         return ""
     }
