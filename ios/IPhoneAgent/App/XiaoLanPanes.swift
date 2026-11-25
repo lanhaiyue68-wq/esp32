@@ -168,6 +168,41 @@ import UIKit
     /// Back from a chat to the list: the arrow at the window's top-left.
     static let back = CGPoint(x: 0.055, y: 0.058)
 
+    // MARK: Delete (174, user 11-25: "苹果设备删除聊天窗口长按删不了，要横滑，有一个红色的删除")
+
+    /// The red 删除 a swipe brought out on the row titled `row` (window fractions): the word read there, or else the
+    /// red block at the row's right end (WeChat ~(243, 84, 81), WeCom ~(227, 77, 69); system accounts have none).
+    static func deleteButton(_ rows: [[Piece]], row: CGRect, red: (CGRect) -> Double) -> CGPoint? {
+        if let p = rows.joined().first(where: { deleteWords.contains($0.text.trimmingCharacters(in: .whitespaces))
+            && $0.box.midX > 0.5 && abs($0.box.midY - row.midY) < 0.05 }) {
+            return CGPoint(x: p.box.midX, y: p.box.midY)
+        }
+        let band = CGRect(x: 0.8, y: row.midY - 0.02, width: 0.18, height: 0.04)
+        return red(band) >= 0.4 ? CGPoint(x: band.midX, y: band.midY) : nil
+    }
+    static let deleteWords: Set<String> = ["删除", "刪除", "Delete"]
+
+    /// After the red 删除 (seen 11-25, the user tapping it): WeChat widens the row's red button into
+    /// 「清空记录同时不显示聊天」, tapped again to delete; WeCom asks in an alert 「此聊天及其聊天记录将从你所有设备中删除。」
+    /// with 取消 | 删除, the row's own buttons still showing dimmed behind it. The confirming button: the widened red one,
+    /// or the 删除 on the line of a 取消 to its left (not the row's).
+    static func confirmDelete(_ rows: [[Piece]]) -> CGPoint? {
+        let pieces = Array(rows.joined())
+        if let wide = pieces.first(where: { $0.text.contains("清空记录") || $0.text.contains("不显示聊天") }) {
+            return CGPoint(x: wide.box.midX, y: wide.box.midY)
+        }
+        let cancels = pieces.filter { ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) }
+        return pieces.first { p in
+            deleteWords.contains(p.text.trimmingCharacters(in: .whitespaces))
+                && cancels.contains { abs($0.box.midY - p.box.midY) < 0.02 && $0.box.midX < p.box.midX }
+        }.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
+    /// No piece on the window reads as `chat`'s name any more (a row still swiped open still shows it).
+    static func gone(_ chat: String, _ rows: [[Piece]]) -> Bool {
+        !rows.joined().contains { (0.1...0.92).contains($0.box.midY) && WatchChatOpen.sameChat(chat, listName: listName($0.text)) }
+    }
+
     // MARK: Search (173, user 11-25: a chat not in view is found by the list's search box, "這不是兩邊都有嗎")
 
     /// The list's search box.

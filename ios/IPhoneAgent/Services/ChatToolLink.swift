@@ -38,6 +38,8 @@ import Foundation
 
     static let stopAndGoHome = 201, receivePump = 202, sendMessage = 203, replyMessage = 204, queueClear = 304, heartBeat = 11
     static let controllerTest = 303, queueRemove = 305
+    /// 174: 小藍's own order (not in either engine): delete a chat from the app's chat list.
+    static let deleteChat = 290
     /// Packets that are not orders: heartbeat answers, received-message lists, toasts, logs, the engine's own pump.
     static let notOrders: Set<Int> = [0, 11, 101, 102, 202, 283, 301, 302]
     static let internalGroup = 3, privateChat = 0, plainText = 1

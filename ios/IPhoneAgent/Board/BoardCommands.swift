@@ -148,7 +148,7 @@ extension HIDDevice {
     // home pushes left, then up only `padMargin` past the top, from where the pointer is known to be.
 
     /// App units across the iPad (Pointer sets the calibrated span; these are the measured values before one).
-    static var padSpan = (w: 3900, h: 5300)  // measured on the customer's iPad 9 (11-25)
+    static var padSpan = (w: 1750, h: 2330)  // the customer's iPad 9 at 60 counts / 30 ms (11-25; 3900 x 5300 at 10 / 20 ms)
     /// How far past the left and top edges a home pushes: ~5.7% of the screen's height (300 units on the customer's iPad
     /// at its pointer speed of 11-25; 800 there tested harmless), so it stays as small a push if the speed changes.
     static func margin(_ span: (w: Int, h: Int)) -> Int { max(80, span.h * 57 / 1000) }
@@ -158,10 +158,85 @@ extension HIDDevice {
     /// slow home stopped short of the corner (fit offset 0.15 / 0.20, 11-25 14:16) and calibration failed at ±7–9%.
     /// Every move at 10, as 168 was (±0.5%). Speed comes from the iPad's own 跟踪速度 (twice as fast, same pace).
     /// `padStepV1` (test channel /padstep) tries another pace on the device.
-    static let padStepKey = "padStepV1"
+    /// 174 (user 11-25 on 173's step 10: "还是慢", wanted 170's speed; measured on the customer's iPad 9, 跟踪速度 at its
+    /// fastest, v38 boards with `round on`): moves go at 60 counts every 30 ms, where a long move goes as far as it is long
+    /// times one gain, a short one starts slower (padShort), and a push past an edge must be slow (padPushParts).
+    /// `padStepV2` / `padPaceV1` (test channel /padstep) try another pace on the device.
+    static let padStepKey = "padStepV2"
+    static let defaultPadStep = 60  // with defaultPadPace 30: as fast as 40 every 20 ms, without its extra jumps
     static var padStep: Int {
         let n = UserDefaults.standard.integer(forKey: padStepKey)
-        return n == 0 ? 10 : min(max(n, 2), 40)
+        return n == 0 ? defaultPadStep : min(max(n, 2), 127)
+    }
+    /// ms between Bluetooth move reports (v37 boards' `pace`; older boards keep 20).
+    static let padPaceKey = "padPaceV1"
+    static let defaultPadPace = 30
+    static var padPaceMs: Int {
+        let n = UserDefaults.standard.integer(forKey: padPaceKey)
+        return n == 0 ? defaultPadPace : min(max(n, 10), 60)
+    }
+
+    /// 174: the slow pace (counts a report) for a push past an edge and for a move from an unknown place: every edge
+    /// test of 11-25 was made at 10. Fast, a push left past the edge brought up Stage Manager's recent apps (11-25, at 25
+    /// and above: the calibration's clicks landed on it and it failed), up opens Notification Center, down goes Home.
+    /// 174: the same speed as 10 counts every 20 ms at any report interval.
+    static var padSlowStep: Int { max(2, 10 * padPaceMs / 20) }
+    /// How many slow units go as far as one app (fast) unit. Calibration corrects it (correctSlowRatio): its locating
+    /// moves go slow, its probes fast, and both measure the screen.
+    static let padSlowRatioKey = "padSlowRatioV1"
+    static let defaultSlowRatio = 2.35  // 60 counts / 30 ms at ~0.55 px a unit, 10 / 20 ms at 0.2345 (960-wide frames, 11-25)
+    static var padSlowRatio: Double {
+        get {
+            let r = UserDefaults.standard.double(forKey: padSlowRatioKey)
+            return r == 0 ? defaultSlowRatio : r
+        }
+        set { UserDefaults.standard.set(min(max(newValue, 0.8), 4), forKey: padSlowRatioKey) }
+    }
+    /// The screen as the calibration's (slow) locating moves measured it, in app units; compared with the probes' span.
+    static var padLocatedSpan: (w: Int, h: Int)?
+    /// After a calibration: a slow ratio that was off measured the screen bigger or smaller than the fast probes did.
+    static func correctedSlowRatio(_ ratio: Double, located: (w: Int, h: Int), probed: (w: Int, h: Int)) -> Double? {
+        guard probed.w > 0, probed.h > 0 else { return nil }
+        let k = (Double(located.w) / Double(probed.w) + Double(located.h) / Double(probed.h)) / 2
+        guard (0.5...2).contains(k) else { return nil }  // a locating click that missed: keep the ratio
+        return ratio * k
+    }
+
+    /// 174: the fast and the slow part of a `move` (app units) on an iPad. Inside the screen it goes fast; the part past
+    /// an edge goes slow; all of it slow when the pointer's place is not known (it may be at an edge). nil: not a move,
+    /// or one that stays inside the screen.
+    static func padPushParts(_ command: String, from pos: (x: Int, y: Int)?,
+                             span: (w: Int, h: Int)) -> (fast: (x: Int, y: Int), slow: (x: Int, y: Int))? {
+        let parts = command.split(separator: " ")
+        guard parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]), dx != 0 || dy != 0 else {
+            return nil
+        }
+        guard let p = pos else { return ((0, 0), (dx, dy)) }
+        if (0...span.w).contains(p.x + dx), (0...span.h).contains(p.y + dy) { return nil }
+        func reach(_ from: Int, _ d: Int, _ end: Int) -> Double {
+            d > 0 ? Double(max(0, end - from)) / Double(d) : d < 0 ? Double(max(0, from)) / Double(-d) : 1
+        }
+        let k = min(1, reach(p.x, dx, span.w), reach(p.y, dy, span.h))
+        let fast = (x: Int((Double(dx) * k).rounded(.towardZero)), y: Int((Double(dy) * k).rounded(.towardZero)))
+        return (fast, (dx - fast.x, dy - fast.y))
+    }
+
+    /// 174: a short fast move starts slower than a long one (iPadOS speeds the pointer up over its first reports).
+    /// Measured at 60 counts / 30 ms on v38 (11-25, every round trip the same each way): 160 units went 42 px, 320 → 101,
+    /// 480 → 183, 640 → 312, and longer moves (curves from 640 on, PadCurve.shortest) ~0.55 px a unit. As app units
+    /// (px / 0.55): what a move should go → what to send. Only for that pace; other paces send as they are.
+    static let padShortTable: [(want: Double, send: Double)] = [(0, 0), (76, 160), (184, 320), (332, 480), (568, 640), (640, 700)]
+    static let padShortStep = 60, padShortPace = 30
+    static func padShort(_ command: String, step: Int = CommandChannel.padStep, pace: Int = CommandChannel.padPaceMs) -> String? {
+        guard step == padShortStep, pace == padShortPace else { return nil }
+        let parts = command.split(separator: " ")
+        guard parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
+        let len = hypot(Double(dx), Double(dy))
+        guard len > 0, let i = padShortTable.firstIndex(where: { $0.want >= len }), i > 0 else { return nil }
+        let (a, b) = (padShortTable[i - 1], padShortTable[i])
+        let sendLen = a.send + (b.send - a.send) * (len - a.want) / (b.want - a.want)
+        let k = sendLen / len
+        return "move \(Int((Double(dx) * k).rounded())) \(Int((Double(dy) * k).rounded()))"
     }
     static let padPosKey = "padPointerPosV1"
     /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches
@@ -178,16 +253,20 @@ extension HIDDevice {
     }
     /// Finds the pointer's height on screen (0 top … 1 bottom) when padPos is not known (Pointer, from the frames).
     static var padLocateY: (() async -> Double?)?
+    /// 174: an iPad's home, by looking (Pointer.padHome): the middle of the screen, never a corner.
+    static var padHomeVisual: (() async -> Bool)?
     static func onPad() -> Bool { UIDevice.current.model.hasPrefix("iPad") }  // also an iPhone app run on an iPad
 
     /// An iPad home's commands: `abort` first (the firmware forgets its corner, so its curves never bow up or left),
-    /// then left and up, each `padMargin` past the edge. nil when the pointer's height is not known.
+    /// then one move up and left, `padMargin` past each edge. nil when the pointer's height is not known.
+    /// 174 (user 11-25 on 173: "贝塞尔曲线做得还不是很好"): one move, not left and then up: two straight lines into the
+    /// corner every home (five in one calibration) were the user's "别拆成两段直线". The board curves it inside its box.
     static func padHome(from pos: (x: Int, y: Int)?, span: (w: Int, h: Int), locatedY: Double?) -> [String]? {
         let y: Int
         if let pos { y = pos.y } else if let f = locatedY { y = Int((f * Double(span.h)).rounded()) } else { return nil }
         let x = pos?.x ?? span.w  // pushing left is harmless however far
         let m = margin(span)
-        return ["abort", "move -\(max(0, x) + m) 0", "move 0 -\(max(0, y) + m)"]
+        return ["abort", "move -\(max(0, x) + m) -\(max(0, y) + m)"]
     }
 
     /// Where the pointer is after a command (it stops at the edges); nil for anything that may move it unseen.
@@ -202,7 +281,7 @@ extension HIDDevice {
             }
             return p
         case "click", "press", "release", "scroll", "type", "key", "ping", "curve", "status", "snap", "stream", "fps",
-             "res", "log", "bench", "phy", "coex", "hid", "app", "step": return pos
+             "res", "log", "bench", "phy", "coex", "hid", "app", "step", "round", "pace": return pos
         default: return nil  // abort, flickhome, homescreen, unpair, …
         }
     }
@@ -213,16 +292,43 @@ extension HIDDevice {
         guard Self.onPad() else { return try await sendWatched(command) }
         if command == "home" { return try await padHomeNow() }
         await padPace()
-        let sent = Self.padCurved(command, from: Self.padPos, span: Self.padSpan, held: padHeld) ?? command
+        if !padHeld, let push = Self.padPushParts(command, from: Self.padPos, span: Self.padSpan) {
+            return try await padPush(command, push)
+        }
+        let sent = Self.padCurved(command, from: Self.padPos, span: Self.padSpan, held: padHeld)
+            ?? (padHeld ? nil : Self.padShort(command)) ?? command
         do {
             let reply = try await sendWatched(sent)
-            Self.padPos = Self.padTrack(sent, from: Self.padPos, span: Self.padSpan)
+            Self.padPos = Self.padTrack(command, from: Self.padPos, span: Self.padSpan)  // app units, as asked
             padHeld = Self.heldAfter(sent, was: padHeld)
             return reply
         } catch {
             Self.padPos = nil  // a command that failed may have moved part of the way
             throw error
         }
+    }
+
+    /// 174: a move past an edge (or from an unknown place): fast up to the edge, then the rest at the slow pace, its
+    /// units scaled so it goes as far as asked; then back to the fast pace.
+    private func padPush(_ command: String, _ push: (fast: (x: Int, y: Int), slow: (x: Int, y: Int))) async throws -> String {
+        let from = Self.padPos
+        do {
+            if push.fast.x != 0 || push.fast.y != 0 {
+                let fast = "move \(push.fast.x) \(push.fast.y)"
+                _ = try await sendWatched(Self.padCurved(fast, from: from, span: Self.padSpan, held: false)
+                                          ?? Self.padShort(fast) ?? fast)
+            }
+            let r = Self.padSlowRatio
+            _ = try await sendWatched("step \(Self.padSlowStep)")
+            _ = try await sendWatched("move \(Int((Double(push.slow.x) * r).rounded())) \(Int((Double(push.slow.y) * r).rounded()))")
+            _ = try await sendWatched("step \(Self.padStep)")
+        } catch {
+            Self.padPos = nil
+            _ = try? await sendWatched("step \(Self.padStep)")
+            throw error
+        }
+        Self.padPos = Self.padTrack(command, from: from, span: Self.padSpan)
+        return ""
     }
 
     /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known, no button is down (a drag
@@ -255,16 +361,34 @@ extension HIDDevice {
 
     /// 171: the board starts at 40 counts a report (v35): set the one iPad pace (padStep) once per link, before anything
     /// moves. Every push past an edge of 11-25 was tested at 10. Older boards answer "unknown command": asked once a link.
-    private var pacedLink = -1, pacedStep = 0
+    private var pacedLink = -1, pacedStep = 0, pacedMs = 0
     private var padHeld = false
     func padPace() async {
-        let step = Self.padStep
-        guard pacedLink != links || pacedStep != step else { return }
-        (pacedLink, pacedStep) = (links, step)
+        let step = Self.padStep, ms = Self.padPaceMs
+        guard pacedLink != links || pacedStep != step || pacedMs != ms else { return }
+        (pacedLink, pacedStep, pacedMs) = (links, step, ms)
         _ = try? await send("step \(step)", timeout: nil)
+        // 174: v37 boards' report interval; Bluetooth before Wi-Fi on the board's radio (11-25: at 40 counts a move went
+        // ~3.5% too far one time in 7, one in 26 with `coex bt`: a missed connection event carried two reports).
+        _ = try? await send("pace \(ms)", timeout: nil)
+        _ = try? await send("coex bt", timeout: nil)
+        // 174: v36 boards send every report `step` long along the move (not up to `step` on each axis): one speed in
+        // every direction, so iPadOS's pointer acceleration is the same for every piece of a curve. 173's square
+        // reports drew curves as stairs and landed them 4–7% off. Older boards answer "unknown command".
+        _ = try? await send("round on", timeout: nil)
     }
 
     private func padHomeNow() async throws -> String {
+        if let visual = Self.padHomeVisual {  // 174
+            Self.padPos = nil
+            await padPace()
+            _ = try await sendWatched("abort")
+            padHeld = false
+            guard await visual() else {
+                throw DeviceError(message: "iPad 上看不到游标：请确认「共享整个屏幕」开着、Echo 看得到画面，再试一次。")
+            }
+            return ""
+        }
         var located: Double?
         if Self.padPos == nil, let locate = Self.padLocateY { located = await locate() }
         guard let steps = Self.padHome(from: Self.padPos, span: Self.padSpan, locatedY: located) else {
@@ -272,10 +396,18 @@ extension HIDDevice {
             throw DeviceError(message: "iPad 上不知道指针在哪里：请先在小藍打开「共享整个屏幕」让它看得到指针，再校准。")
         }
         DebugLog.write("ipad home: " + steps.joined(separator: " · "))
+        let from = Self.padPos
         Self.padPos = nil
         await padPace()
-        for step in steps { _ = try await sendWatched(step) }  // straight pushes, never curved
+        _ = try await sendWatched(steps[0])  // abort
         padHeld = false
+        // 174: to the corner fast (a curve) when the place is known, the push past the edges slow (padPush)
+        Self.padPos = from
+        if let push = Self.padPushParts(steps[1], from: from, span: Self.padSpan) {
+            _ = try await padPush(steps[1], push)
+        } else {
+            _ = try await sendWatched(steps[1])
+        }
         Self.padPos = (0, 0)
         return ""
     }

@@ -121,7 +121,7 @@ enum XiaoLanTools {
         case 227, 228: return [Field(key: "titleList", label: "原會話", kind: .list), Field(key: "messages", label: "要轉發的訊息（每行一則）", kind: .lines),
                                Field(key: "nameList", label: "轉發給（多個用逗號）", kind: .list)]
         case 229, 230: return [titles, Field(key: "messages", label: "訊息（每行一則）", kind: .lines)]
-        case 231, 232: return [titles]
+        case 231, 232, 290: return [titles]
         case 233, 243: return [Field(key: "fileUrl", label: "二維碼圖片網址")]
         case 234, 236: return [Field(key: "friend.name", label: "聯絡人名字")]
         case 235: return [Field(key: "objectName", label: "推薦項名稱")]

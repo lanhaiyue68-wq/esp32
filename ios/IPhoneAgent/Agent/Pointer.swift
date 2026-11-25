@@ -55,6 +55,70 @@ import Foundation
     /// iPad home does not know where it is. Not in the status bar (Vision skips it): from there it moves 600 down first
     /// (a push that far past the bottom is harmless). nil without a live screen. Not behind oneAtATime: it runs inside
     /// a gesture's home.
+    /// 174 (user 11-25: "不要让它走上边、左边和下面…尽量叫它走右边，也不要走右上角"): an iPad's home is the middle of the
+    /// screen, found by looking, never a corner (pushes past the top, the left and the bottom brought in Notification
+    /// Center, Stage Manager's recent apps and the Dock). Find the arrow (a nudge sideways, Vision.arrows), move to the
+    /// middle, look again, up to three times; where it was last seen is the home (padHomeSpot). Not seen: a slow push
+    /// right, the edge that brings nothing in, and look again. false when it was never seen.
+    func padHome() async -> Bool {
+        guard CommandChannel.onPad(), let screen, screen.live else { return false }
+        CommandChannel.padPos = nil
+        var spot = await padSpot(nudge: 60)
+        if spot == nil { spot = await padSpot(nudge: -60) }
+        if spot == nil {
+            log("ipad home: arrow not seen; a slow push right")
+            _ = try? await device.send("move \(CommandChannel.padSpan.w * 13 / 10) 0")  // place unknown: slow (padPush)
+            spot = await padSpot(nudge: -60)
+        }
+        guard var p = spot else {
+            log("ipad home: arrow not seen")
+            return false
+        }
+        let w = Double(CommandChannel.padSpan.w), h = Double(CommandChannel.padSpan.h)
+        for _ in 0..<3 {
+            let ex = 0.5 - Double(p.x), ey = 0.5 - Double(p.y)
+            if abs(ex) <= 0.015 && abs(ey) <= 0.015 { break }
+            CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
+            let before = screen.frame, sent = now()
+            guard (try? await device.send("move \(Int(ex * w)) \(Int(ey * h))")) != nil, let before,
+                  let after = await stopped(since: sent, on: screen, wait: 0.9),
+                  let seen = Vision.arrow(before, after, near: CGPoint(x: 0.5, y: 0.5)) else {
+                log("ipad home: arrow lost on the way to the middle")
+                return false
+            }
+            p = seen
+        }
+        log(String(format: "ipad home: the arrow at (%.3f, %.3f)", Double(p.x), Double(p.y)))
+        CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
+        Self.padHomeSpot = p
+        return true
+    }
+
+    /// Where an iPad's home left the arrow (screen fractions); nil before one.
+    static var padHomeSpot: CGPoint?
+
+    /// 174: where home leaves the pointer, in this pointer's units: an iPad's seen spot, elsewhere the corner.
+    private func homeUnits() -> (Int, Int) {
+        guard CommandChannel.onPad(), let p = Self.padHomeSpot else { return (0, 0) }
+        return (dx(Double(p.x)), dy(Double(p.y)))
+    }
+
+    /// The arrow's spot: nudge it sideways and back, and compare the frames.
+    private func padSpot(nudge: Int) async -> CGPoint? {
+        guard let screen, screen.live else { return nil }
+        await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
+        let before = screen.frame, sent = now()
+        guard (try? await device.send("move \(nudge) 0")) != nil else { return nil }
+        var after = await screen.fresh(since: sent, timeout: 1.0)
+        if after != nil {
+            await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)
+            after = screen.frame
+        }
+        _ = try? await device.send("move \(-nudge) 0")
+        guard let before, let after else { return nil }
+        return Self.arrowBefore(before, after, near: CGPoint(x: 0.5, y: 0.5), nudge: nudge, window: 0.5)
+    }
+
     func padFindY() async -> Double? {
         func wiggle() async -> Double? {
             guard let screen, screen.live else { return nil }
@@ -69,6 +133,8 @@ import Foundation
             _ = try? await device.send("move -60 0")
             guard let before, let after else { return nil }
             let shift = 60 / Double(max(1, CommandChannel.padSpan.w))
+            // 174: the arrow (Vision.arrow); either of its two spots has the height
+            if let tip = Vision.arrows(before, after, near: CGPoint(x: 0.5, y: 0.5), window: 0.5).first { return Double(tip.y) }
             return Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)).map { Double($0.y) }
         }
         if let y = await wiggle() { return y }
@@ -183,7 +249,8 @@ import Foundation
         }
         try await device.send("move -\(Self.nudge) 0")
         guard let before, let after else { return nil }
-        let pixel = Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: 0.025, reach: CGPoint(x: 0.5, y: 0.5))
+        let pixel = CommandChannel.onPad() ? Self.arrowBefore(before, after, near: CGPoint(x: 0.5, y: 0.5), nudge: Self.nudge, window: 0.5)
+            : Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: 0.025, reach: CGPoint(x: 0.5, y: 0.5))
         var found = pixel
         if found == nil { found = await locate?(after) }
         guard let p = found else { return nil }
@@ -224,6 +291,17 @@ import Foundation
         pos = nil
         log(String(format: "calibration: touch probe span %d x %d, offset %.3f / %.3f, residual %.2f%%",
                    s.w, s.h, x.b, y.b, max(mx.scatter, my.scatter) * 100))
+        // 174: the locating moves went slow, the probes fast: where they measured the screen apart, the slow pace's
+        // ratio was off by as much (pushes past an edge go slow, scaled by it).
+        if CommandChannel.onPad(), let located = CommandChannel.padLocatedSpan {
+            CommandChannel.padLocatedSpan = nil
+            let old = CommandChannel.padSlowRatio
+            if let r = CommandChannel.correctedSlowRatio(old, located: located, probed: (s.w, s.h)) {
+                CommandChannel.padSlowRatio = r
+                log(String(format: "calibration: slow pace ratio %.2f → %.2f (located %d x %d, probed %d x %d)",
+                           old, CommandChannel.padSlowRatio, located.w, located.h, s.w, s.h))
+            }
+        }
         return true
     }
 
@@ -360,6 +438,14 @@ import Foundation
             if onTarget(found) { break }
             if pinned(found, x, y) {
                 if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
+                if CommandChannel.onPad() {  // 174: home is the middle, seen: go to the target from there and look
+                    let h = homeUnits()
+                    try await ProbeMotion.move(device, dx(x) - h.0, dy(y) - h.1)
+                    pos = (dx(x), dy(y))
+                    guard let p = try await find(x, y) else { return try await lost() }
+                    found = p
+                    continue
+                }
                 let ux = Int((x * gain.w / 2).rounded(.toNearestOrEven)), uy = Int((y * gain.h / 2).rounded(.toNearestOrEven))
                 if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
                 pos = (ux, uy)
@@ -440,7 +526,9 @@ import Foundation
         guard let restored, let after else { return nil }
         // The inverse move need not return to exactly the old point. Locate the pointer where it NOW is,
         // rather than clicking on the assumption that undoing relative mouse units restored it.
-        if let p = Vision.pointer(restored, after, near: CGPoint(x: x, y: y), shift: shift)
+        if CommandChannel.onPad() {  // 174: the arrow, where it is in `restored`
+            if let p = Self.arrowBefore(restored, after, near: CGPoint(x: x, y: y), nudge: nudge, window: 0.5) { return p }
+        } else if let p = Vision.pointer(restored, after, near: CGPoint(x: x, y: y), shift: shift)
             ?? Vision.pointer(restored, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)) {
             return p
         }
@@ -494,7 +582,7 @@ import Foundation
         if pos == nil || (rehome && (maps != nil || moves >= Self.rehomeEvery)) {
             let homing = now()
             if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
-            (pos, moves, hops) = ((0, 0), 0, 0)
+            (pos, moves, hops) = (homeUnits(), 0, 0)
             await noteCorner(since: homing)
         }
         guard let (x, y) = pos else { throw DeviceError(message: "pointer position lost; no move was sent") }
@@ -525,7 +613,8 @@ import Foundation
     static let farBottom = 0.9
 
     func belowReach(_ y: Double) -> Bool { maps?["y"] != nil && y > Self.farBottom }
-    func viaBorders(_ x: Double, _ y: Double) -> Bool { beyondReach(x) || belowReach(y) }
+    /// 174: never on an iPad (its home is the middle, seen; pushes past the bottom bring in the Dock).
+    func viaBorders(_ x: Double, _ y: Double) -> Bool { !CommandChannel.onPad() && (beyondReach(x) || belowReach(y)) }
 
     /// The right border is an exact reference: home, push the pointer against it at the target's row, then come back
     /// the short distance, which the map measured (the same move from the left border lands that far in).
@@ -577,7 +666,7 @@ import Foundation
         unitsSinceDrawHome = 0
         try await device.send("release")
         if maps != nil { try await ProbeMotion.home(device) } else { try await device.send("home") }
-        (pos, moves) = ((0, 0), 0)
+        (pos, moves) = (homeUnits(), 0)
     }
 
     /// 169 (iPad calibration): the pointer rests where a probe's click was caught, `ux, uy` units from the corner; the
@@ -655,7 +744,8 @@ import Foundation
             // search finds the pointer and corrects it before the click (2-4 s, only then).
             startedOver = false
             let arrival = try await arrive(x, y, before: before, began: began)
-            if Self.hopNeedsCorner(y: y, border: viaBorders(x, y), arrival: arrival, startedOver: startedOver) {
+            if Self.hopNeedsCorner(y: y, border: viaBorders(x, y), arrival: arrival, startedOver: startedOver,
+                                   pad: CommandChannel.onPad()) {
                 log(String(format: "tap (%.3f, %.3f): hop %ld not seen on the target near the top or a border; from the corner after all", x, y, hops))
                 (before, began) = (screen?.frame, now())
             } else {
@@ -835,6 +925,27 @@ import Foundation
     /// is corrected by a short move (short moves are near linear) and looked at once more. Unseen (the screen itself
     /// changed there), the click goes at the estimate as before.
     @discardableResult
+    /// 174: where the pointer arrived: an iPad's is an arrow (Vision.arrow), an iPhone's a disk (Vision.arrival).
+    static func sighting(_ before: Data, _ after: Data, near: CGPoint) -> CGPoint? {
+        CommandChannel.onPad() ? Vision.arrow(before, after, near: near) : Vision.arrival(before, after, near: near)
+    }
+
+    /// 174: where an iPad's arrow was before a sideways nudge of `nudge` units: of two tips on one row the one on the
+    /// side it came from; one tip (the spots overlapped) is that spot; otherwise the tip nearest `near`.
+    static func arrowBefore(_ before: Data, _ after: Data, near: CGPoint, nudge: Int, window: Double = 0.25) -> CGPoint? {
+        pickBefore(Vision.arrows(before, after, near: near, window: window), near: near, nudge: nudge)
+    }
+    static func pickBefore(_ tips: [CGPoint], near: CGPoint, nudge: Int) -> CGPoint? {
+        if tips.count == 1 { return tips[0] }
+        for a in tips {
+            for b in tips where b != a && abs(b.y - a.y) < 0.02 && abs(b.x - a.x) < 0.1 {
+                // a is where it was when b lies the way the nudge went
+                if (nudge > 0 && b.x > a.x) || (nudge < 0 && b.x < a.x) { return a }
+            }
+        }
+        return tips.min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
+    }
+
     func arrive(_ x: Double, _ y: Double, before: Data?, began: Double) async throws -> Arrival {
         let seen = try await look(x, y, before: before, began: began)
         lastArrival = seen
@@ -866,7 +977,7 @@ import Foundation
             log(String(format: "arrive (%.3f, %.3f): no frame after the move; clicking at the estimate", x, y))
             return .unseen
         }
-        guard var seen = Vision.arrival(before, first, near: target) else {
+        guard var seen = Self.sighting(before, first, near: target) else {
             log(String(format: "arrive (%.3f, %.3f): pointer not seen; clicking at the estimate", x, y))
             return .unseen
         }
@@ -903,7 +1014,7 @@ import Foundation
             if let p = pos { pos = (p.0 + ux, p.1 + uy) }
             // Nothing on screen changed: the board held the counts back (it keeps a remainder); the same again sends them.
             guard let after = await stopped(since: moved, on: screen, wait: 0.6) else { continue }
-            guard let next = Vision.arrival(before, after, near: target) else {
+            guard let next = Self.sighting(before, after, near: target) else {
                 log(String(format: "arrive (%.3f, %.3f): pointer not seen after a correction; clicking at the estimate", x, y))
                 return .unseen
             }
@@ -1110,8 +1221,9 @@ import Foundation
     /// D102: a hop into the top band clicks only where the pointer was seen on the target; otherwise the tap goes from
     /// the corner after all (not when the arrival check itself already started over from there).
     /// D151: a hop to a target the border path is for (the right side, the bottom rows) likewise.
-    static func hopNeedsCorner(y: Double, border: Bool = false, arrival: Arrival, startedOver: Bool) -> Bool {
-        (y < topBand || border) && arrival != .onTarget && !startedOver
+    /// 174: never on an iPad (v36 boards' round reports): its hops landed within 0.3-1.3% and its homes 1.8-3.9% off (11-25).
+    static func hopNeedsCorner(y: Double, border: Bool = false, arrival: Arrival, startedOver: Bool, pad: Bool = false) -> Bool {
+        !pad && (y < topBand || border) && arrival != .onTarget && !startedOver
     }
     static let hopWindow = 120.0   // seconds; after longer, start from the corner
 
@@ -1139,6 +1251,30 @@ import Foundation
     static func clickAgain(_ last: LastClick, _ x: Double, _ y: Double, units: (Int, Int), link: Int, at now: Double) -> Bool {
         !last.swiped && abs(last.x - x) <= sameSpot && abs(last.y - y) <= sameSpot && units == (last.ux, last.uy)
             && link == last.link && now - last.time >= 0 && now - last.time <= clickAgainWindow
+    }
+
+    /// 174 (user 11-25: 苹果上长按删不了会话，要横滑出红色“删除”): bring out the buttons under a list row. WeChat's come
+    /// with a drag left (press, one move, release, no pause between them); WeCom's are the system's swipe actions, which
+    /// a pointer's drag only taps (it opened the chat twice, 11-25) and a sideways scroll over the row brings out.
+    /// `room`: how far left the drag may go (screen fraction), so it stays inside its window.
+    func revealRowActions(_ x: Double, _ y: Double, room: Double, scroll: Bool) async throws {
+        try await oneAtATime {
+            try await point(x, y, rehome: pos == nil)
+            lastClick = nil
+            if scroll {
+                for _ in 0..<14 { try await device.send("scroll 0 -4") }
+                return
+            }
+            guard let span else { throw DeviceError(message: "pointer not calibrated") }
+            let units = max(1, Int((min(max(room, 0.02), 0.2) * Double(span.w)).rounded()))
+            try await device.send("press")
+            do { try await device.send("move -\(units) 0") } catch {
+                _ = try? await device.send("release")
+                throw error
+            }
+            try await device.send("release")
+            if let p = pos { pos = (p.0 - units, p.1) }
+        }
     }
 
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, hold: Bool = true) async throws {
@@ -1204,6 +1340,7 @@ import Foundation
             try await point(start.x, start.y, rehome: startFromHome, edgeStart: !hold && !drawing && !quick)
         }
         var strokedLine = false  // D167: a 2-point line went in one stroke
+        var thumbEnd: CGPoint?  // 174: where an iPad thumb swipe really ended (screen fractions)
         // With the position unknown the next move would go home first: never with the button down.
         if pos == nil { try await moveTo(dx(Double(points[0].x)), dy(Double(points[0].y)), rehome: true) }
         try await device.send("press")
@@ -1237,8 +1374,18 @@ import Foundation
             // Up and down only: 134's sideways jump never moved Weather's hourly strip, so sideways keeps the walk.
             let upDown = abs(Double(points[1].y - points[0].y)) >= abs(Double(points[1].x - points[0].x))
             if points.count == 2, hold || quick, upDown || quick, strokeCommand != false, let from = pos {
-                let to = (dx(Double(points[1].x)), dy(Double(points[1].y)))
-                let deltas = Self.strokeDeltas(from: from, to: to, step: Self.swipeStrokeStep)
+                var to = (dx(Double(points[1].x)), dy(Double(points[1].y)))
+                var deltas = Self.strokeDeltas(from: from, to: to, step: Self.swipeStrokeStep)
+                // 174: on an iPad a swipe goes as a thumb's, bending toward its own side (PadCurve.thumbEnd).
+                if CommandChannel.onPad(), let s = span,
+                   let e = PadCurve.thumbEnd(from: (Double(points[0].x), Double(points[0].y)),
+                                             to: (Double(points[1].x), Double(points[1].y)), span: (s.w, s.h)) {
+                    let bent = (dx(e.x), dy(e.y))
+                    deltas = PadCurve.thumbPieces(from: from, toward: to, end: bent, step: Self.swipeStrokeStep / 2)
+                    log(String(format: "swipe (%.3f, %.3f) → (%.3f, %.3f): a thumb's, ending at (%.3f, %.3f)",
+                               Double(points[0].x), Double(points[0].y), Double(points[1].x), Double(points[1].y), e.x, e.y))
+                    (to, thumbEnd) = (bent, CGPoint(x: e.x, y: e.y))
+                }
                 do {
                     try await device.send("stroke " + deltas.map { "\($0.0) \($0.1)" }.joined(separator: " "))
                     (pos, strokeCommand, stroked) = (to, true, true)
@@ -1281,7 +1428,8 @@ import Foundation
         } else if hold || quick, let p = pos, Self.swipeHops(from: start, to: points[points.count - 1]) {
             // D108: the pointer rests where the swipe ended: the next tap or swipe may go straight from there.
             // D167: a held stroke rests short of its end (restsAt): the next hop goes from there.
-            let end = strokedLine && hold ? Self.restsAt(from: start, to: points[points.count - 1]) : points[points.count - 1]
+            let asked = thumbEnd ?? points[points.count - 1]
+            let end = strokedLine && hold ? Self.restsAt(from: start, to: asked) : asked
             let q = strokedLine && hold ? (dx(Double(end.x)), dy(Double(end.y))) : p
             pos = q
             lastClick = LastClick(x: Double(end.x), y: Double(end.y), ux: q.0, uy: q.1, link: device.links,

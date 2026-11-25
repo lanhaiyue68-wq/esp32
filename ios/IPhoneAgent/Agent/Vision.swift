@@ -294,6 +294,68 @@ enum Vision {
         return centres.min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
     }
 
+    /// 174 (iPadOS 26+): an iPad's pointer is a grey arrow, tip at its top-left, ~20 px tall in a 960-wide frame; not
+    /// arrival's translucent disk, so arrival never saw it ("pointer not seen" on every iPad tap and calibration check,
+    /// 11-25). Where it is now: the compact patches of pixels that changed by more than `threshold` between the frames
+    /// (the arrow at its new spot and at the one it left), the one nearest `near` (where it was sent), and of that patch
+    /// the tip, the pixel farthest up and left, which is where it clicks. Checked on 18 frames of 11-25 (960 x 1280):
+    /// 161-176 changed pixels a patch, the tip 4 px left of and 10 px above the patch's centre every time.
+    static func arrow(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40) -> CGPoint? {
+        arrows(before, after, near: near, window: window, threshold: threshold)
+            .min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
+    }
+
+    /// Every arrow tip seen changed within `window` of `near` (at most four).
+    static func arrows(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40) -> [CGPoint] {
+        guard let ia = image(before), let ib = image(after), ia.width == ib.width, ia.height == ib.height else { return [] }
+        let w = ia.width, h = ia.height
+        let a = gray(ia, w, h), b = gray(ib, w, h)
+        let x0 = max(0, Int((Double(near.x) - window) * Double(w))), x1 = min(w - 1, Int((Double(near.x) + window) * Double(w)))
+        let y0 = max(Int(topMask * Double(h)), Int((Double(near.y) - window) * Double(h)))
+        let y1 = min(h - 1, Int((Double(near.y) + window) * Double(h)))
+        guard x1 > x0, y1 > y0 else { return [] }
+        var changed: [(x: Int, y: Int)] = []
+        for y in y0...y1 {
+            for x in x0...x1 where abs(Int(a.px[y * w + x]) - Int(b.px[y * w + x])) > threshold {
+                changed.append((x, y))
+            }
+        }
+        guard !changed.isEmpty, changed.count < w * h / 50 else { return [] }  // much of the screen changed: no pointer move
+        let cell = max(4, w / 40)  // about the arrow's size: 24 px at 960
+        let scale = Double(w * w) / (960.0 * 960.0)
+        // A patch: the changed pixels near the densest cell, centred on their own centroid, then all within 0.75 cell
+        // of it (an arrow reaches ~13 px from its centroid at 960): two spots a nudge apart (~33 px) stay two.
+        let look = 1.2 * Double(cell), reach = 0.75 * Double(cell), most = 1.2 * Double(cell)
+        var remaining = changed
+        var tips: [CGPoint] = []
+        for _ in 0..<4 where !remaining.isEmpty {
+            var counts: [Int: Int] = [:]
+            for p in remaining { counts[((p.y - y0) / cell) * 100_000 + (p.x - x0) / cell, default: 0] += 1 }
+            guard let densest = counts.max(by: { $0.value < $1.value })?.key else { break }
+            let gx = Double(x0 + (densest % 100_000) * cell) + Double(cell) / 2
+            let gy = Double(y0 + (densest / 100_000) * cell) + Double(cell) / 2
+            var sx = 0.0, sy = 0.0, sn = 0.0
+            for p in remaining {
+                let dx = Double(p.x) - gx, dy = Double(p.y) - gy
+                if dx * dx + dy * dy <= look * look { sx += Double(p.x); sy += Double(p.y); sn += 1 }
+            }
+            let cx = sn > 0 ? sx / sn : gx, cy = sn > 0 ? sy / sn : gy
+            var patch: [(x: Int, y: Int)] = [], rest: [(x: Int, y: Int)] = []
+            for p in remaining {
+                let dx = Double(p.x) - cx, dy = Double(p.y) - cy
+                if dx * dx + dy * dy <= reach * reach { patch.append(p) } else { rest.append(p) }
+            }
+            remaining = rest
+            guard let minX = patch.map(\.x).min(), let maxX = patch.map(\.x).max(),
+                  let minY = patch.map(\.y).min(), let maxY = patch.map(\.y).max() else { continue }
+            let n = Double(patch.count)
+            guard n >= 60 * scale, n <= 600 * scale, Double(maxX - minX) <= most, Double(maxY - minY) <= most,
+                  let tip = patch.min(by: { $0.x + $0.y < $1.x + $1.y }) else { continue }
+            tips.append(CGPoint(x: Double(tip.x) / Double(w), y: Double(tip.y) / Double(h)))
+        }
+        return tips
+    }
+
     /// The image's RGBA bytes at w x h.
     static func rgba(_ img: CGImage, _ w: Int, _ h: Int) -> [UInt8] {
         var out = [UInt8](repeating: 0, count: w * h * 4)

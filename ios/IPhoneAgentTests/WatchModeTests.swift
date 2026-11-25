@@ -235,9 +235,9 @@ import UIKit
     /// 161: every order of Android 小藍's two engines is taken; each becomes a task, a read or a local answer.
     func testXiaoLanTakesEveryOrderOfBothEngines() throws {
         let personal: Set<Int> = [201, 202, 203, 204, 205, 206, 207, 210, 212, 213, 214, 218, 219, 220, 221, 226, 231, 232, 241, 242, 243,
-                                  260, 261, 263, 265, 304, 501, 502, 503, 504, 505, 507, 508, 509, 512]
+                                  260, 261, 263, 265, 290, 304, 501, 502, 503, 504, 505, 507, 508, 509, 512]  // 290: 小藍's own (174)
         XCTAssertEqual(Set(XiaoLanOrders.personal.keys), personal)
-        XCTAssertEqual(Set(XiaoLanOrders.wework.keys), Set(201...237).union([303, 304, 305]).union(501...514))
+        XCTAssertEqual(Set(XiaoLanOrders.wework.keys), Set(201...237).union([290, 303, 304, 305]).union(501...514))
         let link: Set<Int> = [201, 202, 303, 304, 305]
         let full = XiaoLanOrders.Fields([
             "titleList": ["测试群"], "receivedContent": "你好", "originalContent": "原话", "receivedName": "老板", "nameList": ["客户群"],
@@ -545,16 +545,153 @@ import UIKit
         XCTAssertTrue(CommandChannel.heldAfter("press", was: false))
         XCTAssertFalse(CommandChannel.heldAfter("release", was: true))
         XCTAssertTrue(CommandChannel.heldAfter("move 5 5", was: true))
-        XCTAssertEqual(CommandChannel.padStep, 10)  // one pace for every iPad move
+        XCTAssertEqual(CommandChannel.padStep, 60)  // 174: fast moves
+        XCTAssertEqual(CommandChannel.padPaceMs, 30)
+        XCTAssertEqual(CommandChannel.padSlowStep, 15)  // the edge tests' speed
+    }
+
+    /// 174: deleting a chat: the red 删除 on its swiped row (read, or the red block), and the row gone afterwards.
+    func testPaneDeleteFindsTheRedButtonAndSeesTheRowGone() {
+        typealias P = CandidatePicker.Piece
+        let row = CGRect(x: 0.2, y: 0.30, width: 0.3, height: 0.03)
+        let swiped: [[P]] = [[P(text: "腾讯新闻", box: CGRect(x: 0.03, y: 0.30, width: 0.2, height: 0.03)),
+                              P(text: "不显示", box: CGRect(x: 0.62, y: 0.305, width: 0.12, height: 0.03)),
+                              P(text: "删除", box: CGRect(x: 0.85, y: 0.305, width: 0.08, height: 0.03))]]
+        let red = XiaoLanPanes.deleteButton(swiped, row: row, red: { _ in 0 })!
+        XCTAssertEqual(Double(red.x), 0.89, accuracy: 0.001)
+        // not read: the red block at the row's right end
+        let unread: [[P]] = [[P(text: "不显示", box: CGRect(x: 0.62, y: 0.305, width: 0.12, height: 0.03))]]
+        XCTAssertNotNil(XiaoLanPanes.deleteButton(unread, row: row, red: { _ in 0.8 }))
+        XCTAssertNil(XiaoLanPanes.deleteButton(unread, row: row, red: { _ in 0.1 }))  // a system account: no 删除
+        // a 删除 elsewhere (another row's) is not this row's
+        let other: [[P]] = [[P(text: "删除", box: CGRect(x: 0.85, y: 0.6, width: 0.08, height: 0.03))]]
+        XCTAssertNil(XiaoLanPanes.deleteButton(other, row: row, red: { _ in 0 }))
+        // still swiped open the name is still there; deleted it is not (another chat's preview line does not count)
+        XCTAssertFalse(XiaoLanPanes.gone("腾讯新闻", swiped))
+        XCTAssertTrue(XiaoLanPanes.gone("腾讯新闻", [[P(text: "微信团队", box: CGRect(x: 0.2, y: 0.3, width: 0.2, height: 0.03))]]))
+        // the confirmations, as seen 11-25: WeChat's widened red button; WeCom's alert 删除 beside 取消, not the row's
+        let wechat: [[P]] = [[P(text: "清空记录同时不显示聊天", box: CGRect(x: 0.4, y: 0.49, width: 0.5, height: 0.03))]]
+        XCTAssertEqual(Double(XiaoLanPanes.confirmDelete(wechat)!.x), 0.65, accuracy: 0.001)
+        let wework: [[P]] = [[P(text: "此聊天及其聊天记录将从你所有设备中删除。", box: CGRect(x: 0.2, y: 0.45, width: 0.6, height: 0.03))],
+                             [P(text: "取消", box: CGRect(x: 0.25, y: 0.53, width: 0.08, height: 0.03)),
+                              P(text: "删除", box: CGRect(x: 0.65, y: 0.53, width: 0.08, height: 0.03))],
+                             [P(text: "标为未读", box: CGRect(x: 0.45, y: 0.59, width: 0.14, height: 0.03)),
+                              P(text: "删除", box: CGRect(x: 0.86, y: 0.59, width: 0.08, height: 0.03))]]
+        XCTAssertEqual(Double(XiaoLanPanes.confirmDelete(wework)!.y), 0.545, accuracy: 0.001)
+        XCTAssertNil(XiaoLanPanes.confirmDelete(swiped))  // the row's own 删除 is no confirmation
+        XCTAssertEqual(ChatToolLink.deleteChat, 290)
+        XCTAssertEqual(XiaoLanOrders.personal[290], "删除会话")
+    }
+
+    /// 174: an iPad's pointer is a grey arrow; it is found by its tip, at its new spot and at the one it left.
+    func testIPadArrowIsFoundByItsTip() {
+        func frame(_ tips: [CGPoint]) -> Data {
+            let fmt = UIGraphicsImageRendererFormat()
+            fmt.scale = 1
+            let img = UIGraphicsImageRenderer(size: CGSize(width: 960, height: 1280), format: fmt).image { ctx in
+                UIColor.white.setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 960, height: 1280))
+                UIColor(white: 0.5, alpha: 1).setFill()
+                for t in tips {  // the arrow: a straight left side, the tip at its top-left
+                    let p = UIBezierPath()
+                    p.move(to: t)
+                    p.addLine(to: CGPoint(x: t.x, y: t.y + 20))
+                    p.addLine(to: CGPoint(x: t.x + 6, y: t.y + 15))
+                    p.addLine(to: CGPoint(x: t.x + 15, y: t.y + 15))
+                    p.close()
+                    p.fill()
+                }
+            }
+            return img.jpegData(compressionQuality: 0.8)!
+        }
+        let a = CGPoint(x: 300, y: 640), b = CGPoint(x: 340, y: 640)
+        let before = frame([a]), after = frame([b])
+        let tips = Vision.arrows(before, after, near: CGPoint(x: 0.33, y: 0.5), window: 0.3)
+        XCTAssertEqual(tips.count, 2)
+        // the tip nearest where it was sent, within 2 px of the drawn tip
+        let near = Vision.arrow(before, after, near: CGPoint(x: 340.0 / 960, y: 0.5))!
+        XCTAssertEqual(Double(near.x) * 960, 340, accuracy: 2)
+        XCTAssertEqual(Double(near.y) * 1280, 640, accuracy: 2)
+        // a nudge right: where it was is the left one
+        let was = Pointer.pickBefore(tips, near: CGPoint(x: 0.5, y: 0.5), nudge: 60)!
+        XCTAssertEqual(Double(was.x) * 960, 300, accuracy: 2)
+        XCTAssertEqual(Double(Pointer.pickBefore(tips, near: CGPoint(x: 0.5, y: 0.5), nudge: -60)!.x) * 960, 340, accuracy: 2)
+        // nothing moved, or the whole screen changed: no arrow
+        XCTAssertTrue(Vision.arrows(before, before, near: CGPoint(x: 0.5, y: 0.5), window: 0.5).isEmpty)
+    }
+
+    /// 174: inside the screen fast, past an edge slow (Stage Manager, Notification Center, Home); short moves lengthened.
+    func testIPadPushesPastAnEdgeGoSlowAndShortMovesGoFarther() {
+        let span = (w: 2000, h: 2800)
+        // inside: no split
+        XCTAssertNil(CommandChannel.padPushParts("move 500 -300", from: (1000, 1000), span: span))
+        XCTAssertNil(CommandChannel.padPushParts("click", from: (1000, 1000), span: span))
+        // a home from (1000, 2000) with 160 past each edge: fast to the corner, the margins slow
+        let home = CommandChannel.padPushParts("move -1160 -2160", from: (1000, 2000), span: span)!
+        XCTAssertEqual(Double(home.fast.x), -1000, accuracy: 1)  // the left edge comes first: fast up to it
+        XCTAssertEqual(Double(home.fast.y), -1862, accuracy: 1)
+        XCTAssertEqual(home.fast.x + home.slow.x, -1160)
+        XCTAssertEqual(home.fast.y + home.slow.y, -2160)
+        XCTAssertTrue((0...span.w).contains(1000 + home.fast.x) && (0...span.h).contains(2000 + home.fast.y))
+        // unknown place: all of it slow
+        let blind = CommandChannel.padPushParts("move -300 0", from: nil, span: span)!
+        XCTAssertEqual(blind.fast.x, 0)
+        XCTAssertEqual(blind.slow.x, -300)
+        // past the right edge only by the part beyond it
+        let right = CommandChannel.padPushParts("move 600 0", from: (1800, 1000), span: span)!
+        XCTAssertEqual(right.fast.x, 200)
+        XCTAssertEqual(right.slow.x, 400)
+        // short fast moves go farther (the measured start-up), long ones and other paces as asked
+        XCTAssertEqual(CommandChannel.padShort("move 76 0", step: 60, pace: 30), "move 160 0")
+        XCTAssertEqual(CommandChannel.padShort("move 0 -332", step: 60, pace: 30), "move 0 -480")
+        XCTAssertNil(CommandChannel.padShort("move 700 0", step: 60, pace: 30))
+        XCTAssertNil(CommandChannel.padShort("move 76 0", step: 40, pace: 20))
+        XCTAssertNil(CommandChannel.padShort("stroke 76 0", step: 60, pace: 30))
+        // the calibration's slow locating moves against its fast probes correct the slow ratio
+        XCTAssertEqual(CommandChannel.correctedSlowRatio(2, located: (2200, 3080), probed: (2000, 2800))!, 2.2, accuracy: 1e-9)
+        XCTAssertNil(CommandChannel.correctedSlowRatio(2, located: (200, 300), probed: (2000, 2800)))
+    }
+
+    /// 174 (user 11-25): an iPad swipe goes as a thumb's: left half bends left, right half bends right, up and down as
+    /// far as asked, leaving the way it was asked and ending inside the screen on its own half.
+    func testIPadSwipeBendsLikeAThumbTowardItsSide() {
+        let span = (w: 3700, h: 5200)
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }
+        // left pane, up: ends left of where it was asked, same height
+        let l = PadCurve.thumbEnd(from: (0.25, 0.7), to: (0.25, 0.3), span: span, random: mid)!
+        XCTAssertLessThan(l.x, 0.25 - 0.02)
+        XCTAssertEqual(l.y, 0.3, accuracy: 1e-9)
+        // right pane, up and down: both bend right
+        XCTAssertGreaterThan(PadCurve.thumbEnd(from: (0.75, 0.7), to: (0.75, 0.3), span: span, random: mid)!.x, 0.77)
+        XCTAssertGreaterThan(PadCurve.thumbEnd(from: (0.75, 0.3), to: (0.75, 0.7), span: span, random: mid)!.x, 0.77)
+        // near the edge it stops inside the screen, never crossing back
+        XCTAssertEqual(PadCurve.thumbEnd(from: (0.96, 0.8), to: (0.96, 0.2), span: span, random: mid)!.x, 0.97, accuracy: 1e-9)
+        XCTAssertEqual(PadCurve.thumbEnd(from: (0.02, 0.8), to: (0.02, 0.2), span: span, random: mid)!.x, 0.02, accuracy: 1e-9)
+        // sideways bends down, never into the home bar; too short shows no bend
+        let s = PadCurve.thumbEnd(from: (0.8, 0.5), to: (0.2, 0.5), span: span, random: mid)!
+        XCTAssertGreaterThan(s.y, 0.5)
+        XCTAssertEqual(PadCurve.thumbEnd(from: (0.8, 0.95), to: (0.2, 0.95), span: span, random: mid)!.y, 0.95, accuracy: 1e-9)
+        XCTAssertNil(PadCurve.thumbEnd(from: (0.5, 0.5), to: (0.5, 0.48), span: span, random: mid))
+        // the pieces: exact end, at most 40, the first part straight along the asked line, then turning toward the side
+        let a = (900, 3600), b = (900, 1600), e = (700, 1600)
+        let d = PadCurve.thumbPieces(from: a, toward: b, end: e, step: 100)
+        XCTAssertLessThanOrEqual(d.count, 40)
+        var p = a
+        var xs: [Int] = []
+        for v in d { p = (p.0 + v.0, p.1 + v.1); xs.append(p.0) }
+        XCTAssertEqual(p.0, e.0)
+        XCTAssertEqual(p.1, e.1)
+        XCTAssertGreaterThanOrEqual(xs[0], 895)  // sets off upward, barely sideways
+        XCTAssertEqual(xs, xs.sorted(by: >))     // then only ever turns one way (left)
     }
 
     /// 162: an iPad home pushes only a little past the top (from where the pointer is), never blindly.
     func testIPadHomeNeverPushesFarPastTheTop() {
         let span = (w: 3900, h: 5270)
-        XCTAssertEqual(CommandChannel.padHome(from: (1000, 2000), span: span, locatedY: nil),
-                       ["abort", "move -1300 0", "move 0 -2300"])
+        // 174: one move into the corner, not left and then up
+        XCTAssertEqual(CommandChannel.padHome(from: (1000, 2000), span: span, locatedY: nil), ["abort", "move -1300 -2300"])
         // not known: the height seen on screen decides; left still goes all the way
-        XCTAssertEqual(CommandChannel.padHome(from: nil, span: span, locatedY: 0.5), ["abort", "move -4200 0", "move 0 -2935"])
+        XCTAssertEqual(CommandChannel.padHome(from: nil, span: span, locatedY: 0.5), ["abort", "move -4200 -2935"])
         XCTAssertNil(CommandChannel.padHome(from: nil, span: span, locatedY: nil))
         // 169: the push past the edge is a part of the screen: a faster pointer (fewer units) pushes fewer units
         XCTAssertEqual(CommandChannel.margin((w: 3900, h: 5270)), 300)

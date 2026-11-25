@@ -157,6 +157,7 @@ import UIKit
                            screen: feed)
         pointer = made
         CommandChannel.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
+        CommandChannel.padHomeVisual = { [weak made] in await made?.padHome() ?? false }  // 174: iPad home, by looking
         ProbeMotion.onePiece = CommandChannel.onPad()  // 169: on an iPad one curved move, not x then y
         agent = AgentLoop(phone: made, screen: feed, actor: nil, planner: nil, trace: traces)
         if !MockMode.on {

@@ -5,10 +5,17 @@ import UIKit
 extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
     static var roughStops: [Int] { [75, 150].map { $0 * Pointer.padScale } }  // 167: iPad 600 / 1200, clear of the status bar
-    static let targets: [(Double, Double)] = [
-        (0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.75), (0.9, 0.9)]
+    static var targets: [(Double, Double)] {
+        // 174 (user 11-25): on an iPad every point a tenth or more from the top, left and bottom edges (a miss past them
+        // brings in Notification Center, recent apps, the Dock); the right side may come closer.
+        CommandChannel.onPad() ? [(0.12, 0.5), (0.5, 0.15), (0.25, 0.25), (0.75, 0.75), (0.9, 0.85)]
+            : [(0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.75), (0.9, 0.9)]
+    }
     // Test each low axis separately, away from the top-left system indicator.
-    static let checks: [(Double, Double)] = [(0.06, 0.5), (0.5, 0.09), (0.5, 0.62), (0.85, 0.87)]
+    static var checks: [(Double, Double)] {
+        CommandChannel.onPad() ? [(0.12, 0.5), (0.5, 0.15), (0.5, 0.62), (0.88, 0.82)]
+            : [(0.06, 0.5), (0.5, 0.09), (0.5, 0.62), (0.85, 0.87)]
+    }
     static let check = (x: 0.5, y: 0.62)
     static let tapTimeout = 3.0
     static let maxCheckError = Pointer.calibrationTolerance
@@ -28,7 +35,9 @@ extension AutoCalibrator {
         CommandChannel.padPos = nil
         do {
             try await device.send("abort")  // also releases; the firmware forgets its corner, so no curve bows up or left
-            try await device.send("move -\(CommandChannel.padSpan.w * 2 + CommandChannel.padMargin) 0")  // harmless however far
+            // 174: from an unknown place a move goes at the slow pace (CommandChannel.padPush), so a third more than the
+            // screen, not twice it: slow, it takes seconds; fast, it brought up Stage Manager's recent apps.
+            try await device.send("move -\(CommandChannel.padSpan.w * 13 / 10 + CommandChannel.padMargin) 0")
             try await device.send("move 300 -150")
             var first: CGPoint?
             for attempt in 0..<2 where first == nil {
@@ -55,6 +64,7 @@ extension AutoCalibrator {
                 if (0.02...0.9).contains(fx), (0.02...0.9).contains(fy) {
                     span = (Int((400 / fx).rounded()), Int((400 / fy).rounded()))
                     CommandChannel.padSpan = span
+                    CommandChannel.padLocatedSpan = span  // 174: measured slow; the probes measure it fast
                     app.say("ipad: the screen is about \(span.w) x \(span.h) units")
                 }
                 CommandChannel.padPos = (700, Int((Double(p2.y) * Double(span.h)).rounded()))
@@ -76,8 +86,15 @@ extension AutoCalibrator {
         progress = Progress(done: 0, total: total)
         var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
         phase = .homing
-        await locatePadPointer(probe: probe, device: device)
+        // 174 (user 11-25: "不要让它走上边、左边和下面"): on an iPad no locating pushes; the home is the middle of the
+        // screen, found by looking (Pointer.padHome, through reset), and the probes start from there.
+        if !CommandChannel.onPad() { await locatePadPointer(probe: probe, device: device) }
         try await pointer.reset()
+        /// Where an iPad's home left the pointer, in the probes' units (from the corner at the span measured last).
+        func padHomeUnits() -> (Int, Int) {
+            let spot = Pointer.padHomeSpot ?? CGPoint(x: 0.5, y: 0.5)
+            return (Int(Double(spot.x) * Double(CommandChannel.padSpan.w)), Int(Double(spot.y) * Double(CommandChannel.padSpan.h)))
+        }
 
         func record(_ ux: Int, _ uy: Int, _ p: CGPoint) {
             samples.append((Double(ux), Double(uy), p.x, p.y))
@@ -95,11 +112,15 @@ extension AutoCalibrator {
         // 169 (user 11-25: "不要一直從左上角作為起點來點，就從你上一次點的那個位置…要快"): on an iPad the probes home
         // once; each next probe moves from where the last one's click was caught, in one curved move. A probe that was
         // not caught homes again (where the pointer is is not known then).
-        var at: (Int, Int)?  // where the pointer rests, in units from the corner, after a caught probe
+        var at: (Int, Int)? = CommandChannel.onPad() ? padHomeUnits() : nil  // where the pointer rests, in units from the corner
         var landed: CGPoint?
         func click(_ ux: Int, _ uy: Int) async throws -> CGPoint? {
             if CommandChannel.onPad(), let a = at {
                 try await ProbeMotion.move(device, ux - a.0, uy - a.1)
+            } else if CommandChannel.onPad() {  // 174: home is the middle (seen), not the corner
+                try await ProbeMotion.home(device)
+                let h = padHomeUnits()
+                try await ProbeMotion.move(device, ux - h.0, uy - h.1)
             } else {
                 try await ProbeMotion.home(device)
                 try await ProbeMotion.move(device, ux, uy)

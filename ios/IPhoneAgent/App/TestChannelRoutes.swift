@@ -73,9 +73,13 @@ extension AppModel {
                           "weworkURL": .str(WatchSettings.weworkURL), "weworkCode": .str(WatchSettings.weworkCode)])
 
         case ("POST", "/padstep"):
-            // 171: try another iPad pace (counts a report, 2…40; 0 back to 10) without a new build; recalibrate after.
+            // 171: try another iPad pace (counts a report, 2…127; 0 back to the default) without a new build; recalibrate
+            // after. 174: "pace" (ms a report, v37 boards; 0 back to the default) and "ratio" (slow units a fast one).
             UserDefaults.standard.set(Int(number("n")), forKey: CommandChannel.padStepKey)
-            return .json(["padStep": .num(Double(CommandChannel.padStep))])
+            if body["pace"] != nil { UserDefaults.standard.set(Int(number("pace")), forKey: CommandChannel.padPaceKey) }
+            if number("ratio") > 0 { CommandChannel.padSlowRatio = number("ratio") }
+            return .json(["padStep": .num(Double(CommandChannel.padStep)), "pace": .num(Double(CommandChannel.padPaceMs)),
+                          "slowRatio": .num(CommandChannel.padSlowRatio)])
 
         case ("POST", "/calibrate"):
             // 171: the Calibrate button, from the computer (it moves the iPad's pointer: only with the user there).

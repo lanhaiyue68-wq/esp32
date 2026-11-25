@@ -107,8 +107,11 @@ async def main():
         return show(*await call("POST", "/watch", {"on": rest[0] == "on"}))
     if what == "servers":  # build 169+: servers '{"serverOn":true,"serverURL":"http://192.168.3.79:18971/zwt",...}'
         return show(*await call("POST", "/servers", json.loads(rest[0]) if rest else {}))
-    if what == "padstep":  # build 171+: padstep 10  (iPad pace, counts a report; 0 = default)
-        return show(*await call("POST", "/padstep", {"n": int(rest[0]) if rest else 0}))
+    if what == "padstep":  # build 171+: padstep 10 [pace ms] [slow ratio]  (iPad pace, counts a report; 0 = default)
+        body = {"n": int(rest[0]) if rest else 0}
+        if len(rest) > 1: body["pace"] = int(rest[1])
+        if len(rest) > 2: body["ratio"] = float(rest[2])
+        return show(*await call("POST", "/padstep", body))
     if what == "calibrate":  # build 171+: starts calibration (moves the pointer: only with the user there)
         return show(*await call("POST", "/calibrate", {}))
     raise SystemExit(__doc__)

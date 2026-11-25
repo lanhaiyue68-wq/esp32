@@ -205,6 +205,12 @@ import Foundation
         connectionDeadline = Task { [weak self] in
             guard (try? await Task.sleep(nanoseconds: 30_000_000_000)) != nil, let self, !self.connected else { return }
             self.failConnection(String(localized: "Connection timed out. Keep the board nearby and try again."))
+            // 174 (11-25): the board was being flashed (in its bootloader) for those 30 s, and Echo never tried again
+            // until the user tapped 开发板. A paired board that timed out is tried again every 10 s.
+            self.retryTask = Task { [weak self] in
+                guard (try? await Task.sleep(nanoseconds: 10_000_000_000)) != nil else { return }
+                self?.reconnect()
+            }
         }
         if peripheral.state == .connected {
             connecting = false

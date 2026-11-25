@@ -200,8 +200,14 @@ extension AppModel {
 
     /// A server order. Sending a message is done in its app's window; anything else goes the usual way (runOrder).
     private func paneOrder(_ order: ChatToolLink.Command, _ state: inout PaneWatchState) async {
-        guard order.type == ChatToolLink.sendMessage else { await runOrder(order); return }
         let link = order.app == .wework ? weworkTool : chatTool
+        if order.type == ChatToolLink.deleteChat {  // 174
+            watchStatus = "删除会话 \(order.chat)…"
+            let done = await paneDelete(order.chat, app: order.app, &state)
+            link.finish(order, ok: done.ok, reason: done.why)
+            return
+        }
+        guard order.type == ChatToolLink.sendMessage else { await runOrder(order); return }
         if let why = PrivacyGuard.check(order.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
             DebugLog.write("watch: order withheld: \(why)")
             link.finish(order, ok: false, reason: ChatToolLink.reasonPrivacy)
@@ -281,6 +287,55 @@ extension AppModel {
             return (true, "")
         }
         return (false, ChatToolLink.reasonNotSent)
+    }
+
+    /// 174 (user 11-25): delete `chat` from its app's chat list in its window: the row's buttons brought out (WeChat by a
+    /// drag, WeCom by a sideways scroll), the red 删除, a confirmation's 删除 when one comes, then the row is gone.
+    private func paneDelete(_ chat: String, app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> (ok: Bool, why: String) {
+        let appName = app == .wework ? "企业微信" : "微信"
+        let sides = state.apps
+        var found: PaneLook?
+        for l in await paneLooks() {
+            if let a = XiaoLanPanes.app(l.rows) { state.apps[l.side] = a }
+            if found == nil, (state.apps[l.side] ?? sides[l.side]) == app { found = l }
+        }
+        guard var look = found else { return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）") }
+        if case .chat = look.view {  // in a chat: back to the list first
+            _ = await paneTap(XiaoLanPanes.back, in: look.rect, wide: 0.02)
+            guard let back = await paneLook(look.side, after: now(), until: { $0.view == .list }) else {
+                return (false, "\(appName)没有回到会话列表")
+            }
+            look = back
+        }
+        guard look.view == .list else { return (false, "\(appName)没有回到会话列表") }
+        guard let title = XiaoLanPanes.entries(look.rows).first(where: { WatchChatOpen.sameChat(chat, listName: $0.name) })?.box else {
+            return (false, "\(appName)的会话列表上看不到「\(chat)」")
+        }
+        let start = XiaoLanPanes.onScreen(CGPoint(x: 0.75, y: title.midY), in: look.rect)
+        do {
+            try await pointer.revealRowActions(Double(start.x), Double(start.y), room: Double(start.x - look.rect.minX) - 0.03,
+                                               scroll: app == .wework)
+        } catch {
+            return (false, "\(appName)里滑不出「\(chat)」的按钮：\(error.localizedDescription)")
+        }
+        func button(_ l: PaneLook) -> CGPoint? {
+            guard let image = UIImage(data: l.crop)?.cgImage else { return nil }
+            return XiaoLanPanes.deleteButton(l.rows, row: title, red: { Vision.redShare(image, in: $0) })
+        }
+        guard let shown = await paneLook(look.side, after: now(), until: { button($0) != nil }), let red = button(shown) else {
+            return (false, "「\(chat)」那一行没有滑出红色的删除（系统账号、公众号可能没有）")
+        }
+        DebugLog.write("watch: \(app.rawValue): deleting \(chat)")
+        guard await paneTap(red, in: look.rect, wide: 0.04) else { return (false, "没点到「\(chat)」的删除") }
+        var after = await paneLook(look.side, after: now(), tries: 3) { XiaoLanPanes.gone(chat, $0.rows) }
+        if let a = after, !XiaoLanPanes.gone(chat, a.rows), let confirm = XiaoLanPanes.confirmDelete(a.rows) {
+            DebugLog.write("watch: \(app.rawValue): the confirmation (\(app == .wework ? "the alert's 删除" : "清空记录同时不显示聊天"))")
+            _ = await paneTap(confirm, in: look.rect, wide: 0.04)
+            after = await paneLook(look.side, after: now(), tries: 3) { XiaoLanPanes.gone(chat, $0.rows) }
+        }
+        guard let end = after, XiaoLanPanes.gone(chat, end.rows) else { return (false, "「\(chat)」还在\(appName)的会话列表上") }
+        DebugLog.write("watch: \(app.rawValue): \(chat) deleted")
+        return (true, "")
     }
 }
 #endif
