@@ -541,10 +541,14 @@ import Foundation
         await noteCorner(since: homing)
         let right = beyondReach(x), bottom = belowReach(y)
         let back = right ? mx.units(for: 1 - x) : 0
+        // 168: on an iPad a push far past the bottom goes to the Home Screen (and past the right edge opens Slide Over):
+        // from the corner it goes only padMargin past the border (tested harmless), not 1.5 screens.
+        let pad = CommandChannel.onPad()
         if right {
             // y last: after the 400+ unit push it landed 0.027 low (live test 11-08, the alarm's ✓), against 0.012 after an
             // ordinary move; after the short way back it follows a move like the calibrated ones.
-            try await ProbeMotion.move(device, max(mx.units(for: 1) * 3 / 2, 400), 0)
+            let push = pad ? mx.units(for: 1) + CommandChannel.padMargin : max(mx.units(for: 1) * 3 / 2, 400)
+            try await ProbeMotion.move(device, push, 0)
             try await Task.sleep(nanoseconds: 150_000_000)
             try await ProbeMotion.move(device, -back, 0)
             try await Task.sleep(nanoseconds: 150_000_000)
@@ -553,7 +557,8 @@ import Foundation
         }
         if bottom {
             let up = my.units(for: 1 - y)
-            try await ProbeMotion.move(device, 0, max(my.units(for: 1) * 3 / 2, 600))
+            let push = pad ? my.units(for: 1) + CommandChannel.padMargin : max(my.units(for: 1) * 3 / 2, 600)
+            try await ProbeMotion.move(device, 0, push)
             try await Task.sleep(nanoseconds: 150_000_000)
             try await ProbeMotion.move(device, 0, -up)
             log(String(format: "point (%.3f, %.3f): a bottom row; from the bottom border, %ld units up", x, y, up))
