@@ -580,6 +580,14 @@ import Foundation
         (pos, moves) = ((0, 0), 0)
     }
 
+    /// 169 (iPad calibration): the pointer rests where a probe's click was caught, `ux, uy` units from the corner; the
+    /// next taps hop on from there instead of going back to the corner.
+    func restAt(ux: Int, uy: Int, x: Double, y: Double) {
+        pos = (ux, uy)
+        lastClick = LastClick(x: x, y: y, ux: ux, uy: uy, link: device.links, time: Date().timeIntervalSince1970)
+        hops = 0
+    }
+
     /// Calibration check: the pointer still rests where its real click landed; move it by the measured miss
     /// (screen fractions) and click there, without re-homing.
     func clickBy(_ ex: Double, _ ey: Double) async throws {

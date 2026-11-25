@@ -417,6 +417,10 @@ import UIKit
         // not known: the height seen on screen decides; left still goes all the way
         XCTAssertEqual(CommandChannel.padHome(from: nil, span: span, locatedY: 0.5), ["abort", "move -4200 0", "move 0 -2935"])
         XCTAssertNil(CommandChannel.padHome(from: nil, span: span, locatedY: nil))
+        // 169: the push past the edge is a part of the screen: a faster pointer (fewer units) pushes fewer units
+        XCTAssertEqual(CommandChannel.margin((w: 3900, h: 5270)), 300)
+        XCTAssertEqual(CommandChannel.margin((w: 1300, h: 1750)), 99)
+        XCTAssertEqual(CommandChannel.margin((w: 300, h: 400)), 80)
         // tracking: moves clamp at the edges; anything that can move it unseen forgets it
         var p = CommandChannel.padTrack("move 500 700", from: (0, 0), span: span)
         XCTAssertEqual(p?.x, 500)

@@ -20,13 +20,18 @@ extension AutoCalibrator {
     /// ask it: left all the way (harmless), right 300 (off the AssistiveTouch button at the edge), up 300 (past the top at
     /// most 300, tested harmless; and never at the bottom, so no Dock or Home bar under the click), click. A click in
     /// the status bar is not caught: Esc (an AssistiveTouch menu), down 500, click again.
+    /// 169: done at every calibration (the iPad's pointer speed may have changed since the last one), with a second click
+    /// 400 units right and 400 up or down (away from the nearer edge) that measures the screen in units, so the home's
+    /// push past the top stays the same small part of the screen at any speed. Up only 150 at first for the same reason.
     func locatePadPointer(probe: TouchProbe, device: HIDDevice) async {
-        guard CommandChannel.onPad(), CommandChannel.padPos == nil else { return }
+        guard CommandChannel.onPad() else { return }
+        CommandChannel.padPos = nil
         do {
             try await device.send("abort")  // also releases; the firmware forgets its corner, so no curve bows up or left
-            try await device.send("move -\(CommandChannel.padSpan.w + CommandChannel.padMargin) 0")
-            try await device.send("move 300 -300")
-            for attempt in 0..<2 {
+            try await device.send("move -\(CommandChannel.padSpan.w * 2 + CommandChannel.padMargin) 0")  // harmless however far
+            try await device.send("move 300 -150")
+            var first: CGPoint?
+            for attempt in 0..<2 where first == nil {
                 if attempt > 0 {
                     _ = try? await device.send("key esc")
                     try await device.send("move 0 500")
@@ -34,12 +39,27 @@ extension AutoCalibrator {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 let sent = now()
                 try await device.send("click")
-                if let p = await probe.tap(since: sent, timeout: Self.tapTimeout) {
-                    CommandChannel.padPos = (300, Int((Double(p.y) * Double(CommandChannel.padSpan.h)).rounded()))
-                    app.say(String(format: "ipad: pointer found by a click at (%.3f, %.3f)", p.x, p.y))
-                    return
+                first = await probe.tap(since: sent, timeout: Self.tapTimeout)
+                if first == nil { app.say("ipad: locating click \(attempt + 1) not caught") }
+            }
+            guard let p1 = first else { return }
+            app.say(String(format: "ipad: pointer found by a click at (%.3f, %.3f)", p1.x, p1.y))
+            let dy = p1.y > 0.5 ? -400 : 400
+            try await device.send("move 400 \(dy)")
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let sent = now()
+            try await device.send("click")
+            var span = CommandChannel.padSpan
+            if let p2 = await probe.tap(since: sent, timeout: Self.tapTimeout) {
+                let fx = Double(p2.x - p1.x), fy = abs(Double(p2.y - p1.y))
+                if (0.02...0.9).contains(fx), (0.02...0.9).contains(fy) {
+                    span = (Int((400 / fx).rounded()), Int((400 / fy).rounded()))
+                    CommandChannel.padSpan = span
+                    app.say("ipad: the screen is about \(span.w) x \(span.h) units")
                 }
-                app.say("ipad: locating click \(attempt + 1) not caught")
+                CommandChannel.padPos = (700, Int((Double(p2.y) * Double(span.h)).rounded()))
+            } else {
+                CommandChannel.padPos = (700, max(0, Int((Double(p1.y) * Double(span.h)).rounded()) + dy))
             }
         } catch {
             app.say("ipad: locating the pointer failed: \(error.localizedDescription)")
@@ -72,12 +92,29 @@ extension AutoCalibrator {
             } else { app.say("probe \(clicks): no confirmed click") }
             return p
         }
+        // 169 (user 11-25: "不要一直從左上角作為起點來點，就從你上一次點的那個位置…要快"): on an iPad the probes home
+        // once; each next probe moves from where the last one's click was caught, in one curved move. A probe that was
+        // not caught homes again (where the pointer is is not known then).
+        var at: (Int, Int)?  // where the pointer rests, in units from the corner, after a caught probe
+        var landed: CGPoint?
         func click(_ ux: Int, _ uy: Int) async throws -> CGPoint? {
-            try await ProbeMotion.home(device)
-            try await ProbeMotion.move(device, ux, uy)
+            if CommandChannel.onPad(), let a = at {
+                try await ProbeMotion.move(device, ux - a.0, uy - a.1)
+            } else {
+                try await ProbeMotion.home(device)
+                try await ProbeMotion.move(device, ux, uy)
+            }
             let sent = now()
             try await device.send("click")
-            return await caught(since: sent, ux: ux, uy: uy)
+            let p = await caught(since: sent, ux: ux, uy: uy)
+            if let p {
+                at = (ux, uy)
+                landed = p
+            } else {
+                at = nil
+                landed = nil
+            }
+            return p
         }
         func lines() -> (ProbeFit.Line, ProbeFit.Line)? {
             let xs = samples.filter { ProbeFit.usable($0.fx) }.map { ($0.ux, $0.fx) }
@@ -111,6 +148,8 @@ extension AutoCalibrator {
             return .failed("校准落点无法建立有效映射，未保存参数。")
         }
         app.say(String(format: "calibration: curved initial estimate scatter %.2f%%; endpoint feedback required", pointer.probeScatter * 100))
+        // 169: the checks hop on from the last probe's spot, not from the corner.
+        if CommandChannel.onPad(), let a = at, let p = landed { pointer.restAt(ux: a.0, uy: a.1, x: p.x, y: p.y) }
 
         phase = .verifying
         try await Task.sleep(nanoseconds: 400_000_000)  // let the board repaint plain before the first pixel search

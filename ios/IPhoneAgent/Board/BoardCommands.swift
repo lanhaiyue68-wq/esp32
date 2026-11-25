@@ -149,7 +149,10 @@ extension HIDDevice {
 
     /// App units across the iPad (Pointer sets the calibrated span; these are the measured values before one).
     static var padSpan = (w: 3900, h: 5300)  // measured on the customer's iPad 9 (11-25)
-    static let padMargin = 300  // how far past the left and top edges a home pushes (800 tested harmless)
+    /// How far past the left and top edges a home pushes: ~5.7% of the screen's height (300 units on the customer's iPad
+    /// at its pointer speed of 11-25; 800 there tested harmless), so it stays as small a push if the speed changes.
+    static func margin(_ span: (w: Int, h: Int)) -> Int { max(80, span.h * 57 / 1000) }
+    static var padMargin: Int { margin(padSpan) }
     static let padPosKey = "padPointerPosV1"
     /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches
     /// (the iPad keeps its pointer where it was), forgotten after anything that can move it unseen.
@@ -173,7 +176,8 @@ extension HIDDevice {
         let y: Int
         if let pos { y = pos.y } else if let f = locatedY { y = Int((f * Double(span.h)).rounded()) } else { return nil }
         let x = pos?.x ?? span.w  // pushing left is harmless however far
-        return ["abort", "move -\(max(0, x) + padMargin) 0", "move 0 -\(max(0, y) + padMargin)"]
+        let m = margin(span)
+        return ["abort", "move -\(max(0, x) + m) 0", "move 0 -\(max(0, y) + m)"]
     }
 
     /// Where the pointer is after a command (it stops at the edges); nil for anything that may move it unseen.

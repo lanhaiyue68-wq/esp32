@@ -114,6 +114,14 @@ struct ProbeMap: Codable {
     }
 
     static func move(_ device: HIDDevice, _ x: Int, _ y: Int) async throws {
+        // 169 (user 11-25, iPad: "還是直線去點，不是貝塞爾曲線"): split into x then y, each a straight line (the board
+        // only curves a move with both), the pointer drew an L. On an iPad it is one move, which the board curves; the
+        // firmware's corridor keeps the curve inside the move's own box once a home has forgotten the corner (abort).
+        if CommandChannel.onPad(), x != 0, y != 0 {
+            try await device.send("move \(x) \(y)")
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return
+        }
         if x != 0 { try await device.send("move \(x) 0") }
         if x != 0 && y != 0 { try await Task.sleep(nanoseconds: 100_000_000) }
         if y != 0 { try await device.send("move 0 \(y)") }
