@@ -148,7 +148,7 @@ extension HIDDevice {
     // home pushes left, then up only `padMargin` past the top, from where the pointer is known to be.
 
     /// App units across the iPad (Pointer sets the calibrated span; these are the measured values before one).
-    static var padSpan = (w: 4200, h: 5600)
+    static var padSpan = (w: 3900, h: 5300)  // measured on the customer's iPad 9 (11-25)
     static let padMargin = 300  // how far past the left and top edges a home pushes (800 tested harmless)
     static let padPosKey = "padPointerPosV1"
     /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches

@@ -14,6 +14,38 @@ extension AutoCalibrator {
     static let maxCheckError = Pointer.calibrationTolerance
     static let landingCorrections = 2  // re-clicks per check, each moved by the last real landing's miss
 
+    /// 163 (iPad): before the first home the pointer's place (CommandChannel.padPos) may be unknown, and a blind push up
+    /// can open Notification Center. 162 looked for it in the shared screen, which failed under calibration's own screen
+    /// (11-25 log: "pointer position unknown and not seen; refused", every try). Calibration's overlay catches clicks, so
+    /// ask it: left all the way (harmless), right 300 (off the AssistiveTouch button at the edge), up 300 (past the top at
+    /// most 300, tested harmless; and never at the bottom, so no Dock or Home bar under the click), click. A click in
+    /// the status bar is not caught: Esc (an AssistiveTouch menu), down 500, click again.
+    func locatePadPointer(probe: TouchProbe, device: HIDDevice) async {
+        guard CommandChannel.onPad(), CommandChannel.padPos == nil else { return }
+        do {
+            try await device.send("abort")  // also releases; the firmware forgets its corner, so no curve bows up or left
+            try await device.send("move -\(CommandChannel.padSpan.w + CommandChannel.padMargin) 0")
+            try await device.send("move 300 -300")
+            for attempt in 0..<2 {
+                if attempt > 0 {
+                    _ = try? await device.send("key esc")
+                    try await device.send("move 0 500")
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                let sent = now()
+                try await device.send("click")
+                if let p = await probe.tap(since: sent, timeout: Self.tapTimeout) {
+                    CommandChannel.padPos = (300, Int((Double(p.y) * Double(CommandChannel.padSpan.h)).rounded()))
+                    app.say(String(format: "ipad: pointer found by a click at (%.3f, %.3f)", p.x, p.y))
+                    return
+                }
+                app.say("ipad: locating click \(attempt + 1) not caught")
+            }
+        } catch {
+            app.say("ipad: locating the pointer failed: \(error.localizedDescription)")
+        }
+    }
+
     func touchCalibrate(full: Bool) async throws -> TouchResult {
         let probe = app.probe, device = app.board.commands, pointer = app.pointer
         var accepted = false
@@ -24,6 +56,7 @@ extension AutoCalibrator {
         progress = Progress(done: 0, total: total)
         var samples: [(ux: Double, uy: Double, fx: Double, fy: Double)] = []
         phase = .homing
+        await locatePadPointer(probe: probe, device: device)
         try await pointer.reset()
 
         func record(_ ux: Int, _ uy: Int, _ p: CGPoint) {

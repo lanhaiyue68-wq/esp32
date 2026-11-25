@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 15:00（首爾）163：iPad 校準改成「點一下定位」
+- 使用者裝 162：校準一直顯示「iPad 上不知道指针在哪里，请先打开共享整个屏幕」（已共享）。日誌：每次都是擺動 60 兩次沒找到游標就拒絕（校準畫面自己的動畫干擾比對）。
+- 163：TouchCalibration.locatePadPointer —— 位置不知道時：abort → 往左推到底 → 右 300、上 300（推過頂最多 300；不會在最底下，不會點到 Dock／主畫面橫條）→ 點一下讓校準畫面接住，得到確切位置；沒接住（狀態列）→ Esc、下移 500 再點。padSpan 預設改成實測 3900×5300。
+- 使用者問「為什麼小藍要模型、不是像智微兔智企微行不燒 token 嗎」：162 的指令執行與守候都用大模型。使用者要求照兩個包原本的邏輯做（正常回覆不用大模型，接話／監察模式才用），先拆包分析。
+
 ## 2026-11-25 14:20（首爾）162 編譯、測試全過，IPA 出好
 - 第一次 CI 45530934622 失敗：iPad 歸零寫在 BoardCommands.swift 的類別 CommandChannel 裡，我在 Pointer／AppModel／測試引用成「BoardCommands」（3 處 cannot find in scope）。c7ea54c 改名後 CI 45531319928：BUILD／TEST SUCCEEDED，962 測試 0 失敗（新 6 個都過）。
 - IPA：E:/桌面/XiaoLan-build162-ios27-unsigned.ipa（SHA256 d5e37069…647071c33，與 CI 一致）；核對：顯示名小藍，en／zh-Hans InfoPlist.strings 都是小藍（不再是 Pilot），版本 162，[1,2]，iphoneos27.1，含 ScreenCaptureKit，含 XiaoLanRoot／XiaoLanToolbox。
