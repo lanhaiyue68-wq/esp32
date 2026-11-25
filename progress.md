@@ -1,5 +1,11 @@
 # 当前进度
 
+## 2026-11-25 16:10（首爾）163 IPA 出好；164 第一步：照引擎的 QA 回調（未編譯）
+- 163：CI 45535310039 編譯＋962 測試 0 失敗；E:/桌面/XiaoLan-build163-ios27-unsigned.ipa（SHA256 db0f8cc7…）。
+- 使用者同意照三步改，並問接茬這類要大模型的怎麼辦 → 答：跟安卓小藍一樣由北京總網關叫大模型（手機 POST /device/models/reply/route，網關回 text），手機不用模型。
+- 164 第一步（ChatToolLink）：連線時 GET {伺服器}/robot/robotInfo/get?robotId= 取 callbackUrl／openCallback／replyAll／robotType；讀到的訊息改用引擎格式上報（socketType 2、type 101、messageList[sender,nameList,itemMessageList feature 2]，ChatTool 後台看到 messageList 就用它，不重複）；符合條件（非自己；replyAll 全部，否則私聊與 @）POST QA 回調 {spoken,rawSpoken,receivedName,groupName,groupRemark,roomType,atMe,textType}，回 data.info.text 就排一個 203（qa# 開頭，結果只進記錄）。WatchSettings.serverReplies 在 XIAOLAN 固定 true（iPad 不自己寫回覆）。測試 testXiaoLanQACallbackLikeTheEngines。
+- 第二步要看 iPad 版微信實際畫面（可能左右兩欄）才能寫文字辨識讀訊息。
+
 ## 2026-11-25 15:00（首爾）163：iPad 校準改成「點一下定位」
 - 使用者裝 162：校準一直顯示「iPad 上不知道指针在哪里，请先打开共享整个屏幕」（已共享）。日誌：每次都是擺動 60 兩次沒找到游標就拒絕（校準畫面自己的動畫干擾比對）。
 - 163：TouchCalibration.locatePadPointer —— 位置不知道時：abort → 往左推到底 → 右 300、上 300（推過頂最多 300；不會在最底下，不會點到 Dock／主畫面橫條）→ 點一下讓校準畫面接住，得到確切位置；沒接住（狀態列）→ Esc、下移 500 再點。padSpan 預設改成實測 3900×5300。

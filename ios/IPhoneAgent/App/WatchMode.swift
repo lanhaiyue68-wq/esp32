@@ -100,8 +100,15 @@ enum WatchSettings {
     static var weworkOn: Bool { d.bool(forKey: weworkOnKey) }
     static var weworkURL: String { text(weworkURLKey, "") }
     static var weworkCode: String { text(weworkCodeKey, "") }
-    /// ChatTool decides the replies; this iPhone only reads, reports and types what it is told.
-    static var serverReplies: Bool { serverOn && d.bool(forKey: serverRepliesKey) }
+    /// ChatTool decides the replies; this iPhone only reads, reports and types what it is told. 小藍 (163) always: like
+    /// 智微兔 and 智企微行, the server's QA callback or orders decide every reply and the iPad writes none itself.
+    static var serverReplies: Bool {
+        #if XIAOLAN
+        return true
+        #else
+        return serverOn && d.bool(forKey: serverRepliesKey)
+        #endif
+    }
     static var knowledgeFromComputer: Bool { d.bool(forKey: knowledgeFromComputerKey) }
     static var computerURL: String { text(computerURLKey, "") }
     static var computerToken: String { text(computerTokenKey, "") }

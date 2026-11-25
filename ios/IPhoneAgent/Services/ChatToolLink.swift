@@ -85,39 +85,154 @@ import Foundation
         guard let url = Self.socketURL(server, robot: robot, app: app) else { return }
         self.url = url
         job = Task { [weak self] in await self?.keepConnected() }
+        configJob = Task { [weak self] in await self?.loadConfig(server: server, robot: robot) }
     }
 
     func disconnect() {
         job?.cancel()
         job = nil
+        configJob?.cancel()
+        configJob = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         pending = []
         tallies = [:]
+        config = nil
         state = .off
     }
 
     /// The next message the server asked for, or nil. Hand it back with `finish` when it is sent or given up.
     func nextCommand() -> Command? { pending.isEmpty ? nil : pending.removeFirst() }
 
-    /// What was read, one packet per message (ChatTool's dedupe then drops a message read twice).
+    /// What was read: one packet per message over the socket (ChatTool's dedupe then drops a message read twice), and
+    /// what the robot settings say goes to the QA callback, whose reply is queued to be sent (163, as the engines do).
     func report(_ messages: [ReadMessage]) {
-        guard state == .connected else { return }
         for m in messages {
-            guard let packet = Self.packet(m) else { continue }
-            send(packet) { [weak self] in self?.reported += 1 }
+            if state == .connected, let packet = Self.packet(m) { send(packet) { [weak self] in self?.reported += 1 } }
+            if Self.asksQA(m, config: config) { Task { [weak self] in await self?.askQA(m) } }
         }
     }
 
-    /// A read message in the robot's callback format (list[].titleList, receivedName, rawSpoken, atMe, roomType).
+    /// A read message as the engines report it: socketType 2, an item of type 101 (TYPE_RECEIVE_MESSAGE_LIST) with
+    /// messageList [SubMessageBean: sender 0 others / 1 me, nameList, itemMessageList feature 2 = text]. ChatTool's
+    /// callback keys (receivedName, rawSpoken, atMe…) stay on the item; ChatTool reads messageList when it is there.
     static func packet(_ m: ReadMessage) -> String? {
-        let item: [String: Any] = [
-            "titleList": [m.chat], "groupName": m.group ? m.chat : "", "roomType": m.group ? internalGroup : privateChat,
-            "receivedName": m.sender, "rawSpoken": m.text, "atMe": m.atMe ? "1" : "", "textType": plainText,
-            "sender": m.sender == "me" ? 1 : 0,
+        let sub: [String: Any] = [
+            "sender": m.sender == "me" ? 1 : 0, "textType": plainText, "nameList": [m.sender],
+            "itemMessageList": [["feature": 2, "text": m.text]],
         ]
-        return json(["list": [item]])
+        let item: [String: Any] = [
+            "type": receiveMessageList, "titleList": [m.chat], "roomType": m.group ? internalGroup : privateChat,
+            "messageList": [sub],
+            "groupName": m.group ? m.chat : "", "receivedName": m.sender, "rawSpoken": m.text, "atMe": m.atMe ? "1" : "",
+            "textType": plainText, "sender": m.sender == "me" ? 1 : 0,
+        ]
+        return json(["socketType": listSocket, "list": [item]])
     }
+
+    // MARK: The engines' robot settings and QA callback (163)
+    // Both engines (docs/xiaolan-engine-logic.md) fetch GET /robot/robotInfo/get?robotId= (callbackUrl → qaUrl,
+    // openCallback, replyAll, robotType), POST each new message to the QA callback {spoken, rawSpoken, receivedName,
+    // groupName, groupRemark, roomType, atMe, textType} and send its {"code":0,"data":{"info":{"text":…}}} back into that
+    // chat as a 203. The reply is the server's (its rules, or its model for 接茬); the phone runs no model.
+
+    struct RobotConfig: Equatable { var callbackUrl: String; var openCallback: Bool; var replyAll: Bool; var autoReply: Bool }
+    @Published private(set) var config: RobotConfig?
+    private var configJob: Task<Void, Never>?
+    static let receiveMessageList = 101, qaPrefix = "qa#"
+
+    /// The server's HTTP root for a robot address: ws(s) → http(s), the path kept (…/zwt).
+    static func httpBase(_ server: String) -> String? {
+        var s = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if !s.contains("://") { s = "http://" + s }
+        guard var c = URLComponents(string: s), let host = c.host, !host.isEmpty else { return nil }
+        c.scheme = c.scheme == "https" || c.scheme == "wss" ? "https" : "http"
+        var path = c.path
+        while path.hasSuffix("/") { path.removeLast() }
+        c.path = path
+        c.query = nil
+        return c.url?.absoluteString
+    }
+
+    static func configURL(_ server: String, robot: String) -> URL? {
+        guard !robot.isEmpty, let base = httpBase(server), var c = URLComponents(string: base + "/robot/robotInfo/get") else { return nil }
+        c.queryItems = [URLQueryItem(name: "robotId", value: robot)]
+        return c.url
+    }
+
+    /// robotInfo/get's answer as the engines keep it (MyConfigBean): replyAll -1 = only private chats and @ in groups;
+    /// robotType 2 = no auto reply.
+    static func robotConfig(_ data: Data) -> RobotConfig? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], (obj["code"] as? Int) == 200,
+              let d = obj["data"] as? [String: Any] else { return nil }
+        return RobotConfig(callbackUrl: (d["callbackUrl"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                           openCallback: (d["openCallback"] as? Int ?? 0) == 1,
+                           replyAll: (d["replyAll"] as? Int ?? 1) != -1,
+                           autoReply: (d["robotType"] as? Int ?? 1) != 2)
+    }
+
+    /// Whether a read message goes to the QA callback: not our own; with replyAll every one, else private chats and
+    /// group messages that @ us.
+    static func asksQA(_ m: ReadMessage, config: RobotConfig?) -> Bool {
+        guard let c = config, c.openCallback, c.autoReply, !c.callbackUrl.isEmpty, m.sender != "me" else { return false }
+        return c.replyAll || !m.group || m.atMe
+    }
+
+    static func qaBody(_ m: ReadMessage) -> [String: Any] {
+        ["spoken": m.text, "rawSpoken": m.text, "receivedName": m.sender, "groupName": m.chat, "groupRemark": "",
+         "roomType": m.group ? internalGroup : privateChat, "atMe": m.atMe ? "true" : "false", "textType": plainText]
+    }
+
+    /// The QA callback's reply text, or nil when it gives none to send (an empty text means: do not reply).
+    static func qaReply(_ data: Data) -> String? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], (obj["code"] as? Int ?? 0) == 0,
+              let info = (obj["data"] as? [String: Any])?["info"] as? [String: Any],
+              let text = (info["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
+
+    private func loadConfig(server: String, robot: String) async {
+        guard let url = Self.configURL(server, robot: robot) else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled else { return }
+            config = Self.robotConfig(data)
+            if let c = config {
+                note("⚙ 機器人設定：回調\(c.openCallback && !c.callbackUrl.isEmpty ? "開" : "關")・\(c.replyAll ? "全部回覆" : "只回私聊與 @")\(c.autoReply ? "" : "・不自動回覆")")
+            } else {
+                note("⚙ 伺服器沒有給機器人設定（不走 QA 回調）")
+            }
+        } catch {
+            DebugLog.write("chattool: robot settings not loaded: \(error.localizedDescription)")
+        }
+    }
+
+    private func askQA(_ m: ReadMessage) async {
+        guard let c = config, let url = URL(string: c.callbackUrl),
+              let body = try? JSONSerialization.data(withJSONObject: Self.qaBody(m)) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code), let text = Self.qaReply(data) else { return }
+            let id = Self.qaPrefix + UUID().uuidString
+            let raw = Self.json(["type": Self.sendMessage, "titleList": [m.chat], "receivedContent": text]) ?? ""
+            queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date())
+            note("↩ 伺服器回覆 · \(m.chat)")
+        } catch {
+            DebugLog.write("chattool: QA callback failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Orders that answer into the record, not to a server: the tool box's and the QA callback's replies.
+    static func isLocal(_ messageId: String) -> Bool { messageId.hasPrefix(localPrefix) || messageId.hasPrefix(qaPrefix) }
 
     /// The orders in a packet from the server (for the engine `app`). Heartbeat answers, receive pumps and other
     /// packets give none. An order naming several chats (XiaoLanOrders.perChat) becomes one command per chat.
@@ -228,7 +343,7 @@ import Foundation
         let label = XiaoLanOrders.label(t.type, app) ?? "\(t.type)"
         note((t.failed.isEmpty ? "✓ " : "✗ ") + label + " · " + (t.ok + t.failed).joined(separator: "、")
              + (t.reasons.isEmpty ? "" : "：" + t.reasons.joined(separator: "；")), now: now)
-        if t.messageId.hasPrefix(Self.localPrefix) { return nil }  // a tool-box order: its result stays on the iPad
+        if Self.isLocal(t.messageId) { return nil }  // a tool-box order or a QA reply: its result stays on the iPad
         if sending, let packet { send(packet) }
         return packet
     }
@@ -273,7 +388,7 @@ import Foundation
 
     /// A read's data for an order: to the server, or (a tool-box order) into the record.
     func deliver(_ bean: [String: Any], for c: Command) {
-        guard c.messageId.hasPrefix(Self.localPrefix) else { sendData(bean); return }
+        guard Self.isLocal(c.messageId) else { sendData(bean); return }
         var shown = bean
         shown["type"] = nil
         if let q = shown["qrcode"] as? String { shown["qrcode"] = "（图片 \(q.count / 1024) KB）" }

@@ -292,6 +292,41 @@ import UIKit
         XCTAssertTrue(XiaoLanOrders.openMomentPicture(friend: "王五", locate: "新品到了").contains("第一张图片"))
     }
 
+    /// 163: the engines' robot settings, QA callback and type-101 report (docs/xiaolan-engine-logic.md).
+    func testXiaoLanQACallbackLikeTheEngines() throws {
+        XCTAssertEqual(ChatToolLink.configURL("127.0.0.1:18971/zwt", robot: "r1")?.absoluteString,
+                       "http://127.0.0.1:18971/zwt/robot/robotInfo/get?robotId=r1")
+        XCTAssertEqual(ChatToolLink.httpBase("wss://relay.example/relay/zwt/"), "https://relay.example/relay/zwt")
+        let cfg = try XCTUnwrap(ChatToolLink.robotConfig(Data(#"{"code":200,"data":{"openCallback":1,"callbackUrl":"http://x/cb","replyAll":-1,"robotType":1}}"#.utf8)))
+        XCTAssertFalse(cfg.replyAll)
+        let group = ReadMessage(chat: "群", group: true, sender: "张三", text: "你好", atMe: false)
+        XCTAssertFalse(ChatToolLink.asksQA(group, config: cfg))  // replyAll -1: only @ in groups
+        XCTAssertTrue(ChatToolLink.asksQA(ReadMessage(chat: "群", group: true, sender: "张三", text: "@小蓝 你好", atMe: true), config: cfg))
+        XCTAssertTrue(ChatToolLink.asksQA(ReadMessage(chat: "张三", group: false, sender: "张三", text: "在吗", atMe: false), config: cfg))
+        XCTAssertFalse(ChatToolLink.asksQA(ReadMessage(chat: "张三", group: false, sender: "me", text: "在", atMe: false), config: cfg))
+        var all = cfg
+        all.replyAll = true
+        XCTAssertTrue(ChatToolLink.asksQA(group, config: all))
+        all.autoReply = false
+        XCTAssertFalse(ChatToolLink.asksQA(group, config: all))  // robotType 2
+        XCTAssertNil(ChatToolLink.robotConfig(Data(#"{"code":500,"message":"no"}"#.utf8)))
+        XCTAssertEqual(ChatToolLink.qaReply(Data(#"{"code":0,"data":{"info":{"text":" 收到 "}}}"#.utf8)), "收到")
+        XCTAssertNil(ChatToolLink.qaReply(Data(#"{"code":0,"data":{"info":{"text":""}}}"#.utf8)))  // empty: do not reply
+        let body = ChatToolLink.qaBody(group)
+        XCTAssertEqual(body["spoken"] as? String, "你好")
+        XCTAssertEqual(body["atMe"] as? String, "false")
+        XCTAssertEqual(body["groupName"] as? String, "群")
+        let packet = try object(ChatToolLink.packet(group))
+        let item = try XCTUnwrap((packet["list"] as? [[String: Any]])?.first)
+        XCTAssertEqual(packet["socketType"] as? Int, 2)
+        XCTAssertEqual(item["type"] as? Int, 101)
+        let sub = try XCTUnwrap((item["messageList"] as? [[String: Any]])?.first)
+        XCTAssertEqual(sub["nameList"] as? [String], ["张三"])
+        XCTAssertEqual(((sub["itemMessageList"] as? [[String: Any]])?.first)?["text"] as? String, "你好")
+        XCTAssertTrue(ChatToolLink.isLocal("qa#1"))
+        XCTAssertFalse(ChatToolLink.isLocal("m1"))
+    }
+
     /// 162: the tool box builds the engines' orders; they run like a server's but answer only into the record.
     func testXiaoLanToolboxOrdersStayOnTheIPad() throws {
         for group in XiaoLanTools.groups {
