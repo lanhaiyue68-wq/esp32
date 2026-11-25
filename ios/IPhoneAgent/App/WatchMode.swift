@@ -1392,7 +1392,16 @@ extension AppModel {
         if WatchSettings.serverOn { chatTool.connect(server: WatchSettings.serverURL, robot: WatchSettings.robotId) }
         if WatchSettings.weworkOn { weworkTool.connect(server: WatchSettings.weworkURL, robot: WatchSettings.weworkCode) }
         watchStartedAt = now()
+        #if XIAOLAN
+        // 172 (user 11-25: 個微和企微都要守候，同時兩個): on an iPad, WeChat and WeCom side by side (XiaoLanPaneWatch).
+        if CommandChannel.onPad() {
+            watchJob = Task { [weak self] in await self?.paneWatchLoop() }
+        } else {
+            watchJob = Task { [weak self] in await self?.watchLoop() }
+        }
+        #else
         watchJob = Task { [weak self] in await self?.watchLoop() }
+        #endif
         let r = WatchSettings.rules, pin = WatchSettings.ownerPIN
         // What owner authority hangs on, once per start (build 64–65: a passcode task never ran, and nothing said why).
         DebugLog.write("watch: started; chats \(r.targets), senders \(r.senders), phone tasks \(r.phoneTasks), "
@@ -2387,7 +2396,7 @@ extension AppModel {
     /// 小藍 iPad 版 (161): one order from a server (ChatToolLink, either engine), done and answered. A plain 203 into WeChat
     /// takes the quick send as before; every other order is an agent task from XiaoLanOrders: its typed texts checked for
     /// privacy first, its files fetched first, a read answered with its data bean, a 跟圈 run reported to its backend.
-    private func runOrder(_ send: ChatToolLink.Command) async {
+    func runOrder(_ send: ChatToolLink.Command) async {
         let link = send.app == .wework ? weworkTool : chatTool
         let label = XiaoLanOrders.label(send.type, send.app) ?? "\(send.type)"
         watchStatus = String(localized: "Server order: \(label) · \(send.chat)")

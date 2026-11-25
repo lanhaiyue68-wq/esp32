@@ -409,6 +409,78 @@ import UIKit
         XCTAssertNotNil(link.enqueueLocal(["type": 222]))  // 打卡 is WeCom's only
     }
 
+    /// 172: WeChat and WeCom side by side: the screen splits at the gap (wherever it is), each window is told by its tab
+    /// bar, a red mark on a list row is found, and the input field is the white box at the bottom.
+    func testXiaoLanWatchesTwoWindowsSideBySide() throws {
+        func picture(_ size: CGSize, _ draw: (CGContext) -> Void) -> Data {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            return UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: 0.95) { draw($0.cgContext) }
+        }
+        func fill(_ c: CGContext, _ r: CGRect, _ v: (CGFloat, CGFloat, CGFloat)) {
+            c.setFillColor(red: v.0 / 255, green: v.1 / 255, blue: v.2 / 255, alpha: 1)
+            c.fill(r)
+        }
+        // The customer's iPad 11-25: WeChat left to 0.494, the wallpaper, WeCom from 0.506; the Dock below 0.9.
+        for (gapAt, width) in [(474.0, 12.0), (600.0, 10.0)] {  // and a wider left window
+            let screen = picture(CGSize(width: 960, height: 1280)) { c in
+                fill(c, CGRect(x: 0, y: 0, width: 960, height: 1280), (180, 60, 120))
+                fill(c, CGRect(x: 0, y: 0, width: gapAt, height: 1152), (237, 237, 237))
+                fill(c, CGRect(x: gapAt, y: 0, width: width, height: 1152), (100, 80, 40))
+                fill(c, CGRect(x: gapAt + width, y: 0, width: 960 - gapAt - width, height: 1152), (236, 237, 241))
+            }
+            let wins = XiaoLanPanes.windows(try XCTUnwrap(WatchOCR.Pixels(screen)))
+            XCTAssertEqual(wins.count, 2)
+            XCTAssertEqual(Double(wins[0].maxX), gapAt / 960, accuracy: 0.004)
+            XCTAssertEqual(Double(wins[1].minX), (gapAt + width) / 960, accuracy: 0.004)
+            XCTAssertEqual(Double(wins[0].height), 0.9, accuracy: 0.005)
+            XCTAssertNotNil(XiaoLanPanes.crop(screen, wins[1]))
+        }
+        let whole = picture(CGSize(width: 960, height: 1280)) { c in fill(c, CGRect(x: 0, y: 0, width: 960, height: 1280), (237, 237, 237)) }
+        XCTAssertEqual(XiaoLanPanes.windows(try XCTUnwrap(WatchOCR.Pixels(whole))).count, 1)
+        XCTAssertEqual(XiaoLanPanes.onScreen(CGPoint(x: 0.5, y: 0.5), in: CGRect(x: 0.5, y: 0, width: 0.5, height: 0.9)),
+                       CGPoint(x: 0.75, y: 0.45))
+
+        typealias P = CandidatePicker.Piece
+        func at(_ t: String, _ x: Double, _ y: Double, _ w: Double = 0.1) -> P { P(text: t, box: CGRect(x: x, y: y - 0.01, width: w, height: 0.02)) }
+        let wecomBar = [at("消息", 0.05, 0.95), at("邮件", 0.25, 0.95), at("文档", 0.45, 0.95), at("工作台", 0.62, 0.95), at("通讯录", 0.82, 0.95)]
+        let wechatBar = [at("微信", 0.08, 0.95), at("通讯录", 0.3, 0.95), at("发现", 0.55, 0.95), at("我", 0.82, 0.95)]
+        let list: [[P]] = [[at("消息", 0.45, 0.058)],
+                           [at("行业资讯", 0.184, 0.212, 0.15)], [at("同事们在看《安克被告》", 0.184, 0.236, 0.6)],
+                           [at("企微测试群外部", 0.184, 0.358, 0.25)], [at("来自微信的柳掌柜", 0.184, 0.382, 0.6)], wecomBar]
+        XCTAssertEqual(XiaoLanPanes.app(list), .wework)
+        XCTAssertEqual(XiaoLanPanes.app([wechatBar]), .wechat)
+        XCTAssertEqual(XiaoLanPanes.view(list), .list)
+        XCTAssertEqual(XiaoLanPanes.entries(list).map(\.name), ["行业资讯", "企微测试群"])
+        // red on both rows: 行业资讯 is WeCom's news, no one's chat
+        let hits = XiaoLanPanes.marked(list) { _ in 0.2 }
+        XCTAssertEqual(hits.map(\.name), ["企微测试群"])
+        XCTAssertEqual(Double(hits[0].at.y), 0.358, accuracy: 0.001)
+        XCTAssertTrue(XiaoLanPanes.marked(list) { _ in 0 }.isEmpty)
+        // a chat: WeCom's group line under the name is not the title
+        XCTAssertEqual(XiaoLanPanes.view([[at("3:51", 0.1, 0.016)], [at("企微测试群(7)", 0.35, 0.050, 0.3)],
+                                          [at("外部群|群主:范兆磊", 0.35, 0.071, 0.3)], [at("1", 0.15, 0.3)]]), .chat("企微测试群(7)"))
+        XCTAssertEqual(XiaoLanPanes.view([[at("1", 0.15, 0.3)]]), .unknown)
+        XCTAssertEqual(XiaoLanPanes.listName("蓝海乐@微信"), "蓝海乐")
+        XCTAssertEqual(XiaoLanPanes.listName("主人蓝海乐下午1:31"), "主人蓝海乐")
+
+        // the input field: WeCom's white buttons above it are not it
+        let chat = picture(CGSize(width: 473, height: 1035)) { c in
+            fill(c, CGRect(x: 0, y: 0, width: 473, height: 1035), (236, 237, 241))
+            fill(c, CGRect(x: 0, y: 900, width: 473, height: 135), (246, 246, 248))
+            for x in stride(from: 10.0, to: 470, by: 120) { fill(c, CGRect(x: x, y: 905, width: 110, height: 30), (255, 255, 255)) }
+            fill(c, CGRect(x: 56, y: 975, width: 314, height: 40), (255, 255, 255))
+        }
+        let field = try XCTUnwrap(XiaoLanPanes.inputField(try XCTUnwrap(WatchOCR.Pixels(chat))))
+        XCTAssertEqual(Double(field.y), 995.0 / 1035, accuracy: 0.01)
+        XCTAssertEqual(Double(field.x), 0.30, accuracy: 0.001)
+        // WeCom's own bubble (light blue) is mine; its background is not
+        XCTAssertEqual(WatchOCR.kind(of: (200, 225, 250)), .mine)
+        XCTAssertEqual(WatchOCR.kind(of: (236, 237, 241)), .grey)
+        XCTAssertEqual(WatchOCR.kind(of: (255, 255, 255)), .theirs)
+        XCTAssertEqual(WatchOCR.kind(of: (149, 237, 99)), .mine)
+    }
+
     /// 171: an iPad move goes as one curved stroke that bows visibly, stays on the screen and lands where the move would.
     func testIPadMoveIsACurveThatStaysOnTheScreen() {
         let span = (w: 1733, h: 2380)

@@ -60,6 +60,8 @@ enum WatchOCR {
     static func kind(of c: (Int, Int, Int)) -> Kind {
         let (r, g, b) = c
         if g > r + 40 && g > b + 60 { return .mine }
+        // 172: WeCom's own bubble is light blue; its chat background (236, 237, 241) is only a little blue.
+        if b >= 230 && b - r >= 20 && g >= 200 && r >= 150 { return .mine }
         if r >= 247 && g >= 247 && b >= 247 { return .theirs }
         if abs(r - g) < 10 && abs(g - b) < 10 && (222...246).contains(r) { return .grey }
         return .other
