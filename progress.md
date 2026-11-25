@@ -1,5 +1,10 @@
 # 当前进度
 
+## 2026-11-25 21:30（首爾）165／166 編譯、測試全過，IPA 出好
+- 165 CI 45538379889：964 測試 0 失敗。166 第一次 CI 45538810413 失敗（我新加的 freshFrame 與 KeyboardTyping.swift 的 AppModel.freshFrame 重名，刪掉改用原本的），f6558e5 → CI 45539140479：965 測試 0 失敗，小藍相關 9 個測試都過。
+- IPA：E:/桌面/XiaoLan-build166-ios27-unsigned.ipa（SHA256 7f44300f…，與 CI 一致），小藍、166、iphoneos27.1、[1,2]、含 ScreenCaptureKit、含 QA 回調／搜尋／裝置上讀聊天的程式。
+- 下一步：使用者裝 166 → iPad 微信鍵盤切小藍 → 校準 → 测试群實測守候讀訊息與發訊息（伺服器設定好 QA 回調才會自動回覆）。
+
 ## 2026-11-25 20:50（首爾）166 第三步開頭：發訊息全程不用模型（未編譯）
 - 164 CI 45536896428：963 測試 0 失敗。165 已推（CI 45538379889）。
 - 166：WatchSettings.noModel（XIAOLAN＝true）。walkToChat 在列表找不到會話時 searchToChat（點「搜索」、用小藍輸入法 keyboardBridge 打名字、點名字相符的結果、核對標題；失敗點「取消」）。WatchOCR.inputBox 從畫面找輸入框（輸入列上緣下 0.027，要是白色）。sendReply：returned／needsInspection 改用讀畫面確認（sentAlready，不叫模型）；不在畫面上就 walkToChat→找輸入框→quickSend；quickSend 在小藍連英數字也走貼上。runOrder：微信 203 一律走這條（有 @ 先只發文字並在 errorReason 註明）；其他沒有固定步驟的指令直接回「小蓝还没有这个指令的固定步骤（不用大模型执行）」，不叫模型。
