@@ -623,6 +623,12 @@ import UIKit
         XCTAssertEqual(Double(moved.x), 0.6, accuracy: 1e-9)
         XCTAssertEqual(Double(Pointer.movedArrow([CGPoint(x: 0.4, y: 0.4)], from: CGPoint(x: 0.2, y: 0.3))!.x), 0.4, accuracy: 1e-9)
         XCTAssertNil(Pointer.movedArrow([], from: .zero))
+        // 176: a hop toward the top, left or bottom stops short; the right edge brings nothing in
+        XCTAssertTrue(Pointer.nearGuardedEdge(0.88, 0.82))
+        XCTAssertTrue(Pointer.nearGuardedEdge(0.12, 0.5))
+        XCTAssertTrue(Pointer.nearGuardedEdge(0.5, 0.15))
+        XCTAssertFalse(Pointer.nearGuardedEdge(0.5, 0.62))
+        XCTAssertFalse(Pointer.nearGuardedEdge(0.95, 0.5))
     }
 
     /// 174: inside the screen fast, past an edge slow (Stage Manager, Notification Center, Home); short moves lengthened.

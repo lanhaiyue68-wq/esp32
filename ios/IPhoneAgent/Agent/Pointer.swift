@@ -690,6 +690,7 @@ import Foundation
     /// 169 (iPad calibration): the pointer rests where a probe's click was caught, `ux, uy` units from the corner; the
     /// next taps hop on from there instead of going back to the corner.
     func restAt(ux: Int, uy: Int, x: Double, y: Double) {
+        Self.syncPad(CGPoint(x: x, y: y))  // 176
         pos = (ux, uy)
         lastClick = LastClick(x: x, y: y, ux: ux, uy: uy, link: device.links, time: Date().timeIntervalSince1970)
         hops = 0
@@ -751,7 +752,12 @@ import Foundation
             // User 11-08: go straight to the next spot from where the pointer rests (the board still curves the
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
             // an aimed tap (after one that changed nothing) always starts from the corner.
-            let (ux, uy) = hopUnits(from: last, to: x, y, units: p)
+            var (ux, uy) = hopUnits(from: last, to: x, y, units: p)
+            // 176: on an iPad a long hop toward the top, left or bottom edge goes 85% of the way and the arrival's look
+            // finishes it, so a model that runs long (175: 0.36 of the screen for 0.20) never reaches the Dock or an edge.
+            if CommandChannel.onPad(), Self.nearGuardedEdge(x, y), hypot(x - last.x, y - last.y) > 0.15 {
+                (ux, uy) = (Int(Double(ux) * 0.85), Int(Double(uy) * 0.85))
+            }
             lastClick = nil
             pos = nil
             if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
@@ -944,6 +950,16 @@ import Foundation
     /// changed there), the click goes at the estimate as before.
     @discardableResult
     /// 174: where the pointer arrived: an iPad's is an arrow (Vision.arrow), an iPhone's a disk (Vision.arrival).
+    /// 176: where the arrow was seen is where the board's tracked place (CommandChannel.padPos) is: the two kept apart
+    /// let a hop's split at an edge go wrong (175: the check meant for 0.82 went to 0.98, by the Dock).
+    /// 176: within a fifth of the screen of the top, the left or the bottom (the right edge brings nothing in).
+    static func nearGuardedEdge(_ x: Double, _ y: Double) -> Bool { x < 0.2 || y < 0.2 || y > 0.8 }
+
+    static func syncPad(_ seen: CGPoint) {
+        guard CommandChannel.onPad() else { return }
+        CommandChannel.padPos = (Int(Double(seen.x) * Double(CommandChannel.padSpan.w)), Int(Double(seen.y) * Double(CommandChannel.padSpan.h)))
+    }
+
     static func sighting(_ before: Data, _ after: Data, near: CGPoint) -> CGPoint? {
         CommandChannel.onPad() ? Vision.arrow(before, after, near: near) : Vision.arrival(before, after, near: near)
     }
@@ -1000,6 +1016,7 @@ import Foundation
             return .unseen
         }
         firstSeen = seen
+        Self.syncPad(seen)  // 176
         var corrections = 0, unmoved = 0
         while true {
             let ex = x - Double(seen.x), ey = y - Double(seen.y)
@@ -1015,7 +1032,10 @@ import Foundation
                            x, y, seen.x, seen.y, half.x, half.y))
                 return .onTarget
             }
-            guard max(abs(ex), abs(ey)) <= 0.15 else {
+            // 176 (175 on the iPad, 11-25: a check seen at (0.946, 0.980) for (0.880, 0.820) was "too far to trust", clicked at
+            // the estimate on the bottom edge and missed): an iPad's arrow is found by itself, so it is corrected from farther.
+            Self.syncPad(seen)
+            guard max(abs(ex), abs(ey)) <= (CommandChannel.onPad() ? 0.6 : 0.15) else {
                 log(String(format: "arrive (%.3f, %.3f): seen at (%.3f, %.3f), too far to trust; clicking at the estimate", x, y, seen.x, seen.y))
                 return .offTarget
             }

@@ -37,6 +37,14 @@ struct CalibrationBoard: View {
             // The checks find the pointer by pixel diff: lines, labels and the earlier landing dots under it hid
             // it (logs43: the first check sits on a probe dot and the 50% line), so they see plain white.
             ProbeGrid(flashes: calibrator.phase == .verifying ? [] : probe.flashes, plain: calibrator.phase == .verifying)
+            if calibrator.phase == .verifying {  // 176 (user 11-25: "点到第七个点过后网格没了，变成白屏"): say what the white is
+                GeometryReader { geo in
+                    Text("正在驗證校準：游標會再點 4 下，請不要碰 iPad")
+                        .font(.title3.weight(.semibold)).foregroundStyle(Color(white: 0.55))
+                        .position(x: geo.size.width / 2, y: geo.size.height * 0.36)
+                }
+                .allowsHitTesting(false)
+            }
             VStack {
                 HStack {
                     Spacer()
