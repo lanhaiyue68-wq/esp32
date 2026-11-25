@@ -48,7 +48,7 @@ enum WatchOCR {
                 for x in stride(from: 0, to: w, by: across) {
                     n += 1
                     let i = (y * w + x) * 4
-                    if bytes[i] >= 246 && bytes[i + 1] >= 246 && bytes[i + 2] >= 246 { white += 1 }
+                    if bytes[i] >= 243 && bytes[i + 1] >= 243 && bytes[i + 2] >= 243 { white += 1 }  // the bar is 246, the chat 237
                 }
                 if white * 10 >= n * 9 { return Double(y) / Double(h) }
                 y += step
@@ -131,6 +131,15 @@ enum WatchOCR {
         }
         close()
         return WatchReport.Screen(title: name, group: group, lines: lines)
+    }
+
+    /// 165: where to tap to type in a chat, with no model: in the white field just under the input bar's top (iPad
+    /// WeChat 11-25: bar from 0.645, field centre ~0.672 with the keyboard up; at the bottom without it).
+    static func inputBox(_ jpeg: Data) -> CGPoint? {
+        guard let px = Pixels(jpeg), let top = px.inputTop(from: 0.3) else { return nil }
+        let y = min(top + 0.027, 0.985)
+        let (r, g, b) = px.rgb(0.45, y)
+        return r >= 250 && g >= 250 && b >= 250 ? CGPoint(x: 0.45, y: y) : nil
     }
 
     /// The chat on screen (its title already read and checked by the caller), or nil when the frame cannot be read.

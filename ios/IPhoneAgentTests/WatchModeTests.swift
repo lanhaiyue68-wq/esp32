@@ -325,6 +325,27 @@ import UIKit
         XCTAssertFalse(one.group)
     }
 
+    /// 165: the input box found on the screen, no model: the field just under the bar's top (iPad WeChat colours).
+    func testXiaoLanFindsTheInputBoxByItsColours() throws {
+        let size = CGSize(width: 300, height: 400)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let frame = UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: 1) { ctx in
+            UIColor(white: 237 / 255, alpha: 1).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))  // the chat
+            UIColor(white: 1, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 40, y: 100, width: 120, height: 30))  // a white bubble: not the bar
+            UIColor(white: 246 / 255, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 0, y: 300, width: 300, height: 100))  // the input bar
+            UIColor(white: 1, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 20, y: 305, width: 260, height: 28))  // its field
+        }
+        let box = try XCTUnwrap(WatchOCR.inputBox(frame))
+        XCTAssertEqual(box.x, 0.45, accuracy: 0.001)
+        XCTAssertEqual(box.y, 0.777, accuracy: 0.01)
+        XCTAssertEqual(ChatToolLink.reasonNoSteps.isEmpty, false)
+    }
+
     /// 163: the engines' robot settings, QA callback and type-101 report (docs/xiaolan-engine-logic.md).
     func testXiaoLanQACallbackLikeTheEngines() throws {
         XCTAssertEqual(ChatToolLink.configURL("127.0.0.1:18971/zwt", robot: "r1")?.absoluteString,

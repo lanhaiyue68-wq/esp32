@@ -46,7 +46,9 @@ import Foundation
     static let done = 0, badData = 101011, sendFailed = 201102, otherError = 501000
     /// Reasons go to the customer's server, worded like Android 小藍's.
     static let reasonPrivacy = "隐私检查拦下，未发送", reasonNotSent = "微信里没有发出去", reasonCleared = "指令已被清除",
-               reasonBadData = "缺少聊天名称或内容"
+               reasonBadData = "缺少聊天名称或内容",
+               reasonNoAt = "已发送，但没有 @ 成员（小蓝还没有 @ 的固定步骤）",
+               reasonNoSteps = "小蓝还没有这个指令的固定步骤（不用大模型执行）"
     static func reasonUnsupported(_ type: Int) -> String { "小蓝 iPad 版还不支持指令 \(type)" }
 
     let app: XiaoLanOrders.App

@@ -100,6 +100,15 @@ enum WatchSettings {
     static var weworkOn: Bool { d.bool(forKey: weworkOnKey) }
     static var weworkURL: String { text(weworkURLKey, "") }
     static var weworkCode: String { text(weworkCodeKey, "") }
+    /// 小藍 (164+): no model anywhere on the iPad; reading, opening and sending by fixed steps on the device
+    /// (docs/xiaolan-engine-logic.md).
+    static let noModel: Bool = {
+        #if XIAOLAN
+        return true
+        #else
+        return false
+        #endif
+    }()
     /// ChatTool decides the replies; this iPhone only reads, reports and types what it is told. 小藍 (163) always: like
     /// 智微兔 and 智企微行, the server's QA callback or orders decide every reply and the iPad writes none itself.
     static var serverReplies: Bool {
@@ -2364,13 +2373,15 @@ extension AppModel {
         watchStatus = String(localized: "Server order: \(label) · \(send.chat)")
         DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) for \(send.chat)")
         let words = WatchSettings.privateWords, numbers = WatchSettings.blockNumbers
-        if send.app == .wechat, send.type == ChatToolLink.sendMessage, send.at.isEmpty {
+        if send.app == .wechat, send.type == ChatToolLink.sendMessage, send.at.isEmpty || WatchSettings.noModel {
             if let why = PrivacyGuard.check(send.text, words: words, numbers: numbers) {
                 DebugLog.write("watch: order withheld: \(why)")
                 link.finish(send, ok: false, reason: ChatToolLink.reasonPrivacy)
             } else {
+                // 165: 小藍 has no fixed steps for WeChat's @ picker yet: the text goes out without the @.
+                let note = send.at.isEmpty ? "" : ChatToolLink.reasonNoAt
                 let sent = await sendReply(send.text, chat: send.chat, back: !WatchSettings.rules.single)
-                link.finish(send, ok: sent, reason: sent ? "" : ChatToolLink.reasonNotSent)
+                link.finish(send, ok: sent, reason: sent ? note : ChatToolLink.reasonNotSent)
             }
             return
         }
@@ -2387,6 +2398,13 @@ extension AppModel {
         if let local = job.local {
             link.deliver(XiaoLanMedia.local(local, type: send.type), for: send)
             link.finish(send, ok: true)
+            return
+        }
+        if WatchSettings.noModel {
+            // 165: 小藍 runs orders by fixed steps only (docs/xiaolan-engine-logic.md); this one has none yet, and no
+            // model is asked instead.
+            DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) has no fixed steps yet in 小藍")
+            link.finish(send, ok: false, reason: ChatToolLink.reasonNoSteps)
             return
         }
         if !job.media.isEmpty {
@@ -2477,6 +2495,17 @@ extension AppModel {
             case .sent:
                 if back { watchListReturn.pending = chat }
                 return true
+            case .returned where WatchSettings.noModel:
+                // 165: no model to look: the chat is read on the device; typed and returned counts as answered.
+                let ok = await sentAlready(text, chat: chat, after: after, strict: true)
+                DebugLog.write("watch: after the return: \(ok ? "sent" : "not confirmed; not typed again")")
+                if back { watchListReturn.pending = chat }
+                return true
+            case .needsInspection where WatchSettings.noModel:
+                let ok = await sentAlready(text, chat: chat, after: after, strict: true)
+                DebugLog.write("watch: the input was not confirmed; \(ok ? "it went out" : "not sent (no model to look at the box)")")
+                if ok, back { watchListReturn.pending = chat }
+                return ok
             case .returned:
                 agent.endAfterSend = 5
                 defer { agent.endAfterSend = nil }
@@ -2505,6 +2534,27 @@ extension AppModel {
             case .notTried: break
             }
         }
+        if WatchSettings.noModel {
+            // 165 (小藍): as 智微兔 does, by fixed steps — to the chat (its row, or WeChat's search), the input box found
+            // on the screen, then the quick send.
+            guard await walkToChat(chat, look: { await self.freshFrame() }) else {
+                DebugLog.write("watch: could not get to \(chat) by fixed steps; not sent")
+                return false
+            }
+            if let frame = await freshFrame(), let box = WatchOCR.inputBox(frame) { WatchSettings.inputBox = box }
+            switch await quickSend(text, chat: chat, after: after) {
+            case .sent, .returned:
+                if back { watchListReturn.pending = chat }
+                return true
+            case .needsInspection:
+                let ok = await sentAlready(text, chat: chat, after: after, strict: true)
+                if ok, back { watchListReturn.pending = chat }
+                return ok
+            case .notTried:
+                DebugLog.write("watch: the quick send could not start in \(chat); not sent")
+                return false
+            }
+        }
         // Return-sending intentionally ends the send run. Returning is a separate, verified stage.
         let ok = await watchRun(WatchSettings.sendTask(chat: chat, text: text, back: false), plan: WatchSettings.sendPlan(chat: chat, back: false),
                                 stepLimit: 25, returnSends: true, sendTo: chat) != nil
@@ -2521,7 +2571,8 @@ extension AppModel {
     /// front for a moment); tap the box again; paste, and go on only if exactly this text newly shows; Return; then
     /// read the chat, and it counts as sent only when the newest own message is this text.
     private func quickSend(_ text: String, chat: String, after: WatchReport.Line?) async -> QuickSend {
-        guard let box = WatchSettings.inputBox, Pasteboard.needed(text),
+        // 165: 小藍 has no agent run to type plain ASCII on the board, so all text goes the quick way there.
+        guard let box = WatchSettings.inputBox, Pasteboard.needed(text) || WatchSettings.noModel,
               UIApplication.shared.applicationState != .active else { return .notTried }
         // A frame captured after the last action, as the agent's runs look (AgentLoop.freshFrame): on a quiet screen
         // the board sends ~2 frames a second, and the "current" frame came from before the typing, so a correctly
@@ -2657,6 +2708,53 @@ extension AppModel {
         }
     }
 
+    /// 165 (小藍, no model): a chat not in view on the list, found the way 智微兔 does it, by WeChat's search: tap the
+    /// search bar, type the name with 小藍's keyboard, tap the result whose text is the name, check the chat's title.
+    private func searchToChat(_ chat: String, list: Data, look: () async -> Data?) async -> Bool {
+        let top = CandidatePicker.rows(in: list, top: 0.06, bottom: 0.2).joined()
+        guard let bar = top.first(where: { $0.text.contains("搜索") }) else {
+            DebugLog.write("watch: search: no search bar on the list")
+            return false
+        }
+        try? await pointer.tap(Double(bar.box.midX), Double(bar.box.midY))
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard await keyboardBridge.type(chat, enter: false, within: 4) else {
+            DebugLog.write("watch: search: 小藍's keyboard did not type (is it the keyboard chosen in WeChat?)")
+            await cancelSearch(look: look)
+            return false
+        }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard let results = await look() else { return false }
+        let hits = CandidatePicker.rows(in: results, top: 0.13, bottom: 0.92).joined()
+            .filter { WatchReport.isChat($0.text, chat) && $0.box.minX > 0.08 }
+        guard let hit = hits.first else {
+            DebugLog.write("watch: search: no result named \(chat)")
+            await cancelSearch(look: look)
+            return false
+        }
+        try? await pointer.tap(Double(hit.box.midX), Double(hit.box.midY))
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        guard let opened = await look(), WatchReport.navigationChat(in: opened, targets: [chat]) == chat else {
+            DebugLog.write("watch: search: \(chat)'s title not seen after the tap")
+            return false
+        }
+        DebugLog.write("watch: search: in \(chat)")
+        return true
+    }
+
+    private func cancelSearch(look: () async -> Data?) async {
+        guard let frame = await look(),
+              let cancel = CandidatePicker.rows(in: frame, top: 0.04, bottom: 0.2).joined().first(where: { $0.text == "取消" })
+        else { return }
+        try? await pointer.tap(Double(cancel.box.midX), Double(cancel.box.midY))
+    }
+
+    /// A fresh frame, for the no-model steps.
+    private func freshFrame() async -> Data? {
+        _ = try? await feed.currentFrame()
+        return feed.frame
+    }
+
     /// From wherever the phone is to the chat `chat`, with no model call: the chat itself; its row on the chat list;
     /// back from another WeChat chat; or WeChat again through Lan Agent. Every step is checked on a fresh frame and
     /// anything unclear stops here (the agent's run takes over as before).
@@ -2676,6 +2774,7 @@ extension AppModel {
                 continue
             }
             if WatchListReturn.view(in: frame, chat: "") == .list {  // on the list, the row not in view
+                if WatchSettings.noModel { return await searchToChat(chat, list: frame, look: look) }
                 DebugLog.write("watch: walk: on the list but \(chat)'s row is not in view")
                 return false
             }
