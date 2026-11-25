@@ -156,7 +156,7 @@ import UIKit
         let made = Pointer(device: board.commands, calibrationFile: support.appendingPathComponent("calibration.json"),
                            screen: feed)
         pointer = made
-        BoardCommands.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
+        CommandChannel.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
         agent = AgentLoop(phone: made, screen: feed, actor: nil, planner: nil, trace: traces)
         if !MockMode.on {
             let memory = ExperienceStore(file: support.appendingPathComponent("experience-v1.json"))

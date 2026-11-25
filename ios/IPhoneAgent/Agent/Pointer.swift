@@ -40,10 +40,10 @@ import Foundation
         didSet { Self.shareSpan(span) }
     }
 
-    /// The iPad home (BoardCommands) clamps its tracked position to the calibrated screen size.
+    /// The iPad home (CommandChannel) clamps its tracked position to the calibrated screen size.
     static func shareSpan(_ span: Span?) {
         guard let span, span.w > 100, span.h > 100 else { return }
-        BoardCommands.padSpan = (span.w, span.h)
+        CommandChannel.padSpan = (span.w, span.h)
     }
 
     /// 162 (iPad): the pointer's height on screen (0 top … 1 bottom) from two frames around a 60-unit wiggle, when the
@@ -63,7 +63,7 @@ import Foundation
             }
             _ = try? await device.send("move -60 0")
             guard let before, let after else { return nil }
-            let shift = 60 / Double(max(1, BoardCommands.padSpan.w))
+            let shift = 60 / Double(max(1, CommandChannel.padSpan.w))
             return Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)).map { Double($0.y) }
         }
         if let y = await wiggle() { return y }
