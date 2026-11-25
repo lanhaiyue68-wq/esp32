@@ -122,9 +122,9 @@ extension AppModel {
             paneRead(app, chat, title: title, fromMark: true, &state)
             state.quietSince[look.side] = now()
         case .chat(let title):
-            // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has its input bar at the bottom; the Settings app's 键盘
-            // page was taken for a chat and its back arrow tapped. A window without one is left alone.
-            guard let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.inputField(px) != nil else {
+            // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has their grey background; the Settings app's 键盘 page
+            // was taken for a chat and its back arrow tapped. Any other window is left alone.
+            guard let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.chatBackground(px) else {
                 if state.notChat[look.side] != title {
                     state.notChat[look.side] = title
                     DebugLog.write("watch: a window shows \(title), no chat of WeChat or WeCom; left alone")
@@ -241,6 +241,8 @@ extension AppModel {
         guard var look = found else {
             return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）")
         }
+        // 180: a list's title is no chat to send to (178 replied "into 微信", the WeChat list read as a chat).
+        guard !XiaoLanPanes.listTitles.contains(WatchOCR.titled(chat).name) else { return (false, "「\(chat)」不是会话") }
         func isChat(_ l: PaneLook) -> Bool {
             if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: chat) }
             return false
@@ -265,13 +267,13 @@ extension AppModel {
             look = opened
         }
         // The input field: the white box at the bottom of the window (WeCom's row of buttons above it is left alone).
-        if !keyboardBridge.onScreen() {
-            guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px) else {
-                return (false, "\(appName)里没找到输入框")
-            }
-            guard await paneTap(field, in: look.rect, wide: 0.15) else { return (false, ChatToolLink.reasonNotSent) }
-            try? await Task.sleep(nanoseconds: 400_000_000)
+        // 180 (Echo 178, 11-25): always tapped, keyboard up or not. The keyboard is the whole screen's: up from a send in
+        // WeCom, a reply meant for WeChat was typed into WeCom's field and went out there, as the WeCom account.
+        guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px) else {
+            return (false, "\(appName)里没找到输入框")
         }
+        guard await paneTap(field, in: look.rect, wide: 0.15) else { return (false, ChatToolLink.reasonNotSent) }
+        try? await Task.sleep(nanoseconds: 400_000_000)
         do {
             try await pointer.key("cmd+a")
             try await pointer.key("backspace")

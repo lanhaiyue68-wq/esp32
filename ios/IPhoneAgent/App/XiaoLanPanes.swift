@@ -109,6 +109,17 @@ import UIKit
         return rows.joined().contains { p in words.contains { p.text.contains($0) } } ? .wework : .wechat
     }
 
+    /// 180: a chat of WeChat or WeCom by its background down the window's left margin: WeChat (237, 237, 237), WeCom
+    /// (236, 237, 241), measured 11-25; the Settings app's grouped background (242, 242, 247) or white is neither.
+    static func chatBackground(_ px: WatchOCR.Pixels) -> Bool {
+        let ys = Array(stride(from: 0.3, through: 0.7, by: 0.05))
+        let hits = ys.filter { y in
+            let (r, g, b) = px.rgb(0.015, y)
+            return (230...240).contains(r) && (230...240).contains(g) && (230...244).contains(b) && b - r <= 6
+        }.count
+        return hits * 2 > ys.count
+    }
+
     /// The chat lists' own titles (WeChat's carries the unread count: 微信(3)).
     static let listTitles: Set<String> = ["微信", "消息", "WeChat", "Chats", "Messages"]
 
@@ -125,7 +136,7 @@ import UIKit
         }
         let step = 1 / Double(px.h)
         var y = 1 - step, bottom: Double?
-        while y > 0.7 {
+        while y > 0.3 {  // 180: with the keyboard up the field sits right over it, half way up the window
             if white(y) {
                 if bottom == nil { bottom = y }
             } else if let b = bottom {
