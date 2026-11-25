@@ -202,6 +202,22 @@ extension HIDDevice {
         return ratio * k
     }
 
+    /// 178 (user 11-25, twice: "不要放角落", "右上角、右下角都不要有"): the one gate every iPad move passes. Where the
+    /// pointer's place is known, no move ends in the band along the screen's edges and corners (2% at the sides, 3% at
+    /// the top, under the status bar, 4% at the bottom, over the Dock and the Home bar); it stops at the band. So no
+    /// feature, calibration or home can take the pointer into an edge or a corner. A move from inside the band out of
+    /// it is let through.
+    static let padSafe = (left: 0.02, right: 0.98, top: 0.03, bottom: 0.96)
+    static func padKeptClear(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int)) -> String? {
+        let parts = command.split(separator: " ")
+        guard let p = pos, parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
+        let w = Double(span.w), h = Double(span.h)
+        let tx = min(max(Double(p.x + dx), padSafe.left * w), padSafe.right * w)
+        let ty = min(max(Double(p.y + dy), padSafe.top * h), padSafe.bottom * h)
+        let nx = Int(tx.rounded()) - p.x, ny = Int(ty.rounded()) - p.y
+        return nx == dx && ny == dy ? nil : "move \(nx) \(ny)"
+    }
+
     /// 174: the fast and the slow part of a `move` (app units) on an iPad. Inside the screen it goes fast; the part past
     /// an edge goes slow; all of it slow when the pointer's place is not known (it may be at an edge). nil: not a move,
     /// or one that stays inside the screen.
@@ -292,6 +308,11 @@ extension HIDDevice {
         guard Self.onPad() else { return try await sendWatched(command) }
         if command == "home" { return try await padHomeNow() }
         await padPace()
+        var command = command
+        if !padHeld, let clear = Self.padKeptClear(command, from: Self.padPos, span: Self.padSpan) {
+            DebugLog.write("ipad: \(command) would end at the screen's edge; \(clear) instead (kept clear)")
+            command = clear
+        }
         if !padHeld, let push = Self.padPushParts(command, from: Self.padPos, span: Self.padSpan) {
             return try await padPush(command, push)
         }

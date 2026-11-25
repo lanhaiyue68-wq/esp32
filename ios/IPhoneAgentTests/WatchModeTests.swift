@@ -634,6 +634,13 @@ import UIKit
     /// 174: inside the screen fast, past an edge slow (Stage Manager, Notification Center, Home); short moves lengthened.
     func testIPadPushesPastAnEdgeGoSlowAndShortMovesGoFarther() {
         let span = (w: 2000, h: 2800)
+        // 178: no move ends at an edge or in a corner; inside, or out of the band, it goes as asked
+        XCTAssertEqual(CommandChannel.padKeptClear("move 2000 0", from: (1000, 1000), span: span), "move 960 0")
+        XCTAssertEqual(CommandChannel.padKeptClear("move 1500 -2000", from: (1000, 1000), span: span), "move 960 -916")
+        XCTAssertNil(CommandChannel.padKeptClear("move -300 400", from: (1000, 1000), span: span))
+        // from inside the corner band a move inward comes out of it, onto the safe side
+        XCTAssertEqual(CommandChannel.padKeptClear("move 300 400", from: (1990, 10), span: span), "move -30 400")
+        XCTAssertNil(CommandChannel.padKeptClear("move 0 -100", from: nil, span: span))  // place unknown: not touched
         // inside: no split
         XCTAssertNil(CommandChannel.padPushParts("move 500 -300", from: (1000, 1000), span: span))
         XCTAssertNil(CommandChannel.padPushParts("click", from: (1000, 1000), span: span))
