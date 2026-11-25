@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// The board did not answer in time; the link is still up (a disconnect throws DeviceError instead).
 struct BoardTimeout: LocalizedError {
@@ -137,15 +138,97 @@ extension HIDDevice {
     /// stream off. The outcome is uncertain: never replay the command automatically.
     var onTimeout: ((String) async -> Void)?
 
+    // MARK: iPad home (162)
+    // The firmware's `home` throws the pointer into the top-left corner in six fast reports. On an iPad a push past the
+    // top edge pulls Notification Center down, and one past the bottom goes to the Home Screen: 小藍 161's calibration
+    // homed, the app was covered and its probe clicks never arrived (11-25). Measured that day on the customer's iPad 9
+    // over the test channel (pointer seen in the shared screen): the screen is ~3900 x 5270 app units; pushing left is
+    // always harmless; a single paced push 150, 400 or 800 units past the top did nothing, but the fast `home`, a push
+    // ~2000 past it, five 700-unit pushes in a row at the top, and 6000 down past the bottom all did. So on an iPad a
+    // home pushes left, then up only `padMargin` past the top, from where the pointer is known to be.
+
+    /// App units across the iPad (Pointer sets the calibrated span; these are the measured values before one).
+    static var padSpan = (w: 4200, h: 5600)
+    static let padMargin = 300  // how far past the left and top edges a home pushes (800 tested harmless)
+    static let padPosKey = "padPointerPosV1"
+    /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches
+    /// (the iPad keeps its pointer where it was), forgotten after anything that can move it unseen.
+    static var padPos: (x: Int, y: Int)? {
+        get {
+            guard let a = UserDefaults.standard.array(forKey: padPosKey) as? [Int], a.count == 2 else { return nil }
+            return (a[0], a[1])
+        }
+        set {
+            if let p = newValue { UserDefaults.standard.set([p.x, p.y], forKey: padPosKey) }
+            else { UserDefaults.standard.removeObject(forKey: padPosKey) }
+        }
+    }
+    /// Finds the pointer's height on screen (0 top … 1 bottom) when padPos is not known (Pointer, from the frames).
+    static var padLocateY: (() async -> Double?)?
+    static func onPad() -> Bool { UIDevice.current.model.hasPrefix("iPad") }  // also an iPhone app run on an iPad
+
+    /// An iPad home's commands: `abort` first (the firmware forgets its corner, so its curves never bow up or left),
+    /// then left and up, each `padMargin` past the edge. nil when the pointer's height is not known.
+    static func padHome(from pos: (x: Int, y: Int)?, span: (w: Int, h: Int), locatedY: Double?) -> [String]? {
+        let y: Int
+        if let pos { y = pos.y } else if let f = locatedY { y = Int((f * Double(span.h)).rounded()) } else { return nil }
+        let x = pos?.x ?? span.w  // pushing left is harmless however far
+        return ["abort", "move -\(max(0, x) + padMargin) 0", "move 0 -\(max(0, y) + padMargin)"]
+    }
+
+    /// Where the pointer is after a command (it stops at the edges); nil for anything that may move it unseen.
+    static func padTrack(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int)) -> (x: Int, y: Int)? {
+        let parts = command.split(separator: " ").map(String.init)
+        switch parts.first ?? "" {
+        case "move", "stroke":
+            guard var p = pos else { return nil }
+            let v = parts.dropFirst().compactMap { Int($0) }
+            for i in stride(from: 0, to: v.count - 1, by: 2) {
+                p = (min(max(p.x + v[i], 0), span.w), min(max(p.y + v[i + 1], 0), span.h))
+            }
+            return p
+        case "click", "press", "release", "scroll", "type", "key", "ping", "curve", "status", "snap", "stream", "fps",
+             "res", "log", "bench", "phy", "coex", "hid", "app": return pos
+        default: return nil  // abort, flickhome, homescreen, unpair, …
+        }
+    }
+
     /// Send one command; returns the text after "ok" (e.g. bench's ms). Throws DeviceError on err/timeout.
     @discardableResult
     func send(_ command: String) async throws -> String {
+        guard Self.onPad() else { return try await sendWatched(command) }
+        if command == "home" { return try await padHomeNow() }
+        do {
+            let reply = try await sendWatched(command)
+            Self.padPos = Self.padTrack(command, from: Self.padPos, span: Self.padSpan)
+            return reply
+        } catch {
+            Self.padPos = nil  // a command that failed may have moved part of the way
+            throw error
+        }
+    }
+
+    private func sendWatched(_ command: String) async throws -> String {
         do {
             return try await send(command, timeout: nil)
         } catch let e as BoardTimeout {
             if command != "ping", !command.hasPrefix("stream"), let onTimeout { await onTimeout(command) }
             throw e
         }
+    }
+
+    private func padHomeNow() async throws -> String {
+        var located: Double?
+        if Self.padPos == nil, let locate = Self.padLocateY { located = await locate() }
+        guard let steps = Self.padHome(from: Self.padPos, span: Self.padSpan, locatedY: located) else {
+            DebugLog.write("ipad home: pointer position unknown and not seen; refused (a blind push could open Notification Center)")
+            throw DeviceError(message: "iPad 上不知道指针在哪里：请先在小藍打开「共享整个屏幕」让它看得到指针，再校准。")
+        }
+        DebugLog.write("ipad home: " + steps.joined(separator: " · "))
+        Self.padPos = nil
+        for step in steps { _ = try await sendWatched(step) }
+        Self.padPos = (0, 0)
+        return ""
     }
 
     /// A timeout is the board being slow (e.g. a snap while it also streams), not a lost link: it throws

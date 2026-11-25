@@ -30,7 +30,11 @@ struct RootView: View {
     @AppStorage(RunShare.askedKey) private var privacyAsked = false
     @State private var consent = false
 
-    var body: some View {
+    /// 小藍 iPad 版 has its own three tabs (XiaoLanViews.swift); Pilot keeps its own.
+    @ViewBuilder private var tabs: some View {
+        #if XIAOLAN
+        XiaoLanRoot(app: app, settings: settings)
+        #else
         TabView(selection: $app.tab) {
             HomeView(app: app, board: app.board, feed: app.feed, agent: app.agent, settings: settings,
                      intents: app.intents, recorder: app.recorder)
@@ -43,6 +47,11 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        #endif
+    }
+
+    var body: some View {
+        tabs
         // 131 over the cloud 11-13 (g3): the user opened the learning page mid-run; the run held 28 minutes waiting for
         // them to leave, and only the Agent tab said so ("我手機上它沒有動啊"). Every tab shows it now.
         .safeAreaInset(edge: .top, spacing: 0) {

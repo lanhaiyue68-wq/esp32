@@ -1,5 +1,10 @@
 # 问题与验证
 
+## 2026-11-25 162
+- 161 在 iPad 上：①韌體 home 高速甩過頂邊拉下通知中心 → 校準探測點擊沒到（日誌 calibration failed: Clicks aren't reaching the screen）；②App 名稱顯示 Pilot（沿用大藍 InfoPlist.xcstrings）、介面是大藍。162 已改，未編譯、未真機驗。
+- 測試時我觸發了 3 次 iPad 系統動作（通知中心 2 次、回主畫面 1 次），使用者手動關掉；都在主畫面或小藍上，沒點到任何東西。
+- iPad 一屏≈3900×5270 app 單位，歸零從畫面中間要推約 2–3 秒，比 iPhone 慢很多；可考慮請使用者調高 AssistiveTouch 追蹤速度（調了要重新校準）。
+
 ## 2026-11-25 小藍 iPad 版 161（未編譯）
 - 161 全部程式（XiaoLanOrders、XiaoLanMedia、ChatToolLink、WatchMode.runOrder、設定頁、測試）都沒編譯過：本機沒 Swift，要推 CI 才知道有沒有編譯錯。
 - 一個代理任務都還沒在 iPad 上跑過；iPad 版微信／企業微信的按鈕名稱、位置可能和目標文字寫的不同。

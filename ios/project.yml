@@ -143,7 +143,10 @@ targets:
     platform: iOS
     sources:
       - path: IPhoneAgent
-        excludes: [Info.plist]  # Pilot's own; 小藍's is XiaoLan/Info.plist (else two Info.plist land in the app)
+        # Pilot's own Info.plist and its localized name/permission texts ("Pilot"): 小藍 has its own (XiaoLan/Info.plist,
+        # XiaoLanResources/InfoPlist.xcstrings); with Pilot's catalog the iPad showed the app as "Pilot" (11-25).
+        excludes: [Info.plist, InfoPlist.xcstrings]
+      - XiaoLanResources
       - Shared
       - KeyboardShared
       - path: ../prompts

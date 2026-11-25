@@ -4,13 +4,15 @@
 - [x] 160 iOS 27 正式版 IPA（Xcode 27.1，run 45495463189）→ E:/桌面/XiaoLan-build160-ios27-unsigned.ipa，已核對 ScreenCaptureKit／小藍／[1,2]／min 17。
 - [x] 161 指令層：智微兔 35＋智企微行 54 個指令全接（XiaoLanOrders／XiaoLanMedia／ChatToolLink 企微連線／WatchMode.runOrder），跟圈有圖貼文改截螢幕上傳。
 - [x] 161 提交 cdf9fc3 推 build477 main；CI 45524329990 編譯＋960 測試 0 失敗；IPA E:/桌面/XiaoLan-build161-ios27-unsigned.ipa。
-- [ ] 使用者用爱思簽名把 161 iOS 27 版裝到 iPad，信任 App（直接裝 161，不用先裝 160）。
+- [x] 使用者已裝 161；回報校準拉下通知中心、介面是大藍 → 162 修（iPad 歸零、小藍名稱與三分頁介面），待推 CI。
+- [ ] 162 推 build477 → CI → 裝 iPad → 校準實測（共享整個螢幕要開）。
 - [ ] iPad 真機在测试群逐項測指令（先 203／204／205、查詢類），按實測調目標文字。
 - [ ] 推測欄位實測確認：215–217、225、230、235、305。
 - [ ] 跟圈截圖上傳連 owner-gequan 後台實測。
-- [ ] 小藍首頁畫面（伺服器／機器人 ID／板子／鏡像／指令記錄）。
+- [x] 小藍首頁：162 改成安卓小藍的守候／工具箱／設定三分頁（待真機看）。
+- [ ] 小藍的首次設定精靈（Onboarding）還是大藍的頁面與「Pilot」字樣。
 - [ ] 語音板 LE 接進小藍（app-protocol.md：connect → headset link up → 按住說話 → disconnect）。
-- [ ] iPad 歸零角（滑鼠推左上角）會不會拉下通知中心，要真機測。
+- [x] iPad 歸零：已實測會拉下通知中心，162 改成追蹤位置、只推過頂邊 300（實測 ≤800 安全）。
 - [ ] 測試通道工具 tools/ipad/lan_usb_ipad.py 的 BUNDLE 改成小藍裝好後的 bundle id。
 
 - [x] 148（D153–D160）已裝並回歸（11-19 13:16 – 11-20 00:34 首爾）：x 5/6＋x5 正確停下、y 3 題缺 App 依規則結束、n 15/16、h 19/21、s 5/10＋3（補測 6/10＋3）、h2 21/22（補測 20/22）、x 補測 5/6＋1。

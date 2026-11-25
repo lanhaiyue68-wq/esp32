@@ -1,5 +1,13 @@
 # 当前进度
 
+## 2026-11-25 13:40（首爾）162：iPad 校準不再拉下通知中心；小藍自己的介面與名稱（未推送）
+- 使用者回報兩件事：①校準時歸零會拉下通知中心、校準不了；②裝的是小藍，但 App 還是大藍。
+- ①實測（iPad 用 USB＋測試通道，tools/ipad/lan_usb_ipad.py 改成小藍 bundle com.example.esp32agent.xiaolan.67AUY82AXY）：共享畫面看得到游標，量出 iPad 一屏≈3900×5270 app 單位（iPhone 約 445×620）。往左推多少都沒事；單次推過頂邊 150／400／800 沒事；韌體 home（6 下 -127 高速）、推過頂邊約 2000、頂端連推 5 次 700、往下推過底 6000（回主畫面）都會觸發。日誌也證實 161 校準失敗是 home 後 App 被蓋住、探測點擊沒到。
+- 改法（BoardCommands.send，iPad 判斷用 UIDevice.model 開頭 iPad，大藍裝 iPad 也適用）：home →「abort（韌體忘記角落，曲線不往上／左鼓）＋往左推 x+300＋往上推 y+300」，y 用 App 自己追蹤的游標位置（padPos，存 UserDefaults，move/stroke 依螢幕邊界夾住，abort/flickhome 等就忘記）；不知道位置時用 Pointer.padFindY 從共享畫面找游標（擺動 60 單位比對兩張畫面），找不到就拒絕並請使用者打開共享整個螢幕，絕不盲推。校準後 padSpan 用校準的 span。
+- ②名稱：iPad 上顯示「Pilot」是因為小藍沿用大藍的 InfoPlist.xcstrings（本地化名稱蓋過 Info.plist）。改成小藍自己的 ios/XiaoLanResources/InfoPlist.xcstrings（小藍），XiaoLan target 排除大藍那份。
+- ②介面：新增 UI/XiaoLanViews.swift，照安卓小藍（Echo · 小藍 LanWatchActivity）三個分頁：守候（微信守候卡片＋開始/停止、開發板與畫面狀態＋校準、個微/企微指令連線狀態、指令記錄、守候設定、打開微信/企業微信）、工具箱（搜尋、常用操作、按用途瀏覽，Services/XiaoLanTools.swift 列出兩引擎全部指令與表單欄位，執行＝ChatToolLink.enqueueLocal 排入，結果只進指令記錄不送伺服器）、設定（個微/企微伺服器、進階設定＝大藍的設定頁、版本）。RootView 在 XIAOLAN 才換。
+- 測試：WatchModeTests 新增 testIPadHomeNeverPushesFarPastTheTop、testXiaoLanToolboxOrdersStayOnTheIPad。版本 162。未編譯、未推送。
+
 ## 2026-11-25 12:40（首爾）161 編譯、測試全過，IPA 出好
 - 提交 cdf9fc3 推 build477 main（使用者同意）。CI run 45524329990（xcode-27、Xcode 27.1）：BUILD SUCCEEDED、TEST SUCCEEDED，960 個測試 0 失敗（新增 4 個：testXiaoLanOrdersGetAReceiptAndOneResultEach、testXiaoLanTakesEveryOrderOfBothEngines、testMomentPictureLosesTheViewerBlack、testXiaoLanWeComLinkAndQueueOrders 都過）。
 - IPA：E:/桌面/XiaoLan-build161-ios27-unsigned.ipa（3,400,728 bytes，SHA256 70c6a677…3109d893，與 CI ipa.sha256 一致）；核對：小藍、com.example.esp32agent.xiaolan、CFBundleVersion 161、[1,2]、min 17.0、iphoneos27.1、含 ScreenCaptureKit、含 NSPhotoLibraryAddUsageDescription、PlugIns/XiaoLanKeyboard.appex。

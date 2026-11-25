@@ -16,7 +16,7 @@ from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.services.house_arrest import HouseArrestService
 from pymobiledevice3.usbmux import select_device
 
-BUNDLE = "com.example.esp32agent.67AUY82AXY"
+BUNDLE = os.environ.get("LAN_BUNDLE", "com.example.esp32agent.xiaolan.67AUY82AXY")  # 小藍 as 爱思 signed it (11-25)
 PORT = 47821
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".lan_usb_token")
 REMOTE = "/Documents/testchannel.token"

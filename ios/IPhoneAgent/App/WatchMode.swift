@@ -2356,7 +2356,7 @@ extension AppModel {
             return
         }
         if let local = job.local {
-            link.sendData(XiaoLanMedia.local(local, type: send.type))
+            link.deliver(XiaoLanMedia.local(local, type: send.type), for: send)
             link.finish(send, ok: true)
             return
         }
@@ -2381,7 +2381,7 @@ extension AppModel {
                     _ = try? await feed.currentFrame()
                     if let frame = feed.frame { bean["qrcode"] = frame.base64EncodedString() }
                 }
-                link.sendData(bean)
+                link.deliver(bean, for: send)
             } else {
                 ok = false
                 reason = "读到的内容不是 JSON：" + String(answer.prefix(80))

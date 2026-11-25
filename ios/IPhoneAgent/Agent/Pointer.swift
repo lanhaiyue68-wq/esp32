@@ -36,7 +36,40 @@ import Foundation
     let device: HIDDevice
     weak var screen: ScreenSource?
     private let file: URL
-    @Published private(set) var span: Span?  // mouse units needed to cross the full screen width / height
+    @Published private(set) var span: Span? {  // mouse units needed to cross the full screen width / height
+        didSet { Self.shareSpan(span) }
+    }
+
+    /// The iPad home (BoardCommands) clamps its tracked position to the calibrated screen size.
+    static func shareSpan(_ span: Span?) {
+        guard let span, span.w > 100, span.h > 100 else { return }
+        BoardCommands.padSpan = (span.w, span.h)
+    }
+
+    /// 162 (iPad): the pointer's height on screen (0 top … 1 bottom) from two frames around a 60-unit wiggle, when the
+    /// iPad home does not know where it is. Not in the status bar (Vision skips it): from there it moves 600 down first
+    /// (a push that far past the bottom is harmless). nil without a live screen. Not behind oneAtATime: it runs inside
+    /// a gesture's home.
+    func padFindY() async -> Double? {
+        func wiggle() async -> Double? {
+            guard let screen, screen.live else { return nil }
+            await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
+            let before = screen.frame, sent = now()
+            guard (try? await device.send("move 60 0")) != nil else { return nil }
+            var after = await screen.fresh(since: sent, timeout: 1.0)
+            if after != nil {
+                await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)
+                after = screen.frame
+            }
+            _ = try? await device.send("move -60 0")
+            guard let before, let after else { return nil }
+            let shift = 60 / Double(max(1, BoardCommands.padSpan.w))
+            return Vision.pointer(before, after, near: CGPoint(x: 0.5, y: 0.5), shift: shift, reach: CGPoint(x: 0.5, y: 0.5)).map { Double($0.y) }
+        }
+        if let y = await wiggle() { return y }
+        guard (try? await device.send("move 0 600")) != nil else { return nil }
+        return await wiggle()
+    }
     private var pos: (Int, Int)?  // pointer position in mouse units; nil = unknown
     private var moves = 0
     private var lastClick: LastClick?  // the last tap's spot, for clicking again in place
@@ -71,6 +104,7 @@ import Foundation
         self.screen = screen
         if let data = try? Data(contentsOf: calibrationFile), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
             span = Span(w: saved.w, h: saved.h)
+            Self.shareSpan(span)  // didSet does not run in init
             (quality, aspect, stale) = (saved.quality, saved.aspect, saved.stale ?? false)
             maps = saved.maps
             requiresFeedback = saved.requiresFeedback ?? false

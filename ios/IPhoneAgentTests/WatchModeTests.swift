@@ -292,6 +292,55 @@ import UIKit
         XCTAssertTrue(XiaoLanOrders.openMomentPicture(friend: "王五", locate: "新品到了").contains("第一张图片"))
     }
 
+    /// 162: the tool box builds the engines' orders; they run like a server's but answer only into the record.
+    func testXiaoLanToolboxOrdersStayOnTheIPad() throws {
+        for group in XiaoLanTools.groups {
+            for tool in group.tools { XCTAssertFalse(tool.apps.isEmpty, "\(tool.type)") }
+        }
+        let item = XiaoLanTools.order(203, app: .wechat, values: ["titleList": "测试群，客户群", "receivedContent": " 你好 ", "atList": ""], toggles: [:])
+        XCTAssertEqual(item["titleList"] as? [String], ["测试群", "客户群"])
+        XCTAssertEqual(item["receivedContent"] as? String, "你好")
+        XCTAssertNil(item["atList"])
+        let friend = XiaoLanTools.order(213, app: .wework, values: ["friend.phone": "13800000000"], toggles: [:])
+        XCTAssertEqual((friend["friend"] as? [String: Any])?["phone"] as? String, "13800000000")
+        let many = XiaoLanTools.order(229, app: .wework, values: ["titleList": "群", "messages": "一\n二"], toggles: [:])
+        XCTAssertEqual((many["messageList"] as? [[String: Any]])?.count, 2)
+
+        let link = ChatToolLink()
+        XCTAssertNotNil(link.enqueueLocal(["type": 203, "titleList": ["群"]]))  // no text: refused, nothing queued
+        XCTAssertNil(link.enqueueLocal(item))
+        XCTAssertEqual(link.pending.count, 2)
+        let first = try XCTUnwrap(link.nextCommand()), second = try XCTUnwrap(link.nextCommand())
+        XCTAssertTrue(first.messageId.hasPrefix(ChatToolLink.localPrefix))
+        XCTAssertNil(link.finish(first, ok: true))
+        XCTAssertNil(link.finish(second, ok: false, reason: "测试"))  // a tool-box order never makes a server packet
+        XCTAssertTrue(link.history.last?.contains("✗ 发消息") == true)
+        link.deliver(["type": 503, "myInfo": ["name": "小蓝"]], for: first)
+        XCTAssertTrue(link.history.last?.contains("小蓝") == true)
+        XCTAssertNotNil(link.enqueueLocal(["type": 222]))  // 打卡 is WeCom's only
+    }
+
+    /// 162: an iPad home pushes only a little past the top (from where the pointer is), never blindly.
+    func testIPadHomeNeverPushesFarPastTheTop() {
+        let span = (w: 3900, h: 5270)
+        XCTAssertEqual(BoardCommands.padHome(from: (1000, 2000), span: span, locatedY: nil),
+                       ["abort", "move -1300 0", "move 0 -2300"])
+        // not known: the height seen on screen decides; left still goes all the way
+        XCTAssertEqual(BoardCommands.padHome(from: nil, span: span, locatedY: 0.5), ["abort", "move -4200 0", "move 0 -2935"])
+        XCTAssertNil(BoardCommands.padHome(from: nil, span: span, locatedY: nil))
+        // tracking: moves clamp at the edges; anything that can move it unseen forgets it
+        var p = BoardCommands.padTrack("move 500 700", from: (0, 0), span: span)
+        XCTAssertEqual(p?.x, 500)
+        XCTAssertEqual(p?.y, 700)
+        p = BoardCommands.padTrack("stroke -900 0 0 9000", from: p, span: span)
+        XCTAssertEqual(p?.x, 0)
+        XCTAssertEqual(p?.y, 5270)
+        XCTAssertEqual(BoardCommands.padTrack("click", from: (1, 2), span: span)?.y, 2)
+        XCTAssertNil(BoardCommands.padTrack("abort", from: (1, 2), span: span))
+        XCTAssertNil(BoardCommands.padTrack("flickhome", from: (1, 2), span: span))
+        XCTAssertNil(BoardCommands.padTrack("move 5 5", from: nil, span: span))
+    }
+
     /// 跟圈 pictures are kept as the viewer shows them: the black around them and the status bar are cut off.
     func testMomentPictureLosesTheViewerBlack() throws {
         let size = CGSize(width: 300, height: 400)

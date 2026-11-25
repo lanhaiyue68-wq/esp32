@@ -185,10 +185,7 @@ import Foundation
         }
         for order in got.orders {
             switch order {
-            case .send(let c):
-                if tallies[c.key] == nil { tallies[c.key] = Tally(left: 0, messageId: c.messageId, type: c.type, raw: c.raw, started: now) }
-                tallies[c.key]?.left += 1
-                pending.append(c)
+            case .send(let c): queue(c, now: now)
             case .stop(let raw): clear(Self.stopAndGoHome, raw)
             case .clearQueue(let raw): clear(Self.queueClear, raw)
             case .test(let raw):
@@ -228,8 +225,60 @@ import Foundation
         tallies[c.key] = nil
         let packet = Self.resultPacket(messageId: t.messageId, type: t.type, raw: t.raw, code: t.failed.isEmpty ? Self.done : Self.sendFailed,
                                        reason: t.reasons.joined(separator: "；"), ok: t.ok, failed: t.failed, started: t.started, now: now)
+        let label = XiaoLanOrders.label(t.type, app) ?? "\(t.type)"
+        note((t.failed.isEmpty ? "✓ " : "✗ ") + label + " · " + (t.ok + t.failed).joined(separator: "、")
+             + (t.reasons.isEmpty ? "" : "：" + t.reasons.joined(separator: "；")), now: now)
+        if t.messageId.hasPrefix(Self.localPrefix) { return nil }  // a tool-box order: its result stays on the iPad
         if sending, let packet { send(packet) }
         return packet
+    }
+
+    // MARK: 小藍's own orders and record (162)
+
+    /// What was done, newest last (server orders and the tool box's), shown on 小藍's 守候 page.
+    @Published private(set) var history: [String] = []
+    static let localPrefix = "local#"
+
+    private func note(_ line: String, now: Date = Date()) {
+        let stamp = DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .short)
+        history = Array((history + [stamp + "  " + line]).suffix(100))
+    }
+
+    private func queue(_ c: Command, now: Date) {
+        if tallies[c.key] == nil { tallies[c.key] = Tally(left: 0, messageId: c.messageId, type: c.type, raw: c.raw, started: now) }
+        tallies[c.key]?.left += 1
+        pending.append(c)
+    }
+
+    /// An order typed in 小藍's tool box: checked and queued like a server's (watch does it), its result and any data
+    /// kept in `history` instead of going to a server. Returns why it cannot run, or nil when queued.
+    @discardableResult func enqueueLocal(_ item: [String: Any], now: Date = Date()) -> String? {
+        let id = Self.localPrefix + UUID().uuidString
+        guard let text = Self.json(["socketType": Self.listSocket, "messageId": id, "list": [item]]) else { return "指令内容无法读取" }
+        let got = Self.incoming(text, app: app)
+        var queued: [Command] = []
+        for order in got.orders {
+            switch order {
+            case .send(let c): queued.append(c)
+            case .invalid(_, _, let why): return why
+            case .unsupported(let type, _): return Self.reasonUnsupported(type)
+            default: return "这个指令不能从工具箱发"
+            }
+        }
+        guard let first = queued.first else { return "这个指令不能从工具箱发" }
+        for c in queued { queue(c, now: now) }
+        note("⋯ " + (XiaoLanOrders.label(first.type, app) ?? "\(first.type)") + " · " + queued.map(\.chat).joined(separator: "、"), now: now)
+        return nil
+    }
+
+    /// A read's data for an order: to the server, or (a tool-box order) into the record.
+    func deliver(_ bean: [String: Any], for c: Command) {
+        guard c.messageId.hasPrefix(Self.localPrefix) else { sendData(bean); return }
+        var shown = bean
+        shown["type"] = nil
+        if let q = shown["qrcode"] as? String { shown["qrcode"] = "（图片 \(q.count / 1024) KB）" }
+        let text = Self.json(shown).map { String($0.prefix(400)) } ?? ""
+        note("ⓘ " + (XiaoLanOrders.label(c.type, app) ?? "\(c.type)") + "：" + text)
     }
 
     /// A read's data, as the engines send it: `{socketType:2, list:[{type:503, myInfo:{…}}]}`.
