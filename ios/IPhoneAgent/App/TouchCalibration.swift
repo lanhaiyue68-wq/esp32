@@ -8,7 +8,9 @@ extension AutoCalibrator {
     static var targets: [(Double, Double)] {
         // 174 (user 11-25): on an iPad every point a tenth or more from the top, left and bottom edges (a miss past them
         // brings in Notification Center, recent apps, the Dock); the right side may come closer.
-        CommandChannel.onPad() ? [(0.12, 0.5), (0.5, 0.15), (0.25, 0.25), (0.75, 0.75), (0.9, 0.85)]
+        // 179 (178 on the iPad, 11-25): the rough probes, aimed before the fit, landed at x 0.028 for 0.12 and y 0.054
+        // for 0.15: they go nearer the middle; the checks, corrected by looking, still test the low axes.
+        CommandChannel.onPad() ? [(0.2, 0.5), (0.5, 0.22), (0.3, 0.3), (0.75, 0.75), (0.85, 0.8)]
             : [(0.06, 0.5), (0.5, 0.12), (0.25, 0.25), (0.75, 0.75), (0.9, 0.9)]
     }
     // Test each low axis separately, away from the top-left system indicator.
