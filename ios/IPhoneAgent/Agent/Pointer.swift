@@ -198,6 +198,65 @@ import Foundation
     /// where the pointer really landed (seen on screen) for the fraction we aimed at, per axis; a line fit
     /// through them corrects every later move, so taps get better as the agent works
     private(set) var seen: [String: [(Double, Double)]] = ["x": [], "y": []]
+
+    // 187 (user 11-26: "不論你點什么，都一次性點好…每次點目標地方的時候，都是會在中間停頓一下"): on an iPad every tap
+    // stopped short and was corrected (6 of 6 test taps on blank spots, 11-26 23:42 首爾). Its moves went by the touch
+    // probe's map (ProbeMap: two rough knots from the corner, `hop` read from the corner's inset), which lost ~0.05 of
+    // every hop across (0.513 asked, 0.459 gone; a hop of -0.084 went +0.011) and the span was 5 % long. The iPad's
+    // pointer is linear (measured the same day with 辅助触控 on: 5.83 units a frame pixel every way and length, ±1.5 %),
+    // so a move goes from where the pointer was last seen (CommandChannel.padPos) straight to the target in the span's
+    // units, times a gain per axis learned from where hops arrived. With PadCurve's bow made good, 10 such hops landed
+    // within 8 px but two long ones (17 px): inside the target, clicked with no stop.
+    static let padGainKey = "padGainV1"
+    private var padGainKept: (x: Double, y: Double, w: Int, h: Int)?
+    /// Where the last iPad move began (screen fraction) and the units it was sent: what its arrival teaches the gain.
+    private var padHopFrom: (from: CGPoint, units: (Int, Int))?
+
+    /// The gain per axis for this span (1 until hops were seen; a new calibration's span starts over).
+    func padGain(for s: (w: Int, h: Int)) -> (x: Double, y: Double) {
+        if padGainKept == nil, let v = UserDefaults.standard.array(forKey: Self.padGainKey) as? [Double], v.count == 4 {
+            padGainKept = (v[0], v[1], Int(v[2]), Int(v[3]))
+        }
+        guard let g = padGainKept, g.w == s.w, g.h == s.h else { return (1, 1) }
+        return (g.x, g.y)
+    }
+    private func keepPadGain(_ g: (x: Double, y: Double), _ s: (w: Int, h: Int)) {
+        padGainKept = (g.x, g.y, s.w, s.h)
+        UserDefaults.standard.set([g.x, g.y, Double(s.w), Double(s.h)], forKey: Self.padGainKey)
+    }
+
+    /// 187: one axis's gain after a hop of `units` was seen to move `moved` (screen fraction). Only long moves teach
+    /// (short ones go by padShort's table), and a sighting far from what the gain expects (another thing seen, a start
+    /// that was wrong) teaches nothing.
+    static func learnedPadGain(_ g: Double, units: Int, span: Int, moved: Double) -> Double {
+        guard abs(units) >= 400, abs(moved) >= 0.08, span > 0 else { return g }
+        let fresh = Double(units) / (Double(span) * moved)
+        guard fresh > 0, (0.8...1.25).contains(fresh / g) else { return g }
+        return min(1.15, max(0.85, 0.6 * g + 0.4 * fresh))
+    }
+
+    /// 187: the units of an iPad move from where the pointer was last seen to (x, y); nil when that is not known
+    /// (lost, a new board link, not an iPad): the old way then.
+    func padHop(to x: Double, _ y: Double) -> (Int, Int)? {
+        guard CommandChannel.onPad(), pos != nil, link == device.links, let p = CommandChannel.padPos else { return nil }
+        let s = CommandChannel.padSpan
+        guard s.w > 0, s.h > 0 else { return nil }
+        let g = padGain(for: s)
+        return (Int(((x * Double(s.w) - Double(p.x)) * g.x).rounded()), Int(((y * Double(s.h) - Double(p.y)) * g.y).rounded()))
+    }
+
+    /// 187: an iPad move straight to (x, y) (PadCurve curves it); false when its start is not known.
+    private func padMove(_ x: Double, _ y: Double) async throws -> Bool {
+        guard let units = padHop(to: x, y), let p = CommandChannel.padPos else { return false }
+        let s = CommandChannel.padSpan
+        padHopFrom = (CGPoint(x: Double(p.x) / Double(s.w), y: Double(p.y) / Double(s.h)), units)
+        pos = nil  // unknown until the move succeeds
+        try await device.send("move \(units.0) \(units.1)")
+        CommandChannel.padPos = (Int((x * Double(s.w)).rounded()), Int((y * Double(s.h)).rounded()))
+        (pos, moves) = ((dx(x), dy(y)), moves + 1)
+        return true
+    }
+
     @Published private(set) var quality: Double?  // pointer error at the last check, fraction of the screen
     private(set) var aspect: Double?  // frame width / height when calibrated
     /// An aimed tap missed by more than maxMiss or hit the border: the span no longer fits this phone (log25: saved
@@ -416,7 +475,10 @@ import Foundation
         let border = !edgeStart && viaBorders(x, y)
         viaBorder = border && !belowReach(y)  // the lift learned is the right border's
         if border { try await fromBorder(x, y) }
-        else { try await moveTo(dx(x), dy(y), rehome: rehome) }
+        else {
+            let padMoved = try await padMove(x, y)  // 187: an iPad's move from where the pointer was seen
+            if !padMoved { try await moveTo(dx(x), dy(y), rehome: rehome) }
+        }
         // Ordinary taps click at the calibrated map without looking for the pointer. On the dark WeChat screens the
         // pixel search found it 6 times in 31 (logs 11-06): every tap wiggled it ~5 times over 4–6 s, often walked it
         // after a misread and lost it, then clicked at this estimate anyway, and all of those taps landed. A tap that
@@ -669,6 +731,7 @@ import Foundation
     }
 
     private func moveTo(_ tx: Int, _ ty: Int, rehome: Bool = true, positioning: Bool = true) async throws {
+        padHopFrom = nil  // 187: only a padMove's arrival teaches the iPad's gain
         if link != device.links {  // new link: a dropped gesture may have left the button down
             try await device.send("release")
             (pos, link) = (nil, device.links)
@@ -840,11 +903,15 @@ import Foundation
             // move), not back to the top-left corner first. A re-home every few hops keeps the error from adding up;
             // an aimed tap (after one that changed nothing) always starts from the corner.
             // 180: one move, no stop short (176's 85%); the look corrects, the gate keeps it off the edges.
-            let (ux, uy) = hopUnits(from: last, to: x, y, units: p)
             lastClick = nil
-            pos = nil
-            if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
-            (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
+            if try await padMove(x, y) {  // 187: an iPad's hop from where the pointer was seen, not by the probe map
+                hops += 1
+            } else {
+                let (ux, uy) = hopUnits(from: last, to: x, y, units: p)
+                pos = nil
+                if maps != nil { try await ProbeMotion.move(device, ux, uy) } else { try await device.send("move \(ux) \(uy)") }
+                (pos, hops, moves) = ((p.0 + ux, p.1 + uy), hops + 1, moves + 1)
+            }
             log(String(format: "tap (%.3f, %.3f): hop %ld from (%.3f, %.3f)", x, y, hops, last.x, last.y))
             // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
             // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle
@@ -1117,6 +1184,8 @@ import Foundation
         // Accuracy test 11-08: after a relaunch screen sharing was off, every tap skipped this without a word and
         // 20 spots were blind. No frame is said, every time.
         firstSeen = nil
+        let hop = padHopFrom  // 187: this look teaches the gain the move it follows went by
+        padHopFrom = nil
         guard let screen, let span else { return .unseen }
         guard let before else {
             log(String(format: "arrive (%.3f, %.3f): no screen frame before the move (screen sharing off?); clicking at the estimate", x, y))
@@ -1132,6 +1201,15 @@ import Foundation
             return .unseen
         }
         firstSeen = seen
+        if let hop, CommandChannel.onPad() {  // 187
+            let s = CommandChannel.padSpan, g = padGain(for: s)
+            let learned = (x: Self.learnedPadGain(g.x, units: hop.units.0, span: s.w, moved: Double(seen.x) - Double(hop.from.x)),
+                           y: Self.learnedPadGain(g.y, units: hop.units.1, span: s.h, moved: Double(seen.y) - Double(hop.from.y)))
+            if learned != g {
+                keepPadGain(learned, s)
+                log(String(format: "ipad gain %.3f / %.3f (was %.3f / %.3f)", learned.x, learned.y, g.x, g.y))
+            }
+        }
         Self.syncPad(seen)  // 176
         if CommandChannel.onPad() { pos = (dx(Double(seen.x)), dy(Double(seen.y))) }  // 180: where it really is
         var corrections = 0, unmoved = 0
@@ -1192,6 +1270,7 @@ import Foundation
             if ux != 0 { fineX = Self.learned(fineX ?? 1 / Double(span.w), moved: Double(next.x - seen.x), units: ux) }
             if uy != 0 { fineY = Self.learned(fineY ?? 1 / Double(span.h), moved: Double(next.y - seen.y), units: uy) }
             seen = next
+            Self.syncPad(seen)  // 187: the place the next hop starts from is where it was last seen
             if CommandChannel.onPad() { pos = (dx(Double(seen.x)), dy(Double(seen.y))) }  // 180
         }
     }

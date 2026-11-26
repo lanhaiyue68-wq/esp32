@@ -43,6 +43,40 @@ import UIKit
         XCTAssertTrue(XiaoLanPanes.gone("文件传输助手", [[piece("测试群", y: 0.3)], [piece("文件", y: 0.5)]]))
     }
 
+    /// User 11-26 ("都一次性點好"): an iPad curve aims against its bow (it lands ~0.22 of it toward the bow) and a
+    /// little further (the bow's extra length comes short), so it lands where the move asked; still a visible bow.
+    func testPadCurveAimsAgainstItsBow() throws {
+        let span = (w: 5854, h: 7626)
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }  // side +1, bow 9 %
+        let by = (-492, 2135), from = (1200, 2000)
+        let s = try XCTUnwrap(PadCurve.stroke(from: from, by: by, span: span, random: mid))
+        let v = s.split(separator: " ").dropFirst().compactMap { Int($0) }
+        var end = (0, 0), bow = 0.0
+        let len = hypot(Double(by.0), Double(by.1)), n = (x: -Double(by.1) / len, y: Double(by.0) / len)  // side +1
+        for i in stride(from: 0, to: v.count - 1, by: 2) {
+            end = (end.0 + v[i], end.1 + v[i + 1])
+            bow = max(bow, Double(end.0) * n.x + Double(end.1) * n.y)
+        }
+        let across = Double(end.0 - by.0) * n.x + Double(end.1 - by.1) * n.y
+        let along = (Double(end.0 - by.0) * Double(by.0) + Double(end.1 - by.1) * Double(by.1)) / len
+        XCTAssertGreaterThan(bow, len * 0.05, "a bow that shows")
+        XCTAssertEqual(across, -0.22 * 0.09 * len, accuracy: 3, "back against the bow by 0.22 of it")
+        XCTAssertGreaterThan(along, 0, "a little further")
+        XCTAssertLessThan(along, 0.03 * len)
+    }
+
+    /// User 11-26: an iPad hop's gain per axis is learned from long hops seen where they arrived; a short hop or a
+    /// sighting far off what the gain expects teaches nothing.
+    func testPadGainLearnsFromLongHopsOnly() {
+        // 3003 units sent for 0.513 of a 5854 span, seen to go 0.459: the units go ~1.12x as far as the span says
+        let g = Pointer.learnedPadGain(1, units: 3003, span: 5854, moved: 0.459)
+        XCTAssertEqual(g, 0.6 + 0.4 * 3003 / (5854 * 0.459), accuracy: 0.0001)
+        XCTAssertEqual(Pointer.learnedPadGain(1, units: 300, span: 5854, moved: 0.05), 1)   // short
+        XCTAssertEqual(Pointer.learnedPadGain(1, units: 3003, span: 5854, moved: 0.2), 1)   // 2.6x: not the pointer
+        XCTAssertEqual(Pointer.learnedPadGain(1, units: 3003, span: 5854, moved: -0.5), 1)  // the wrong way
+        XCTAssertEqual(Pointer.learnedPadGain(1.14, units: 3003, span: 5854, moved: 0.40), 1.15, accuracy: 0.0001)  // kept ≤ 1.15
+    }
+
     /// B32: a preview's beginning counts only when it is cut short with "…".
     func testPreviewBeginningOnlyWhenCut() {
         XCTAssertFalse(XiaoLanSelf.previewShowsSent("【小蓝测试】186个微0018", "【小蓝测试】186 个微 0018 连发2"))

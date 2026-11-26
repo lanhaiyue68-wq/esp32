@@ -6,9 +6,16 @@ import Foundation
 /// 170 sent one `move` and left the curve to the board, but an iPad home never uses the board's corner (`abort`), so
 /// the board kept its curve inside the move's own box: a thin box for most moves, so a straight line. The app knows
 /// where the pointer is (CommandChannel.padPos) and how big the screen is (padSpan), so it draws the curve itself:
-/// a cubic Bezier bowed to one side by 10–18% of its length, the side and the bow random each time. All four control
-/// points stay on the screen, so the whole curve does (a Bezier stays inside its control points): no push past an
-/// edge (Notification Center, Home). The pieces add up exactly to the move, so where it lands is where a `move` lands.
+/// a cubic Bezier bowed to one side, the side and the bow random each time. All four control points stay on the
+/// screen, so the whole curve does (a Bezier stays inside its control points): no push past an edge (Notification
+/// Center, Home).
+///
+/// 187 (user 11-26: "不論你點什么，都一次性點好…每次點目標地方的時候，都是會在中間停頓一下"): a curve whose pieces add up
+/// to the move does not land where the move does. Measured on the customer's iPad 9 (辅助触控 on, v41, 60 / 30 ms),
+/// the same move again and again to ±1 px: straight it lands exactly; bowed it lands toward the bow by ~0.22 of the
+/// bow (control points `b` off the line: 14 px of a 0.14 bow, 4 px of a 0.05 one, either side) and short by ~0.8 of
+/// the length the bow adds (2 % at 0.12). So the bow is 6–12 % (was 10–18 %, k1 ≠ k2 made it worse: 17 px at 0.18) and
+/// the end aimed at is moved against both: 10 hops between blank spots then landed within 8 px but two long ones (17).
 enum PadCurve {
     /// Shorter moves stay one `move` (a bow of a few units shows nothing and only slows the pointer). 174: 640, the
     /// shortest fast move iPadOS takes at full gain; a shorter one goes straight, lengthened by CommandChannel.padShort.
@@ -25,35 +32,52 @@ enum PadCurve {
         func onScreen(_ q: (x: Double, y: Double)) -> Bool { q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h }
         guard onScreen(p0), onScreen(p3) else { return nil }  // a push past an edge stays straight
         let ux = Double(d.x) / len, uy = Double(d.y) / len
-        let a = random(0.25...0.38), z = random(0.62...0.75)
-        let k1 = random(0.85...1.15), k2 = random(0.85...1.15)
-        var bow = len * random(0.10...0.18)
+        let a = random(0.25...0.38), z = 1 - a  // the same either end: the bow goes out and comes back alike
+        var bow = len * random(0.06...0.12)
         let first: Double = random(0...1) < 0.5 ? -1 : 1
-        var controls: ((x: Double, y: Double), (x: Double, y: Double))?
-        for _ in 0..<4 where controls == nil {  // near an edge: the other side, then a smaller bow
-            for side in [first, -first] where controls == nil {
-                let nx = -uy * side * bow, ny = ux * side * bow
-                let c1 = (x: p0.x + Double(d.x) * a + nx * k1, y: p0.y + Double(d.y) * a + ny * k1)
-                let c2 = (x: p0.x + Double(d.x) * z + nx * k2, y: p0.y + Double(d.y) * z + ny * k2)
-                if onScreen(c1), onScreen(c2) { controls = (c1, c2) }
+        var found: (c1: (x: Double, y: Double), c2: (x: Double, y: Double), off: (x: Double, y: Double))?
+        for _ in 0..<4 where found == nil {  // near an edge: the other side, then a smaller bow
+            for side in [first, -first] where found == nil {
+                let off = (x: -uy * side * bow, y: ux * side * bow)
+                let c1 = (x: p0.x + Double(d.x) * a + off.x, y: p0.y + Double(d.y) * a + off.y)
+                let c2 = (x: p0.x + Double(d.x) * z + off.x, y: p0.y + Double(d.y) * z + off.y)
+                if onScreen(c1), onScreen(c2) { found = (c1, c2, off) }
             }
             bow /= 2
         }
-        guard let found = controls else { return nil }
-        let (c1, c2) = found
+        guard let picked = found else { return nil }
+        let (c1, c2, off) = (picked.c1, picked.c2, picked.off)
+        func point(_ t: Double, _ c1: (x: Double, y: Double), _ c2: (x: Double, y: Double),
+                   _ p3: (x: Double, y: Double)) -> (x: Double, y: Double) {
+            let u = 1 - t
+            return (x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x,
+                    y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p3.y)
+        }
+        // The end aimed at: further by what the bow's extra length loses, back against the bow by what of it stays.
+        var arc = 0.0, at = p0
+        for i in 1...60 { let q = point(Double(i) / 60, c1, c2, p3); arc += hypot(q.x - at.x, q.y - at.y); at = q }
+        let further = 1 + alongLoss * max(0, arc / len - 1)
+        let aim = (x: min(max(p0.x + Double(d.x) * further - acrossKept * off.x, 0), w),
+                   y: min(max(p0.y + Double(d.y) * further - acrossKept * off.y, 0), h))
+        let e = (x: aim.x - p0.x, y: aim.y - p0.y)
+        let a1 = (x: p0.x + e.x * a + off.x, y: p0.y + e.y * a + off.y)
+        let a2 = (x: p0.x + e.x * z + off.x, y: p0.y + e.y * z + off.y)
+        let end = (x: Int(e.x.rounded()), y: Int(e.y.rounded()))
         let n = min(maxPieces, max(8, Int(len / 80)))
         var pieces: [String] = []
         var last = (x: 0, y: 0)
         for i in 1...n {
-            let t = Double(i) / Double(n), u = 1 - t
-            let bx = u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x
-            let by = u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p3.y
-            let q = i == n ? (x: d.x, y: d.y) : (x: Int((bx - p0.x).rounded()), y: Int((by - p0.y).rounded()))
+            let b = point(Double(i) / Double(n), a1, a2, aim)
+            let q = i == n ? end : (x: Int((b.x - p0.x).rounded()), y: Int((b.y - p0.y).rounded()))
             if q.x != last.x || q.y != last.y { pieces.append("\(q.x - last.x) \(q.y - last.y)") }
             last = q
         }
         return "stroke " + pieces.joined(separator: " ")
     }
+    /// 187: of the bow's offset (control points off the line), the share a curved move lands off toward it.
+    static let acrossKept = 0.22
+    /// 187: of the length a bow adds to the path, the share a curved move comes short by.
+    static let alongLoss = 0.8
 
     // 174 (user 11-25: "滑屏幕左边的时候，贝塞尔曲线往左滑，就像我们的大拇指滑屏幕一样；右边的时候用右滑"): an iPad swipe
     // goes as a thumb's does. It sets off the way it was asked (so a list locks onto that direction, and a row is
