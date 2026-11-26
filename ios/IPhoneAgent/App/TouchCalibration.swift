@@ -82,6 +82,9 @@ extension AutoCalibrator {
         let probe = app.probe, device = app.board.commands, pointer = app.pointer
         var accepted = false
         defer { if !accepted { pointer.discardProbe() } }
+        // 184: the corners and sides kept clear while calibrating only (user 11-26).
+        CommandChannel.padCalibrating = true
+        defer { CommandChannel.padCalibrating = false }
         var clicks = 0, hits = 0
         // Show the planned pass, not the maximum number including a possible retry.
         let total = Self.roughStops.count + Self.targets.count + Self.checks.count

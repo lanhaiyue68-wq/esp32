@@ -300,18 +300,22 @@ enum Vision {
     /// (the arrow at its new spot and at the one it left), the one nearest `near` (where it was sent), and of that patch
     /// the tip, the pixel farthest up and left, which is where it clicks. Checked on 18 frames of 11-25 (960 x 1280):
     /// 161-176 changed pixels a patch, the tip 4 px left of and 10 px above the patch's centre every time.
-    static func arrow(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40) -> CGPoint? {
-        arrows(before, after, near: near, window: window, threshold: threshold)
+    static func arrow(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40,
+                      top: Double = topMask) -> CGPoint? {
+        arrows(before, after, near: near, window: window, threshold: threshold, top: top)
             .min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
     }
 
     /// Every arrow tip seen changed within `window` of `near` (at most four).
-    static func arrows(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40) -> [CGPoint] {
+    /// 184 (Echo 183, 11-26: by an iPad window's top, its back arrow, 取消 and ＋ at ~0.05, the pointer was never seen:
+    /// the top 6 % (an iPhone's status bar) was left out): `top`, the band left out (an iPad's status bar is ~3 %).
+    static func arrows(_ before: Data, _ after: Data, near: CGPoint, window: Double = 0.25, threshold: Int = 40,
+                       top: Double = topMask) -> [CGPoint] {
         guard let ia = image(before), let ib = image(after), ia.width == ib.width, ia.height == ib.height else { return [] }
         let w = ia.width, h = ia.height
         let a = gray(ia, w, h), b = gray(ib, w, h)
         let x0 = max(0, Int((Double(near.x) - window) * Double(w))), x1 = min(w - 1, Int((Double(near.x) + window) * Double(w)))
-        let y0 = max(Int(topMask * Double(h)), Int((Double(near.y) - window) * Double(h)))
+        let y0 = max(Int(top * Double(h)), Int((Double(near.y) - window) * Double(h)))
         let y1 = min(h - 1, Int((Double(near.y) + window) * Double(h)))
         guard x1 > x0, y1 > y0 else { return [] }
         var changed: [(x: Int, y: Int)] = []

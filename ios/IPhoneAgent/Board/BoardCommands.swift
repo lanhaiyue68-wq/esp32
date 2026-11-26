@@ -208,12 +208,20 @@ extension HIDDevice {
     /// feature, calibration or home can take the pointer into an edge or a corner. A move from inside the band out of
     /// it is let through.
     static let padSafe = (left: 0.02, right: 0.98, top: 0.03, bottom: 0.96)
-    static func padKeptClear(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int)) -> String? {
+    /// 184 (user 11-26: "校準的時候不能碰四個角…正常做任務的時候是可以的…上面太靠邊會按到那個時間"): outside a
+    /// calibration only the status bar (its clock: a click there stops the screen sharing) and the Home bar are kept
+    /// clear; a task's button by a side or a corner is reached.
+    static let padTaskSafe = (left: 0.0, right: 1.0, top: 0.03, bottom: 0.985)
+    /// 184: a calibration is running (Pointer.startCalibration): the corners and sides kept clear (padSafe).
+    static var padCalibrating = false
+    static func padKeptClear(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int),
+                             calibrating: Bool = true) -> String? {
         let parts = command.split(separator: " ")
         guard let p = pos, parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
         let w = Double(span.w), h = Double(span.h)
-        let tx = min(max(Double(p.x + dx), padSafe.left * w), padSafe.right * w)
-        let ty = min(max(Double(p.y + dy), padSafe.top * h), padSafe.bottom * h)
+        let safe = calibrating ? padSafe : padTaskSafe
+        let tx = min(max(Double(p.x + dx), safe.left * w), safe.right * w)
+        let ty = min(max(Double(p.y + dy), safe.top * h), safe.bottom * h)
         let nx = Int(tx.rounded()) - p.x, ny = Int(ty.rounded()) - p.y
         return nx == dx && ny == dy ? nil : "move \(nx) \(ny)"
     }
@@ -309,7 +317,7 @@ extension HIDDevice {
         if command == "home" { return try await padHomeNow() }
         await padPace()
         var command = command
-        if !padHeld, let clear = Self.padKeptClear(command, from: Self.padPos, span: Self.padSpan) {
+        if !padHeld, let clear = Self.padKeptClear(command, from: Self.padPos, span: Self.padSpan, calibrating: Self.padCalibrating) {
             DebugLog.write("ipad: \(command) would end at the screen's edge; \(clear) instead (kept clear)")
             command = clear
         }
@@ -350,6 +358,25 @@ extension HIDDevice {
         }
         Self.padPos = Self.padTrack(command, from: from, span: Self.padSpan)
         return ""
+    }
+
+    /// 184 (Echo 183, 11-26: aim's sideways nudge went at the fast pace, 60 units sent as 126, and saw the pointer 32 %
+    /// of the time, almost never by a window's top; the iPad home's nudge, from an unknown place, went at the slow pace
+    /// and saw it every time): a nudge of `dx` app units at the slow pace (as padPush's slow part), the place tracked.
+    func padSlowNudge(_ dx: Int) async throws {
+        guard Self.onPad() else { _ = try await send("move \(dx) 0"); return }
+        await padPace()
+        let from = Self.padPos
+        do {
+            _ = try await sendWatched("step \(Self.padSlowStep)")
+            _ = try await sendWatched("move \(Int((Double(dx) * Self.padSlowRatio).rounded())) 0")
+            _ = try await sendWatched("step \(Self.padStep)")
+        } catch {
+            Self.padPos = nil
+            _ = try? await sendWatched("step \(Self.padStep)")
+            throw error
+        }
+        Self.padPos = Self.padTrack("move \(dx) 0", from: from, span: Self.padSpan)
     }
 
     /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known, no button is down (a drag

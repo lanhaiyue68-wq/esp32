@@ -231,6 +231,8 @@ import Foundation
     /// Returns true when it calibrated itself; otherwise the user taps the pointer (finishCalibration).
     /// `progress` gets 0 (homing), then 1, 2 (each probe).
     func startCalibration(progress: ((Int) -> Void)? = nil) async throws -> Bool {
+        CommandChannel.padCalibrating = true  // 184: corners and sides kept clear while calibrating only
+        defer { CommandChannel.padCalibrating = false }
         pos = nil
         lastClick = nil
         progress?(0)
@@ -584,18 +586,26 @@ import Foundation
     /// compared with the nudged one was the first new frame after the move back, taken before the pointer had come back,
     /// so it often matched the nudged one and nothing moved. As padSpot: the frame before the nudge (the pointer at
     /// rest) against the nudged one at rest; the move back is not waited for.
+    /// 184 (Echo 183, 11-26: still 32 %, the nudge at the fast pace, 60 units sent as 126): the nudge at the slow pace,
+    /// as the iPad home's (which saw it every time).
     private func padMeasure(_ x: Double, _ y: Double, nudge: Int, on screen: ScreenSource) async throws -> CGPoint? {
         await screen.settled(quiet: 0.2, least: 0.2, most: 1.0)
         let before = screen.frame, sent = now()
-        try await device.send("move \(nudge) 0")
+        try await nudgeSlowly(nudge)
         var after = await screen.fresh(since: sent, timeout: 1.0)
         if after != nil {
             await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)
             after = screen.frame
         }
-        try await device.send("move \(-nudge) 0")
+        try await nudgeSlowly(-nudge)
         guard let before, let after else { return nil }
         return Self.arrowBefore(before, after, near: CGPoint(x: x, y: y), nudge: nudge, window: 0.5)
+    }
+
+    /// 184: a sideways nudge at the board's slow pace (a test's device: as a move).
+    private func nudgeSlowly(_ units: Int) async throws {
+        if let channel = device as? CommandChannel { try await channel.padSlowNudge(units) }
+        else { try await device.send("move \(units) 0") }
     }
 
     /// Calibration check without tapping: move to a known point and measure the miss (fraction of the screen).
@@ -754,6 +764,9 @@ import Foundation
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }
 
+    /// 184: where the pointer is now, looked for around (x, y) (on an iPad by a slow nudge); nil when it is not seen.
+    func lookFor(_ x: Double, _ y: Double) async throws -> CGPoint? { try await find(x, y) }
+
     /// 183: a click where the pointer rests, just seen on its target by an aim (小藍's clicks by a window's top).
     func clickInPlace() async throws {
         try await device.send("click")
@@ -835,7 +848,11 @@ import Foundation
             }
         }
         lastClick = nil
-        pos = nil
+        // 184 (Echo 183, 11-26: an order's first tap found the pointer again first, 3–5 s every time, once 12.5 s: no hop
+        // after the watch's back click or after 120 s): on an iPad every move tracks the pointer (padPos) and every
+        // sighting corrects it, so a tap goes straight from where it is and its arrival looks; only an iPhone's tap
+        // starts from the corner.
+        if !CommandChannel.onPad() { pos = nil }
         // Going back near where the pointer rests, the frame before the move already shows it there: it comes back to
         // the same wrong spot, nothing changes and the eye sees nothing (over USB 11-09: Clock's icon tapped 15 times,
         // always the same miss). The frame to compare against is then the one with the pointer in the corner.
@@ -1010,13 +1027,40 @@ import Foundation
     }
 
     static func sighting(_ before: Data, _ after: Data, near: CGPoint) -> CGPoint? {
-        CommandChannel.onPad() ? Vision.arrow(before, after, near: near) : Vision.arrival(before, after, near: near)
+        CommandChannel.onPad() ? Vision.arrow(before, after, near: near, top: padTopMask) : Vision.arrival(before, after, near: near)
     }
+
+    /// 184: the band at an iPad's top where the pointer is not looked for: its status bar (~3 %), not an iPhone's 6 %,
+    /// which hid every window's title bar (back arrow, 取消, ＋ at ~0.05).
+    static let padTopMask = 0.03
 
     /// 174: where an iPad's arrow was before a sideways nudge of `nudge` units: of two tips on one row the one on the
     /// side it came from; one tip (the spots overlapped) is that spot; otherwise the tip nearest `near`.
+    /// 184 (Echo 183, 11-26: the iPad home found "the arrow" at WeCom's blinking text cursor, (0.569, 0.666), time after
+    /// time; the tracked place went wrong and every move after it was cut short at an edge that was not there): on an
+    /// iPad only a pair of tips counts, the spot left and the spot reached, as far apart as the nudge and along it; a
+    /// lone patch that changed (a cursor blinking) is no pointer.
     static func arrowBefore(_ before: Data, _ after: Data, near: CGPoint, nudge: Int, window: Double = 0.25) -> CGPoint? {
-        pickBefore(Vision.arrows(before, after, near: near, window: window), near: near, nudge: nudge)
+        guard CommandChannel.onPad() else { return pickBefore(Vision.arrows(before, after, near: near, window: window), near: near, nudge: nudge) }
+        let tips = Vision.arrows(before, after, near: near, window: window, top: padTopMask)
+        return pickNudged(tips, nudge: nudge, span: Double(CommandChannel.padSpan.w))
+    }
+
+    /// 184: of the tips, the one a nudge of `nudge` units left (screen `span` units wide): its partner on the same row,
+    /// the way the nudge went, 0.3–3 times as far as asked. Nil without such a pair.
+    static func pickNudged(_ tips: [CGPoint], nudge: Int, span: Double) -> CGPoint? {
+        guard span > 0, nudge != 0 else { return nil }
+        let expected = Double(abs(nudge)) / span
+        var best: (p: CGPoint, off: Double)?
+        for a in tips {
+            for b in tips where b != a {
+                let along = Double(b.x - a.x) * (nudge > 0 ? 1 : -1)
+                guard abs(Double(b.y - a.y)) < 0.02, along >= 0.3 * expected, along <= 3 * expected else { continue }
+                let off = abs(along - expected)
+                if best == nil || off < best!.off { best = (a, off) }
+            }
+        }
+        return best?.p
     }
     static func pickBefore(_ tips: [CGPoint], near: CGPoint, nudge: Int) -> CGPoint? {
         if tips.count == 1 { return tips[0] }

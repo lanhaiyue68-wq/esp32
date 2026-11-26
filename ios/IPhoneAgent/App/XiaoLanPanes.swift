@@ -230,7 +230,9 @@ import UIKit
 
     /// 183: the top of a window where a click goes only on a pointer seen there (its title bar: the back arrow, 取消,
     /// WeChat's ＋; the ••• and close above them).
-    static let topBand = 0.12
+    /// 184 (Echo 183, 11-26: the band to 0.12 took in the lists' search box, 0.10, and no search ever ran): the title bar
+    /// only (0.08).
+    static let topBand = 0.08
 
     /// 183 (Echo 182 overnight, 11-26: a second 取消 after a search, clicked unseen, hit WeChat's ＋ on the list behind
     /// it, and its menu stayed open for three minutes): the ＋ menu, by two of its rows.
@@ -283,11 +285,21 @@ import UIKit
     /// text (轻触说话转文字, 发消息或按住…) and WeChat's microphone cover one at most. Tapped left of the middle, on the
     /// hint, clear of the microphone.
     /// 183: `above`, a system keyboard's top: its white keys are no field (the field sits over the keyboard).
+    /// 184 (Echo 183, 11-26: 简体拼音 up, its keys not read as a keyboard, a white key clicked for the field): the field's
+    /// white sits under the input bar's light grey (~246); a key's under the keyboard's grey (~226): a white band with no
+    /// light bar right over it is a key, and the field is looked for higher up.
     static func inputField(_ px: WatchOCR.Pixels, above: Double = 1) -> CGPoint? {
+        let xs = [0.135, 0.50, 0.66]
         func white(_ y: Double) -> Bool {
-            [0.135, 0.50, 0.66].filter { x in
+            xs.filter { x in
                 let (r, g, b) = px.rgb(x, y)
                 return r >= 250 && g >= 250 && b >= 250
+            }.count >= 2
+        }
+        func barOver(_ y: Double) -> Bool {
+            xs.filter { x in
+                let (r, g, b) = px.rgb(x, max(0, y - 0.008))
+                return (r * 3 + g * 6 + b) / 10 >= 236
             }.count >= 2
         }
         let step = 1 / Double(px.h)
@@ -296,7 +308,7 @@ import UIKit
             if white(y) {
                 if bottom == nil { bottom = y }
             } else if let b = bottom {
-                if b - y >= 0.015 { return CGPoint(x: 0.30, y: (b + y) / 2) }
+                if b - y >= 0.015 && barOver(y) { return CGPoint(x: 0.30, y: (b + y) / 2) }
                 bottom = nil
             }
             y -= step
@@ -464,6 +476,21 @@ import UIKit
     /// for matching what was sent with what is read. Letters include Chinese.
     static func plain(_ s: String) -> String {
         String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map { Character($0) })
+    }
+
+    /// 184 (Echo 183, 11-26: after a send the keyboard went down, older lines came in above, and the screen no longer
+    /// started where the history ended): what follows the history's last line wherever it is on the screen, the line
+    /// before it agreeing too when the history has one; nil when it is not there (or too short to tell: 好, 嗯).
+    static func afterAnchor(_ lines: [WatchReport.Line], history: [WatchReport.Line]) -> [WatchReport.Line]? {
+        guard let last = history.last else { return nil }
+        func key(_ l: WatchReport.Line) -> String { plain(l.text) + (l.mine ? "|me" : "") }
+        let lastKey = key(last)
+        guard plain(last.text).count >= 3 else { return nil }
+        for i in stride(from: lines.count - 1, through: 0, by: -1) where key(lines[i]) == lastKey {
+            if history.count >= 2, i >= 1, key(lines[i - 1]) != key(history[history.count - 2]) { continue }
+            return Array(lines[(i + 1)...])
+        }
+        return nil
     }
 
     /// The line read in `chat` on `app` is one 小藍 sent there from the other app within the window.

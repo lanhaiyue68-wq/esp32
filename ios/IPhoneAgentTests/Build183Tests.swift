@@ -123,7 +123,8 @@ import UIKit
         let px = try XCTUnwrap(WatchOCR.Pixels(chat))
         let field = try XCTUnwrap(XiaoLanPanes.inputField(px, above: 0.72))
         XCTAssertEqual(Double(field.y), 0.68, accuracy: 0.015)
-        XCTAssertGreaterThan(Double(XiaoLanPanes.inputField(px)?.y ?? 0), 0.75)  // without it: a key (11-26's miss)
+        // 184: without the keyboard's top too, the keys (grey over them, no light bar) are passed over
+        XCTAssertEqual(Double(XiaoLanPanes.inputField(px)?.y ?? 0), 0.68, accuracy: 0.015)
     }
 
     /// 11-26: the owner's other account 蓝海乐 read as "监海乐" and its line reported; 范光磊 stays another person (182).

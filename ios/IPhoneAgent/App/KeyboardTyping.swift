@@ -47,6 +47,20 @@ extension AppModel {
                 DebugLog.write("keyboard: no keyboard on screen to switch from")
                 return false
             }
+            // 184 (Echo 183, 11-26, iPad: from 简体拼音 one click on the globe went straight to 小藍, twice; held, the
+            // globe's menu was missed once and its 小藍 row clicked at an estimate the next time): on an iPad the globe is
+            // clicked first, up to three times round the keyboards, 小藍 looked for after each; the menu after that.
+            if attempt == 1, CommandChannel.onPad() {
+                for click in 1...3 {
+                    do { try await pointer.tap(Self.globeKey.x, Self.globeKey.y) } catch { break }
+                    if await lanAgentKeyboardUp(within: 1.2) {
+                        DebugLog.write("keyboard: Lan Agent's keyboard on screen after \(click) globe click(s)")
+                        return true
+                    }
+                }
+                DebugLog.write("keyboard: three globe clicks did not bring Lan Agent's keyboard; its menu next")
+                continue
+            }
             do { try await pointer.longPress(Self.globeKey.x, Self.globeKey.y) } catch { return false }
             if await lanAgentKeyboardUp(within: 0.4) {
                 DebugLog.write("keyboard: Lan Agent's keyboard on screen after holding the globe key (try \(attempt))")

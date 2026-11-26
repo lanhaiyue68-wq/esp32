@@ -335,10 +335,10 @@ import Foundation
     /// returned; until then nil.
     @discardableResult func finish(_ c: Command, ok: Bool, reason: String = "", now: Date = Date(), sending: Bool = true) -> String? {
         guard var t = tallies[c.key] else { return nil }
-        if ok { t.ok.append(c.chat) } else {
-            t.failed.append(c.chat)
-            if !reason.isEmpty, !t.reasons.contains(reason) { t.reasons.append(reason) }
-        }
+        if ok { t.ok.append(c.chat) } else { t.failed.append(c.chat) }
+        // 184 (Echo 183, 11-26: a line with @ went out and the answer said nothing of the @ left out; only a failure's
+        // reason was kept): a reason given with a success goes back too ("已发送，但没有 @ 成员").
+        if !reason.isEmpty, !t.reasons.contains(reason) { t.reasons.append(reason) }
         t.left -= 1
         guard t.left <= 0 else { tallies[c.key] = t; return nil }
         tallies[c.key] = nil
