@@ -485,12 +485,18 @@ import UIKit
 
     /// The result row named `chat` under the search field, topmost first.
     static func searchResult(_ chat: String, _ rows: [[Piece]]) -> CGPoint? {
-        rows.map { row in row.filter { $0.box.minX < 0.75 } }
+        // 187 (Echo 186, 11-27 00:10 首爾: WeCom searched 不存在的群187, found nothing, and took 小藍's own bar under it,
+        // "小藍 已填入：不存在的群187", for the row; clicked it twice and left the search open): nothing at or under a
+        // keyboard (小藍's bar, or a system one) is a result.
+        let bar = rows.joined().filter { p in ["已填入", "输入法", "輸入法"].contains { p.text.contains($0) } }
+            .map { Double($0.box.minY) }.min()
+        let floor = min(bar ?? 0.9, keyboardTop(rows) ?? 0.9, 0.9)
+        return rows.map { row in row.filter { $0.box.minX < 0.75 } }
             .compactMap { row -> (text: String, box: CGRect)? in
                 guard !row.isEmpty else { return nil }
                 return (listName(row.map(\.text).joined()), row.reduce(CGRect.null) { $0.union($1.box) })
             }
-            .filter { (0.12...0.9).contains($0.box.midY) && WatchChatOpen.sameChat(chat, listName: $0.text) }
+            .filter { Double($0.box.midY) >= 0.12 && Double($0.box.maxY) < floor && WatchChatOpen.sameChat(chat, listName: $0.text) }
             .min { $0.box.midY < $1.box.midY }
             .map { CGPoint(x: 0.5, y: $0.box.midY) }
     }

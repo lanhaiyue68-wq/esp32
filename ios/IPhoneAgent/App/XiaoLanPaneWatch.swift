@@ -100,8 +100,11 @@ extension AppModel {
         if told.contains(.wechat) && told.contains(.wework) { state.frontSince = nil; return true }
         // 185 (B9, Echo 184, 11-26: WeChat left in a chat with the keyboard up was not told, and weixin:// was opened
         // every 11 s for minutes): two windows of the apps' own (told, or a chat of theirs) are both in view.
+        // 187 (Echo 186, 11-27: WeCom left in its search, "Echo in front… opened by URL: wxwork://" every 11 s for minutes,
+        // the search never closed): a window with 取消 at its top (a search) is one of theirs; the watch closes it.
         let theirs = looks.filter { l in
             XiaoLanPanes.toldApp(l.rows, crop: l.crop) != nil || XiaoLanPanes.weworkBar(l.rows)
+                || XiaoLanPanes.cancelButton(l.rows) != nil
                 || (WatchOCR.Pixels(l.crop).map { XiaoLanPanes.chatBackground($0) } ?? false)
         }
         if theirs.count >= 2 { state.frontSince = nil; return true }
@@ -794,6 +797,7 @@ extension AppModel {
             var target = XiaoLanPanes.entries(look.rows).first { WatchChatOpen.sameChat(chat, listName: $0.name) }
                 .map { CGPoint(x: 0.5, y: $0.box.midY) }
             var searchWhy: String?
+            let inList = target != nil
             if target == nil { (target, searchWhy) = await paneSearch(chat, look) }  // not in view: the list's search box
             if target == nil, let why = searchWhy { return (false, "\(appName)\(why)，没有搜「\(chat)」", nil) }
             guard var row = target else { return (false, "\(appName)里搜不到「\(chat)」", nil) }
@@ -819,7 +823,12 @@ extension AppModel {
                     DebugLog.write("watch: \(app.rawValue): \(chat) did not open; its row clicked once more")
                 }
             }
-            guard let open = opened, isChat(open) else { return (false, "\(appName)里没有打开「\(chat)」", nil) }
+            guard let open = opened, isChat(open) else {
+                // 187 (Echo 186, 11-27: WeCom's search for 不存在的群187 was left open, 小藍 up over both windows, and
+                // the watch stood still for minutes): a row found by the search that did not open closes the search.
+                if !inList { await paneCloseSearch(look.side) }
+                return (false, "\(appName)里没有打开「\(chat)」", nil)
+            }
             look = open
             (openedHere, banded) = (!keyboardBefore, true)
         }

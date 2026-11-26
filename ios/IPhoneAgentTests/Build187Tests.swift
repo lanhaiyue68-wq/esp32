@@ -94,6 +94,15 @@ import UIKit
         XCTAssertEqual(WatchReport.markedLine([], fresh: [], preview: "明天:3点见", sender: nil)?.text, "明天:3点见")
     }
 
+    /// 11-27: a search that found nothing has no result in 小藍's own bar under it ("小藍 已填入：…"); a real row is found.
+    func testSearchResultIsNotTheKeyboardsBar() {
+        let bar = CandidatePicker.Piece(text: "小藍 已填入：不存在的群187", box: CGRect(x: 0.3, y: 0.86, width: 0.4, height: 0.02))
+        let empty = [[piece("不存在的群187", y: 0.03)], [piece("没有找到相关结果", y: 0.35)], [bar]]
+        XCTAssertNil(XiaoLanPanes.searchResult("不存在的群187", empty))
+        let found = [[piece("测试群", y: 0.03)], [piece("测试群", y: 0.30)], [bar]]
+        XCTAssertEqual(Double(XiaoLanPanes.searchResult("测试群", found)?.y ?? 0), 0.31, accuracy: 0.001)
+    }
+
     /// B32: a preview's beginning counts only when it is cut short with "…".
     func testPreviewBeginningOnlyWhenCut() {
         XCTAssertFalse(XiaoLanSelf.previewShowsSent("【小蓝测试】186个微0018", "【小蓝测试】186 个微 0018 连发2"))
