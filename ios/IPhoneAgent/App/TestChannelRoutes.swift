@@ -107,6 +107,40 @@ extension AppModel {
             DebugLog.write("test channel: hot \(body["on"] as? Bool == true ? "on" : "off")")
             return .json(["hot": .bool(cloud.hot())])
 
+        case ("POST", "/media"):
+            // 188: reading voice notes, videos, pictures, files and links, tried by hand: "set" turns kinds (and "quote")
+            // on or off; "read" opens one kind on the chat open on `side` and says what was seen; "quote" long-presses
+            // the line `text` and clicks 引用 (nothing typed or sent). Either of the last two only with the watch off.
+            switch text("do") {
+            case "set":
+                for k in XiaoLanMediaFind.Kind.allCases { if let on = body[k.rawValue] as? Bool { MediaSettings.set(k, on) } }
+                if let on = body["quote"] as? Bool { MediaSettings.quoteOn = on }
+            case "read":
+                guard !watching else { return .json(["error": .str("the watch is on: turn it off first")], status: 409) }
+                guard let kind = XiaoLanMediaFind.Kind(rawValue: text("kind")) else {
+                    return .json(["error": .str("kind: voice, video, image, file or link")], status: 400)
+                }
+                let got = await paneMediaTest(side: Int(number("side")), kind: kind, text: text("text"))
+                return .json(["seen": got.seen.map { JValue.str($0) } ?? .null, "why": got.why.map { JValue.str($0) } ?? .null])
+            case "quote":
+                guard !watching else { return .json(["error": .str("the watch is on: turn it off first")], status: 409) }
+                let quoted = await paneQuoteTest(side: Int(number("side")), quote: text("text"))
+                return .json(["quoted": .bool(quoted)])
+            default:
+                break
+            }
+            var flags: JObject = ["quote": .bool(MediaSettings.quoteOn)]
+            for k in XiaoLanMediaFind.Kind.allCases { flags[k.rawValue] = .bool(MediaSettings.on(k)) }
+            return .json(flags)
+
+        case ("GET", "/spots"), ("POST", "/spots"):
+            // 188: the places of WeChat's and WeCom's buttons learned on this device (XiaoLanSpots); {"reset":true}
+            // forgets them, so they are found again (another device, the windows' widths changed).
+            if body["reset"] as? Bool == true { XiaoLanSpots.reset() }
+            var spots: JObject = [:]
+            for (k, v) in XiaoLanSpots.learnedAll().sorted(by: { $0.key < $1.key }) { spots[k] = .arr(v.map { JValue.num($0) }) }
+            return .json(["device": .str(XiaoLanSpots.deviceModel), "learned": .obj(spots)])
+
         case ("POST", "/release"):
             keepAwake.hold = false
             if !agent.running, !startingAgent, !watching { keepAwake.stop() }

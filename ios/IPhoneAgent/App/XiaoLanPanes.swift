@@ -279,6 +279,14 @@ import UIKit
 
     /// 186 (user 11-26: a WeCom group is WeCom's to answer): a chat title read with WeCom's logo after it, as an
     /// external group shows on WeChat's side ("企微测试群（7）Q").
+    /// 188: a row of WeChat's list whose name has WeCom's logo after it (OCR 「企微测试群Q」, 11-27): a WeCom group.
+    static func weComGroupRow(_ rows: [[Piece]], name: String) -> Bool {
+        rows.joined().contains { p in
+            let raw = WatchChatOpen.withoutTime(p.text.filter { !$0.isWhitespace })
+            return WatchOCR.withoutIconTail(raw) != raw && listName(p.text) == name
+        }
+    }
+
     static func weComGroupTitle(_ title: String) -> Bool {
         let t = title.trimmingCharacters(in: .whitespaces)
         return WatchOCR.withoutIconTail(t) != t && WatchOCR.titled(t).group
@@ -502,8 +510,21 @@ import UIKit
 
     /// Searching: the 取消 by the search field at the top (no chat has it there).
     static func cancelButton(_ rows: [[Piece]]) -> CGPoint? {
-        rows.joined().first { $0.box.midY < 0.13 && ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) }
-            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        let top = rows.joined().filter { $0.box.midY < 0.13 }
+        if let p = top.first(where: { ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) }) {
+            return CGPoint(x: p.box.midX, y: p.box.midY)
+        }
+        // 188 (B37 again, Echo 187, 11-27: WeCom's search for a group not there read its 取消 as 「•取消」, the field's ⊗
+        // joined to it: not found, so the search was left open and, its window not told as WeCom's, wxwork:// was
+        // opened every 11 s): 取消 ending a short piece counts, and the click goes to the 取消 part, not the ⊗.
+        for p in top {
+            let t = p.text.trimmingCharacters(in: .whitespaces)
+            let word = t.hasSuffix("取消") && t.count <= 4 ? 2 : t.hasSuffix("Cancel") && t.count <= 8 ? 6 : 0
+            if word > 0 {
+                return CGPoint(x: p.box.maxX - p.box.width * Double(word) / Double(t.count) / 2, y: p.box.midY)
+            }
+        }
+        return nil
     }
 
     /// The result row named `chat` under the search field, topmost first.
@@ -664,8 +685,43 @@ import UIKit
         return p.count >= 4 ? String(p.suffix(6)) : String(text.filter { !$0.isWhitespace }.suffix(6))
     }
     /// 187 (B40): `read` (a line, a preview) shows the signature of `text`, compared the way the signature was taken.
+    /// 188 (B40 again, Echo 187, 11-27: 「【小蓝测试】187 符号~😀 0021」 went out, its preview read 「187符号~G」「0021」 — the
+    /// emoji as a letter, as 186 read one as 「③金」 — and the send was reported failed): the signature's runs of letters
+    /// and digits may also be found in order with up to two characters between them (an emoji or a sign read as one
+    /// or two), never more, so 「…0018」 is still not 「…0018 连发2」.
     static func shows(_ read: String, signature: String, of text: String) -> Bool {
-        plain(text).count >= 4 ? plain(read).contains(signature) : read.filter { !$0.isWhitespace }.contains(signature)
+        guard plain(text).count >= 4 else { return read.filter { !$0.isWhitespace }.contains(signature) }
+        return plain(read).contains(signature) || showsInOrder(read, tailRuns(text))
+    }
+    /// 188: the text's last six letters and digits (as `plain` keeps them), split where the text had anything else.
+    static func tailRuns(_ text: String) -> [String] {
+        var runs: [String] = [], cur = ""
+        for s in text.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(s) { cur.unicodeScalars.append(s) } else if !cur.isEmpty { runs.append(cur); cur = "" }
+        }
+        if !cur.isEmpty { runs.append(cur) }
+        var out: [String] = [], n = 0
+        for r in runs.reversed() where n < 6 {
+            let take = min(r.count, 6 - n)
+            out.insert(String(r.suffix(take)), at: 0)
+            n += take
+        }
+        return out
+    }
+    /// 188: `pieces` found in `read` (letters and digits only) one after another, each within `gap` characters of the last.
+    static func showsInOrder(_ read: String, _ pieces: [String], gap: Int = 2) -> Bool {
+        let r = Array(plain(read)), ps = pieces.map { Array($0) }.filter { !$0.isEmpty }
+        guard let first = ps.first, r.count >= first.count else { return false }
+        func at(_ i: Int, _ p: [Character]) -> Bool { i + p.count <= r.count && Array(r[i..<(i + p.count)]) == p }
+        for start in 0...(r.count - first.count) where at(start, first) {
+            var end = start + first.count, found = true
+            for p in ps.dropFirst() {
+                guard end <= r.count, let s = (end...min(end + gap, r.count)).first(where: { at($0, p) }) else { found = false; break }
+                end = s + p.count
+            }
+            if found { return true }
+        }
+        return false
     }
 
     /// 186 (B24): a list preview shows the line just sent: its end, or (cut short with "…") its beginning, at least six

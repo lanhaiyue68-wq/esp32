@@ -63,8 +63,18 @@ import UIKit
         XCTAssertTrue(WatchOCR.bannerShown(banner))
         XCTAssertFalse(WatchOCR.bannerShown([at("测试群(6)", 0.38, 0.058, 0.24)]))   // the chat's own centred title
         XCTAssertFalse(WatchOCR.bannerShown([at("时间：明天下午", 0.15, 0.4, 0.4)]))  // a message lower down
+        // 188 (B45, Echo 187, 11-27): the iPad's status bar over WeChat's window, and a chat's own time label, are no banner
+        XCTAssertFalse(WatchOCR.bannerShown([at("◀企业微信 01:00 11月27日周五 微信", 0.06, 0.021, 0.8)]))
+        XCTAssertFalse(WatchOCR.bannerShown([at("企业微信01:0011月27日周五微信", 0.19, 0.035, 0.6)]))
+        XCTAssertFalse(WatchOCR.bannerShown([at("昨天 23:56", 0.2, 0.08, 0.2)]))
+        XCTAssertTrue(WatchOCR.bannerShown([at("企微测试群", 0.15, 0.05, 0.3), at("主人蓝海乐: 2", 0.15, 0.075, 0.3)]))
+        XCTAssertTrue(WatchOCR.bannerShown([at("测试群", 0.15, 0.05, 0.3), at("主人蓝海乐: 11月27日 12:30开会", 0.15, 0.075, 0.5)]))  // a banner's own date
+        // 188 (B45 again, 17:35): 小藍's own line with a colon at the top of WeCom's narrow window, nothing over it, is no banner
+        XCTAssertFalse(WatchOCR.bannerShown([at("外部群 | 群主：范兆磊", 0.37, 0.065, 0.27), at("【模拟服务器】收到：［图片］", 0.26, 0.10, 0.6)]))
         let jpeg = chat()
-        XCTAssertNil(WatchOCR.screen(jpeg, title: "测试群(6)", rows: banner.map { [$0] }))
+        // 188 (B45): under a banner the window is read with the banner's band left out (187: not read at all, lines lost)
+        let under = try XCTUnwrap(WatchOCR.screen(jpeg, title: "测试群(6)", rows: banner.map { [$0] }))
+        XCTAssertFalse(under.lines.contains { $0.text.contains("0109") })
         XCTAssertNotNil(WatchOCR.screen(jpeg, title: "测试群(6)", rows: banner.map { [$0] }, banner: false))
     }
 

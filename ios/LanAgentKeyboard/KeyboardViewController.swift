@@ -131,9 +131,17 @@ final class KeyboardViewController: UIInputViewController {
                     return
                 }
                 self.textDocumentProxy.insertText("\n")
-                DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLink.sentCheckDelay) {
+                // 188 (B41, Echo 187, 11-27: WeCom empties its field a moment after the return; 0.35 s after it the
+                // text was still there, "not sent", though the reply had gone out): looked at again every 0.15 s, for
+                // 1.5 s, before it counts as not sent.
+                let began = Date()
+                func check() {
                     let before = self.textDocumentProxy.documentContextBeforeInput
                     let sent = !KeyboardLink.stillHolds(job.text, before: before)
+                    if !sent && Date().timeIntervalSince(began) < KeyboardLink.sentCheckWindow {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLink.sentCheckEvery) { check() }
+                        return
+                    }
                     if !sent {
                         if before?.hasSuffix("\n") == true { self.textDocumentProxy.deleteBackward() }
                         self.status.text = "\(Self.name)：發送鍵沒有送出（變成換行）"
@@ -143,6 +151,7 @@ final class KeyboardViewController: UIInputViewController {
                         if sent && job.dismiss == true { self.dismissKeyboard() }
                     }
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLink.sentCheckDelay) { check() }
             }
         }
     }

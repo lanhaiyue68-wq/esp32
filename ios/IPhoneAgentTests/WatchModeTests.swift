@@ -679,8 +679,11 @@ import UIKit
         XCTAssertEqual(right.fast.x, 200)
         XCTAssertEqual(right.slow.x, 400)
         // short fast moves go farther (the measured start-up), long ones and other paces as asked
-        XCTAssertEqual(CommandChannel.padShort("move 76 0", step: 60, pace: 30), "move 160 0")
-        XCTAssertEqual(CommandChannel.padShort("move 0 -332", step: 60, pace: 30), "move 0 -480")
+        // 188: the table measured on 187 (sent → went), and never under 80 (less does not move it)
+        XCTAssertEqual(CommandChannel.padShort("move 78 0", step: 60, pace: 30), "move 126 0")
+        XCTAssertEqual(CommandChannel.padShort("move 0 -347", step: 60, pace: 30), "move 0 -445")
+        XCTAssertEqual(CommandChannel.padShort("move 20 0", step: 60, pace: 30), "move 80 0")
+        XCTAssertEqual(CommandChannel.padShort("move 0 -30", step: 60, pace: 30), "move 0 -80")
         XCTAssertNil(CommandChannel.padShort("move 700 0", step: 60, pace: 30))
         XCTAssertNil(CommandChannel.padShort("move 76 0", step: 40, pace: 20))
         XCTAssertNil(CommandChannel.padShort("stroke 76 0", step: 60, pace: 30))

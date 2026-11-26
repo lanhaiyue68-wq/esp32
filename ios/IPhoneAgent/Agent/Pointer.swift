@@ -99,6 +99,7 @@ import Foundation
             // (752 x 1002), so every probe after it was too): the gate gets this same span with this place.
             CommandChannel.padSpan = (Int(w), Int(h))
             CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
+            CommandChannel.padUnseenUnits = 0  // 188: just seen there
             let before = screen.frame, sent = now()
             guard (try? await device.send("move \(ux) \(uy)")) != nil, let before,
                   let after = await stopped(since: sent, on: screen, wait: 0.9),
@@ -119,6 +120,7 @@ import Foundation
         log(String(format: "ipad home: the arrow at (%.3f, %.3f); a screen ~%.0f x %.0f units", Double(p.x), Double(p.y), w, h))
         CommandChannel.padSpan = (Int(w), Int(h))
         CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
+        CommandChannel.padUnseenUnits = 0  // 188: just seen there
         Self.padHomeSpot = p
         return nil
     }
@@ -232,7 +234,8 @@ import Foundation
         guard abs(units) >= 400, abs(moved) >= 0.08, span > 0 else { return g }
         let fresh = Double(units) / (Double(span) * moved)
         guard fresh > 0, (0.8...1.25).contains(fresh / g) else { return g }
-        return min(1.15, max(0.85, 0.6 * g + 0.4 * fresh))
+        // 188 (B43): one hop moves the gain by 0.02 at most (187: one hop from a wrong start took y from 1.007 to 0.954)
+        return min(1.15, max(0.85, min(g + 0.02, max(g - 0.02, 0.6 * g + 0.4 * fresh))))
     }
 
     /// 187: the units of an iPad move from where the pointer was last seen to (x, y); nil when that is not known
@@ -249,7 +252,14 @@ import Foundation
     private func padMove(_ x: Double, _ y: Double) async throws -> Bool {
         guard let units = padHop(to: x, y), let p = CommandChannel.padPos else { return false }
         let s = CommandChannel.padSpan
-        padHopFrom = (CGPoint(x: Double(p.x) / Double(s.w), y: Double(p.y) / Double(s.h)), units)
+        // 188 (B43): only a hop from where the pointer was just seen teaches the gain
+        let reckoned = CommandChannel.padUnseenUnits
+        if reckoned <= CommandChannel.padFreshUnits {
+            padHopFrom = (CGPoint(x: Double(p.x) / Double(s.w), y: Double(p.y) / Double(s.h)), units)
+        } else {
+            padHopFrom = nil
+            log("ipad gain: this hop starts where the pointer was reckoned, not seen (\(min(reckoned, 999_999)) units since); it teaches nothing")
+        }
         pos = nil  // unknown until the move succeeds
         try await device.send("move \(units.0) \(units.1)")
         CommandChannel.padPos = (Int((x * Double(s.w)).rounded()), Int((y * Double(s.h)).rounded()))
@@ -520,8 +530,13 @@ import Foundation
         // A swipe that does not start on the border is no click: 0.9 % off (0.859 for 0.850, turning a Home Screen page)
         // failed the whole open, and three of those stopped a run over USB 11-09.
         let swipeStart = edgeStart && !(x <= 0.01 || x >= 0.99 || y <= 0.01 || y >= 0.99)
-        let tolerance = (x: swipeStart || (edgeStart && (y <= 0.01 || y >= 0.99)) ? Self.edgeAlongTolerance : Self.aimTolerance,
-                         y: swipeStart || (edgeStart && (x <= 0.01 || x >= 0.99)) ? Self.edgeAlongTolerance : Self.aimTolerance)
+        // 188 (B44, user 11-27 on 187's back arrow: "其實第一下已經到地方了，但是我不知道為什么還微調一下"): the first stop
+        // was on the arrow (0.014 for 0.029, 0.035 for 0.029) and was corrected anyway, as aim knew only 0.008. A caller
+        // that knows its button's size (aimHalf) has a first stop anywhere on it clicked as it is.
+        let loose = aimHalf
+        aimHalf = nil
+        let tolerance = (x: swipeStart || (edgeStart && (y <= 0.01 || y >= 0.99)) ? Self.edgeAlongTolerance : max(Self.aimTolerance, loose?.x ?? 0),
+                         y: swipeStart || (edgeStart && (x <= 0.01 || x >= 0.99)) ? Self.edgeAlongTolerance : max(Self.aimTolerance, loose?.y ?? 0))
         func onTarget(_ p: CGPoint) -> Bool {
             abs(error(Double(p.x), x)) <= tolerance.x && abs(error(Double(p.y), y)) <= tolerance.y
         }
@@ -576,6 +591,9 @@ import Foundation
                 continue
             }
             let mx = Int((error(fx, x) * gain.w).rounded(.toNearestOrEven)), my = Int((error(fy, y) * gain.h).rounded(.toNearestOrEven))
+            // 188 (B44): 187 corrected here without a word, and its log read "straight to the arrow" though it had stopped
+            log(String(format: "aim (%.3f, %.3f): seen at (%.3f, %.3f), off by more than (±%.3f, ±%.3f); correcting by %ld, %ld units",
+                       x, y, fx, fy, tolerance.x, tolerance.y, mx, my))
             if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
             if let p = pos { pos = (p.0 + mx, p.1 + my) }
             guard let p = try await find(x, y) else { return try await lost() }
@@ -1112,6 +1130,7 @@ import Foundation
     static func syncPad(_ seen: CGPoint) {
         guard CommandChannel.onPad() else { return }
         CommandChannel.padPos = (Int(Double(seen.x) * Double(CommandChannel.padSpan.w)), Int(Double(seen.y) * Double(CommandChannel.padSpan.h)))
+        CommandChannel.padUnseenUnits = 0  // 188: just seen there
     }
 
     /// 184: on an iPad the red pointer (指针控制 › 颜色) is found in the frame itself first; the change between frames after.
@@ -1308,6 +1327,8 @@ import Foundation
     static let arrivalTolerance = 0.008
     /// Half the width and height (0-1) of what the next tap is for, when known: a first stop inside it is clicked as it is.
     var targetHalf: (x: Double, y: Double)?
+    /// 188 (B44): the same for an aimed click (aim: true), used once: a back arrow's first stop anywhere on it is clicked.
+    var aimHalf: (x: Double, y: Double)?
     func aimLoosely(_ halfX: Double, _ halfY: Double) {
         guard UserDefaults.standard.object(forKey: "tapTargetToleranceV1") as? Bool ?? true else { return }
         targetHalf = (min(max(halfX, 0), 0.2), min(max(halfY, 0), 0.035))

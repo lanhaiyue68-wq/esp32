@@ -11,6 +11,7 @@ import Network
     private var listener: NWListener?
     private var pending: [KeyboardLink.Job] = []
     private var waiting: [String: CheckedContinuation<Bool, Never>] = [:]
+    private var timedOut: Set<String> = []  // 188: jobs ended by the wait, not by the keyboard's answer
     private let port: UInt16
 
     /// `port`: the keyboard's (KeyboardLink.port); tests use their own, since the app they run in listens there.
@@ -66,10 +67,13 @@ import Network
             waiting[job.id] = continuation
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+                if self?.waiting[job.id] != nil { self?.timedOut.insert(job.id) }
                 self?.finish(job.id, ok: false)
             }
         }
-        DebugLog.write("keyboard bridge: \(ok ? "typed by the keyboard" : "not picked up within \(Int(seconds)) s")")
+        // 188 (B41): 187 said "not picked up within 5 s" 1.4 s after queueing, when the keyboard had answered "not sent"
+        let late = timedOut.remove(job.id) != nil
+        DebugLog.write("keyboard bridge: \(ok ? "typed by the keyboard" : late ? "not picked up within \(Int(seconds)) s" : "the keyboard says not done (\(enter ? "the field still held the text after the return, or held other words" : "not typed"))")")
         return ok
     }
 

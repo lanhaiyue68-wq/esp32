@@ -249,7 +249,14 @@ extension HIDDevice {
     /// Measured at 60 counts / 30 ms on v38 (11-25, every round trip the same each way): 160 units went 42 px, 320 → 101,
     /// 480 → 183, 640 → 312, and longer moves (curves from 640 on, PadCurve.shortest) ~0.55 px a unit. As app units
     /// (px / 0.55): what a move should go → what to send. Only for that pace; other paces send as they are.
-    static let padShortTable: [(want: Double, send: Double)] = [(0, 0), (76, 160), (184, 320), (332, 480), (568, 640), (640, 700)]
+    /// 188 (B42, Echo 187, 11-27, 辅助触控 on, v41): measured again, each size sent +/- (the same to a frame px both
+    /// ways, x and y alike). The old table sent too much (asked 80 went 116, 100 → 140, 130 → 165: corrections went
+    /// past and came back) and too little at the bottom (asked 30, sent 63: the pointer never moved; three corrections
+    /// and a start over from the corner). Sent → went: 63 → 0, 80 → 36, 95 → 52, 105 → 60, 126 → 78, 166 → 118,
+    /// 196 → 142, 240 → 166, 284 → 202, 359 → 268, 445 → 347, 526 → 455, 594 → 564, 667 → 657. Under 36, 80 (the
+    /// least that moves it, ~6 px: inside the tolerance either way).
+    static let padShortTable: [(want: Double, send: Double)] = [(0, 0), (1, 80), (36, 80), (52, 95), (60, 105), (78, 126),
+        (118, 166), (142, 196), (166, 240), (202, 284), (268, 359), (347, 445), (455, 526), (564, 594), (657, 667)]
     static let padShortStep = 60, padShortPace = 30
     static func padShort(_ command: String, step: Int? = nil, pace: Int? = nil) -> String? {
         guard (step ?? padStep) == padShortStep, (pace ?? padPaceMs) == padShortPace else { return nil }
@@ -261,6 +268,17 @@ extension HIDDevice {
         let sendLen = a.send + (b.send - a.send) * (len - a.want) / (b.want - a.want)
         let k = sendLen / len
         return "move \(Int((Double(dx) * k).rounded())) \(Int((Double(dy) * k).rounded()))"
+    }
+    /// 188 (B43, 11-27): app units the pointer was moved by reckoning (sent, not seen) since it was last seen. 187
+    /// learned the gain from a hop whose start had been reckoned over ~60 strokes sent from the computer: it was
+    /// 0.037 off and one hop took the y gain from 1.007 to 0.954. A hop whose start was reckoned over more than
+    /// `padFreshUnits` (the 25 s keep-alive wiggles add 34 a pair) teaches the gain nothing.
+    static var padUnseenUnits = Int.max / 2
+    static let padFreshUnits = 1500
+    static func padReckoned(_ command: String) {
+        let parts = command.split(separator: " ")
+        guard let verb = parts.first, verb == "move" || verb == "stroke" else { return }
+        padUnseenUnits = min(Int.max / 2, padUnseenUnits + parts.dropFirst().compactMap { Int($0) }.reduce(0) { $0 + abs($1) })
     }
     static let padPosKey = "padPointerPosV1"
     /// Where the pointer is on the iPad, in app units from the top-left corner; nil when not known. Kept across launches
@@ -329,6 +347,7 @@ extension HIDDevice {
         do {
             let reply = try await sendWatched(sent)
             Self.padPos = Self.padTrack(command, from: Self.padPos, span: Self.padSpan)  // app units, as asked
+            Self.padReckoned(command)  // 188
             padHeld = Self.heldAfter(sent, was: padHeld)
             return reply
         } catch {
@@ -357,6 +376,7 @@ extension HIDDevice {
             throw error
         }
         Self.padPos = Self.padTrack(command, from: from, span: Self.padSpan)
+        Self.padReckoned(command)  // 188
         return ""
     }
 
@@ -377,6 +397,7 @@ extension HIDDevice {
             throw error
         }
         Self.padPos = Self.padTrack("move \(dx) 0", from: from, span: Self.padSpan)
+        Self.padReckoned("move \(dx) 0")  // 188
     }
 
     /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known, no button is down (a drag

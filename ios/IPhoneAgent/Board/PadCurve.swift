@@ -16,6 +16,14 @@ import Foundation
 /// bow (control points `b` off the line: 14 px of a 0.14 bow, 4 px of a 0.05 one, either side) and short by ~0.8 of
 /// the length the bow adds (2 % at 0.12). So the bow is 6–12 % (was 10–18 %, k1 ≠ k2 made it worse: 17 px at 0.18) and
 /// the end aimed at is moved against both: 10 hops between blank spots then landed within 8 px but two long ones (17).
+///
+/// 188 (B42, user 11-27 on 187: "你到那個位置的時候，還要稍微微調一下，然后才點。你這也叫一次到位嗎？"): 187 still
+/// corrected 3 of 4 diagonal taps. Raw strokes sent from the computer (moves only, Echo's home page, 11-27) landed the
+/// same twice to 1–6 px, and the bow's share was half of 187's: ~0.10 of the offset toward the bow (6 %: ~4 px, 12 %:
+/// ~10 px, either side, either way), and a 6 % bow comes no shorter (12 % came 0–11 px short by direction). With a
+/// 5–8 % bow, 0.10 across and nothing along, 40 hops to random spots landed 31 inside the 0.008 tolerance (187's
+/// constants ~1 in 4); the rest is ±1 % that no per-direction gain removed. The user: "弧度還是要隨機，包括每一次的長度
+/// 都要隨機…可以小一點，但是不能固定": the bow, its side, where it bulges and the number of pieces are all random.
 enum PadCurve {
     /// Shorter moves stay one `move` (a bow of a few units shows nothing and only slows the pointer). 174: 640, the
     /// shortest fast move iPadOS takes at full gain; a shorter one goes straight, lengthened by CommandChannel.padShort.
@@ -33,7 +41,7 @@ enum PadCurve {
         guard onScreen(p0), onScreen(p3) else { return nil }  // a push past an edge stays straight
         let ux = Double(d.x) / len, uy = Double(d.y) / len
         let a = random(0.25...0.38), z = 1 - a  // the same either end: the bow goes out and comes back alike
-        var bow = len * random(0.06...0.12)
+        var bow = len * random(0.05...0.08)  // 188: was 0.06–0.12
         let first: Double = random(0...1) < 0.5 ? -1 : 1
         var found: (c1: (x: Double, y: Double), c2: (x: Double, y: Double), off: (x: Double, y: Double))?
         for _ in 0..<4 where found == nil {  // near an edge: the other side, then a smaller bow
@@ -63,7 +71,7 @@ enum PadCurve {
         let a1 = (x: p0.x + e.x * a + off.x, y: p0.y + e.y * a + off.y)
         let a2 = (x: p0.x + e.x * z + off.x, y: p0.y + e.y * z + off.y)
         let end = (x: Int(e.x.rounded()), y: Int(e.y.rounded()))
-        let n = min(maxPieces, max(8, Int(len / 80)))
+        let n = min(maxPieces, max(8, Int(len / 80 * random(0.9...1.1))))  // 188: how long it takes varies too
         var pieces: [String] = []
         var last = (x: 0, y: 0)
         for i in 1...n {
@@ -75,9 +83,11 @@ enum PadCurve {
         return "stroke " + pieces.joined(separator: " ")
     }
     /// 187: of the bow's offset (control points off the line), the share a curved move lands off toward it.
-    static let acrossKept = 0.22
+    /// 188: 0.10 measured (was 0.22, which pushed every curve ~as far the other way).
+    static let acrossKept = 0.10
     /// 187: of the length a bow adds to the path, the share a curved move comes short by.
-    static let alongLoss = 0.8
+    /// 188: a bow of 5–8 % comes no shorter (was 0.8).
+    static let alongLoss = 0.0
 
     // 174 (user 11-25: "滑屏幕左边的时候，贝塞尔曲线往左滑，就像我们的大拇指滑屏幕一样；右边的时候用右滑"): an iPad swipe
     // goes as a thumb's does. It sets off the way it was asked (so a list locks onto that direction, and a row is

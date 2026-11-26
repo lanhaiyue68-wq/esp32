@@ -139,11 +139,35 @@ enum WatchOCR {
     /// 182 (Echo 181, 11-26: WeCom's line to 企微测试群 dropped in over WeChat's 测试群 as a banner, and was reported as
     /// 测试群's): an in-app banner sits in the title bar's band, left-aligned, "name: message". The chat's own title is
     /// centred and has no colon there. While one shows, the chat is not read (it goes in a few seconds).
-    static func bannerShown(_ pieces: [CandidatePicker.Piece]) -> Bool {
-        pieces.contains { p in
-            (0.02...0.14).contains(Double(p.box.midY)) && Double(p.box.minX) < 0.3 && p.text.count >= 4
+    static func bannerShown(_ pieces: [CandidatePicker.Piece]) -> Bool { bannerPiece(pieces) != nil }
+    /// 188 (B45, Echo 187, 11-27: twice the owner's line in 测试群 was lost under its red mark, nothing logged): a
+    /// window's words are read from its very top, so WeChat's window had the iPad's status bar in them, 「◀企业微信 01:00
+    /// 11月27日周五 微信」 at y ~0.016 with its time's colon, on the band's top edge (0.02): a box a little lower made every
+    /// read of the chat "under a banner", so not read at all. A banner's line with a colon is its message, under its
+    /// title (~0.05–0.10): from 0.03 down; the status bar and a chat's own time labels are never one.
+    /// 188 (B45 again, Echo 187, 11-27 17:35: WeCom's 企微测试群 opened for a quote and a video, nothing read, nothing
+    /// logged: 小藍's own blue line 「【模拟服务器】收到：［图片］」 sat at the window's top, from 0.26 across, a colon in
+    /// it): a banner is two lines, its title and right under it its message, starting at the same place; one line with
+    /// a colon is none.
+    static func bannerPiece(_ pieces: [CandidatePicker.Piece]) -> CandidatePicker.Piece? {
+        pieces.first { p in
+            (0.03...0.14).contains(Double(p.box.midY)) && Double(p.box.minX) < 0.3 && p.text.count >= 4
                 && (p.text.contains(":") || p.text.contains("："))
+                && !(Double(p.box.midY) < 0.045 && statusBar(p.text)) && !WatchReport.timeLabel(p.text)
+                && pieces.contains { t in
+                    !(t.box == p.box && t.text == p.text) && (0.012...0.05).contains(Double(p.box.midY - t.box.midY))
+                        && abs(Double(t.box.minX - p.box.minX)) <= 0.04
+                }
         }
+    }
+    /// 188 (B45): under a banner the window is still read, its top (the banner's band) left out: the new lines are at
+    /// the bottom, and nothing is lost when the banner was not one.
+    static let bannerBand = 0.15
+    /// 188: the iPad's status bar as read: a time with a date or weekday, or the ◀ back to the app before.
+    static func statusBar(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        return t.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) != nil
+            && (t.contains("月") || t.contains("周") || t.contains("星期") || t.hasPrefix("◀") || t.hasPrefix("<"))
     }
 
     /// A read line: what the recognizer found and what it sits on.
@@ -212,11 +236,12 @@ enum WatchOCR {
         guard let px = Pixels(jpeg) else { return nil }
         let bottom = px.inputTop(from: 0.12) ?? 0.95
         let read = Array((rows ?? CandidatePicker.rows(in: jpeg, top: 0.08, bottom: bottom)).joined())
-        if banner && bannerShown(read) { return nil }
+        let top = banner && bannerShown(read) ? bannerBand : 0.085  // 188 (B45): the banner's band left out, not the window
         let pieces = read
-            .filter { Double($0.box.minY) > 0.085 && Double($0.box.maxY) < bottom }
+            .filter { Double($0.box.minY) > top && Double($0.box.maxY) < bottom }
             .map { Piece(text: $0.text, box: $0.box, kind: kind($0.box, px)) }
-        return lines(bySide(pieces, px), title: title)
+        // 188: voice notes, videos and pictures as lines of their own; words read off a picture are none
+        return lines(bySide(XiaoLanMediaFind.withMedia(pieces, px, top: top, bottom: bottom), px), title: title)
     }
 
     /// 173 (user 11-25 on WeCom: "我發的那個泡泡…他就還是白色嘛"): who wrote a bubble is the side its avatar is on, not

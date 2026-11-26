@@ -57,6 +57,8 @@ enum KeyboardLink {
     /// nothing; 183's ~0.8 s sent), and how long after the return the field is looked at again.
     static let returnDelay = 0.8
     static let sentCheckDelay = 0.35
+    /// 188 (B41): the field is looked at again this often, for this long after the return, before "not sent".
+    static let sentCheckEvery = 0.15, sentCheckWindow = 1.5
 
     /// 185: after the return, the field still holds `text` (a new line after it at most): it was not sent.
     static func stillHolds(_ text: String, before: String?) -> Bool {

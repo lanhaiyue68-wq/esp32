@@ -36,7 +36,48 @@ struct PaneWatchState {
     var cancelFails: [Int: Int] = [:], cancelPause: [Int: Double] = [:]
     /// 184: the windows left on a news or team account's page (its back missed): back again on the next look.
     var systemOpen: Set<Int> = []
+    /// 188: voice notes, videos, pictures, files and links read and not reported yet: opened, looked at and reported
+    /// right after the read (XiaoLanMediaRead), the other window waiting meanwhile.
+    var media: [MediaJob] = []
+    /// 188 (user 11-27): what WeCom's window shows this pass (its marked chats, the chat it has open), and when WeChat
+    /// first saw each WeCom group's mark: WeChat leaves such a mark to WeCom first.
+    var weworkMarked: Set<String> = [], weworkOpen: String?
+    var leftToWeCom: [String: Double] = [:]
+    /// 188 (user 11-27: 「先收到的消息先回」): when each chat's red mark was first seen ("wechat|测试群"), so the one that
+    /// came first is opened first, whichever window it is in; looked at during the waits for a reply too.
+    var markSeen: [String: Double] = [:]
+    var lastMarkNote = -Double.infinity
+    /// 188 (大藍's joinVoiceText): per chat, the words its voice notes were turned into here: their lines are no news.
+    var echoes: [String: [String]] = [:]
+    /// 188 (大藍's missedLine): when each chat was left for the list, and the list preview already opened again for.
+    var leftAt: [String: Double] = [:]
+    var missedOpened: [String: String] = [:]
 }
+
+/// 188: which order goes next and which mark is opened next, by when things came (pure: tested).
+enum PaneTurns {
+    /// Of each link's earliest waiting turn, the earliest (its index and turn); nil when one asked earlier still waits
+    /// for its QA reply (that one goes first) or nothing waits.
+    static func next(firsts: [Int?], asking: [Int?]) -> (index: Int, turn: Int)? {
+        let waiting = firsts.enumerated().compactMap { i, f in f.map { (index: i, turn: $0) } }
+        guard let best = waiting.min(by: { $0.turn < $1.turn }) else { return nil }
+        if let earlier = asking.compactMap({ $0 }).min(), earlier < best.turn { return nil }
+        return best
+    }
+
+    /// The mark to open first in a window: the one first seen earliest; seen together, the lower row (its chat's last
+    /// line is older).
+    static func first(_ marks: [(name: String, at: CGPoint)], seen: (String) -> Double) -> (name: String, at: CGPoint)? {
+        marks.min { a, b in
+            let (sa, sb) = (seen(a.name), seen(b.name))
+            return sa != sb ? sa < sb : a.at.y > b.at.y
+        }
+    }
+}
+
+@MainActor private var paneHeldTurn = 0
+/// 188: each window's last full read and its grey grid, for a window unchanged since then (paneLooks(reuse:)).
+@MainActor private var paneLookCache: [Int: (sig: [UInt8], look: AppModel.PaneLook, at: Double)] = [:]
 
 extension AppModel {
     /// A window seen once: where it is, its picture and words, what it shows.
@@ -49,7 +90,7 @@ extension AppModel {
         var waitingLogged = false
         DebugLog.write("watch: 小藍 side by side: WeChat and WeCom both watched, either side, no model")
         while watching && !Task.isCancelled {
-            if let order = chatTool.nextCommand() ?? weworkTool.nextCommand() {
+            if let order = paneNextOrder() {  // 188: in the order the messages came, both apps together
                 await paneOrder(order, &state)
                 continue
             }
@@ -57,6 +98,12 @@ extension AppModel {
             // 回了，然後再去點啟微的…反過來也是一樣的"): while a line just read waits for its QA reply (15 s at most), nothing
             // else is looked at; its chat stays open and the reply, an order, goes in first.
             if repliesComing {
+                // 188: the marks that come meanwhile are noted (not opened), so they go in the order they came
+                if now() - state.lastMarkNote > 1.0, board.connected, feed.watchable {
+                    state.lastMarkNote = now()
+                    let seen = await paneLooks()
+                    paneNoteMarks(seen, &state)
+                }
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 continue
             }
@@ -79,10 +126,12 @@ extension AppModel {
             watchStatus = "正在同时守候微信和企业微信…"
             // 183 (Echo 182 overnight, 11-26: "【小益心山』104上1VULO" read off a window still scrolling): read at rest.
             await feed.settled(quiet: 0.2, least: 0, most: 0.8)
-            let looks = await paneLooks()
+            let looks = await paneLooks(reuse: true)  // 188: a window unchanged since the last pass is not read again
             paneTell(looks, &state)
+            paneNoteWeCom(looks, &state)  // 188
+            paneNoteMarks(looks, &state)  // 188
             await paneNoAppsCheck(looks, &state)
-            for look in looks {
+            for look in paneByTurn(looks, state) {
                 guard watching, !Task.isCancelled else { break }
                 // 183 (Echo 182 overnight, 11-26: an order waited 13–25 s for the other window's back to its list): an
                 // order first; the rest of the pass waits.
@@ -167,7 +216,7 @@ extension AppModel {
     /// 184 (C15b): the two windows brought back as by hand (XiaoLanRecall): 辅助触控's button when the Dock is not in
     /// view, then the Dock's WeCom, then WeChat; every click only on the pointer seen there (paneSeenTap). True when both
     /// apps' windows are in view after.
-    private func paneRecall(attempt n: Int) async -> Bool {
+    func paneRecall(attempt n: Int) async -> Bool {
         func dock() async -> (wechat: CGPoint?, wework: CGPoint?) {
             await feed.settled(quiet: 0.3, least: 0.2, most: 2)
             guard let frame = feed.frame, let px = WatchOCR.Pixels(frame) else { return (nil, nil) }
@@ -209,7 +258,8 @@ extension AppModel {
     /// window's words cost a text recognition; a check after a tap needs only the window tapped).
     /// 183 (Echo 182 overnight, 11-26: each look read the whole window, ~1 s, two or three per line sent): `band`
     /// reads that part of it only (the title band tells a chat or the list).
-    func paneLooks(after since: Double? = nil, side only: Int? = nil, band: (top: Double, bottom: Double)? = nil) async -> [PaneLook] {
+    func paneLooks(after since: Double? = nil, side only: Int? = nil, band: (top: Double, bottom: Double)? = nil,
+                   reuse: Bool = false) async -> [PaneLook] {
         // 184 (Echo 183, 11-26: every look after a tap waited for 0.5 s of a still screen): 0.25 s; a look taken while
         // the window still moves is looked at again by paneLook anyway.
         if since != nil { await feed.settled(quiet: 0.25, least: 0.15, most: 2.5) }
@@ -219,13 +269,24 @@ extension AppModel {
         for (i, r) in rects.enumerated() {
             if let only, only != (rects.count == 1 ? 2 : i) { continue }
             guard let crop = XiaoLanPanes.crop(frame, r) else { continue }
+            let side = rects.count == 1 ? 2 : i
+            // 188 (大藍's watch compares the screen before it reads it): the main loop's window that has not changed
+            // since its last read (no point of a 48×96 grey grid moved by more than 10) is not read again, at most for 3 s
+            let sig = WatchOCR.Pixels(crop).map { XiaoLanMediaFind.signature($0) } ?? []
+            if reuse, band == nil, let kept = paneLookCache[side], kept.look.rect == r, now() - kept.at < 3,
+               XiaoLanMediaFind.sameSignature(kept.sig, sig) {
+                looks.append(kept.look)
+                continue
+            }
             let rows = await CandidatePicker.rowsOffMain(in: crop, top: band?.top ?? 0, bottom: band?.bottom ?? 1)
             var view = XiaoLanPanes.view(rows)
             // 181: a list whose words were not read (title nor tab bar) is still told by its tab's colour, at any width.
             if view == .unknown, XiaoLanPanes.cancelButton(rows) == nil, let px = WatchOCR.Pixels(crop), XiaoLanPanes.tabApp(px) != nil {
                 view = .list
             }
-            looks.append(PaneLook(side: rects.count == 1 ? 2 : i, rect: r, crop: crop, rows: rows, view: view))
+            let look = PaneLook(side: side, rect: r, crop: crop, rows: rows, view: view)
+            if band == nil { paneLookCache[side] = (sig, look, now()) }
+            looks.append(look)
         }
         return looks
     }
@@ -233,7 +294,7 @@ extension AppModel {
     /// The same window again after a gesture, up to `tries` looks 0.5 s apart until `done` says so.
     /// 182: only that window is read, and the waits are shorter (0.3 + 0.2 s were 0.15 + 0.1 s): the wait for a new
     /// frame after the action is already in `paneLooks(after:)`.
-    private func paneLook(_ side: Int, after since: Double, tries: Int = 4, band: (top: Double, bottom: Double)? = nil,
+    func paneLook(_ side: Int, after since: Double, tries: Int = 4, band: (top: Double, bottom: Double)? = nil,
                           until done: (PaneLook) -> Bool) async -> PaneLook? {
         var last: PaneLook?
         var t = since
@@ -250,7 +311,12 @@ extension AppModel {
     /// `tall`: how far off the spot (screen fraction, up or down) still counts as on it.
     /// 183 (user's rule "視窗頂端看不到游標一律不點"; Echo 182 overnight, 11-26: a 取消 clicked unseen opened WeChat's ＋
     /// menu): by a window's top a click goes only where the pointer is seen on the spot; unseen, nothing is clicked.
-    private func paneTap(_ p: CGPoint, in r: CGRect, wide: Double = 0.3, tall: Double = 0.015) async -> Bool {
+    /// 188 (B44, Echo 187, 11-27: a red mark's row seen 0.021 below its name was corrected, though on the row): a
+    /// list row is ~0.078 tall and the spot is its name, 0.027 below the row's top: within 0.025 is on the row.
+    static let rowTall = 0.025
+    /// 188 (B46): how far over or under an input field's middle still counts as on it.
+    static let fieldTall = 0.010
+    func paneTap(_ p: CGPoint, in r: CGRect, wide: Double = 0.3, tall: Double = 0.015) async -> Bool {
         let s = XiaoLanPanes.onScreen(p, in: r)
         if Double(p.y) < XiaoLanPanes.topBand { return await paneSeenTap(s, half: (wide * Double(r.width), tall)) }
         pointer.aimLoosely(wide * Double(r.width), tall)
@@ -264,8 +330,10 @@ extension AppModel {
     /// 184 (Echo 183, 11-26: the pointer seen 0.007 off the menu's bare spot, and 0.026 off in a search box 0.44 wide,
     /// counted as unseen; nothing was ever clicked): seen anywhere within `half` of the spot (the button's own size) is
     /// enough.
-    private func paneSeenTap(_ s: CGPoint, half: (x: Double, y: Double)) async -> Bool {
+    func paneSeenTap(_ s: CGPoint, half: (x: Double, y: Double)) async -> Bool {
         let at = String(format: "%.3f, %.3f", s.x, s.y)
+        pointer.aimHalf = half  // 188 (B44): a first stop on the button is clicked, not corrected toward its middle
+        defer { pointer.aimHalf = nil }
         do { try await pointer.point(Double(s.x), Double(s.y), aim: true, rehome: false) } catch {
             DebugLog.write("watch: tap at (\(at)) by a window's top: \(error.localizedDescription); nothing clicked")
             return false
@@ -357,7 +425,11 @@ extension AppModel {
         var look = look
         var waited = 0.0
         while WatchOCR.bannerShown(Array(look.rows.joined())), waited < 5 {
-            if waited == 0 { DebugLog.write("watch: \(who): a banner over the window's top; back after it goes") }
+            // 188 (B45): what was taken for the banner is said (187: ten of these on WeChat, none on WeCom, two with nothing coming in)
+            if waited == 0 {
+                let p = WatchOCR.bannerPiece(Array(look.rows.joined()))
+                DebugLog.write("watch: \(who): a banner over the window's top; back after it goes (「\(p?.text ?? "")」 at y \(String(format: "%.3f", Double(p?.box.midY ?? 0))))")
+            }
             try? await Task.sleep(nanoseconds: 500_000_000)
             waited += 0.5
             guard let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }) else { break }
@@ -374,7 +446,7 @@ extension AppModel {
         return await paneBackClick(after, who)
     }
 
-    private func paneBackClick(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
+    func paneBackClick(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
         let arrow = XiaoLanPanes.onScreen(XiaoLanPanes.back, in: look.rect)
         // 187 (user 11-26: "從A點到B點，停頓一下，然後再到C點…中間為什麼要停頓，而不是直接就點過去"; B33, Echo 186, 11-26:
         // the blind hop up from the stop below the arrow fell short with 辅助触控's speed-up and clicked the top message's
@@ -383,7 +455,8 @@ extension AppModel {
         if !refound {
             let windows = await paneWindowCount()
             let t = now()
-            if await paneSeenTap(arrow, half: (0.012, 0.012)) {
+            // 188 (B44): the arrow's own size; 187's first stops at 0.014 and 0.035 for 0.029 were on it (the user saw)
+            if await paneSeenTap(arrow, half: (0.02, 0.012)) {
                 DebugLog.write("watch: \(who): back: " + String(format: "straight to the arrow (%.3f, %.3f), seen on it", Double(arrow.x), Double(arrow.y)))
                 if windows == 2, await paneWindowCount(after: t) == 1 {
                     DebugLog.write("watch: a window is gone after the back arrow; watch stopped")
@@ -438,7 +511,12 @@ extension AppModel {
             state.quietSince[look.side] = nil
             state.systemOpen.remove(look.side)  // 184
             guard let app = state.apps[look.side], let image = UIImage(data: look.crop)?.cgImage else { return }
-            guard let hit = XiaoLanPanes.marked(look.rows, red: { Vision.redShare(image, in: $0) }).first else {
+            let marks = XiaoLanPanes.marked(look.rows, red: { Vision.redShare(image, in: $0) })
+            let hits = app == .wechat ? paneLeaveToWeCom(marks, look.rows, &state) : marks  // 188
+            var next = PaneTurns.first(hits, seen: { state.markSeen["\(app.rawValue)|\($0)"] ?? now() })
+            if next == nil, hits.count == marks.count { next = paneMissedLine(look, app, &state) }  // 188
+            guard let hit = next else {
+                if hits.count < marks.count { return }  // 188: only WeCom groups marked, left to WeCom for now
                 // 183 (user 11-25: "所有紅點都要消失"): no chat marked: a news or team account's mark is opened, read
                 // into the notices (never reported), and the window goes back to its list.
                 if let news = XiaoLanPanes.systemMarked(look.rows, red: { Vision.redShare(image, in: $0) }).first {
@@ -447,7 +525,7 @@ extension AppModel {
                 return
             }
             DebugLog.write("watch: \(app.rawValue): red mark on \(hit.name); opening it")
-            guard await paneTap(hit.at, in: look.rect) else { return }
+            guard await paneTap(hit.at, in: look.rect, tall: Self.rowTall) else { return }
             let opened = await paneLook(look.side, after: now()) { l in
                 if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: hit.name) }
                 return false
@@ -468,9 +546,31 @@ extension AppModel {
                 }
                 DebugLog.write("watch: \(app.rawValue): \(hit.name)'s row opened \(title) (the list moved); read as opened by its mark")
             }
-            paneRead(app, chat, title: title, fromMark: true,
-                     markSender: same ? XiaoLanPanes.previewSender(look.rows, of: hit.name) : nil,
-                     markPreview: same ? XiaoLanPanes.previewText(look.rows, of: hit.name) : nil, &state)
+            let markSender = same ? XiaoLanPanes.previewSender(look.rows, of: hit.name) : nil
+            let markPreview = same ? XiaoLanPanes.previewText(look.rows, of: hit.name) : nil
+            if same && markPreview == nil { DebugLog.write("watch: \(app.rawValue): \(hit.name): its preview was not read on the list") }
+            // 188 (B45): a window not read (a banner over its top) is looked at again, a second apart, for up to 6 s (a
+            // banner stays ~5 s); the other window waits meanwhile, so the line that came first is answered first. The
+            // last try takes the mark's preview if the window still cannot be read.
+            var current = (look: chat, title: title)
+            for attempt in 0..<7 {
+                let done = paneRead(app, current.look, title: current.title, fromMark: true, markSender: markSender,
+                                    markPreview: markPreview, lastTry: attempt == 6, &state)
+                if done >= 0 { break }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let name = WatchOCR.titled(title).name
+                guard let again = await paneLook(look.side, after: now(), until: { l in
+                    if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: name) }
+                    return false
+                }), case .chat(let t) = again.view, WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: name) else {
+                    DebugLog.write("watch: \(app.rawValue): \(name) is no longer in its window; its preview's line taken")
+                    _ = paneRead(app, current.look, title: current.title, fromMark: true, markSender: markSender,
+                                 markPreview: markPreview, lastTry: true, &state)
+                    break
+                }
+                current = (again, t)
+            }
+            await paneMediaRun(&state)  // 188
             state.quietSince[look.side] = now()
         case .chat(let title):
             // 187 (user 11-27: a sheet over the chat — "點那個叉…都可以把這個聊天框給它關掉"): another chat open over this one
@@ -531,6 +631,10 @@ extension AppModel {
             if paneRead(app, look, title: title, fromMark: fromMark, &state) > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
+            if !state.media.isEmpty {  // 188
+                await paneMediaRun(&state)
+                state.quietSince[look.side] = now()
+            }
             // The engines watch the whole list: a chat that stays quiet is left for the list (its red marks). 182 (user
             // 11-26: "速度太慢了"): 5 s, was 8 s (other chats' messages waited that long first).
             // 183: not while an order waits (it may be for this chat, and it goes first).
@@ -538,6 +642,7 @@ extension AppModel {
                 DebugLog.write("watch: \(app.rawValue): \(title) quiet; back to the list")
                 _ = await paneBack(look, app.rawValue)
                 state.quietSince[look.side] = nil
+                state.leftAt["\(app.rawValue)|\(WatchOCR.titled(title).name)"] = now()  // 188 (missedLine)
             }
         case .unknown:
             // 184: a news or team account's page left open (its back missed): back again.
@@ -571,6 +676,116 @@ extension AppModel {
         }
     }
 
+    /// 188 (user 11-27: 「假如第一條是企微，第二條來的是個微的，第三條來的又是企微的，那麽回復順序就是先企微，然後接第二個
+    /// 個微，最後再回去做第三條企微的…都要按收到的順序依次回復」): the next order in turn, both apps together (a QA reply
+    /// keeps the turn its message was read in); none while a message read earlier still waits for its reply.
+    private func paneNextOrder() -> ChatToolLink.Command? {
+        let tools = [chatTool, weworkTool]
+        guard let next = PaneTurns.next(firsts: tools.map { $0.firstTurn }, asking: tools.map { $0.askingTurn }) else {
+            if tools.allSatisfy({ $0.firstTurn == nil }) { return chatTool.nextCommand() ?? weworkTool.nextCommand() }
+            if let held = tools.compactMap({ $0.firstTurn }).min(), held != paneHeldTurn {
+                paneHeldTurn = held
+                DebugLog.write("watch: a reply (turn \(held)) waits: a message read before it still waits for its own reply")
+            }
+            return nil
+        }
+        return tools[next.index].take(turn: next.turn)
+    }
+
+    /// 188 (大藍's missedLine; 126 on the phone 11-12: a message that comes in while its chat is open has no red mark):
+    /// in the two minutes after a chat was left for the list, its list line showing something other than the last line
+    /// read there opens it again, once per such line, as a red mark would.
+    private func paneMissedLine(_ look: PaneLook, _ app: XiaoLanOrders.App, _ state: inout PaneWatchState) -> (name: String, at: CGPoint)? {
+        let t = now()
+        state.leftAt = state.leftAt.filter { t - $0.value < 120 }
+        for (key, _) in state.leftAt.sorted(by: { $0.value < $1.value }) where key.hasPrefix("\(app.rawValue)|") {
+            let name = String(key.dropFirst(app.rawValue.count + 1))
+            guard let preview = XiaoLanPanes.previewText(look.rows, of: name), let last = state.history[key]?.last else { continue }
+            let body = WatchReport.previewBody(preview)
+            guard body.count >= 2, state.missedOpened[key] != body, !WatchReport.previewShows(body, last),
+                  !XiaoLanSelf.readBefore(body, known: state.seen[key] ?? []),
+                  let row = XiaoLanPanes.entries(look.rows).first(where: { $0.name == name }) else { continue }
+            state.missedOpened[key] = body
+            DebugLog.write("watch: \(app.rawValue): \(name)'s list line 「\(body.prefix(20))」 is not the last line read there (no red mark): opened again")
+            return (name: name, at: CGPoint(x: 0.5, y: row.box.midY))
+        }
+        return nil
+    }
+
+    /// 188: each chat's red mark noted when first seen; marks gone are forgotten (WeCom's groups on WeChat's side are
+    /// WeCom's: not counted there).
+    private func paneNoteMarks(_ looks: [PaneLook], _ state: inout PaneWatchState) {
+        let t = now()
+        for look in looks where look.view == .list {
+            guard let app = state.apps[look.side], let image = UIImage(data: look.crop)?.cgImage else { continue }
+            var marks = XiaoLanPanes.marked(look.rows, red: { Vision.redShare(image, in: $0) }).map { $0.name }
+            if app == .wechat, WatchSettings.weworkOn, state.apps.values.contains(.wework) {
+                marks = marks.filter { !XiaoLanPanes.weComGroupRow(look.rows, name: $0) }
+            }
+            let keys = Set(marks.map { "\(app.rawValue)|\($0)" })
+            for k in keys where state.markSeen[k] == nil { state.markSeen[k] = t }
+            state.markSeen = state.markSeen.filter { !$0.key.hasPrefix("\(app.rawValue)|") || keys.contains($0.key) }
+        }
+    }
+
+    /// 188: the windows in the order their oldest mark came (a window with no mark, or in a chat, after them).
+    private func paneByTurn(_ looks: [PaneLook], _ state: PaneWatchState) -> [PaneLook] {
+        func oldest(_ l: PaneLook) -> Double {
+            guard l.view == .list, let app = state.apps[l.side] else { return .infinity }
+            let mine = state.markSeen.filter { $0.key.hasPrefix("\(app.rawValue)|") }.map { $0.value }
+            return mine.min() ?? .infinity
+        }
+        return looks.enumerated().sorted { a, b in
+            let (oa, ob) = (oldest(a.element), oldest(b.element))
+            return oa != ob ? oa < ob : a.offset < b.offset
+        }.map { $0.element }
+    }
+
+    /// 188: what WeCom's window shows this pass, for WeChat to leave WeCom's groups to it (paneLeaveToWeCom).
+    private func paneNoteWeCom(_ looks: [PaneLook], _ state: inout PaneWatchState) {
+        state.weworkMarked = []
+        state.weworkOpen = nil
+        guard let look = looks.first(where: { state.apps[$0.side] == .wework }) else { return }
+        switch look.view {
+        case .list:
+            guard let image = UIImage(data: look.crop)?.cgImage else { return }
+            state.weworkMarked = Set(XiaoLanPanes.marked(look.rows, red: { Vision.redShare(image, in: $0) }).map { $0.name })
+        case .chat(let t):
+            state.weworkOpen = WatchOCR.titled(t).name
+        case .unknown:
+            break
+        }
+    }
+
+    /// 188 (user 11-27: 「發送給企微的消息，應該優先從企微這邊打開，爲什麽每次都從個微這邊先打開…企微這邊的消息由企微
+    /// 優先回答，反之也是一樣」): each pass went left to right, so WeChat, on the left, opened a WeCom group's mark first
+    /// (186 opens it only to clear the mark; its lines are WeCom's). Now a WeCom group's mark on WeChat's list (its logo
+    /// after the name) waits while WeCom's window shows it marked or open, and for 8 s after WeChat first saw it
+    /// (WeCom's own mark may come a moment later); WeChat's own chats go on as before, then WeChat clears the group's
+    /// mark once WeCom is done. WeChat's groups never show in WeCom, and two private chats of one name are two people's
+    /// talks: each side answers its own.
+    private func paneLeaveToWeCom(_ marks: [(name: String, at: CGPoint)], _ rows: [[CandidatePicker.Piece]],
+                                  _ state: inout PaneWatchState) -> [(name: String, at: CGPoint)] {
+        guard WatchSettings.weworkOn, state.apps.values.contains(.wework) else { return marks }
+        let t = now()
+        let groups = Set(marks.map { $0.name }.filter { XiaoLanPanes.weComGroupRow(rows, name: $0) })
+        state.leftToWeCom = state.leftToWeCom.filter { groups.contains($0.key) }
+        var kept: [(name: String, at: CGPoint)] = []
+        for m in marks {
+            guard groups.contains(m.name) else { kept.append(m); continue }
+            let since = state.leftToWeCom[m.name] ?? t
+            state.leftToWeCom[m.name] = since
+            let open = state.weworkOpen.map { WatchChatOpen.sameChat($0, listName: m.name) } ?? false
+            if state.weworkMarked.contains(m.name) || open || t - since < 8 {
+                if since == t { DebugLog.write("watch: wechat: \(m.name) is a WeCom group: its mark left to WeCom first") }
+                continue
+            }
+            DebugLog.write("watch: wechat: \(m.name) is a WeCom group, WeCom done with it: opened to clear its mark")
+            kept.append(m)
+        }
+        return kept
+    }
+
     /// 183: WeChat's ＋ menu open (发起群聊, 添加朋友, 扫一扫, 收付款): closed by a click on the title bar's bare left part,
     /// on a pointer seen there; none of its rows is ever clicked.
     /// 184 (Echo 183, 11-26: the title bar's bare spot was never clicked, the pointer unseen there, and the menu stayed
@@ -592,7 +807,7 @@ extension AppModel {
     private func paneOpenSystem(_ hit: (name: String, at: CGPoint), _ look: PaneLook, _ app: XiaoLanOrders.App,
                                 _ state: inout PaneWatchState) async {
         DebugLog.write("watch: \(app.rawValue): red mark on \(hit.name) (no one's chat); opening it to read")
-        guard await paneTap(hit.at, in: look.rect) else { return }
+        guard await paneTap(hit.at, in: look.rect, tall: Self.rowTall) else { return }
         // 184 (Echo 183, 11-26: 行业资讯 opened a news page with a picture for a title; waiting for a chat's title, the
         // watch said "did not open" and left WeCom there, unwatched): opened once the window no longer shows its list;
         // its lines kept when there is a title to read them by; back to the list every time.
@@ -641,14 +856,34 @@ extension AppModel {
     @discardableResult
     /// 184 (C12): `markSender`, who the list's preview said wrote the line its red mark was for.
     /// 187: `markPreview`, that preview as read (what the mark was for, when nothing new is read).
+    /// Returns how many messages were reported; -1 when the window could not be read (188: the caller looks again).
+    /// `lastTry` (188, B45): a window opened by its red mark that still cannot be read reports its preview's line.
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
-                          markPreview: String? = nil, _ state: inout PaneWatchState) -> Int {
+                          markPreview: String? = nil, lastTry: Bool = true, _ state: inout PaneWatchState) -> Int {
         // 187: under a sheet of another chat the title is this chat's, the lines are the other's: not read.
         if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil {
             DebugLog.write("watch: \(app.rawValue): \(title): another chat open over it as a sheet; not read")
             return 0
         }
-        guard let read = WatchOCR.screen(look.crop, title: title, rows: look.rows) else { return 0 }  // 182: read once
+        // 188 (B45, Echo 187, 11-27: 测试群's mark opened, the owner's 「11」 and then 「1」 at the bottom in plain view, a
+        // banner of 企微测试群 coming in over the top; nothing read, nothing logged, the mark gone, the line lost, and
+        // WeCom's later 「12」 answered first): a window not read is said, kept, and looked at again; opened by its mark
+        // and still not read on the last try, the mark's preview is its line.
+        let screenRead = WatchOCR.screen(look.crop, title: title, rows: look.rows)  // 182: read once
+        if screenRead != nil, let bp = WatchOCR.bannerPiece(Array(look.rows.joined())) {
+            DebugLog.write("watch: \(app.rawValue): \(title): a banner over its top (「\(bp.text)」); read under its band")
+        }
+        if screenRead == nil {
+            WatchChatOpen.keepFrame(look.crop)
+            let bp = WatchOCR.bannerPiece(Array(look.rows.joined()))
+            let why = bp.map { "a banner over its top: 「\($0.text)」 at y \(String(format: "%.3f", Double($0.box.midY)))" } ?? "no picture"
+            guard fromMark, lastTry, markPreview != nil else {
+                DebugLog.write("watch: \(app.rawValue): \(title): the window could not be read (\(why))\(fromMark && !lastTry ? "; looking again" : "")")
+                return -1
+            }
+            DebugLog.write("watch: \(app.rawValue): \(title): the window still could not be read; its red mark's preview is taken")
+        }
+        let read = screenRead ?? WatchReport.Screen(title: WatchOCR.titled(title).name, group: markSender != nil, lines: [])
         let name = read.title
         // 183: a news or team account's chat (left open) is no one's: never reported.
         if XiaoLanPanes.notChats.contains(XiaoLanPanes.listName(name)) { return 0 }
@@ -697,8 +932,10 @@ extension AppModel {
             WatchChatOpen.keepFrame(look.crop)
             fresh.append(marked)
         }
-        state.history[key] = rebase ? Array(lines.suffix(20)) : WatchReport.remember(fresh, screen: lines, history: before)
-        if state.history[key] != before { PaneHistory.save(state.history) }  // 183
+        if screenRead != nil {  // 188: a window not read leaves the history as it was
+            state.history[key] = rebase ? Array(lines.suffix(20)) : WatchReport.remember(fresh, screen: lines, history: before)
+            if state.history[key] != before { PaneHistory.save(state.history) }  // 183
+        }
         let names = WatchSettings.myNames
         // 181 (user 11-25: "兩個號在一個群里…就相當于是同一個人，就不用回復了"; "應該點開把那個紅點給點掉，而不是應該回復"):
         // the owner's own lines here are what this side's other account can see; a line on this side that is one of the
@@ -722,8 +959,11 @@ extension AppModel {
             }
         }
         var own: [String] = [], unread: [String] = []
+        let echoes = state.echoes[key] ?? []
+        var echoed = 0
         let others = fresh.filter { line in
             guard !line.mine else { return false }
+            if XiaoLanMediaFind.isEcho(line.text, of: echoes) { echoed += 1; return false }  // 188
             let owners = names + XiaoLanSelf.learned
             if XiaoLanSelf.sentByOther(line.text, chat: name, app: app, sent: state.sent, now: t) {
                 if !line.sender.isEmpty && !XiaoLanSelf.isOwner(line.sender, names: owners)
@@ -749,13 +989,14 @@ extension AppModel {
         if !unread.isEmpty {
             DebugLog.write("watch: \(app.rawValue): \(name): \(unread.count) line(s) of the app's buttons: not reported")
         }
+        if echoed > 0 { DebugLog.write("watch: \(app.rawValue): \(name): \(echoed) line(s) of a voice note's words, reported with it: not again") }
         if nameless > 0 { DebugLog.write("watch: \(app.rawValue): \(name): \(nameless) line(s) with no sender read: reported without a name") }
         if !own.isEmpty {
             DebugLog.write("watch: \(app.rawValue): \(name): \(own.count) line(s) from the owner's other account (\(Set(own).sorted().joined(separator: "、"))): opened, not reported")
         }
-        let messages = others.map { line in
+        var messages = others.map { line in
             ReadMessage(chat: name, group: read.group, sender: line.sender, text: line.text,
-                        atMe: names.contains { line.text.contains("@" + $0) })
+                        atMe: XiaoLanMediaFind.atMe(line.text, names: names))  // 188 (B29): 「＠」 as OCR reads it on WeChat
         }
         if before == nil && !fromMark { DebugLog.write("watch: \(app.rawValue): \(name): history starts here (\(lines.count) line(s))") }
         // 186 (user 11-26: "企微群就以企微來回…個微在企微群裡面，看一下就行了，主要還是面向企微"): a WeCom group — its
@@ -765,12 +1006,44 @@ extension AppModel {
             DebugLog.write("watch: wechat: \(name) is a WeCom group: \(messages.count) line(s) left to WeCom; opened, not reported")
             return 0
         }
-        guard !messages.isEmpty else { return 0 }
+        // 188 (user 11-27: links, pictures, videos, files and voice notes opened and looked at): a line that is one of
+        // them (its kind on) is reported after it is looked at (paneMediaRun, right after this read); one shown only by
+        // the red mark's preview (「[语音] 7"」: a voice note or a video has no words of its own to read) too.
+        var jobs: [MediaJob] = []
+        let kinds = messages.map { XiaoLanMediaFind.kind(of: $0.text) }
+        var plain: [ReadMessage] = []
+        for (i, m) in messages.enumerated() {
+            guard let kind = kinds[i], MediaSettings.on(kind) else { plain.append(m); continue }
+            let rank = kinds[(i + 1)...].filter { $0 == kind }.count  // the newest of its kind is 0
+            jobs.append(MediaJob(app: app, side: look.side, chat: name, group: read.group, sender: m.sender, kind: kind,
+                                 text: m.text, atMe: m.atMe, rank: rank))
+        }
+        messages = plain
+        let weComGroup = app == .wechat && WatchSettings.weworkOn && read.group && XiaoLanPanes.weComGroupTitle(title)
+        if fromMark, own.isEmpty, !weComGroup, let preview = markPreview, let kind = XiaoLanMediaFind.tag(preview), MediaSettings.on(kind),
+           !jobs.contains(where: { $0.kind == kind }),
+           !(read.group && (markSender.map { XiaoLanSelf.isOwner($0, names: names + XiaoLanSelf.learned) } ?? false)) {
+            jobs.append(MediaJob(app: app, side: look.side, chat: name, group: read.group, sender: markSender ?? "", kind: kind,
+                                 text: preview, atMe: false))
+        }
+        if !jobs.isEmpty {
+            state.media += jobs
+            DebugLog.write("watch: \(app.rawValue): \(name): \(jobs.map { $0.kind.rawValue }.joined(separator: ", ")) to open and look at")
+        }
+        guard !messages.isEmpty else {
+            // 188 (B45): a red mark that gave nothing to report, and no line said why above, is said and kept
+            if fromMark && own.isEmpty && unread.isEmpty && jobs.isEmpty {
+                let tail = lines.suffix(3).map { "\($0.mine ? "mine" : $0.sender)「\($0.text)」" }.joined(separator: " ")
+                DebugLog.write("watch: \(app.rawValue): \(name): opened by its red mark, nothing to report (preview \(markPreview.map { "「\($0)」" } ?? "not read"), last read \(tail))")
+                WatchChatOpen.keepFrame(look.crop)
+            }
+            return jobs.count
+        }
         ReadLog.append(messages)
         watchRead += messages.count
         (app == .wework ? weworkTool : chatTool).report(messages)
         DebugLog.write("watch: \(app.rawValue): \(name): \(messages.count) new message(s) reported")
-        return messages.count
+        return messages.count + jobs.count
     }
 
     /// A server order. Sending a message is done in its app's window; anything else goes the usual way (runOrder).
@@ -789,7 +1062,7 @@ extension AppModel {
             return
         }
         watchStatus = "发送到 \(order.chat)…"
-        let sent = await paneSend(order.text, to: order.chat, app: order.app, &state)
+        let sent = await paneSend(order.text, to: order.chat, app: order.app, quote: order.quote, &state)
         link.finish(order, ok: sent.ok, reason: sent.ok ? (order.at.isEmpty ? "" : ChatToolLink.reasonNoAt) : sent.why)
         // 183 (Echo 182 overnight, 11-26: the answer waited 1.5–2.5 s for the keyboard to go down): answered first.
         if let shown = sent.shown { await paneDismissKeyboard(shown) }
@@ -797,7 +1070,7 @@ extension AppModel {
 
     /// Open `chat` in its app's window (already open, or a row on its list), type `text` and send it. `shown`: the
     /// window showing the line sent (its keyboard is put down after the answer).
-    private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App,
+    private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App, quote: String = "",
                           _ state: inout PaneWatchState) async -> (ok: Bool, why: String, shown: PaneLook?) {
         let appName = app == .wework ? "企业微信" : "微信"
         guard var look = await paneFind(app, &state) else {
@@ -856,7 +1129,7 @@ extension AppModel {
             // spot; another chat, back to the list and its row again.
             var opened: PaneLook?
             for attempt in 0..<2 {
-                guard await paneTap(row, in: look.rect) else { return (false, ChatToolLink.reasonNotSent, nil) }
+                guard await paneTap(row, in: look.rect, tall: Self.rowTall) else { return (false, ChatToolLink.reasonNotSent, nil) }
                 opened = await paneLook(look.side, after: now(), band: (0, XiaoLanPanes.topBand), until: isChat)
                 if let o = opened, isChat(o) { break }
                 guard attempt == 0 else { break }
@@ -916,6 +1189,19 @@ extension AppModel {
             DebugLog.write("watch: \(app.rawValue): the keyboard came up with \(chat); its field not tapped")
             focused = true
         }
+        // 188 (user 11-27: 「給別人回消息要引用那條消息回復」): the line answered (the order's originalContent) quoted first;
+        // 引用 puts the caret in the field (WeChat: 小藍's keyboard up; WeCom: 简体拼音, switched to 小藍 below). Not
+        // quoted (the line not on the window, no 引用 in its menu): the reply goes plain, as before.
+        var quoted = false
+        if !quote.isEmpty, MediaSettings.quoteOn {
+            quoted = await paneQuote(quote, look, app.rawValue)
+            if quoted {
+                focused = true
+                if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                    (look, low) = (again, again.rows)
+                }
+            }
+        }
         // The input field: the white box at the bottom of the window (WeCom's row of buttons above it is left alone).
         // 180 (Echo 178, 11-25): always tapped, keyboard up or not. The keyboard is the whole screen's: up from a send in
         // WeCom, a reply meant for WeChat was typed into WeCom's field and went out there, as the WeCom account.
@@ -974,7 +1260,10 @@ extension AppModel {
             }
             // 183 (Echo 182 overnight, 11-26: WeCom's field is ~0.03 tall; the pointer 0.015 low counted as on it, the
             // click missed and the keyboard was waited for 5 s): within 0.007; no keyboard after it, once more.
-            guard await paneTap(field, in: look.rect, wide: 0.15, tall: 0.007) else { return (false, ChatToolLink.reasonNotSent, nil) }
+            // 188 (B46, Echo 187, 11-27: twice the first stop 0.008 over the field's middle was corrected, the pointer, an
+            // I-beam over the field, never moved up or down, "does not move", found again and clicked there: the keyboard
+            // came and the reply went): within 0.010 (the field ~0.03 tall; 183's miss was 0.015 low).
+            guard await paneTap(field, in: look.rect, wide: 0.15, tall: Self.fieldTall) else { return (false, ChatToolLink.reasonNotSent, nil) }
             // 187 (B34, Echo 186, 11-26: WeCom's 简体拼音 came up after 0.8 s, unseen by the check, and the second click
             // landed on its keys): 1.5 s for 小藍; then a new look, and a keyboard of any kind on it (the iPad's pinyin
             // keys read "1 q") means up: no second click.
@@ -985,16 +1274,20 @@ extension AppModel {
                     DebugLog.write("watch: \(app.rawValue): a keyboard came up late after the field's tap; not clicked again")
                 } else {
                     DebugLog.write("watch: \(app.rawValue): no keyboard after the field's tap; once more")
-                    _ = await paneTap(field, in: look.rect, wide: 0.15, tall: 0.007)
+                    _ = await paneTap(field, in: look.rect, wide: 0.15, tall: Self.fieldTall)
                 }
             }
         }
         try? await Task.sleep(nanoseconds: 250_000_000)  // 182: was 0.4 s
-        do {
-            try await pointer.key("cmd+a")
-            try await pointer.key("backspace")
-        } catch {
-            DebugLog.write("watch: clearing the input field failed: \(error.localizedDescription)")
+        // 188: quoted on WeChat the field is empty, and a backspace in an empty field takes the quote off (WeCom's 「@名字」
+        // is cleared as any text: its quote stays until a second backspace, measured 11-27).
+        if !(quoted && app == .wechat) {
+            do {
+                try await pointer.key("cmd+a")
+                try await pointer.key("backspace")
+            } catch {
+                DebugLog.write("watch: clearing the input field failed: \(error.localizedDescription)")
+            }
         }
         // 184 (Echo 183, 11-26: the text, a 0.6 s wait, 0.2 s more, then the return as a job of its own, ~1 s): the
         // text and its return in one job of 小藍's keyboard, which puts them into the field in order (the wait was for
@@ -1006,7 +1299,17 @@ extension AppModel {
         // check); then 小藍 puts itself down (B10). Not sent: the field is emptied here, no draft is left (B21).
         let returned = await keyboardBridge.type(text, enter: true, within: 5, dismiss: true)
         guard returned else {
-            DebugLog.write("watch: \(app.rawValue): \(chat): not sent (the field held other words, or the return made a new line); the field emptied")
+            // 188 (B41, Echo 187, 11-27: a WeCom private reply went out — its list preview showed it — but was reported
+            // not sent): my newest line showing the text counts as sent before anything is cleared.
+            let sig = XiaoLanSelf.sendSignature(text)
+            if let l = await paneLook(look.side, after: now(), tries: 2, until: { _ in true }), case .chat(let t) = l.view,
+               let r = WatchOCR.screen(l.crop, title: t, rows: l.rows, banner: false),
+               r.lines.last(where: \.mine).map({ XiaoLanSelf.shows($0.text, signature: sig, of: text) }) == true {
+                DebugLog.write("watch: \(app.rawValue): \(chat): 小藍 said not sent, but my newest line shows it: sent")
+                state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))
+                return (true, "", l)
+            }
+            DebugLog.write("watch: \(app.rawValue): \(chat): not sent (the field held other words, or the return made a new line); emptying the field")
             try? await pointer.key("cmd+a")
             try? await pointer.key("backspace")
             return (false, "小蓝输入法没有发送成功（输入框里有别的字，或发送键变成换行），已清空输入框", nil)
@@ -1039,14 +1342,23 @@ extension AppModel {
             // 187 (Echo 186, 11-26: the newest line was never read, though a still frame taken later showed it over the
             // bar): the window as it was read is kept in Documents/diagnostics, to be looked at.
             WatchChatOpen.keepFrame(after?.crop)
-            if shownBefore != true, shownBefore == false || text.filter({ !$0.isWhitespace }).count >= 6,
-               await paneBack(after ?? look, app.rawValue),
-               let list = await paneLook(look.side, after: now(), tries: 6, until: { $0.view == .list }), list.view == .list,
-               let preview = XiaoLanPanes.previewText(list.rows, of: chat), XiaoLanSelf.previewShowsSent(preview, text) {
-                DebugLog.write("watch: \(app.rawValue): \(chat): sent; the list's preview shows it (\(preview))")
-                state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
-                return (true, "", nil)
+            // 188 (Echo 187, 11-27: a send that went out was reported failed with nothing logged after the back arrow):
+            // which step did not show it is logged.
+            var previewRead = "not looked at (shown before, or too short)"
+            if shownBefore != true, shownBefore == false || text.filter({ !$0.isWhitespace }).count >= 6 {
+                if await paneBack(after ?? look, app.rawValue) {
+                    if let list = await paneLook(look.side, after: now(), tries: 6, until: { $0.view == .list }), list.view == .list {
+                        let preview = XiaoLanPanes.previewText(list.rows, of: chat)
+                        if let preview, XiaoLanSelf.previewShowsSent(preview, text) {
+                            DebugLog.write("watch: \(app.rawValue): \(chat): sent; the list's preview shows it (\(preview))")
+                            state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
+                            return (true, "", nil)
+                        }
+                        previewRead = preview.map { "read 「\($0)」" } ?? "has no row of it"
+                    } else { previewRead = "not seen (no list after the back arrow)" }
+                } else { previewRead = "not seen (the back arrow failed)" }
             }
+            DebugLog.write("watch: \(app.rawValue): \(chat): not counted as sent: the list's preview \(previewRead)")
         }
         if let a = after, let r = sentShown(a) {
             let key = "\(app.rawValue)|\(r.title)"

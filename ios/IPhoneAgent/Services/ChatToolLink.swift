@@ -106,7 +106,34 @@ import Foundation
     }
 
     /// The next message the server asked for, or nil. Hand it back with `finish` when it is sent or given up.
-    func nextCommand() -> Command? { pending.isEmpty ? nil : pending.removeFirst() }
+    func nextCommand() -> Command? {
+        guard !pending.isEmpty else { return nil }
+        let c = pending.removeFirst()
+        turns[c.key] = nil
+        return c
+    }
+
+    /// 188 (user 11-27: 「先收到的消息先回，後面來的在後面排著，前面的回完了再接著回第二個…不管是企微還是個微，都要按
+    /// 收到的順序依次回復」): one count for WeChat's and WeCom's links together. A message asked of the QA callback takes
+    /// its turn when it is read, and its reply keeps it; a server's own order takes one when it comes.
+    private static var turnCount = 0
+    static func takeTurn() -> Int {
+        turnCount += 1
+        return turnCount
+    }
+    private var turns: [String: Int] = [:]  // a waiting order's key → its turn
+    private var asking: Set<Int> = []       // turns whose QA reply is still coming
+    /// The earliest turn among the orders waiting here.
+    var firstTurn: Int? { pending.compactMap { turns[$0.key] }.min() }
+    /// The earliest turn whose QA reply is still coming (15 s at most).
+    var askingTurn: Int? { asking.min() }
+    /// The order of that turn, taken off the queue.
+    func take(turn: Int) -> Command? {
+        guard let i = pending.firstIndex(where: { turns[$0.key] == turn }) else { return nil }
+        let c = pending.remove(at: i)
+        turns[c.key] = nil
+        return c
+    }
 
     /// What was read: one packet per message over the socket (ChatTool's dedupe then drops a message read twice), and
     /// what the robot settings say goes to the QA callback, whose reply is queued to be sent (163, as the engines do).
@@ -121,8 +148,11 @@ import Foundation
             }
             if Self.asksQA(m, config: config) {
                 qaWaiting += 1
+                let turn = Self.takeTurn()  // 188: its turn is when it was read
+                asking.insert(turn)
                 Task { [weak self] in
-                    await self?.askQA(m)
+                    await self?.askQA(m, turn: turn)
+                    self?.asking.remove(turn)
                     self?.qaWaiting -= 1
                 }
             }
@@ -230,7 +260,7 @@ import Foundation
         }
     }
 
-    private func askQA(_ m: ReadMessage) async {
+    private func askQA(_ m: ReadMessage, turn: Int? = nil) async {
         guard let c = config, let url = URL(string: c.callbackUrl),
               let body = try? JSONSerialization.data(withJSONObject: Self.qaBody(m)) else { return }
         var request = URLRequest(url: url)
@@ -244,7 +274,7 @@ import Foundation
             guard (200..<300).contains(code), let text = Self.qaReply(data) else { return }
             let id = Self.qaPrefix + UUID().uuidString
             let raw = Self.json(["type": Self.sendMessage, "titleList": [m.chat], "receivedContent": text]) ?? ""
-            queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date())
+            queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date(), turn: turn)
             note("↩ 伺服器回覆 · \(m.chat)")
         } catch {
             DebugLog.write("chattool: QA callback failed: \(error.localizedDescription); asked again when the link is back")
@@ -381,7 +411,8 @@ import Foundation
         history = Array((history + [stamp + "  " + line]).suffix(100))
     }
 
-    private func queue(_ c: Command, now: Date) {
+    private func queue(_ c: Command, now: Date, turn: Int? = nil) {
+        if turns[c.key] == nil { turns[c.key] = turn ?? Self.takeTurn() }  // 188
         if tallies[c.key] == nil { tallies[c.key] = Tally(left: 0, messageId: c.messageId, type: c.type, raw: c.raw, started: now) }
         tallies[c.key]?.left += 1
         pending.append(c)
