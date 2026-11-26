@@ -1431,14 +1431,33 @@ import Foundation
                 return
             }
             guard let span else { throw DeviceError(message: "pointer not calibrated") }
-            let units = max(1, Int((min(max(room, 0.02), 0.2) * Double(span.w)).rounded()))
+            // 186 (B31, Echo 185, 11-26: a press, then a paced straight move of 0.2 of the screen: WeChat opened 腾讯新闻
+            // instead of sliding its row, and 删除 was clicked on the page; the user: "按住那一瞬間就往左滑", by hand on
+            // the board the same day: pace 12, press, at once an eased arc of 8 steps, release, nothing moved after it —
+            // 不再关注 / 不显示 / 删除 came out): the press and the stroke go out back to back, quick, then up at once.
+            let units = max(1, Int((min(max(room, 0.02), 0.16) * Double(span.w)).rounded()))
+            let steps = Self.rowSwipeSteps(units)
+            _ = try? await device.send("pace 12")
             try await device.send("press")
-            do { try await device.send("move -\(units) 0") } catch {
+            do { try await device.send("stroke " + steps.map { "\($0.dx) \($0.dy)" }.joined(separator: " ")) } catch {
                 _ = try? await device.send("release")
+                _ = try? await device.send("pace 30")
                 throw error
             }
             try await device.send("release")
-            if let p = pos { pos = (p.0 - units, p.1) }
+            _ = try? await device.send("pace 30")
+            if let p = pos { pos = (p.0 + steps.reduce(0) { $0 + $1.dx }, p.1 + steps.reduce(0) { $0 + $1.dy }) }
+        }
+    }
+
+    /// 186 (B31): a left stroke of `total` units as a hand makes it: 8 steps, quick then slowing, a slight arc, each
+    /// step a little off (`jitter` scales a step, `wobble` nudges it up or down).
+    static func rowSwipeSteps(_ total: Int, jitter: () -> Double = { Double.random(in: 0.92...1.08) },
+                              wobble: () -> Int = { Int.random(in: -1...1) }) -> [(dx: Int, dy: Int)] {
+        let shares = [0.10, 0.17, 0.20, 0.18, 0.14, 0.10, 0.07, 0.04]
+        let arc = [1, 2, 2, 1, 0, -1, -1, -1]
+        return zip(shares, arc).map { share, lift in
+            (dx: -max(1, Int((Double(total) * share * jitter()).rounded())), dy: lift + wobble())
         }
     }
 

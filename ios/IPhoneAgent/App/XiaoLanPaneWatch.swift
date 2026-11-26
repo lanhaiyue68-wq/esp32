@@ -19,6 +19,8 @@ struct PaneWatchState {
     var sent: [XiaoLanSelf.Sent] = []
     /// 181: the windows whose app could not be told, logged once each.
     var untold: Set<String> = []
+    /// 186: when a system keyboard over a side's chat was last switched to 小藍 to be put down.
+    var keyboardDown: [Int: Double] = [:]
     /// 183: the chats whose history came from an earlier launch (PaneHistory), not read since.
     var loaded: Set<String> = []
     /// 183: every line's words read in each chat since the launch (XiaoLanSelf.plain), for a screen that does not go on
@@ -431,6 +433,19 @@ extension AppModel {
                     state.notChat[look.side] = "keyboard"
                     DebugLog.write("watch: \(title) has a system keyboard over it; not read")
                 }
+                // 186 (Echo 185, 11-26: 测试群 and 主人蓝海乐, opened from their marks under the 简体拼音 the owner had
+                // left, were not read, and their back was clicked twice, the first only putting the keyboard down): the
+                // keyboard is switched to 小藍, which puts itself down (once in 20 s a side); the chat is read next pass.
+                if !ordersWaiting, now() - (state.keyboardDown[look.side] ?? -Double.infinity) > 20 {
+                    state.keyboardDown[look.side] = now()
+                    if await showLanAgentKeyboard(), await keyboardBridge.type("", enter: false, within: 2, dismiss: true),
+                       await smallKeyboard(up: false, within: 1.5) {
+                        DebugLog.write("watch: \(title): the system keyboard switched to 小藍 and put down; read on the next pass")
+                        state.notChat[look.side] = nil
+                        return
+                    }
+                    DebugLog.write("watch: \(title): the system keyboard was not put down")
+                }
                 // 184 (Echo 183, 11-26: 测试群 under 简体拼音 was left there, its keyboard up over WeCom too): not read,
                 // but back to the list after 5 s all the same (the back puts the keyboard down).
                 if state.quietSince[look.side] == nil { state.quietSince[look.side] = now() }
@@ -665,6 +680,13 @@ extension AppModel {
                         atMe: names.contains { line.text.contains("@" + $0) })
         }
         if before == nil && !fromMark { DebugLog.write("watch: \(app.rawValue): \(name): history starts here (\(lines.count) line(s))") }
+        // 186 (user 11-26: "企微群就以企微來回…個微在企微群裡面，看一下就行了，主要還是面向企微"): a WeCom group — its
+        // logo after the title on WeChat's side — is WeCom's to report and answer while WeCom is watched too; WeChat only
+        // opens it (its mark cleared, its lines kept as read).
+        if app == .wechat, WatchSettings.weworkOn, read.group, XiaoLanPanes.weComGroupTitle(title), !messages.isEmpty {
+            DebugLog.write("watch: wechat: \(name) is a WeCom group: \(messages.count) line(s) left to WeCom; opened, not reported")
+            return 0
+        }
         guard !messages.isEmpty else { return 0 }
         ReadLog.append(messages)
         watchRead += messages.count
@@ -717,6 +739,9 @@ extension AppModel {
             return false
         }
         var openedHere = false, banded = false
+        // 186 (B24): whether the list's preview of this chat already showed the text before it was sent (an older line
+        // alike), nil when the chat was not opened from its list here.
+        var shownBefore: Bool?
         // 183 (Echo 182 overnight, 11-26, n=95: WeCom already in 企微测试群 was sent back to its list, 20 s, and the
         // order failed): another title read is looked at once more, on a fresh frame (a chat scrolling as a line comes
         // in reads wrong), before the window leaves its chat; what was read is logged.
@@ -738,6 +763,7 @@ extension AppModel {
                 look = back
             }
             guard look.view == .list else { return (false, "\(appName)没有回到会话列表", nil) }
+            shownBefore = XiaoLanPanes.previewText(look.rows, of: chat).map { XiaoLanSelf.previewShowsSent($0, text) }
             var target = XiaoLanPanes.entries(look.rows).first { WatchChatOpen.sameChat(chat, listName: $0.name) }
                 .map { CGPoint(x: 0.5, y: $0.box.midY) }
             var searchWhy: String?
@@ -820,8 +846,34 @@ extension AppModel {
                 }
                 guard keys == nil else { return (false, "\(appName)的系统键盘盖住了输入框，没能收起来（没有点）", nil) }
             }
-            guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
+            guard let px = WatchOCR.Pixels(look.crop), var field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
                 return (false, "\(appName)里没找到输入框", nil)
+            }
+            // 186 (B23, Echo 185, 11-26: the field was found on a look taken while a keyboard was still going down —
+            // after 小藍 put the system keyboard down, and right after a send — and clicked where it had been: a message
+            // bubble twice, then a voice note and a .docx above the bar, which opened): found again on a new look before
+            // the click, at the same height; moved, the new place is checked once more; never still, nothing is clicked.
+            var still = false
+            for _ in 0..<3 {
+                guard let again = await paneLook(look.side, after: now(), tries: 2, until: { _ in true }),
+                      let px2 = WatchOCR.Pixels(again.crop) else { break }
+                let keys2 = XiaoLanPanes.keyboardTop(again.rows)
+                if keys2 != nil, !CandidatePicker.ourKeyboardShown(rows: again.rows) {
+                    DebugLog.write("watch: \(app.rawValue): a system keyboard over \(chat) again before the field's click; not clicked")
+                    return (false, "\(appName)的系统键盘又盖住了输入框，没有点", nil)
+                }
+                guard let f2 = XiaoLanPanes.inputField(px2, above: keys2.map { $0 - 0.005 } ?? 1) else { break }
+                if abs(Double(f2.y - field.y)) <= 0.01 { still = true; break }
+                DebugLog.write("watch: \(app.rawValue): the field moved (\(String(format: "%.3f", Double(field.y))) → \(String(format: "%.3f", Double(f2.y)))); looked at again")
+                (field, look, low, keys) = (f2, again, again.rows, keys2)
+            }
+            guard still else { return (false, "\(appName)的输入框位置还在变（键盘在收起或弹出），没有点", nil) }
+            // 186 (B25, Echo 185, 11-26: WeCom's quick bar was taken for the field and 发起收款 clicked, its 对外收款 page
+            // opened; the second click landed just under 申请开通对外收款): the field is under the quick bar; a "field" on
+            // the bar or over it is not clicked.
+            if let bar = XiaoLanPanes.quickBarBottom(low), Double(field.y) <= bar + 0.004 {
+                DebugLog.write("watch: \(app.rawValue): the field found at \(String(format: "%.3f", Double(field.y))) is on or over the quick bar (bottom \(String(format: "%.3f", bar))); not clicked")
+                return (false, "\(appName)的输入框没找准（找到的是快捷栏），没有点", nil)
             }
             // 183 (Echo 182 overnight, 11-26: WeCom's field is ~0.03 tall; the pointer 0.015 low counted as on it, the
             // click missed and the keyboard was waited for 5 s): within 0.007; no keyboard after it, once more.
@@ -867,9 +919,26 @@ extension AppModel {
                   r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(tail) }) == true else { return nil }
             return r
         }
-        let after = await paneLook(look.side, after: now(), tries: 3) { sentShown($0) != nil }
+        let after = await paneLook(look.side, after: now(), tries: 4) { sentShown($0) != nil }
         if after.flatMap(sentShown) == nil {
-            DebugLog.write("watch: \(app.rawValue): \(chat): sent per the keyboard; the new line not read on the screen")
+            // 186 (B24, Echo 185, 11-26: six of nine sends went out — on the screen and in the list's preview — but were
+            // reported failed, every one a one-line text; the only one read was a long one): what was read is logged, and
+            // back on the list the chat's preview showing the text counts as seen on the screen (an older line alike,
+            // shown there before the send, does not).
+            let readLast: String = {
+                guard let a = after else { return "no look" }
+                guard case .chat(let t) = a.view, let r = WatchOCR.screen(a.crop, title: t, rows: a.rows, banner: false) else { return "\(a.view)" }
+                return r.lines.suffix(2).map { "\($0.mine ? "mine" : "not mine")「\($0.text)」" }.joined(separator: ", ")
+            }()
+            DebugLog.write("watch: \(app.rawValue): \(chat): sent per the keyboard; the new line not read on the screen (wanted …\(tail); read \(readLast))")
+            if shownBefore != true, shownBefore == false || text.filter({ !$0.isWhitespace }).count >= 6,
+               await paneBack(after ?? look, app.rawValue),
+               let list = await paneLook(look.side, after: now(), tries: 6, until: { $0.view == .list }), list.view == .list,
+               let preview = XiaoLanPanes.previewText(list.rows, of: chat), XiaoLanSelf.previewShowsSent(preview, text) {
+                DebugLog.write("watch: \(app.rawValue): \(chat): sent; the list's preview shows it (\(preview))")
+                state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
+                return (true, "", nil)
+            }
         }
         if let a = after, let r = sentShown(a) {
             let key = "\(app.rawValue)|\(r.title)"
@@ -905,6 +974,10 @@ extension AppModel {
             }
             DebugLog.write("watch: 小藍's keyboard did not put itself down; a tap on the chat instead")
         }
+        // 186 (O2, Echo 185, 11-26: after each WeCom send, 小藍's keyboard already down, a "bare" spot by the bubbles was
+        // clicked all the same; a picture or a video there would open): with no keyboard seen, nothing is tapped.
+        if XiaoLanPanes.keyboardTop(l.rows) == nil, !CandidatePicker.ourKeyboardShown(rows: l.rows),
+           let frame = feed.frame, !(await CandidatePicker.keyboardUpOffMain(in: frame)) { return }
         guard case .chat = l.view, let px = WatchOCR.Pixels(l.crop) else { return }
         var above = px.inputTop(from: 0.3) ?? 0.85
         for attempt in 1...2 {
@@ -955,7 +1028,10 @@ extension AppModel {
             guard let image = UIImage(data: l.crop)?.cgImage else { return nil }
             return XiaoLanPanes.deleteButton(l.rows, row: title, red: { Vision.redShare(image, in: $0) })
         }
-        guard let shown = await paneLook(look.side, after: now(), until: { button($0) != nil }), let red = button(shown) else {
+        // 186 (B31, Echo 185, 11-26: the drag opened 腾讯新闻 and a red picture on its page was taken for 删除): the red
+        // button counts only on the list.
+        guard let shown = await paneLook(look.side, after: now(), until: { $0.view == .list && button($0) != nil }),
+              shown.view == .list, let red = button(shown) else {
             await paneRetract(look.side)  // 183
             return (false, "「\(chat)」那一行没有滑出红色的删除（系统账号、公众号可能没有，或滑到别的行；已收回）")
         }
@@ -967,7 +1043,13 @@ extension AppModel {
             _ = await paneTap(confirm, in: look.rect, wide: 0.04)
             after = await paneLook(look.side, after: now(), tries: 3) { XiaoLanPanes.gone(chat, $0.rows) }
         }
-        guard let end = after, XiaoLanPanes.gone(chat, end.rows) else {
+        // 186 (B31: "deleted" was said with 腾讯新闻's own page open, its name nowhere on a list): gone from the list, the
+        // list itself on the screen.
+        guard let end = after, end.view == .list, XiaoLanPanes.gone(chat, end.rows) else {
+            if let end = after, end.view != .list {
+                DebugLog.write("watch: \(app.rawValue): delete \(chat): no list on the screen after it; not taken as deleted")
+                return (false, "删「\(chat)」后\(appName)不在会话列表上，没当作删掉")
+            }
             await paneRetract(look.side)  // 183
             return (false, "「\(chat)」还在\(appName)的会话列表上")
         }

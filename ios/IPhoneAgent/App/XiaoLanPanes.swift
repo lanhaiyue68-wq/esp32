@@ -262,8 +262,26 @@ import UIKit
             p.text.count <= 3 && p.text.filter { $0.isASCII && $0.isLetter }.count == 1
         }
         let words = low.filter { CandidatePicker.keyboardWords.contains($0.text.trimmingCharacters(in: .whitespaces)) }
-        guard letters.count >= 6 || CandidatePicker.keyboardUp(rows: lowRows) else { return nil }
-        return (letters + words).map { Double($0.box.minY) }.min()
+        // 186 (B27, Echo 185, 11-26: 简体拼音 left on its 123 page by the owner — no letters on it — was not seen as a
+        // keyboard): a row of six or more one-digit keys is one too (a chat's lines of one digit are on rows of their own).
+        let digitRows = lowRows.filter { row in
+            row.filter { p in p.text.count <= 3 && p.text.filter(\.isNumber).count == 1 && !p.text.contains(where: \.isLetter) }.count >= 6
+        }
+        guard letters.count >= 6 || !digitRows.isEmpty || CandidatePicker.keyboardUp(rows: lowRows) else { return nil }
+        return (letters + words + Array(digitRows.joined())).map { Double($0.box.minY) }.min()
+    }
+
+    /// 186 (B25, Echo 185, 11-26: the bar's 发起收款 was clicked for the field): the bottom of WeCom's quick bar (企业名片
+    /// / 发起收款 / 快捷回复 / 推荐客服) in a window, nil when none of it is read.
+    static func quickBarBottom(_ rows: [[Piece]]) -> Double? {
+        rows.joined().filter { p in WatchOCR.quickBarWords.contains { p.text.contains($0) } }.map { Double($0.box.maxY) }.max()
+    }
+
+    /// 186 (user 11-26: a WeCom group is WeCom's to answer): a chat title read with WeCom's logo after it, as an
+    /// external group shows on WeChat's side ("企微测试群（7）Q").
+    static func weComGroupTitle(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        return WatchOCR.withoutIconTail(t) != t && WatchOCR.titled(t).group
     }
 
     /// 180: a chat of WeChat or WeCom by its background down the window's left margin: WeChat (237, 237, 237), WeCom
@@ -346,6 +364,15 @@ import UIKit
               let preview = body.filter({ abs($0.box.minX - title.box.minX) <= 0.04 && (0.015...0.045).contains($0.box.midY - title.box.midY) })
                 .min(by: { $0.box.midY < $1.box.midY }) else { return nil }
         return senderOf(preview.text)
+    }
+
+    /// 186 (B24): the preview under the row of `chat` as read, nil when the row is not in view.
+    static func previewText(_ rows: [[Piece]], of chat: String) -> String? {
+        let body = listBody(rows)
+        guard let title = body.first(where: { WatchChatOpen.sameChat(chat, listName: listName($0.text)) }),
+              let preview = body.filter({ abs($0.box.minX - title.box.minX) <= 0.04 && (0.015...0.045).contains($0.box.midY - title.box.midY) })
+                .min(by: { $0.box.midY < $1.box.midY }) else { return nil }
+        return preview.text
     }
 
     /// The writer a list preview names: "主人蓝海乐: …" / "主人蓝海乐：…", after any "[2条]" or "[有人@我]"; nil for a
@@ -573,6 +600,19 @@ import UIKit
     /// 185 (B8): what my newest line must show for a send to count: the text's last 6 characters (no spaces); the
     /// beginning matched older lines (「【小蓝测试】」, a customer's 「您好，」).
     static func sendSignature(_ text: String) -> String { String(text.filter { !$0.isWhitespace }.suffix(6)) }
+
+    /// 186 (B24): a list preview shows the line just sent: its end, or (cut short with "…") its beginning, at least six
+    /// characters of it, after a "sender:" as a group's or WeCom's preview may put first.
+    static func previewShowsSent(_ preview: String, _ text: String) -> Bool {
+        let body = WatchReport.previewBody(preview), t = text.filter { !$0.isWhitespace }
+        guard !body.isEmpty, !t.isEmpty else { return false }
+        var heads = [body]
+        if let colon = body.firstIndex(where: { $0 == ":" || $0 == "：" }), body.distance(from: body.startIndex, to: colon) <= 20 {
+            heads.append(String(body[body.index(after: colon)...]))
+        }
+        let tail = sendSignature(text)
+        return heads.contains { h in h.contains(tail) || (h.count >= min(6, t.count) && t.hasPrefix(h)) }
+    }
 
     /// 184 (C12): a "sender" that is one of WeCom's quick bar buttons (a line of the bar, not of a person).
     static func isButton(_ sender: String) -> Bool {
