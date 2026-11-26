@@ -12,6 +12,9 @@ enum KeyboardLink {
         var id: String
         var text: String
         var enter: Bool
+        /// 185 (B10, Echo 184, 11-26: on the iPad a tap on WeChat's chat background never put 小藍 down): the keyboard
+        /// puts itself down after the job (dismissKeyboard). Absent in older apps' jobs.
+        var dismiss: Bool? = nil
     }
 
     enum Request: Equatable {
@@ -48,5 +51,32 @@ enum KeyboardLink {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(Job.self, from: data)
+    }
+
+    /// 185: how long after the text its return goes (Echo 184, 11-26: at once, WeChat took it for a new line and sent
+    /// nothing; 183's ~0.8 s sent), and how long after the return the field is looked at again.
+    static let returnDelay = 0.8
+    static let sentCheckDelay = 0.35
+
+    /// 185: after the return, the field still holds `text` (a new line after it at most): it was not sent.
+    static func stillHolds(_ text: String, before: String?) -> Bool {
+        var b = before ?? ""
+        while b.hasSuffix("\n") || b.hasSuffix(" ") { b.removeLast() }
+        guard !b.isEmpty else { return false }
+        if b.hasSuffix(text) { return true }
+        return text.hasSuffix(b) && b.count >= min(text.count, 8)
+    }
+
+    /// 185: the field holds exactly `text` (what it shows before and after the cursor). A field that shows nothing at
+    /// all around the cursor (the app gives no context) counts as holding it: sent as before. Anything else there, words
+    /// dictated into it (iOS 语音控制, 11-26) or left from before, and it is not sent.
+    static func fieldMatches(_ text: String, before: String?, after: String?) -> Bool {
+        let b = before ?? "", a = after ?? ""
+        if b.isEmpty && a.isEmpty { return true }
+        guard a.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // iOS may hand only the end of a long field (its last sentence): that end being this text's end is enough.
+        if text.hasSuffix(b) { return b.count >= min(text.count, 8) }
+        guard b.hasSuffix(text) else { return false }
+        return b.dropLast(text.count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }

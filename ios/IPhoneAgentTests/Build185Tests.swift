@@ -56,4 +56,47 @@ import UIKit
             c.fillEllipse(in: CGRect(x: 600, y: 1210, width: 50, height: 50))
         }))))
     }
+
+    /// B7/B11 (Echo 184, 11-26): the return only when the field holds exactly the text; after it, still holding the
+    /// text (a new line at most) means not sent.
+    func testFieldHoldsTheTextBeforeTheReturn() {
+        let t = "【小蓝测试】184 个微 0000"
+        XCTAssertTrue(KeyboardLink.fieldMatches(t, before: t, after: ""))
+        XCTAssertTrue(KeyboardLink.fieldMatches(t, before: nil, after: nil))                    // no context given: as before
+        XCTAssertFalse(KeyboardLink.fieldMatches(t, before: t + "都没问题呀没有细看", after: nil)) // dictated after it
+        XCTAssertFalse(KeyboardLink.fieldMatches(t, before: "看看我" + t, after: nil))            // left before it
+        XCTAssertFalse(KeyboardLink.fieldMatches(t, before: t, after: "取消"))
+        XCTAssertTrue(KeyboardLink.fieldMatches("一二三四五六七八九十", before: "三四五六七八九十", after: nil))  // the end only
+        XCTAssertFalse(KeyboardLink.fieldMatches("一二三四五六七八九十", before: "九十", after: nil))
+        XCTAssertTrue(KeyboardLink.stillHolds(t, before: t + "\n"))                             // the return made a new line
+        XCTAssertFalse(KeyboardLink.stillHolds(t, before: ""))                                  // emptied: sent
+        XCTAssertFalse(KeyboardLink.stillHolds(t, before: nil))
+        XCTAssertGreaterThanOrEqual(KeyboardLink.returnDelay, 0.8)
+        // a job of an older app has no `dismiss`
+        XCTAssertNil(KeyboardLink.job(#"{"id":"a1","text":"t","enter":true}"#)?.dismiss)
+        let down = KeyboardLink.Job(id: "b2", text: "", enter: false, dismiss: true)
+        XCTAssertEqual(KeyboardLink.job(KeyboardLink.line(down)), down)
+    }
+
+    /// B8 (11-26: 「【小蓝测试】」 matched 183's lines): the end of the text tells the line just sent.
+    func testSentLineToldByItsEnd() {
+        XCTAssertEqual(XiaoLanSelf.sendSignature("【小蓝测试】184 个微 0003 语音模式"), "03语音模式")
+        XCTAssertEqual(XiaoLanSelf.sendSignature("好"), "好")
+        XCTAssertFalse("【小蓝测试】183个微0038连发2".contains(XiaoLanSelf.sendSignature("【小蓝测试】184 个微 0000")))
+    }
+
+    /// B19 (11-26: voice notes 2" and 6" reported as 「小）2"」「小）6"」).
+    func testVoiceNoteLengthIsNoText() {
+        XCTAssertEqual(WatchOCR.withoutUIWords("小）2\""), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("6\""), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("2个人"), "2个人")
+        XCTAssertEqual(WatchOCR.withoutUIWords("你好"), "你好")
+    }
+
+    /// B18 (11-26: a line read in 测试群 came again under 企微测试群): the app's other chats count, not the other app's.
+    func testSeenInTheAppsOtherChats() {
+        let seen: [String: Set<String>] = ["wechat|测试群": ["a"], "wechat|企微测试群": ["b"], "wework|企微测试群": ["c"]]
+        XCTAssertEqual(XiaoLanSelf.seenInApp(seen, app: "wechat", chat: "wechat|企微测试群"), ["a", "b"])
+        XCTAssertEqual(XiaoLanSelf.seenInApp(seen, app: "wework", chat: "wework|企微测试群"), ["c"])
+    }
 }

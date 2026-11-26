@@ -562,6 +562,18 @@ import UIKit
         return isButton(s)
     }
 
+    /// 185 (B18): every line's words read in this chat, and in the app's other chats (a window's title taken for the
+    /// other's put one chat's lines under another's name).
+    static func seenInApp(_ seen: [String: Set<String>], app: String, chat key: String) -> Set<String> {
+        var all = seen[key] ?? []
+        for (k, v) in seen where k != key && k.hasPrefix(app + "|") { all.formUnion(v) }
+        return all
+    }
+
+    /// 185 (B8): what my newest line must show for a send to count: the text's last 6 characters (no spaces); the
+    /// beginning matched older lines (「【小蓝测试】」, a customer's 「您好，」).
+    static func sendSignature(_ text: String) -> String { String(text.filter { !$0.isWhitespace }.suffix(6)) }
+
     /// 184 (C12): a "sender" that is one of WeCom's quick bar buttons (a line of the bar, not of a person).
     static func isButton(_ sender: String) -> Bool {
         let s = XiaoLanPanes.listName(sender)

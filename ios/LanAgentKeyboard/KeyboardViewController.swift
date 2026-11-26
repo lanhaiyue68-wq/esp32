@@ -95,10 +95,55 @@ final class KeyboardViewController: UIInputViewController {
                 self.busy = false
                 return
             }
+            // 185 (B10): a job to put the keyboard down (no text): done, then down.
+            if job.dismiss == true && job.text.isEmpty && !job.enter {
+                self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in
+                    self.busy = false
+                    self.dismissKeyboard()
+                }
+                return
+            }
+            // A return alone (the iPhone watch's own return, a search's return): as before, at once.
+            if job.text.isEmpty && job.enter {
+                self.textDocumentProxy.insertText("\n")
+                self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
+                return
+            }
             self.textDocumentProxy.insertText(job.text)
-            if job.enter { self.textDocumentProxy.insertText("\n") }
             self.status.text = "\(Self.name) 已填入：\(job.text.prefix(20))"
-            self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
+            guard job.enter else {
+                self.exchange(KeyboardLink.line(.done(id: job.id, ok: true))) { _ in self.busy = false }
+                return
+            }
+            // 185 (Echo 184, 11-26: the return right after the text sent nothing in WeChat, three times in three, and
+            // Lan Agent said sent; with iOS's 语音控制 on, words spoken nearby went into the field after the text): the
+            // return a moment later, and only when the field holds exactly this text (what the field shows around the
+            // cursor; a field that shows nothing is sent as before). Otherwise nothing is sent and Lan Agent is told.
+            // 185 (Echo 184, 11-26 18:19: the return went into WeChat's field as a new line, the cursor on a second
+            // line): after the return the field is looked at again; still holding the text, it was not sent: the new
+            // line is taken back and Lan Agent told.
+            DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLink.returnDelay) {
+                let field = KeyboardLink.fieldMatches(job.text, before: self.textDocumentProxy.documentContextBeforeInput,
+                                              after: self.textDocumentProxy.documentContextAfterInput)
+                guard field else {
+                    self.status.text = "\(Self.name)：輸入框裡還有別的字，沒有發送"
+                    self.exchange(KeyboardLink.line(.done(id: job.id, ok: false))) { _ in self.busy = false }
+                    return
+                }
+                self.textDocumentProxy.insertText("\n")
+                DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLink.sentCheckDelay) {
+                    let before = self.textDocumentProxy.documentContextBeforeInput
+                    let sent = !KeyboardLink.stillHolds(job.text, before: before)
+                    if !sent {
+                        if before?.hasSuffix("\n") == true { self.textDocumentProxy.deleteBackward() }
+                        self.status.text = "\(Self.name)：發送鍵沒有送出（變成換行）"
+                    }
+                    self.exchange(KeyboardLink.line(.done(id: job.id, ok: sent))) { _ in
+                        self.busy = false
+                        if sent && job.dismiss == true { self.dismissKeyboard() }
+                    }
+                }
+            }
         }
     }
 

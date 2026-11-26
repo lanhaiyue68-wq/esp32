@@ -30,6 +30,8 @@ struct PaneWatchState {
     var recallTries = 0, lastRecall = -Double.infinity
     /// 184 (C13): when a red mark's row was clicked on each side and the chat was not seen open then.
     var markTapped: [Int: Double] = [:]
+    /// 185 (B17): the 取消 of a search page clicked in vain on each side in a row, and until when it is left alone.
+    var cancelFails: [Int: Int] = [:], cancelPause: [Int: Double] = [:]
     /// 184: the windows left on a news or team account's page (its back missed): back again on the next look.
     var systemOpen: Set<Int> = []
 }
@@ -91,8 +93,16 @@ extension AppModel {
     /// the wait for .background never ended, and WeCom stayed behind Echo): the apps not in view are opened by their
     /// URLs (WeCom first, then WeChat), no wait for Echo to leave.
     private func paneLeaveEcho(_ state: inout PaneWatchState) async -> Bool {
-        let told = Set(await paneLooks().compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
+        let looks = await paneLooks()
+        let told = Set(looks.compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
         if told.contains(.wechat) && told.contains(.wework) { state.frontSince = nil; return true }
+        // 185 (B9, Echo 184, 11-26: WeChat left in a chat with the keyboard up was not told, and weixin:// was opened
+        // every 11 s for minutes): two windows of the apps' own (told, or a chat of theirs) are both in view.
+        let theirs = looks.filter { l in
+            XiaoLanPanes.toldApp(l.rows, crop: l.crop) != nil || XiaoLanPanes.weworkBar(l.rows)
+                || (WatchOCR.Pixels(l.crop).map { XiaoLanPanes.chatBackground($0) } ?? false)
+        }
+        if theirs.count >= 2 { state.frontSince = nil; return true }
         let t = now()
         if state.frontSince == nil { state.frontSince = t }
         guard let since = state.frontSince, t - since >= (state.hopped ? 8 : 1), t - state.lastHop >= 5 else { return false }
@@ -119,6 +129,9 @@ extension AppModel {
             XiaoLanPanes.toldApp(l.rows, crop: l.crop) != nil || (WatchOCR.Pixels(l.crop).map { XiaoLanPanes.chatBackground($0) } ?? false)
         }
         guard !appShown else { (state.noAppsSince, state.noAppsTold, state.recallTries) = (nil, false, 0); return }
+        // 185 (B2, Echo 184, 11-26: iOS's local network question over Echo made it inactive; 30 s later 小藍 went for
+        // 辅助触控's button): a system question over Echo is no app over the windows; nothing is clicked for it.
+        if UIApplication.shared.applicationState == .inactive { return }
         let t = now()
         if state.noAppsSince == nil { state.noAppsSince = t }
         guard let since = state.noAppsSince, t - since > 30 else { return }
@@ -345,6 +358,12 @@ extension AppModel {
             return true
         }
         if !refound {
+            // 185 (B20, Echo 184, 11-26: the first back had gone through; the second's search for the pointer under the
+            // arrow clicked a list row, 蓝海乐 opened and its new 你好 became history): on its list already, done.
+            if let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }), l.view == .list {
+                DebugLog.write("watch: \(who): back: the window is on its list already; nothing more clicked")
+                return true
+            }
             DebugLog.write("watch: \(who): back: pointer not seen below the arrow; finding it first, then once more")
             pointer.forgetPosition()
             return await paneBack(look, who, refound: true)
@@ -455,8 +474,21 @@ extension AppModel {
             await feed.settled(quiet: 0.3, least: 0.3, most: 1.5)
             guard let again = await paneLooks(side: look.side).first(where: { $0.side == look.side }),
                   again.view == .unknown, let cancel = XiaoLanPanes.cancelButton(again.rows) else { return }
+            // 185 (B17, Echo 184, 11-26: WeCom's 取消 clicked in vain every 3–6 s for 50 s, the pointer turned into
+            // the button's frame by 指针动画): three in a row and it is left for 60 s.
+            let t = now()
+            if let until = state.cancelPause[look.side], t < until { return }
             DebugLog.write("watch: a window is on a search page; 取消 back to its list")
-            _ = await paneTap(cancel, in: again.rect, wide: 0.03)
+            if await paneTap(cancel, in: again.rect, wide: 0.03) {
+                state.cancelFails[look.side] = 0
+            } else {
+                let n = (state.cancelFails[look.side] ?? 0) + 1
+                state.cancelFails[look.side] = n
+                if n >= 3 {
+                    (state.cancelFails[look.side], state.cancelPause[look.side]) = (0, t + 60)
+                    DebugLog.write("watch: 取消 not clicked three times in a row; the search page left for 60 s")
+                }
+            }
         }
     }
 
@@ -554,7 +586,9 @@ extension AppModel {
             rebase = true
             if let after = XiaoLanSelf.afterAnchor(lines, history: before) {
                 fresh = after
-            } else if let known = state.seen[key] {
+            } else if case let known = XiaoLanSelf.seenInApp(state.seen, app: app.rawValue, chat: key), !known.isEmpty {
+                // 185 (B18, Echo 184, 11-26: 「【第三方测试】群消息1」, read in 测试群, came again under 企微测试群 when one
+                // window's title was taken for the other's): what was read in any chat of this app counts.
                 let unseen = lines.filter { !known.contains(XiaoLanSelf.plain($0.text)) }
                 if unseen.count < lines.count {
                     DebugLog.write("watch: \(app.rawValue): \(name): no overlap with what was read; \(lines.count - unseen.count) line(s) read before left out")
@@ -771,7 +805,21 @@ extension AppModel {
         if !focused {
             // 183 (Echo 182, 11-26: 简体拼音 over the chat, a white key taken for the field and a letter typed): with a
             // system keyboard up the field is looked for above it.
-            let keys = XiaoLanPanes.keyboardTop(low)
+            var keys = XiaoLanPanes.keyboardTop(low)
+            // 185 (B22, Echo 184, 11-26: on the iPad the system keyboard covers the windows' bottoms, the input bar under
+            // it; "the field above the keyboard" was a message bubble, clicked twice; a voice note, a picture or a link
+            // there would have played or opened): a system keyboard over this window is put down first (switched to
+            // 小藍, which puts itself down), then the field at the bottom is clicked as ever. Not down: nothing clicked.
+            if keys != nil, !CandidatePicker.ourKeyboardShown(rows: low) {
+                DebugLog.write("watch: \(app.rawValue): a system keyboard over \(chat); switched to 小藍 and put down first")
+                if await showLanAgentKeyboard(), await keyboardBridge.type("", enter: false, within: 2, dismiss: true),
+                   await smallKeyboard(up: false, within: 1.5),
+                   let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                    (look, low) = (again, again.rows)
+                    keys = XiaoLanPanes.keyboardTop(low)
+                }
+                guard keys == nil else { return (false, "\(appName)的系统键盘盖住了输入框，没能收起来（没有点）", nil) }
+            }
             guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
                 return (false, "\(appName)里没找到输入框", nil)
             }
@@ -797,17 +845,32 @@ extension AppModel {
         guard await showLanAgentKeyboard() else {
             return (false, "小蓝输入法没有打出字（请在\(appName)里把键盘切成小蓝）", nil)
         }
-        let returned = await keyboardBridge.type(text, enter: true, within: 4)
-        guard returned else { return (false, "小蓝输入法没有打出字（请在\(appName)里把键盘切成小蓝）", nil) }
-        DebugLog.write("watch: \(app.rawValue): typed into \(chat); the keyboard's return pressed")
+        // 185 (B7/B8/B11): true only when the field held exactly this text and emptied after the return (小藍's own
+        // check); then 小藍 puts itself down (B10). Not sent: the field is emptied here, no draft is left (B21).
+        let returned = await keyboardBridge.type(text, enter: true, within: 5, dismiss: true)
+        guard returned else {
+            DebugLog.write("watch: \(app.rawValue): \(chat): not sent (the field held other words, or the return made a new line); the field emptied")
+            try? await pointer.key("cmd+a")
+            try? await pointer.key("backspace")
+            return (false, "小蓝输入法没有发送成功（输入框里有别的字，或发送键变成换行），已清空输入框", nil)
+        }
+        DebugLog.write("watch: \(app.rawValue): typed into \(chat); sent (the field emptied after the return)")
         // Sent when my newest line now shows the text (182: read from the words already read for the check).
-        let head = String(text.filter { !$0.isWhitespace }.prefix(6))
+        // 185 (B8, Echo 184, 11-26: the first 6 characters, 「【小蓝测试】」, matched 183's lines and nothing sent was
+        // "sent" three times; a customer's replies often begin alike): the text's end, not its beginning.
+        let tail = XiaoLanSelf.sendSignature(text)
+        // 185 (B13, Echo 184, 11-26: a screen read with the keyboard over its bottom became the chat's history, and the
+        // line under the keyboard was "new" later): the keyboard (put down by 小藍 after the send) gone first.
+        _ = await smallKeyboard(up: false, within: 1.0)
         func sentShown(_ l: PaneLook) -> WatchReport.Screen? {
             guard case .chat(let t) = l.view, let r = WatchOCR.screen(l.crop, title: t, rows: l.rows, banner: false),
-                  r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(head) }) == true else { return nil }
+                  r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(tail) }) == true else { return nil }
             return r
         }
         let after = await paneLook(look.side, after: now(), tries: 3) { sentShown($0) != nil }
+        if after.flatMap(sentShown) == nil {
+            DebugLog.write("watch: \(app.rawValue): \(chat): sent per the keyboard; the new line not read on the screen")
+        }
         if let a = after, let r = sentShown(a) {
             let key = "\(app.rawValue)|\(r.title)"
             state.history[key] = WatchReport.remember([], screen: r.lines, history: nil)
@@ -834,6 +897,14 @@ extension AppModel {
     /// 183 (Echo 182 overnight, 11-26: after 4 lines of 12 the keyboard was still up, the tap on a time line): the
     /// keyboard is seen to go; still up, another bare spot higher up, once.
     private func paneDismissKeyboard(_ l: PaneLook) async {
+        // 185 (B10, Echo 184, 11-26: two taps on WeChat's chat background, the keyboard still up, "no bare chat
+        // background to tap"): 小藍's own keyboard puts itself down first; the taps only for another keyboard.
+        if keyboardBridge.onScreen() {
+            if await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true), await smallKeyboard(up: false, within: 1.0) {
+                return
+            }
+            DebugLog.write("watch: 小藍's keyboard did not put itself down; a tap on the chat instead")
+        }
         guard case .chat = l.view, let px = WatchOCR.Pixels(l.crop) else { return }
         var above = px.inputTop(from: 0.3) ?? 0.85
         for attempt in 1...2 {

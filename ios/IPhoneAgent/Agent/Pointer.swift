@@ -480,6 +480,9 @@ import Foundation
             }
             throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
         }
+        // 185 (B16, Echo 184, 11-26: aiming at WeCom's 取消 (0.96, 0.05) the pointer was seen at 0.929 while the edge
+        // gate's tracked place was ~0.99; every move right was cut to nothing): where it is seen is the tracked place.
+        Self.syncPad(found)
         let miss = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
         if !edgeStart && maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
             remember("x", (fix(x, "x"), Double(found.x)))
@@ -517,6 +520,7 @@ import Foundation
             if abs(mx) >= 20, let g = measured(mx, fx, Double(p.x), x, gain.w) { gain.w = g }
             if abs(my) >= 20, let g = measured(my, fy, Double(p.y), y, gain.h) { gain.h = g }
             found = p
+            Self.syncPad(p)  // 185 (B16)
         }
         if stale { pos = nil }  // the tracked units used the wrong span: home before the next gesture
         guard onTarget(found) else {

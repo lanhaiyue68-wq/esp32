@@ -54,11 +54,14 @@ import Network
 
     /// Has the keyboard type `text` (and Return when `enter`) into the field in front; true once it says it did.
     /// The keyboard must be on screen: it asks every 0.35 s while shown.
-    func type(_ text: String, enter: Bool, within seconds: Double) async -> Bool {
+    /// 185: `dismiss`, the keyboard puts itself down after a sent return (B10); no text, no return and `dismiss` only
+    /// puts it down. With text and `enter`, true means the field emptied after the return (sent), not just typed.
+    func type(_ text: String, enter: Bool, within seconds: Double, dismiss: Bool = false) async -> Bool {
         start()
-        let job = KeyboardLink.Job(id: UUID().uuidString.prefix(8).lowercased(), text: text, enter: enter)
+        let job = KeyboardLink.Job(id: UUID().uuidString.prefix(8).lowercased(), text: text, enter: enter,
+                                   dismiss: dismiss ? true : nil)
         pending.append(job)
-        DebugLog.write("keyboard bridge: queued \(text.count) character(s)\(enter ? " + return" : "")")
+        DebugLog.write("keyboard bridge: queued \(text.count) character(s)\(enter ? " + return" : "")\(dismiss ? " + down" : "")")
         let ok = await withCheckedContinuation { continuation in
             waiting[job.id] = continuation
             Task { @MainActor [weak self] in

@@ -120,6 +120,9 @@ enum WatchOCR {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let bare = t.filter { !$0.isWhitespace }
         if uiPhrases.contains(bare) { return "" }
+        // 185 (B19, Echo 184, 11-26: WeChat's voice notes 2" and 6" were reported as 「小）2"」「小）6"」): a line that is
+        // a voice note's length (its speaker read as a stray character or two) is no text.
+        if bare.range(of: #"^[^0-9]{0,2}[0-9]{1,2}["”″＂']$"#, options: .regularExpression) != nil { return "" }
         let squeezed = bare.filter { !"¥￥•·・●○◎".contains($0) }
         var rest = squeezed
         for w in quickBarWords { rest = rest.replacingOccurrences(of: w, with: "") }
