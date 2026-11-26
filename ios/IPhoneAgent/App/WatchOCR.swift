@@ -139,7 +139,7 @@ enum WatchOCR {
     /// 182 (Echo 181, 11-26: WeCom's line to 企微测试群 dropped in over WeChat's 测试群 as a banner, and was reported as
     /// 测试群's): an in-app banner sits in the title bar's band, left-aligned, "name: message". The chat's own title is
     /// centred and has no colon there. While one shows, the chat is not read (it goes in a few seconds).
-    static func bannerShown(_ pieces: [CandidatePicker.Piece]) -> Bool { bannerPiece(pieces) != nil }
+    static func bannerShown(_ pieces: [CandidatePicker.Piece], px: Pixels? = nil) -> Bool { bannerPiece(pieces, px: px) != nil }
     /// 188 (B45, Echo 187, 11-27: twice the owner's line in 测试群 was lost under its red mark, nothing logged): a
     /// window's words are read from its very top, so WeChat's window had the iPad's status bar in them, 「◀企业微信 01:00
     /// 11月27日周五 微信」 at y ~0.016 with its time's colon, on the band's top edge (0.02): a box a little lower made every
@@ -149,9 +149,13 @@ enum WatchOCR {
     /// logged: 小藍's own blue line 「【模拟服务器】收到：［图片］」 sat at the window's top, from 0.26 across, a colon in
     /// it): a banner is two lines, its title and right under it its message, starting at the same place; one line with
     /// a colon is none.
-    static func bannerPiece(_ pieces: [CandidatePicker.Piece]) -> CandidatePicker.Piece? {
+    /// 188 night (Echo 188, 11-27 08:00: my own long green bubble 「…长消息：这一条故意写得比较长，」, two lines from the same
+    /// place at the window's top, was taken for a banner: the back waited 5 s and WeCom's order with it, 25.5 s): a line
+    /// on a bubble of mine (green, WeCom's blue) is no banner's, with the window's picture at hand.
+    static func bannerPiece(_ pieces: [CandidatePicker.Piece], px: Pixels? = nil) -> CandidatePicker.Piece? {
         pieces.first { p in
-            (0.03...0.14).contains(Double(p.box.midY)) && Double(p.box.minX) < 0.3 && p.text.count >= 4
+            if let px, kind(p.box, px) == .mine { return false }
+            return (0.03...0.14).contains(Double(p.box.midY)) && Double(p.box.minX) < 0.3 && p.text.count >= 4
                 && (p.text.contains(":") || p.text.contains("："))
                 && !(Double(p.box.midY) < 0.045 && statusBar(p.text)) && !WatchReport.timeLabel(p.text)
                 && pieces.contains { t in
@@ -236,7 +240,7 @@ enum WatchOCR {
         guard let px = Pixels(jpeg) else { return nil }
         let bottom = px.inputTop(from: 0.12) ?? 0.95
         let read = Array((rows ?? CandidatePicker.rows(in: jpeg, top: 0.08, bottom: bottom)).joined())
-        let top = banner && bannerShown(read) ? bannerBand : 0.085  // 188 (B45): the banner's band left out, not the window
+        let top = banner && bannerShown(read, px: px) ? bannerBand : 0.085  // 188 (B45): the banner's band left out, not the window
         let pieces = read
             .filter { Double($0.box.minY) > top && Double($0.box.maxY) < bottom }
             .map { Piece(text: $0.text, box: $0.box, kind: kind($0.box, px)) }

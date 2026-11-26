@@ -405,10 +405,10 @@ extension AppModel {
     private func paneBack(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
         var look = look
         var waited = 0.0
-        while WatchOCR.bannerShown(Array(look.rows.joined())), waited < 5 {
+        while WatchOCR.bannerShown(Array(look.rows.joined()), px: WatchOCR.Pixels(look.crop)), waited < 5 {
             // 188 (B45): what was taken for the banner is said (187: ten of these on WeChat, none on WeCom, two with nothing coming in)
             if waited == 0 {
-                let p = WatchOCR.bannerPiece(Array(look.rows.joined()))
+                let p = WatchOCR.bannerPiece(Array(look.rows.joined()), px: WatchOCR.Pixels(look.crop))
                 DebugLog.write("watch: \(who): a banner over the window's top; back after it goes (「\(p?.text ?? "")」 at y \(String(format: "%.3f", Double(p?.box.midY ?? 0))))")
             }
             try? await Task.sleep(nanoseconds: 500_000_000)
@@ -863,12 +863,12 @@ extension AppModel {
         // WeCom's later 「12」 answered first): a window not read is said, kept, and looked at again; opened by its mark
         // and still not read on the last try, the mark's preview is its line.
         let screenRead = WatchOCR.screen(look.crop, title: title, rows: look.rows)  // 182: read once
-        if screenRead != nil, let bp = WatchOCR.bannerPiece(Array(look.rows.joined())) {
+        if screenRead != nil, let bp = WatchOCR.bannerPiece(Array(look.rows.joined()), px: WatchOCR.Pixels(look.crop)) {
             DebugLog.write("watch: \(app.rawValue): \(title): a banner over its top (「\(bp.text)」); read under its band")
         }
         if screenRead == nil {
             WatchChatOpen.keepFrame(look.crop)
-            let bp = WatchOCR.bannerPiece(Array(look.rows.joined()))
+            let bp = WatchOCR.bannerPiece(Array(look.rows.joined()), px: WatchOCR.Pixels(look.crop))
             let why = bp.map { "a banner over its top: 「\($0.text)」 at y \(String(format: "%.3f", Double($0.box.midY)))" } ?? "no picture"
             guard fromMark, lastTry, markPreview != nil else {
                 DebugLog.write("watch: \(app.rawValue): \(title): the window could not be read (\(why))\(fromMark && !lastTry ? "; looking again" : "")")

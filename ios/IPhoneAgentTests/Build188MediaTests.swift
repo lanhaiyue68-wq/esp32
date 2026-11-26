@@ -364,4 +364,16 @@ import UIKit
         let page = try XCTUnwrap(WatchOCR.Pixels(split(video: true)))
         XCTAssertEqual(XiaoLanPanes.windows(page).count, 2)  // not one window: no "a window is gone", the watch goes on
     }
+
+    func testMyLongBubbleAtTheTopIsNoBanner() throws {
+        let jpeg = chat { c in
+            c.setFillColor(red: 149 / 255, green: 236 / 255, blue: 105 / 255, alpha: 1)  // WeChat's green, mine
+            c.fill(CGRect(x: 120, y: 110, width: 300, height: 70))
+        }
+        let px = try XCTUnwrap(WatchOCR.Pixels(jpeg))
+        let lines = [CandidatePicker.Piece(text: "【小蓝测试】188个微长消", box: CGRect(x: 0.28, y: 0.100, width: 0.55, height: 0.02)),
+                     CandidatePicker.Piece(text: "息：这一条故意写得比较长，", box: CGRect(x: 0.28, y: 0.125, width: 0.55, height: 0.02))]
+        XCTAssertTrue(WatchOCR.bannerShown(lines))            // words alone: as before
+        XCTAssertFalse(WatchOCR.bannerShown(lines, px: px))  // on my green bubble: no banner
+    }
 }
