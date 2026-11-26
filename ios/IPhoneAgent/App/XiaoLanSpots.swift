@@ -114,3 +114,24 @@ enum XiaoLanSpots {
         return CGPoint(x: Double(p.x - pressed.x), y: Double(p.y - pressed.y))
     }
 }
+
+/// 188: which order goes next and which mark is opened next, by when things came (pure: tested).
+enum PaneTurns {
+    /// Of each link's earliest waiting turn, the earliest (its index and turn); nil when one asked earlier still waits
+    /// for its QA reply (that one goes first) or nothing waits.
+    static func next(firsts: [Int?], asking: [Int?]) -> (index: Int, turn: Int)? {
+        let waiting = firsts.enumerated().compactMap { i, f in f.map { (index: i, turn: $0) } }
+        guard let best = waiting.min(by: { $0.turn < $1.turn }) else { return nil }
+        if let earlier = asking.compactMap({ $0 }).min(), earlier < best.turn { return nil }
+        return best
+    }
+
+    /// The mark to open first in a window: the one first seen earliest; seen together, the lower row (its chat's last
+    /// line is older).
+    static func first(_ marks: [(name: String, at: CGPoint)], seen: (String) -> Double) -> (name: String, at: CGPoint)? {
+        marks.min { a, b in
+            let (sa, sb) = (seen(a.name), seen(b.name))
+            return sa != sb ? sa < sb : a.at.y > b.at.y
+        }
+    }
+}

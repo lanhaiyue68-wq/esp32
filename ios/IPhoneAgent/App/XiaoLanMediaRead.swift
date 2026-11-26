@@ -1,3 +1,4 @@
+#if XIAOLAN
 import Foundation
 import UIKit
 
@@ -486,3 +487,4 @@ extension AppModel {
         return await paneQuote(quote, l, "test")
     }
 }
+#endif

@@ -115,17 +115,21 @@ extension AppModel {
             case "set":
                 for k in XiaoLanMediaFind.Kind.allCases { if let on = body[k.rawValue] as? Bool { MediaSettings.set(k, on) } }
                 if let on = body["quote"] as? Bool { MediaSettings.quoteOn = on }
-            case "read":
+            case "read", "quote":
+                #if XIAOLAN
                 guard !watching else { return .json(["error": .str("the watch is on: turn it off first")], status: 409) }
+                if text("do") == "quote" {
+                    let quoted = await paneQuoteTest(side: Int(number("side")), quote: text("text"))
+                    return .json(["quoted": .bool(quoted)])
+                }
                 guard let kind = XiaoLanMediaFind.Kind(rawValue: text("kind")) else {
                     return .json(["error": .str("kind: voice, video, image, file or link")], status: 400)
                 }
                 let got = await paneMediaTest(side: Int(number("side")), kind: kind, text: text("text"))
                 return .json(["seen": got.seen.map { JValue.str($0) } ?? .null, "why": got.why.map { JValue.str($0) } ?? .null])
-            case "quote":
-                guard !watching else { return .json(["error": .str("the watch is on: turn it off first")], status: 409) }
-                let quoted = await paneQuoteTest(side: Int(number("side")), quote: text("text"))
-                return .json(["quoted": .bool(quoted)])
+                #else
+                return .json(["error": .str("小藍 only")], status: 404)
+                #endif
             default:
                 break
             }
