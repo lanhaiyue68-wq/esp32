@@ -112,7 +112,13 @@ import Foundation
     /// what the robot settings say goes to the QA callback, whose reply is queued to be sent (163, as the engines do).
     func report(_ messages: [ReadMessage]) {
         for m in messages {
-            if state == .connected, let packet = Self.packet(m) { send(packet) { [weak self] in self?.reported += 1 } }
+            if let packet = Self.packet(m) {  // 187: kept when it cannot go out now
+                if state == .connected {
+                    send(packet, then: { [weak self] in self?.reported += 1 }, failed: { [weak self] in self?.keep(packet) })
+                } else {
+                    keep(packet)
+                }
+            }
             if Self.asksQA(m, config: config) {
                 qaWaiting += 1
                 Task { [weak self] in
@@ -241,7 +247,9 @@ import Foundation
             queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date())
             note("↩ 伺服器回覆 · \(m.chat)")
         } catch {
-            DebugLog.write("chattool: QA callback failed: \(error.localizedDescription)")
+            DebugLog.write("chattool: QA callback failed: \(error.localizedDescription); asked again when the link is back")
+            unasked.append(m)  // 187
+            if unasked.count > 50 { unasked.removeFirst(unasked.count - 50) }
         }
     }
 
@@ -422,11 +430,43 @@ import Foundation
         return String(data: data, encoding: .utf8)
     }
 
-    private func send(_ packet: String, then: (@MainActor () -> Void)? = nil) {
-        guard let task else { DebugLog.write("chattool: not connected; dropped a packet"); return }
+    private func send(_ packet: String, then: (@MainActor () -> Void)? = nil, failed: (@MainActor () -> Void)? = nil) {
+        guard let task else {
+            DebugLog.write("chattool: not connected; dropped a packet")
+            failed?()
+            return
+        }
         task.send(.string(packet)) { error in
             Task { @MainActor in
-                if let error { DebugLog.write("chattool: send failed: \(error.localizedDescription)") } else { then?() }
+                if let error {
+                    DebugLog.write("chattool: send failed: \(error.localizedDescription)")
+                    failed?()
+                } else { then?() }
+            }
+        }
+    }
+
+    // 187 (Echo 186, 11-27 00:58 首爾: the server down, 「187断线4」 was read, its red mark cleared and "reported", and
+    // never reached the server after it came back): a read message that could not go out, and its QA ask, are kept
+    // (the newest 200 and 50) and sent, in order, as soon as the link is up again.
+    private var unsent: [String] = []
+    private var unasked: [ReadMessage] = []
+    private func keep(_ packet: String) {
+        unsent.append(packet)
+        if unsent.count > 200 { unsent.removeFirst(unsent.count - 200) }
+        DebugLog.write("chattool: a read message kept to send when the link is back (\(unsent.count) kept)")
+    }
+    private func sendKept() {
+        let packets = unsent, asks = unasked
+        (unsent, unasked) = ([], [])
+        guard !packets.isEmpty || !asks.isEmpty else { return }
+        DebugLog.write("chattool: link back; \(packets.count) read message(s) and \(asks.count) QA ask(s) kept while it was down sent now")
+        for p in packets { send(p, then: { [weak self] in self?.reported += 1 }, failed: { [weak self] in self?.keep(p) }) }
+        for m in asks {
+            qaWaiting += 1
+            Task { [weak self] in
+                await self?.askQA(m)
+                self?.qaWaiting -= 1
             }
         }
     }
@@ -447,7 +487,12 @@ import Foundation
             do {
                 while !Task.isCancelled {
                     let message = try await t.receive()
-                    if state != .connected { state = .connected; wait = 2; DebugLog.write("chattool: connected to \(url.host ?? "")") }
+                    if state != .connected {
+                        state = .connected
+                        wait = 2
+                        DebugLog.write("chattool: connected to \(url.host ?? "")")
+                        sendKept()  // 187: what was read while the link was down
+                    }
                     if case .string(let text) = message { accept(text) }
                 }
             } catch {
