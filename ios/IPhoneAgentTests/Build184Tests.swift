@@ -70,6 +70,30 @@ import UIKit
         XCTAssertFalse(CommandChannel.padCalibrating)
     }
 
+    /// User 11-26: the pointer made big and red (指针控制 › 颜色): found in one frame by its hollow red outline; red
+    /// badges, a red word and the Dock's pink are not it.
+    func testRedPointerInOneFrame() throws {
+        func red(_ c: CGContext) { c.setFillColor(red: 236 / 255, green: 67 / 255, blue: 60 / 255, alpha: 1) }
+        let shot = frame { c in
+            red(c)
+            c.fill(CGRect(x: 32, y: 78, width: 40, height: 52))                       // the outline …
+            c.setFillColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)
+            c.fill(CGRect(x: 38, y: 84, width: 28, height: 40))                       // … round its grey fill
+            red(c)
+            c.fill(CGRect(x: 520, y: 380, width: 22, height: 22))                     // a red mark (badge)
+            c.fill(CGRect(x: 34, y: 640, width: 40, height: 14))                      // a red word
+            c.setFillColor(red: 219 / 255, green: 165 / 255, blue: 179 / 255, alpha: 1)
+            c.fill(CGRect(x: 0, y: 1172, width: 960, height: 108))                    // the Dock
+        }
+        let tip = try XCTUnwrap(Vision.redPointer(shot))
+        XCTAssertEqual(Double(tip.x) * 960, 34, accuracy: 3)
+        XCTAssertEqual(Double(tip.y) * 1280, 80, accuracy: 3)
+        XCTAssertNil(Vision.redPointer(shot, near: CGPoint(x: 0.9, y: 0.9), window: 0.2))  // not near there
+        XCTAssertNil(Vision.redPointer(frame { red($0); $0.fill(CGRect(x: 520, y: 380, width: 22, height: 22)) }))  // a badge only
+        // a solid red block the pointer's size (WeChat's 删除) is no pointer: not hollow
+        XCTAssertNil(Vision.redPointer(frame { red($0); $0.fill(CGRect(x: 600, y: 600, width: 44, height: 52)) }))
+    }
+
     /// 11-26: the top band to 0.12 took in the search box (0.10): no search ever ran.
     func testTopBandIsTheTitleBarOnly() {
         XCTAssertEqual(XiaoLanPanes.topBand, 0.08)

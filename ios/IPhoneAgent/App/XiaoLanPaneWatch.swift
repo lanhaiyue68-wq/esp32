@@ -349,6 +349,15 @@ extension AppModel {
                     state.notChat[look.side] = "keyboard"
                     DebugLog.write("watch: \(title) has a system keyboard over it; not read")
                 }
+                // 184 (Echo 183, 11-26: 测试群 under 简体拼音 was left there, its keyboard up over WeCom too): not read,
+                // but back to the list after 5 s all the same (the back puts the keyboard down).
+                if state.quietSince[look.side] == nil { state.quietSince[look.side] = now() }
+                if let quiet = state.quietSince[look.side], now() - quiet > 5, !ordersWaiting {
+                    let who = (state.apps[look.side] ?? XiaoLanPanes.chatApp(look.rows)).rawValue
+                    DebugLog.write("watch: \(who): \(title) under a system keyboard; back to the list")
+                    _ = await paneBack(look, who)
+                    state.quietSince[look.side] = nil
+                }
                 return
             }
             state.notChat[look.side] = nil

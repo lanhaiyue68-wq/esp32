@@ -306,6 +306,54 @@ enum Vision {
             .min { hypot($0.x - near.x, $0.y - near.y) < hypot($1.x - near.x, $1.y - near.y) }
     }
 
+    /// 184 (user 11-26: the iPad's pointer made big and red, 辅助功能 › 指针控制 › 颜色): the pointer in one frame, no
+    /// nudge: a hollow patch of the pointer's red (its outline ~40 x 52 px at 960 wide, 750 red px, the fill grey), its
+    /// tip the outline's top-left, moved in a little. Checked on the customer's iPad 11-26: found in the frame with it,
+    /// nothing in six without it (badges ~20 px, red icons 38 x 14, the Dock's band, the recording pill in the status
+    /// bar). Nil when there is none near `near` (another colour set, or hidden): the caller falls back to a nudge.
+    static func redPointer(_ jpeg: Data, near: CGPoint? = nil, window: Double = 1, top: Double = 0.03) -> CGPoint? {
+        guard let img = image(jpeg) else { return nil }
+        let w = img.width, h = img.height
+        let px = rgba(img, w, h)
+        let s = 2, gw = w / s, gh = h / s
+        guard gw > 10, gh > 10 else { return nil }
+        var mask = [Bool](repeating: false, count: gw * gh)
+        for gy in Int(top * Double(gh))..<gh {
+            for gx in 0..<gw {
+                let i = ((gy * s) * w + gx * s) * 4
+                let r = Int(px[i]), g = Int(px[i + 1]), b = Int(px[i + 2])
+                if r > 180 && g < 120 && b < 130 && r - g > 90 { mask[gy * gw + gx] = true }
+            }
+        }
+        let k = Double(w) / 960
+        var seen = [Bool](repeating: false, count: gw * gh)
+        var best: (tip: CGPoint, d: Double)?
+        for start in 0..<(gw * gh) where mask[start] && !seen[start] {
+            var stack = [start]
+            seen[start] = true
+            var count = 0, minX = Int.max, maxX = 0, minY = Int.max, maxY = 0, tip = start, tipSum = Int.max
+            while let c = stack.popLast() {
+                count += 1
+                let cx = c % gw, cy = c / gw
+                minX = min(minX, cx); maxX = max(maxX, cx); minY = min(minY, cy); maxY = max(maxY, cy)
+                if cx + cy < tipSum { (tipSum, tip) = (cx + cy, c) }
+                for n in [cx > 0 ? c - 1 : -1, cx < gw - 1 ? c + 1 : -1, c - gw, c + gw]
+                where n >= 0 && n < gw * gh && mask[n] && !seen[n] {
+                    seen[n] = true
+                    stack.append(n)
+                }
+            }
+            let bw = Double((maxX - minX + 1) * s), bh = Double((maxY - minY + 1) * s), n = Double(count * s * s)
+            guard (22 * k...80 * k).contains(bw), (28 * k...95 * k).contains(bh), (250 * k * k...2000 * k * k).contains(n),
+                  !mask[((minY + maxY) / 2) * gw + (minX + maxX) / 2] else { continue }  // hollow: the grey fill inside
+            let p = CGPoint(x: (Double((tip % gw) * s) + 2 * k) / Double(w), y: (Double((tip / gw) * s) + 2 * k) / Double(h))
+            let d = near.map { hypot(Double(p.x - $0.x), Double(p.y - $0.y)) } ?? 0
+            if let near, abs(Double(p.x - near.x)) > window || abs(Double(p.y - near.y)) > window { continue }
+            if best == nil || d < best!.d { best = (p, d) }
+        }
+        return best?.tip
+    }
+
     /// Every arrow tip seen changed within `window` of `near` (at most four).
     /// 184 (Echo 183, 11-26: by an iPad window's top, its back arrow, 取消 and ＋ at ~0.05, the pointer was never seen:
     /// the top 6 % (an iPhone's status bar) was left out): `top`, the band left out (an iPad's status bar is ~3 %).

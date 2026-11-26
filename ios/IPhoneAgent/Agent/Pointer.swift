@@ -137,6 +137,7 @@ import Foundation
     private func padSpot(nudge: Int) async -> CGPoint? {
         guard let screen, screen.live else { return nil }
         await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
+        if let frame = screen.frame, let red = Vision.redPointer(frame) { return red }  // 184: the red pointer, no nudge
         let before = screen.frame, sent = now()
         guard (try? await device.send("move \(nudge) 0")) != nil else { return nil }
         var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -590,6 +591,8 @@ import Foundation
     /// as the iPad home's (which saw it every time).
     private func padMeasure(_ x: Double, _ y: Double, nudge: Int, on screen: ScreenSource) async throws -> CGPoint? {
         await screen.settled(quiet: 0.2, least: 0.2, most: 1.0)
+        // 184 (user 11-26: the pointer made big and red): seen in the frame at rest, no nudge at all.
+        if let frame = screen.frame, let red = Vision.redPointer(frame, near: CGPoint(x: x, y: y), window: 0.5) { return red }
         let before = screen.frame, sent = now()
         try await nudgeSlowly(nudge)
         var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -1026,8 +1029,10 @@ import Foundation
         CommandChannel.padPos = (Int(Double(seen.x) * Double(CommandChannel.padSpan.w)), Int(Double(seen.y) * Double(CommandChannel.padSpan.h)))
     }
 
+    /// 184: on an iPad the red pointer (指针控制 › 颜色) is found in the frame itself first; the change between frames after.
     static func sighting(_ before: Data, _ after: Data, near: CGPoint) -> CGPoint? {
-        CommandChannel.onPad() ? Vision.arrow(before, after, near: near, top: padTopMask) : Vision.arrival(before, after, near: near)
+        guard CommandChannel.onPad() else { return Vision.arrival(before, after, near: near) }
+        return Vision.redPointer(after, near: near, window: 0.5) ?? Vision.arrow(before, after, near: near, top: padTopMask)
     }
 
     /// 184: the band at an iPad's top where the pointer is not looked for: its status bar (~3 %), not an iPhone's 6 %,
