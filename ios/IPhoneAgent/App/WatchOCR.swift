@@ -109,7 +109,10 @@ enum WatchOCR {
                             "滑到這裡轉文字", "上滑取消"]
     static let uiTails = ["转换完成", "轉換完成", "转文字完成", "轉文字完成"]
     /// WeCom's quick bar over a chat's input (180, 182: it tells WeCom's chats).
-    static let quickBarWords = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服", "推薦客服"]
+    /// 184 (C14; Echo 183, 11-26: "企业名片 ¥发起收款 客户转账" reported from a private chat): a private chat's bar
+    /// has 服务总结 and 客户转账 too.
+    static let quickBarWords = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服", "推薦客服",
+                                "服务总结", "服務總結", "客户转账", "客戶轉賬", "客户转帐", "客戶轉帳"]
 
     /// 183 (Echo 182 overnight, 11-26: "¥发起收款 •推荐客服", "发起收款 ●推荐客服" reported 24 times): a line that is
     /// WeCom's quick bar (its buttons read with their icons as ¥ • ●, a stray character at most) is dropped too.
@@ -121,6 +124,8 @@ enum WatchOCR {
         var rest = squeezed
         for w in quickBarWords { rest = rest.replacingOccurrences(of: w, with: "") }
         if rest.count < squeezed.count && rest.count <= 1 { return "" }
+        // 184 (C14): two of the bar's buttons on one line is the bar, whatever else was read with it.
+        if quickBarWords.filter({ squeezed.contains($0) }).count >= 2 { return "" }
         for tail in uiTails where bare.hasSuffix(tail) {
             if let r = t.range(of: tail, options: .backwards) { t = String(t[..<r.lowerBound]) }
             t = t.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "•·・●")))

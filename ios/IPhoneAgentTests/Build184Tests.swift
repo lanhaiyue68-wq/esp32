@@ -101,4 +101,107 @@ import UIKit
         XCTAssertLessThan(Double(XiaoLanPanes.back.y), XiaoLanPanes.topBand)      // the back arrow
         XCTAssertLessThan(Double(XiaoLanPanes.menuCloseSpot.y), XiaoLanPanes.topBand)
     }
+
+    func blue(_ c: CGContext) { c.setFillColor(red: 14 / 255, green: 125 / 255, blue: 234 / 255, alpha: 1) }
+    /// 辅助触控's pointer: a coloured ring (6 px) round a grey fill.
+    func ring(_ c: CGContext, _ x: CGFloat, _ y: CGFloat, d: CGFloat = 34, tall: CGFloat? = nil, inside: CGFloat = 0.6) {
+        let h = tall ?? d
+        blue(c)
+        c.fillEllipse(in: CGRect(x: x - d / 2, y: y - h / 2, width: d, height: h))
+        c.setFillColor(red: inside, green: inside, blue: inside, alpha: 1)
+        c.fillEllipse(in: CGRect(x: x - d / 2 + 6, y: y - h / 2 + 6, width: d - 12, height: h - 12))
+    }
+    func dockPink(_ c: CGContext) {
+        c.setFillColor(red: 194 / 255, green: 41 / 255, blue: 106 / 255, alpha: 1)
+        c.fill(CGRect(x: 0, y: 1160, width: 960, height: 120))
+    }
+
+    /// C15a (user 11-26: 辅助触控 on, the pointer a grey disk in a blue ring ~34 px; 183: "eye: unseen" every time):
+    /// found in one frame, its centre; a lens (white inside), a radio button, an oval, a solid dot are not it.
+    func testRingPointerInOneFrame() throws {
+        let lookalikes: (CGContext) -> Void = { c in
+            self.ring(c, 150, 300, inside: 1)                     // a camera's lens: white inside
+            self.ring(c, 700, 300, d: 16)                          // a radio button
+            self.ring(c, 700, 900, d: 28, tall: 40)                // an oval (a % sign's o, a map pin)
+            self.blue(c)
+            c.fillEllipse(in: CGRect(x: 133, y: 883, width: 34, height: 34))  // a solid dot
+            self.dockPink(c)
+        }
+        let shot = frame { c in lookalikes(c); self.ring(c, 400, 600) }
+        let p = try XCTUnwrap(Vision.ringPointer(shot))
+        XCTAssertEqual(Double(p.x) * 960, 400, accuracy: 2.5)
+        XCTAssertEqual(Double(p.y) * 1280, 600, accuracy: 2.5)
+        XCTAssertEqual(Vision.seenPointer(shot), p)                                // no red arrow: the disk
+        XCTAssertNil(Vision.ringPointer(shot, near: CGPoint(x: 0.9, y: 0.1), window: 0.2))
+        XCTAssertNil(Vision.ringPointer(frame(lookalikes)))                         // the look-alikes only
+        // over the Dock's WeChat icon: green under one half, pink under the other
+        let onDock = frame { c in
+            self.dockPink(c)
+            c.setFillColor(red: 7 / 255, green: 193 / 255, blue: 96 / 255, alpha: 1)
+            c.fill(CGRect(x: 302, y: 1181, width: 70, height: 70))
+            self.ring(c, 300, 1218, inside: 0.45)
+        }
+        let d = try XCTUnwrap(Vision.ringPointer(onDock))
+        XCTAssertEqual(Double(d.x) * 960, 300, accuracy: 2.5)
+        XCTAssertEqual(Double(d.y) * 1280, 1218, accuracy: 2.5)
+    }
+
+    /// C15b: the Dock's WeChat (green, hue ~149, not Messages' 130) and WeCom (white with its blue) told by colour;
+    /// 辅助触控's button where the owner put it unless set.
+    func testDockIconsByColour() throws {
+        func icon(_ c: CGContext, _ x: CGFloat, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) {
+            c.setFillColor(red: r / 255, green: g / 255, blue: b / 255, alpha: 1)
+            c.fill(CGRect(x: x - 35, y: 1181, width: 70, height: 70))
+        }
+        let shot = frame { c in
+            self.dockPink(c)
+            icon(c, 70, 52, 199, 89)                                           // Messages
+            icon(c, 160, 0, 122, 255)                                          // Safari's blue
+            icon(c, 337, 7, 193, 96)                                           // WeChat …
+            c.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            c.fillEllipse(in: CGRect(x: 312, y: 1200, width: 30, height: 24))  // … its white bubbles
+            c.fillEllipse(in: CGRect(x: 332, y: 1214, width: 26, height: 20))
+            icon(c, 425, 255, 255, 255)                                        // WeCom: white …
+            c.setStrokeColor(red: 0, green: 122 / 255, blue: 1, alpha: 1)
+            c.setLineWidth(5)
+            c.strokeEllipse(in: CGRect(x: 405, y: 1198, width: 36, height: 30)) // … its blue bubble
+        }
+        let found = XiaoLanRecall.dockIcons(try XCTUnwrap(WatchOCR.Pixels(shot)))
+        let wechat = try XCTUnwrap(found.wechat), wework = try XCTUnwrap(found.wework)
+        XCTAssertEqual(Double(wechat.x), 337.0 / 960, accuracy: 0.015)  // its bubbles pull the run right a little
+        XCTAssertEqual(Double(wework.x), 425.0 / 960, accuracy: 0.01)
+        XCTAssertEqual(Double(wechat.y), 0.95, accuracy: 0.021)
+        let none = XiaoLanRecall.dockIcons(try XCTUnwrap(WatchOCR.Pixels(frame { _ in })))
+        XCTAssertNil(none.wechat)
+        XCTAssertNil(none.wework)
+        UserDefaults.standard.removeObject(forKey: XiaoLanRecall.spotKey)
+        XCTAssertEqual(Double(XiaoLanRecall.assistiveTouch.x), 0.655, accuracy: 0.001)
+        XCTAssertEqual(Double(XiaoLanRecall.assistiveTouch.y), 0.956, accuracy: 0.001)
+    }
+
+    /// C12: the writer a list preview names (a group's line read with no name over it); C14: WeCom's private chats'
+    /// bar (服务总结, 客户转账) is no one's line.
+    func testPreviewSenderAndQuickBar() {
+        XCTAssertEqual(XiaoLanPanes.senderOf("主人蓝海乐: 【第三方测试】群消息1"), "主人蓝海乐")
+        XCTAssertEqual(XiaoLanPanes.senderOf("[2条]主人蓝海乐：你好"), "主人蓝海乐")
+        XCTAssertNil(XiaoLanPanes.senderOf("[语音] 2\""))
+        XCTAssertNil(XiaoLanPanes.senderOf("【模拟服务器】收到：嗨"))
+        XCTAssertNil(XiaoLanPanes.senderOf("12:30 开会"))
+        typealias P = CandidatePicker.Piece
+        let rows: [[P]] = [
+            [P(text: "测试群", box: CGRect(x: 0.2, y: 0.19, width: 0.2, height: 0.02))],
+            [P(text: "主人蓝海乐: 【第三方测试】群消息1", box: CGRect(x: 0.2, y: 0.218, width: 0.6, height: 0.018))],
+            [P(text: "腾讯新闻", box: CGRect(x: 0.2, y: 0.29, width: 0.2, height: 0.02))],
+            [P(text: "今天的新闻摘要", box: CGRect(x: 0.2, y: 0.318, width: 0.6, height: 0.018))],
+        ]
+        XCTAssertEqual(XiaoLanPanes.previewSender(rows, of: "测试群"), "主人蓝海乐")
+        XCTAssertNil(XiaoLanPanes.previewSender(rows, of: "腾讯新闻"))
+        XCTAssertNil(XiaoLanPanes.previewSender(rows, of: "不在列表"))
+        XCTAssertEqual(WatchOCR.withoutUIWords("企业名片 ¥发起收款 客户转账"), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("服务总结 客户转账 某某"), "")   // two buttons: the bar
+        XCTAssertEqual(WatchOCR.withoutUIWords("明天发起收款"), "明天发起收款")   // one: a message
+        XCTAssertTrue(XiaoLanSelf.isButton("客户转账"))
+        XCTAssertFalse(XiaoLanSelf.isButton("企微测试群"))
+        XCTAssertTrue(XiaoLanSelf.noSender("企微测试群", chat: "企微测试群"))    // still no sender read (C12 names it)
+    }
 }

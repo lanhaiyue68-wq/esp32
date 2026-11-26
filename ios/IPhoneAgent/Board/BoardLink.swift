@@ -185,6 +185,14 @@ import Foundation
         setDisconnected()
         stopScan()
         if let previous { central.cancelPeripheralConnection(previous) }
+        // 184 (C16; 11-26: after the board was flashed the first connect failed, "Failed to encrypt", and Echo never
+        // tried again until the user tapped 开发板: setDisconnected cancels the 30 s deadline, the only one that retried):
+        // a paired board that failed in any way is tried again in 10 s.
+        guard pairedID != nil else { return }
+        retryTask = Task { [weak self] in
+            guard (try? await Task.sleep(nanoseconds: 10_000_000_000)) != nil else { return }
+            self?.reconnect()
+        }
     }
 
     private func reconnect() {
@@ -204,13 +212,10 @@ import Foundation
         connectionDeadline?.cancel()
         connectionDeadline = Task { [weak self] in
             guard (try? await Task.sleep(nanoseconds: 30_000_000_000)) != nil, let self, !self.connected else { return }
-            self.failConnection(String(localized: "Connection timed out. Keep the board nearby and try again."))
             // 174 (11-25): the board was being flashed (in its bootloader) for those 30 s, and Echo never tried again
-            // until the user tapped 开发板. A paired board that timed out is tried again every 10 s.
-            self.retryTask = Task { [weak self] in
-                guard (try? await Task.sleep(nanoseconds: 10_000_000_000)) != nil else { return }
-                self?.reconnect()
-            }
+            // until the user tapped 开发板. A paired board that timed out is tried again every 10 s (184: by
+            // failConnection, as after any failure).
+            self.failConnection(String(localized: "Connection timed out. Keep the board nearby and try again."))
         }
         if peripheral.state == .connected {
             connecting = false

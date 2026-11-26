@@ -26,6 +26,10 @@ struct PaneWatchState {
     var seen: [String: Set<String>] = [:]
     /// 183: since when no window of WeChat or WeCom has been on the screen, and whether the owner was told.
     var noAppsSince: Double?, noAppsTold = false
+    /// 184 (C15b): how often 小藍 tried to bring the two windows back itself since they went, and when last.
+    var recallTries = 0, lastRecall = -Double.infinity
+    /// 184 (C13): when a red mark's row was clicked on each side and the chat was not seen open then.
+    var markTapped: [Int: Double] = [:]
     /// 184: the windows left on a news or team account's page (its back missed): back again on the next look.
     var systemOpen: Set<Int> = []
 }
@@ -66,7 +70,7 @@ extension AppModel {
             await feed.settled(quiet: 0.2, least: 0, most: 0.8)
             let looks = await paneLooks()
             paneTell(looks, &state)
-            paneNoAppsCheck(looks, &state)
+            await paneNoAppsCheck(looks, &state)
             for look in looks {
                 guard watching, !Task.isCancelled else { break }
                 // 183 (Echo 182 overnight, 11-26: an order waited 13–25 s for the other window's back to its list): an
@@ -108,20 +112,63 @@ extension AppModel {
     /// 183 (Echo 181, 11-26: the iPad left on Settings full screen; the board's Cmd+H, Cmd+Tab, Esc do nothing on this
     /// iPad, and Echo may not push the screen's edges to go home or switch apps): no window of WeChat or WeCom for 30 s,
     /// the owner is told once (a notification and the watch's status) to bring them back side by side.
-    private func paneNoAppsCheck(_ looks: [PaneLook], _ state: inout PaneWatchState) {
+    /// 184 (C15b; user 11-26: "不要叫他手動切"): first 小藍 brings them back itself (paneRecall), up to three times 20 s
+    /// apart; the owner is told only when that did not work.
+    private func paneNoAppsCheck(_ looks: [PaneLook], _ state: inout PaneWatchState) async {
         let appShown = looks.contains { l in
             XiaoLanPanes.toldApp(l.rows, crop: l.crop) != nil || (WatchOCR.Pixels(l.crop).map { XiaoLanPanes.chatBackground($0) } ?? false)
         }
-        guard !appShown else { (state.noAppsSince, state.noAppsTold) = (nil, false); return }
+        guard !appShown else { (state.noAppsSince, state.noAppsTold, state.recallTries) = (nil, false, 0); return }
         let t = now()
         if state.noAppsSince == nil { state.noAppsSince = t }
         guard let since = state.noAppsSince, t - since > 30 else { return }
-        watchStatus = "看不到微信和企业微信的窗口：请手动切回微信＋企业微信左右分屏"
+        if state.recallTries < 3, t - state.lastRecall >= 20 {
+            state.recallTries += 1
+            if await paneRecall(attempt: state.recallTries) {
+                (state.noAppsSince, state.noAppsTold, state.recallTries) = (nil, false, 0)
+                return
+            }
+            state.lastRecall = now()
+            if state.recallTries < 3 { return }
+        }
+        watchStatus = "看不到微信和企业微信的窗口：小蓝自己切回没成功，请手动切回微信＋企业微信左右分屏"
         guard !state.noAppsTold else { return }
         state.noAppsTold = true
-        DebugLog.write("watch: no window of WeChat or WeCom on the screen for 30 s; the owner is asked to bring them back")
+        DebugLog.write("watch: no window of WeChat or WeCom on the screen for 30 s; brought back itself: no; the owner is asked")
         notifier.post(.failed, title: "小蓝看不到微信和企业微信",
-                      body: "屏幕被别的 App 盖住了。请手动切回微信和企业微信左右分屏（Echo 不会推屏幕边）。", run: "xiaolan-watch")
+                      body: "屏幕被别的 App 盖住了，小蓝用辅助触控自己切回试了 3 次没成功。请手动切回微信和企业微信左右分屏。", run: "xiaolan-watch")
+    }
+
+    /// 184 (C15b): the two windows brought back as by hand (XiaoLanRecall): 辅助触控's button when the Dock is not in
+    /// view, then the Dock's WeCom, then WeChat; every click only on the pointer seen there (paneSeenTap). True when both
+    /// apps' windows are in view after.
+    private func paneRecall(attempt n: Int) async -> Bool {
+        func dock() async -> (wechat: CGPoint?, wework: CGPoint?) {
+            await feed.settled(quiet: 0.3, least: 0.2, most: 2)
+            guard let frame = feed.frame, let px = WatchOCR.Pixels(frame) else { return (nil, nil) }
+            return XiaoLanRecall.dockIcons(px)
+        }
+        func log(_ s: String) { DebugLog.write("watch: bringing WeChat and WeCom back (\(n)): \(s)") }
+        var icons = await dock()
+        if icons.wechat == nil || icons.wework == nil {
+            let at = XiaoLanRecall.assistiveTouch
+            log(String(format: "辅助触控's button at (%.3f, %.3f)", at.x, at.y))
+            guard await paneSeenTap(at, half: (0.035, 0.025)) else { log("its button not clicked"); return false }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            icons = await dock()
+        }
+        guard let wework = icons.wework else { log("WeCom's icon not seen in the Dock"); return false }
+        log(String(format: "the Dock's WeCom at (%.3f, %.3f)", wework.x, wework.y))
+        guard await paneSeenTap(wework, half: (0.03, 0.025)) else { log("WeCom's icon not clicked"); return false }
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard let wechat = await dock().wechat ?? icons.wechat else { log("WeChat's icon not seen in the Dock"); return false }
+        log(String(format: "the Dock's WeChat at (%.3f, %.3f)", wechat.x, wechat.y))
+        guard await paneSeenTap(wechat, half: (0.03, 0.025)) else { log("WeChat's icon not clicked"); return false }
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        let told = Set(await paneLooks(after: now()).compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
+        let back = told.contains(.wechat) && told.contains(.wework)
+        log(back ? "both back" : "after: \(told.map { "\($0)" }.sorted().joined(separator: ", "))")
+        return back
     }
 
     /// 183: an order is waiting (it goes before the rest of a pass).
@@ -324,12 +371,24 @@ extension AppModel {
                 if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: hit.name) }
                 return false
             }
-            guard let chat = opened, case .chat(let title) = chat.view,
-                  WatchChatOpen.sameChat(WatchOCR.titled(title).name, listName: hit.name) else {
+            guard let chat = opened, case .chat(let title) = chat.view else {
                 DebugLog.write("watch: \(app.rawValue): \(hit.name) did not open (title not seen)")
+                state.markTapped[look.side] = now()  // 184 (C13): a chat seen there next counts as opened by its mark
                 return
             }
-            paneRead(app, chat, title: title, fromMark: true, &state)
+            let same = WatchChatOpen.sameChat(WatchOCR.titled(title).name, listName: hit.name)
+            if !same {
+                // 184 (C13; Echo 183, 11-26: WeCom's list moved as a private line came in; 企微测试群's row opened 蓝海乐's
+                // chat, "did not open", and on the next pass its line was "history starts here", never reported): the
+                // chat that did open is read as opened by a mark (its last lines), if it is a chat of the app at all.
+                guard let px = WatchOCR.Pixels(chat.crop), XiaoLanPanes.chatBackground(px) || XiaoLanPanes.weworkBar(chat.rows) else {
+                    DebugLog.write("watch: \(app.rawValue): \(hit.name) did not open (\(title) shows, no chat)")
+                    return
+                }
+                DebugLog.write("watch: \(app.rawValue): \(hit.name)'s row opened \(title) (the list moved); read as opened by its mark")
+            }
+            paneRead(app, chat, title: title, fromMark: true,
+                     markSender: same ? XiaoLanPanes.previewSender(look.rows, of: hit.name) : nil, &state)
             state.quietSince[look.side] = now()
         case .chat(let title):
             // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has their grey background; the Settings app's 键盘 page
@@ -365,7 +424,9 @@ extension AppModel {
             // the left window sits by the screen's top-left corner).
             if state.apps[look.side] == nil { state.apps[look.side] = XiaoLanPanes.chatApp(look.rows) }
             guard let app = state.apps[look.side] else { return }
-            if paneRead(app, look, title: title, fromMark: false, &state) > 0 || state.quietSince[look.side] == nil {
+            // 184 (C13): a mark's row clicked on this side within 10 s, the chat not seen open then: opened by its mark.
+            let fromMark = state.markTapped.removeValue(forKey: look.side).map { now() - $0 < 10 } ?? false
+            if paneRead(app, look, title: title, fromMark: fromMark, &state) > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
             // The engines watch the whole list: a chat that stays quiet is left for the list (its red marks). 182 (user
@@ -463,7 +524,8 @@ extension AppModel {
 
     /// The new messages of the chat in a window, reported to that app's server. Returns how many were new.
     @discardableResult
-    private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool,
+    /// 184 (C12): `markSender`, who the list's preview said wrote the line its red mark was for.
+    private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
                           _ state: inout PaneWatchState) -> Int {
         guard let read = WatchOCR.screen(look.crop, title: title, rows: look.rows) else { return 0 }  // 182: read once
         let name = read.title
@@ -515,6 +577,19 @@ extension AppModel {
         state.sent.removeAll { t - $0.at > XiaoLanSelf.sentWindow }
         for line in fresh where line.mine { state.sent.append(XiaoLanSelf.Sent(app: app, chat: name, text: line.text, at: t)) }
         if state.sent.count > 200 { state.sent.removeFirst(state.sent.count - 200) }  // 183: was 60
+        // 184 (C12; Echo 183, 11-26: a group line from a third account dropped, "no sender read", as iPad WeChat showed
+        // no name over it): a group line whose sender reads as the group's name is not dropped: the newest such line is
+        // the preview's writer when its mark opened the chat, the others go without a name. Lines of the quick bar's
+        // buttons are still no one's (and C14 drops the bar itself).
+        var nameless = 0
+        if read.group {
+            let unnamed = fresh.indices.filter { !fresh[$0].mine && XiaoLanSelf.noSender(fresh[$0].sender, chat: name) && !XiaoLanSelf.isButton(fresh[$0].sender) }
+            for i in unnamed { fresh[i].sender = (i == unnamed.last ? markSender : nil) ?? "" }
+            nameless = unnamed.filter { fresh[$0].sender.isEmpty }.count
+            if !unnamed.isEmpty, let s = markSender {
+                DebugLog.write("watch: \(app.rawValue): \(name): sender not read over the line; the list's preview says \(s)")
+            }
+        }
         var own: [String] = [], unread: [String] = []
         let others = fresh.filter { line in
             guard !line.mine else { return false }
@@ -541,8 +616,9 @@ extension AppModel {
             return true
         }
         if !unread.isEmpty {
-            DebugLog.write("watch: \(app.rawValue): \(name): \(unread.count) line(s) with no sender read (the group's name or the app's buttons): not reported")
+            DebugLog.write("watch: \(app.rawValue): \(name): \(unread.count) line(s) of the app's buttons: not reported")
         }
+        if nameless > 0 { DebugLog.write("watch: \(app.rawValue): \(name): \(nameless) line(s) with no sender read: reported without a name") }
         if !own.isEmpty {
             DebugLog.write("watch: \(app.rawValue): \(name): \(own.count) line(s) from the owner's other account (\(Set(own).sorted().joined(separator: "、"))): opened, not reported")
         }

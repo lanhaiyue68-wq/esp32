@@ -328,13 +328,43 @@ import UIKit
         return t
     }
 
-    /// The list rows: a title with a smaller preview line just under it.
-    static func entries(_ rows: [[Piece]]) -> [(name: String, box: CGRect)] {
-        let body = rows.compactMap { row -> (text: String, box: CGRect)? in
+    /// 184: a list's lines of text (titles and previews), each joined across its pieces.
+    static func listBody(_ rows: [[Piece]]) -> [(text: String, box: CGRect)] {
+        rows.compactMap { row -> (text: String, box: CGRect)? in
             let pieces = row.filter { (0.12...0.62).contains($0.box.minX) && (0.12...0.92).contains($0.box.midY) }
             guard !pieces.isEmpty else { return nil }
             return (pieces.map(\.text).joined(), pieces.reduce(CGRect.null) { $0.union($1.box) })
         }
+    }
+
+    /// 184 (C12; Echo 183, 11-26: 「主人蓝海乐: 【第三方测试】群消息1」 on WeChat's list, but in the group iPad WeChat
+    /// showed no name over the bubble, the sender read as the group's name and the line was dropped): who wrote the
+    /// line the row titled `name` previews, nil when it names no one.
+    static func previewSender(_ rows: [[Piece]], of name: String) -> String? {
+        let body = listBody(rows)
+        guard let title = body.first(where: { listName($0.text) == name }),
+              let preview = body.filter({ abs($0.box.minX - title.box.minX) <= 0.04 && (0.015...0.045).contains($0.box.midY - title.box.midY) })
+                .min(by: { $0.box.midY < $1.box.midY }) else { return nil }
+        return senderOf(preview.text)
+    }
+
+    /// The writer a list preview names: "主人蓝海乐: …" / "主人蓝海乐：…", after any "[2条]" or "[有人@我]"; nil for a
+    /// preview with none ("[语音] 2\"", "【模拟服务器】收到：嗨", the owner's own line).
+    static func senderOf(_ preview: String) -> String? {
+        var t = Substring(preview.trimmingCharacters(in: .whitespaces))
+        while t.hasPrefix("["), let close = t.firstIndex(of: "]"), t.distance(from: t.startIndex, to: close) <= 10 {
+            t = t[t.index(after: close)...].drop { $0 == " " }
+        }
+        guard let colon = t.firstIndex(where: { $0 == ":" || $0 == "：" }) else { return nil }
+        let who = t[..<colon].trimmingCharacters(in: .whitespaces)
+        guard (1...20).contains(who.count), !who.allSatisfy(\.isNumber), !who.contains(where: { "[]【】「」《》\"“”".contains($0) }) else { return nil }
+        let name = listName(who)
+        return name.isEmpty ? nil : name
+    }
+
+    /// The list rows: a title with a smaller preview line just under it.
+    static func entries(_ rows: [[Piece]]) -> [(name: String, box: CGRect)] {
+        let body = listBody(rows)
         return body.compactMap { t in
             let gaps: [CGFloat] = body.filter { p in abs(p.box.minX - t.box.minX) <= 0.04 }.map { p in p.box.midY - t.box.midY }
             guard let below = gaps.filter({ d in (0.015...0.045).contains(d) }).min() else { return nil }
@@ -529,6 +559,12 @@ import UIKit
         let s = XiaoLanPanes.listName(sender)
         guard !s.isEmpty else { return false }
         if WatchChatOpen.sameChat(s, listName: chat) || WatchChatOpen.sameChat(chat, listName: s) { return true }
+        return isButton(s)
+    }
+
+    /// 184 (C12): a "sender" that is one of WeCom's quick bar buttons (a line of the bar, not of a person).
+    static func isButton(_ sender: String) -> Bool {
+        let s = XiaoLanPanes.listName(sender)
         return WatchOCR.quickBarWords.contains { s.contains($0) }
     }
 
@@ -538,5 +574,66 @@ import UIKit
         let s = XiaoLanPanes.listName(name)
         guard let at = s.firstIndex(where: { $0 == "@" || $0 == "＠" }), at > s.startIndex else { return s }
         return String(s[..<at])
+    }
+}
+
+/// 184 (C15b; user 11-26: the screen left on Settings or on Echo full screen, "不要叫他手動切"): the way back to WeChat
+/// and WeCom side by side without pushing an edge (the board's Cmd+H, Cmd+Tab, Esc and a Home key do nothing on this
+/// iPad): 辅助触控's floating button (its 轻点一下 set to 主屏幕) shows the home screen and the Dock; WeCom's icon there
+/// brings its window back on the right, then WeChat's on the left. Done by hand on the customer's iPad 11-26, 14:50.
+@MainActor enum XiaoLanRecall {
+    static let spotKey = "xiaolanAssistiveTouchSpot"
+    /// Where 辅助触控's button is (screen fractions): set under that key, else where the owner put it 11-26 (over the
+    /// Dock's Echo icon, measured on a frame: a translucent square 0.61–0.70 across, 0.927–0.986 down).
+    static var assistiveTouch: CGPoint {
+        if let a = UserDefaults.standard.array(forKey: spotKey) as? [Double], a.count == 2,
+           (0.03...0.97).contains(a[0]), (0.03...0.97).contains(a[1]) { return CGPoint(x: a[0], y: a[1]) }
+        return CGPoint(x: 0.655, y: 0.956)
+    }
+
+    /// An icon's look around a spot (a box ~56 px at 960 wide): the share of it near white, the share strongly
+    /// coloured, and the middle hue of the coloured part.
+    static func iconLook(_ px: WatchOCR.Pixels, _ cx: Double, _ cy: Double) -> (white: Double, coloured: Double, hue: Double?) {
+        var n = 0, white = 0
+        var hues: [Double] = []
+        let fx = 1 / 960.0, fy = Double(px.w) / 960 / Double(px.h)
+        for dy in stride(from: -28, through: 28, by: 4) {
+            for dx in stride(from: -28, through: 28, by: 4) {
+                let (r, g, b) = px.rgb(cx + Double(dx) * fx, cy + Double(dy) * fy)
+                let mx = max(r, g, b), mn = min(r, g, b)
+                n += 1
+                if mx > 216 && Double(mx - mn) < 0.12 * Double(mx) { white += 1 }
+                if mx > 153 && Double(mx - mn) > 0.6 * Double(mx) { hues.append(Vision.hue(r, g, b)) }
+            }
+        }
+        hues.sort()
+        return (Double(white) / Double(n), Double(hues.count) / Double(n), hues.isEmpty ? nil : hues[hues.count / 2])
+    }
+
+    /// The Dock's WeChat and WeCom icons (screen fractions), when the Dock shows. Measured 11-26 on the customer's iPad
+    /// (960 x 1280, icons ~70 px, their middles at y 0.95): WeChat's green over half the icon, hue 148–149 (Messages'
+    /// green is 130); WeCom's icon white for three quarters, its blue (hue ~206) in it (Safari and Mail are blue over
+    /// half, Photos many hues). Of the spots that look so along a row, the middle of the longest run (at least 0.02).
+    /// A Python copy found them at 0.353 and 0.445 on three frames (by hand: 0.351, 0.443), nothing on an iPhone's.
+    static func dockIcons(_ px: WatchOCR.Pixels) -> (wechat: CGPoint?, wework: CGPoint?) {
+        var best: [Int: (count: Int, x: Double, y: Double)] = [:]
+        for y in [0.93, 0.94, 0.95, 0.96] {
+            var runs: [Int: [Double]] = [0: [], 1: []]
+            for x in stride(from: 0.03, through: 0.97, by: 0.005) {
+                let l = iconLook(px, x, y)
+                guard let hue = l.hue else { continue }
+                if l.coloured >= 0.45 && (140...158).contains(hue) { runs[0]!.append(x) }
+                if l.white >= 0.6 && l.coloured >= 0.08 && (195...220).contains(hue) { runs[1]!.append(x) }
+            }
+            for (app, xs) in runs where !xs.isEmpty {
+                var groups: [[Double]] = [[xs[0]]]
+                for v in xs.dropFirst() {
+                    if v - groups[groups.count - 1].last! <= 0.011 { groups[groups.count - 1].append(v) } else { groups.append([v]) }
+                }
+                guard let g = groups.max(by: { $0.count < $1.count }), g.count >= 4 else { continue }
+                if best[app] == nil || g.count > best[app]!.count { best[app] = (g.count, g.reduce(0, +) / Double(g.count), y) }
+            }
+        }
+        return (best[0].map { CGPoint(x: $0.x, y: $0.y) }, best[1].map { CGPoint(x: $0.x, y: $0.y) })
     }
 }

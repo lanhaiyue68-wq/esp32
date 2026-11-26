@@ -314,7 +314,130 @@ enum Vision {
     static func redPointer(_ jpeg: Data, near: CGPoint? = nil, window: Double = 1, top: Double = 0.03) -> CGPoint? {
         guard let img = image(jpeg) else { return nil }
         let w = img.width, h = img.height
+        return redPointer(rgba(img, w, h), w, h, near: near, window: window, top: top)
+    }
+
+    /// 184 (C15a): the pointer in one frame, whichever it is: the red arrow (指针控制 › 颜色) or the disk 辅助触控 turns it
+    /// into (ringPointer). The frame is decoded once. Nil: neither near `near`; the caller falls back to a nudge.
+    static func seenPointer(_ jpeg: Data, near: CGPoint? = nil, window: Double = 1, top: Double = 0.03) -> CGPoint? {
+        guard let img = image(jpeg) else { return nil }
+        let w = img.width, h = img.height
         let px = rgba(img, w, h)
+        return redPointer(px, w, h, near: near, window: window, top: top)
+            ?? ringPointer(px, w, h, near: near, window: window, top: top)
+    }
+
+    /// 184 (C15a; user 11-26: 辅助功能 › 触控 › 辅助触控 turned on, and the iPad's pointer became a disk, a translucent grey
+    /// fill in a coloured ring, ~34 px across at 960 wide, blue (14, 125, 234) that day; it clicks at its centre; 183
+    /// never saw it: "eye: unseen" on every aim): the pointer in one frame, its colour not assumed: a ring of one
+    /// saturated hue (within 25° of where it starts; brightest channel > 120 and 100 over the dimmest), round (24–48 px
+    /// across, width and height within 15 %, 97 % of it 0.5–1.15 radii out, all eight eighths of the way
+    /// round), nothing of its hue inside, and its inside the grey fill: darker than a white page (luminance < 190) or
+    /// than around it. Checked 11-26 on the customer's iPad (a Python copy of this): the centre within 2 px in four
+    /// frames (on the Dock's WeChat icon, both lists); nothing in 450 other frames (a camera's lens, a smiley, Google's
+    /// O were taken before the inside had to be dark, white inside; a % sign's o and a map pin, 18 x 24, before it had
+    /// to be this round).
+    static func ringPointer(_ jpeg: Data, near: CGPoint? = nil, window: Double = 1, top: Double = 0.03) -> CGPoint? {
+        guard let img = image(jpeg) else { return nil }
+        let w = img.width, h = img.height
+        return ringPointer(rgba(img, w, h), w, h, near: near, window: window, top: top)
+    }
+
+    /// A colour's hue in degrees (0 for a grey).
+    static func hue(_ r: Int, _ g: Int, _ b: Int) -> Double {
+        let mx = max(r, g, b), mn = min(r, g, b), d = Double(mx - mn)
+        guard d > 0 else { return 0 }
+        let h: Double
+        if mx == r { h = (Double(g - b) / d).truncatingRemainder(dividingBy: 6) }
+        else if mx == g { h = Double(b - r) / d + 2 }
+        else { h = Double(r - g) / d + 4 }
+        return (h * 60 + 360).truncatingRemainder(dividingBy: 360)
+    }
+
+    static func ringPointer(_ px: [UInt8], _ w: Int, _ h: Int, near: CGPoint?, window: Double, top: Double) -> CGPoint? {
+        let s = 2, gw = w / s, gh = h / s
+        guard gw > 10, gh > 10 else { return nil }
+        let k = Double(w) / 960
+        var sat = [Bool](repeating: false, count: gw * gh)
+        var hues = [Double](repeating: 0, count: gw * gh)
+        var strong = [Bool](repeating: false, count: gw * gh)  // a ring starts only at its full colour, not a blend at its edge
+        for gy in Int(top * Double(gh))..<gh {
+            for gx in 0..<gw {
+                let i = ((gy * s) * w + gx * s) * 4
+                let r = Int(px[i]), g = Int(px[i + 1]), b = Int(px[i + 2])
+                let mx = max(r, g, b), mn = min(r, g, b)
+                guard mx > 120, mx - mn > 100 else { continue }
+                sat[gy * gw + gx] = true
+                hues[gy * gw + gx] = hue(r, g, b)
+                strong[gy * gw + gx] = mx - mn > 150
+            }
+        }
+        func apart(_ a: Double, _ b: Double) -> Double { let d = abs(a - b).truncatingRemainder(dividingBy: 360); return min(d, 360 - d) }
+        func lum(_ x: Double, _ y: Double) -> Double {
+            let i = (min(h - 1, max(0, Int(y))) * w + min(w - 1, max(0, Int(x)))) * 4
+            return 0.299 * Double(px[i]) + 0.587 * Double(px[i + 1]) + 0.114 * Double(px[i + 2])
+        }
+        var seen = [Bool](repeating: false, count: gw * gh)
+        var best: (p: CGPoint, d: Double)?
+        for start in 0..<(gw * gh) where strong[start] && !seen[start] {
+            let seed = hues[start]
+            var stack = [start], cells: [Int] = []
+            seen[start] = true
+            var minX = Int.max, maxX = 0, minY = Int.max, maxY = 0
+            while let c = stack.popLast() {
+                cells.append(c)
+                let cx = c % gw, cy = c / gw
+                minX = min(minX, cx); maxX = max(maxX, cx); minY = min(minY, cy); maxY = max(maxY, cy)
+                for n in [cx > 0 ? c - 1 : -1, cx < gw - 1 ? c + 1 : -1, c - gw, c + gw]
+                where n >= 0 && n < gw * gh && sat[n] && !seen[n] && apart(hues[n], seed) < 25 {
+                    seen[n] = true
+                    stack.append(n)
+                }
+            }
+            let bw = Double((maxX - minX + 1) * s), bh = Double((maxY - minY + 1) * s)
+            guard (24 * k...48 * k).contains(bw), (24 * k...48 * k).contains(bh), abs(bw - bh) <= 0.15 * max(bw, bh) else { continue }
+            let cx = Double(minX + maxX + 1) / 2 * Double(s), cy = Double(minY + maxY + 1) / 2 * Double(s), r = max(bw, bh) / 2
+            var band = 0, eighths = Set<Int>()
+            for c in cells {
+                let dx = Double((c % gw) * s + 1) - cx, dy = Double((c / gw) * s + 1) - cy, d = hypot(dx, dy)
+                if d >= 0.5 * r && d <= 1.15 * r { band += 1 }
+                eighths.insert(Int((atan2(dy, dx) + .pi) / (2 * .pi) * 8) % 8)
+            }
+            let n = Double(cells.count * s * s), area = Double.pi * r * r
+            guard Double(band) >= 0.97 * Double(cells.count), eighths.count == 8, n >= 0.15 * area, n <= 0.7 * area else { continue }
+            var inner = 0, innerOfIt = 0
+            let r4 = 0.4 * r
+            for gy in max(0, Int((cy - r4) / Double(s)))...min(gh - 1, Int((cy + r4) / Double(s))) {
+                for gx in max(0, Int((cx - r4) / Double(s)))...min(gw - 1, Int((cx + r4) / Double(s)))
+                where hypot(Double(gx * s + 1) - cx, Double(gy * s + 1) - cy) < r4 {
+                    inner += 1
+                    if sat[gy * gw + gx] && apart(hues[gy * gw + gx], seed) < 25 { innerOfIt += 1 }
+                }
+            }
+            guard inner > 0, Double(innerOfIt) < 0.1 * Double(inner) else { continue }
+            var inside: [Double] = []
+            let ri = Int(r4)
+            for dx in stride(from: -ri, through: ri, by: 2) {
+                for dy in stride(from: -ri, through: ri, by: 2) where Double(dx * dx + dy * dy) < r4 * r4 {
+                    inside.append(lum(cx + Double(dx), cy + Double(dy)))
+                }
+            }
+            let around = (0..<16).map { a -> Double in
+                let t = Double(a) / 16 * 2 * .pi
+                return lum(cx + 1.4 * r * cos(t), cy + 1.4 * r * sin(t))
+            }
+            guard !inside.isEmpty else { continue }
+            let li = inside.reduce(0, +) / Double(inside.count), lo = around.reduce(0, +) / Double(around.count)
+            guard li < 190 || li < 0.85 * lo else { continue }  // the grey fill: a white-inside ring (a lens, an O) is not it
+            let p = CGPoint(x: cx / Double(w), y: cy / Double(h))
+            if let near, abs(Double(p.x - near.x)) > window || abs(Double(p.y - near.y)) > window { continue }
+            let d = near.map { hypot(Double(p.x - $0.x), Double(p.y - $0.y)) } ?? 0
+            if best == nil || d < best!.d { best = (p, d) }
+        }
+        return best?.p
+    }
+
+    static func redPointer(_ px: [UInt8], _ w: Int, _ h: Int, near: CGPoint?, window: Double, top: Double) -> CGPoint? {
         let s = 2, gw = w / s, gh = h / s
         guard gw > 10, gh > 10 else { return nil }
         var mask = [Bool](repeating: false, count: gw * gh)

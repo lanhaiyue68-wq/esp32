@@ -97,7 +97,9 @@ import Foundation
             let before = screen.frame, sent = now()
             guard (try? await device.send("move \(ux) \(uy)")) != nil, let before,
                   let after = await stopped(since: sent, on: screen, wait: 0.9),
-                  let seen = Self.movedArrow(Vision.arrows(before, after, near: CGPoint(x: 0.5, y: 0.5), window: 0.6), from: p) else {
+                  // 184 (C15a): the red arrow or 辅助触控's disk in the frame itself first
+                  let seen = Vision.seenPointer(after, near: CGPoint(x: 0.5, y: 0.5), window: 0.6)
+                    ?? Self.movedArrow(Vision.arrows(before, after, near: CGPoint(x: 0.5, y: 0.5), window: 0.6), from: p) else {
                 log("ipad home: arrow lost on the way to the middle")
                 return "游标往屏幕中间移动时跟丢了箭头：请再按一次校准"
             }
@@ -137,7 +139,7 @@ import Foundation
     private func padSpot(nudge: Int) async -> CGPoint? {
         guard let screen, screen.live else { return nil }
         await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
-        if let frame = screen.frame, let red = Vision.redPointer(frame) { return red }  // 184: the red pointer, no nudge
+        if let frame = screen.frame, let red = Vision.seenPointer(frame) { return red }  // 184: the red pointer, no nudge
         let before = screen.frame, sent = now()
         guard (try? await device.send("move \(nudge) 0")) != nil else { return nil }
         var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -154,6 +156,7 @@ import Foundation
         func wiggle() async -> Double? {
             guard let screen, screen.live else { return nil }
             await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
+            if let frame = screen.frame, let seen = Vision.seenPointer(frame) { return Double(seen.y) }  // 184 (C15a)
             let before = screen.frame, sent = now()
             guard (try? await device.send("move 60 0")) != nil else { return nil }
             var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -273,6 +276,9 @@ import Foundation
     private func findPointer() async throws -> CGPoint? {
         guard let screen else { return nil }
         await screen.settled(quiet: 0.2, least: 0.3, most: 1.5)
+        // 184 (C15a): an iPad's red arrow or 辅助触控's disk, in the frame itself
+        if CommandChannel.onPad(), let frame = screen.frame, let seen = Vision.seenPointer(frame),
+           0.03 < seen.x, seen.x < 0.97, 0.03 < seen.y, seen.y < 0.97 { return seen }
         let before = screen.frame, sent = now()
         try await device.send("move \(Self.nudge) 0")
         var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -592,7 +598,7 @@ import Foundation
     private func padMeasure(_ x: Double, _ y: Double, nudge: Int, on screen: ScreenSource) async throws -> CGPoint? {
         await screen.settled(quiet: 0.2, least: 0.2, most: 1.0)
         // 184 (user 11-26: the pointer made big and red): seen in the frame at rest, no nudge at all.
-        if let frame = screen.frame, let red = Vision.redPointer(frame, near: CGPoint(x: x, y: y), window: 0.5) { return red }
+        if let frame = screen.frame, let red = Vision.seenPointer(frame, near: CGPoint(x: x, y: y), window: 0.5) { return red }
         let before = screen.frame, sent = now()
         try await nudgeSlowly(nudge)
         var after = await screen.fresh(since: sent, timeout: 1.0)
@@ -1032,7 +1038,7 @@ import Foundation
     /// 184: on an iPad the red pointer (指针控制 › 颜色) is found in the frame itself first; the change between frames after.
     static func sighting(_ before: Data, _ after: Data, near: CGPoint) -> CGPoint? {
         guard CommandChannel.onPad() else { return Vision.arrival(before, after, near: near) }
-        return Vision.redPointer(after, near: near, window: 0.5) ?? Vision.arrow(before, after, near: near, top: padTopMask)
+        return Vision.seenPointer(after, near: near, window: 0.5) ?? Vision.arrow(before, after, near: near, top: padTopMask)
     }
 
     /// 184: the band at an iPad's top where the pointer is not looked for: its status bar (~3 %), not an iPhone's 6 %,
