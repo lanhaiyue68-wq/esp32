@@ -114,6 +114,7 @@ import UIKit
         XCTAssertNil(XiaoLanPanes.keyboardTop([[at("【小蓝测试】182个微0074", 0.2, 0.6, 0.5)]]))
         let chat = picture(CGSize(width: 480, height: 1150)) { c in
             self.fill(c, CGRect(x: 0, y: 0, width: 480, height: 1150), (237, 237, 237))
+            self.fill(c, CGRect(x: 0, y: 748, width: 480, height: 82), (246, 246, 246))    // 187: the input bar (246, measured)
             self.fill(c, CGRect(x: 40, y: 760, width: 300, height: 40), (255, 255, 255))   // the field, 0.66–0.70
             self.fill(c, CGRect(x: 0, y: 830, width: 480, height: 320), (209, 211, 217))   // the keyboard from 0.72
             for row in [900.0, 970.0, 1040.0] {                                            // its white keys

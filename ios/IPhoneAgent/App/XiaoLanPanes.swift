@@ -314,10 +314,13 @@ import UIKit
                 return r >= 250 && g >= 250 && b >= 250
             }.count >= 2
         }
+        // 187 (B23, Echo 186, 11-26: 「【第三方测试】185引用」, a white bubble on the chat's 237, passed for the field and was
+        // clicked twice; measured that day: WeChat's input bar 245–246 and chat 237, WeCom's bar 246 and chat 237): the
+        // light bar over the field is 242 or more, so a bubble on the chat's grey is no field.
         func barOver(_ y: Double) -> Bool {
             xs.filter { x in
                 let (r, g, b) = px.rgb(x, max(0, y - 0.008))
-                return (r * 3 + g * 6 + b) / 10 >= 236
+                return (r * 3 + g * 6 + b) / 10 >= 242
             }.count >= 2
         }
         let step = 1 / Double(px.h)
@@ -455,8 +458,15 @@ import UIKit
     }
 
     /// No piece on the window reads as `chat`'s name any more (a row still swiped open still shows it).
+    /// 187 (B36): a name cut short by the row slid open (「文件传输助」 for 文件传输助手), three characters or more of its
+    /// beginning, still counts as the chat.
     static func gone(_ chat: String, _ rows: [[Piece]]) -> Bool {
-        !rows.joined().contains { (0.1...0.92).contains($0.box.midY) && WatchChatOpen.sameChat(chat, listName: listName($0.text)) }
+        let full = chat.filter { !$0.isWhitespace }
+        return !rows.joined().contains { p in
+            guard (0.1...0.92).contains(p.box.midY) else { return false }
+            let n = listName(p.text)
+            return WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n))
+        }
     }
 
     // MARK: Search (173, user 11-25: a chat not in view is found by the list's search box, "這不是兩邊都有嗎")
@@ -611,7 +621,11 @@ import UIKit
             heads.append(String(body[body.index(after: colon)...]))
         }
         let tail = sendSignature(text)
-        return heads.contains { h in h.contains(tail) || (h.count >= min(6, t.count) && t.hasPrefix(h)) }
+        // 187 (B32, Echo 186, 11-26: 「…0018」 before 「…0018 连发2」 was taken as the text shown already, and a send that went
+        // out was reported failed): the beginning counts only for a preview cut short with "…".
+        let trimmed = preview.trimmingCharacters(in: .whitespaces)
+        let cut = trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
+        return heads.contains { h in h.contains(tail) || (cut && h.count >= min(6, t.count) && t.hasPrefix(h)) }
     }
 
     /// 184 (C12): a "sender" that is one of WeCom's quick bar buttons (a line of the bar, not of a person).

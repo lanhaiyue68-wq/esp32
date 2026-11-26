@@ -337,6 +337,23 @@ extension AppModel {
     /// finds the arrow first, ~1.7 s) and the two spots are tried once more. Still nothing is clicked unseen.
     private func paneBack(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
         let arrow = XiaoLanPanes.onScreen(XiaoLanPanes.back, in: look.rect)
+        // 187 (user 11-26: "從A點到B點，停頓一下，然後再到C點…中間為什麼要停頓，而不是直接就點過去"; B33, Echo 186, 11-26:
+        // the blind hop up from the stop below the arrow fell short with 辅助触控's speed-up and clicked the top message's
+        // avatar, its 客户详情 opened twice): straight to the arrow, clicked only with the pointer seen on it (every click by
+        // a window's top is); not seen there, the stop below it as before.
+        if !refound {
+            let windows = await paneWindowCount()
+            let t = now()
+            if await paneSeenTap(arrow, half: (0.012, 0.012)) {
+                DebugLog.write("watch: \(who): back: " + String(format: "straight to the arrow (%.3f, %.3f), seen on it", Double(arrow.x), Double(arrow.y)))
+                if windows == 2, await paneWindowCount(after: t) == 1 {
+                    DebugLog.write("watch: a window is gone after the back arrow; watch stopped")
+                    stopWatch("有一个窗口不见了：请点 Dock 上它的图标叫回来，再开守候")
+                    return false
+                }
+                return true
+            }
+        }
         for stage in XiaoLanPanes.backStages {
             let s = XiaoLanPanes.onScreen(stage, in: look.rect)
             do { try await pointer.point(Double(s.x), Double(s.y), aim: true, rehome: false) } catch {
@@ -868,6 +885,12 @@ extension AppModel {
                 (field, look, low, keys) = (f2, again, again.rows, keys2)
             }
             guard still else { return (false, "\(appName)的输入框位置还在变（键盘在收起或弹出），没有点", nil) }
+            // 187 (B23, Echo 186, 11-26: with no keyboard up, a "field" half way up the chat — a white bubble — was
+            // clicked twice): with no keyboard of any kind seen, the field is at the window's bottom; higher up, not clicked.
+            if keys == nil, !CandidatePicker.ourKeyboardShown(rows: low), !keyboardBridge.onScreen(), Double(field.y) < 0.8 {
+                DebugLog.write("watch: \(app.rawValue): a \"field\" at \(String(format: "%.3f", Double(field.y))) with no keyboard up is not the bar's; not clicked")
+                return (false, "\(appName)的输入框没找准（找到的在聊天中间），没有点", nil)
+            }
             // 186 (B25, Echo 185, 11-26: WeCom's quick bar was taken for the field and 发起收款 clicked, its 对外收款 page
             // opened; the second click landed just under 申请开通对外收款): the field is under the quick bar; a "field" on
             // the bar or over it is not clicked.
@@ -878,10 +901,18 @@ extension AppModel {
             // 183 (Echo 182 overnight, 11-26: WeCom's field is ~0.03 tall; the pointer 0.015 low counted as on it, the
             // click missed and the keyboard was waited for 5 s): within 0.007; no keyboard after it, once more.
             guard await paneTap(field, in: look.rect, wide: 0.15, tall: 0.007) else { return (false, ChatToolLink.reasonNotSent, nil) }
-            if keys == nil, !(await smallKeyboard(up: true, within: 0.8)),
+            // 187 (B34, Echo 186, 11-26: WeCom's 简体拼音 came up after 0.8 s, unseen by the check, and the second click
+            // landed on its keys): 1.5 s for 小藍; then a new look, and a keyboard of any kind on it (the iPad's pinyin
+            // keys read "1 q") means up: no second click.
+            if keys == nil, !(await smallKeyboard(up: true, within: 1.5)),
                let frame = feed.frame, !(await CandidatePicker.keyboardUpOffMain(in: frame)) {
-                DebugLog.write("watch: \(app.rawValue): no keyboard after the field's tap; once more")
-                _ = await paneTap(field, in: look.rect, wide: 0.15, tall: 0.007)
+                if let again = await paneLook(look.side, after: now(), tries: 1, until: { _ in true }),
+                   XiaoLanPanes.keyboardTop(again.rows) != nil || CandidatePicker.ourKeyboardShown(rows: again.rows) {
+                    DebugLog.write("watch: \(app.rawValue): a keyboard came up late after the field's tap; not clicked again")
+                } else {
+                    DebugLog.write("watch: \(app.rawValue): no keyboard after the field's tap; once more")
+                    _ = await paneTap(field, in: look.rect, wide: 0.15, tall: 0.007)
+                }
             }
         }
         try? await Task.sleep(nanoseconds: 250_000_000)  // 182: was 0.4 s
@@ -931,6 +962,9 @@ extension AppModel {
                 return r.lines.suffix(2).map { "\($0.mine ? "mine" : "not mine")「\($0.text)」" }.joined(separator: ", ")
             }()
             DebugLog.write("watch: \(app.rawValue): \(chat): sent per the keyboard; the new line not read on the screen (wanted …\(tail); read \(readLast))")
+            // 187 (Echo 186, 11-26: the newest line was never read, though a still frame taken later showed it over the
+            // bar): the window as it was read is kept in Documents/diagnostics, to be looked at.
+            WatchChatOpen.keepFrame(after?.crop)
             if shownBefore != true, shownBefore == false || text.filter({ !$0.isWhitespace }).count >= 6,
                await paneBack(after ?? look, app.rawValue),
                let list = await paneLook(look.side, after: now(), tries: 6, until: { $0.view == .list }), list.view == .list,
@@ -1037,8 +1071,12 @@ extension AppModel {
         }
         DebugLog.write("watch: \(app.rawValue): deleting \(chat)")
         guard await paneTap(red, in: look.rect, wide: 0.04) else { return (false, "没点到「\(chat)」的删除") }
-        var after = await paneLook(look.side, after: now(), tries: 3) { XiaoLanPanes.gone(chat, $0.rows) }
-        if let a = after, !XiaoLanPanes.gone(chat, a.rows), let confirm = XiaoLanPanes.confirmDelete(a.rows) {
+        // 187 (B36, Echo 186, 11-26: 删除并清空记录 was up, the slid row's name cut to 「文件传输助」, and "deleted" was said
+        // without it): the confirmation is looked for first, whatever the row shows.
+        var after = await paneLook(look.side, after: now(), tries: 3) {
+            XiaoLanPanes.confirmDelete($0.rows) != nil || XiaoLanPanes.gone(chat, $0.rows)
+        }
+        if let a = after, let confirm = XiaoLanPanes.confirmDelete(a.rows) {
             DebugLog.write("watch: \(app.rawValue): the confirmation (\(app == .wework ? "the alert's 删除" : "清空记录同时不显示聊天"))")
             _ = await paneTap(confirm, in: look.rect, wide: 0.04)
             after = await paneLook(look.side, after: now(), tries: 3) { XiaoLanPanes.gone(chat, $0.rows) }

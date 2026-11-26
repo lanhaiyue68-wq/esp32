@@ -34,7 +34,8 @@ extension AppModel {
             if keyboardBridge.onScreen() { return true }
             if let frame = await freshFrame() {
                 let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.3, bottom: 1)
-                if CandidatePicker.keyboardUp(in: frame) || CandidatePicker.keyboardMenuOpen(rows: rows) { break }
+                if CandidatePicker.keyboardUp(in: frame) || CandidatePicker.keyboardMenuOpen(rows: rows)
+                    || XiaoLanPanes.keyboardTop(rows) != nil { break }
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
@@ -42,7 +43,10 @@ extension AppModel {
             guard let frame = await freshFrame() else { return keyboardBridge.onScreen() }
             let rows = await CandidatePicker.rowsOffMain(in: frame, top: 0.3, bottom: 1)
             if CandidatePicker.keyboardMenuOpen(rows: rows) { return await useKeyboardMenu(rows, attempt) }
-            guard CandidatePicker.keyboardUp(in: frame) else {
+            // 187 (B35, Echo 186, 11-26: the iPad's 简体拼音 — keys read "1 q", a ".?123" key, a row of candidates over
+            // it — was on screen and "no keyboard on screen to switch from" three times): its keys as the chat windows tell
+            // them (one Latin letter with the digit over it, or a row of digits) count too.
+            guard CandidatePicker.keyboardUp(in: frame) || XiaoLanPanes.keyboardTop(rows) != nil else {
                 if keyboardBridge.onScreen() { return true }
                 DebugLog.write("keyboard: no keyboard on screen to switch from")
                 return false
