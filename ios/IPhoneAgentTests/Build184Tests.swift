@@ -146,8 +146,7 @@ import UIKit
         XCTAssertEqual(Double(d.y) * 1280, 1218, accuracy: 2.5)
     }
 
-    /// C15b: the Dock's WeChat (green, hue ~149, not Messages' 130) and WeCom (white with its blue) told by colour;
-    /// 辅助触控's button where the owner put it unless set.
+    /// C15b: the Dock's WeChat (green, hue ~149, not Messages' 130) and WeCom (white with its blue) told by colour.
     func testDockIconsByColour() throws {
         func icon(_ c: CGContext, _ x: CGFloat, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) {
             c.setFillColor(red: r / 255, green: g / 255, blue: b / 255, alpha: 1)
@@ -174,9 +173,6 @@ import UIKit
         let none = XiaoLanRecall.dockIcons(try XCTUnwrap(WatchOCR.Pixels(frame { _ in })))
         XCTAssertNil(none.wechat)
         XCTAssertNil(none.wework)
-        UserDefaults.standard.removeObject(forKey: XiaoLanRecall.spotKey)
-        XCTAssertEqual(Double(XiaoLanRecall.assistiveTouch.x), 0.655, accuracy: 0.001)
-        XCTAssertEqual(Double(XiaoLanRecall.assistiveTouch.y), 0.956, accuracy: 0.001)
     }
 
     /// C12: the writer a list preview names (a group's line read with no name over it); C14: WeCom's private chats'

@@ -93,6 +93,11 @@ import Foundation
             if abs(ex) <= 0.015 && abs(ey) <= 0.015 { break }
             let k = pass == 0 ? 0.5 : 1.0
             let ux = Int(ex * k * w), uy = Int(ey * k * h)
+            // 185 (Echo 184, 11-26, 辅助触控 on and the pointer ~3.5 times as fast: this place was in the span learned
+            // here, the edge gate's span the old one; the gate took "-574 -803" for a move past the edge and sent
+            // "-829 -1164", then "-2266 -3007", a push into the top-left corner, and the span learned from it was wrong
+            // (752 x 1002), so every probe after it was too): the gate gets this same span with this place.
+            CommandChannel.padSpan = (Int(w), Int(h))
             CommandChannel.padPos = (Int(Double(p.x) * w), Int(Double(p.y) * h))
             let before = screen.frame, sent = now()
             guard (try? await device.send("move \(ux) \(uy)")) != nil, let before,
@@ -104,8 +109,11 @@ import Foundation
                 return "游标往屏幕中间移动时跟丢了箭头：请再按一次校准"
             }
             let mx = Double(seen.x - p.x), my = Double(seen.y - p.y)
-            if abs(ux) >= 40, abs(mx) >= 0.02 { w = min(max(Double(ux) / mx, w / 3), w * 3) }
-            if abs(uy) >= 40, abs(my) >= 0.02 { h = min(max(Double(uy) / my, h / 3), h * 3) }
+            // 185: a move that ended by an edge may have been stopped there: not a measure of the units a screen.
+            let stoppedX = seen.x < 0.03 || seen.x > 0.97, stoppedY = seen.y < 0.04 || seen.y > 0.96
+            if !stoppedX, abs(ux) >= 40, abs(mx) >= 0.02 { w = min(max(Double(ux) / mx, w / 3), w * 3) }
+            if !stoppedY, abs(uy) >= 40, abs(my) >= 0.02 { h = min(max(Double(uy) / my, h / 3), h * 3) }
+            log(String(format: "ipad home: move %d %d went %.3f %.3f; a screen ~%.0f x %.0f units", ux, uy, mx, my, w, h))
             p = seen
         }
         log(String(format: "ipad home: the arrow at (%.3f, %.3f); a screen ~%.0f x %.0f units", Double(p.x), Double(p.y), w, h))

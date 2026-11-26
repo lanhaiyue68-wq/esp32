@@ -151,8 +151,12 @@ extension AppModel {
         func log(_ s: String) { DebugLog.write("watch: bringing WeChat and WeCom back (\(n)): \(s)") }
         var icons = await dock()
         if icons.wechat == nil || icons.wework == nil {
-            let at = XiaoLanRecall.assistiveTouch
-            log(String(format: "辅助触控's button at (%.3f, %.3f)", at.x, at.y))
+            // 185: the button where it is seen now (the owner may move it); not seen, nothing is clicked.
+            guard let frame = feed.frame, let px = WatchOCR.Pixels(frame), let at = XiaoLanRecall.assistiveTouchButton(px) else {
+                log("辅助触控's button not seen on the screen; nothing clicked")
+                return false
+            }
+            log(String(format: "辅助触控's button seen at (%.3f, %.3f)", at.x, at.y))
             guard await paneSeenTap(at, half: (0.035, 0.025)) else { log("its button not clicked"); return false }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             icons = await dock()

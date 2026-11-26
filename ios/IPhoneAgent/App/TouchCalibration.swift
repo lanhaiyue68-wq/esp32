@@ -5,6 +5,14 @@ import UIKit
 extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
     static var roughStops: [Int] { [75, 150].map { $0 * Pointer.padScale } }  // 167: iPad 600 / 1200, clear of the status bar
+    /// 185 (Echo 184, 11-26: with 辅助触控 on the pointer went ~3.5 times as far a unit; 600 from the middle was past the
+    /// right edge, both probes stopped at x 0.913, "粗校准落点无有效跨度" every time, whatever its 跟踪速度): on an iPad
+    /// the rough probes are where 600 / 1200 were at 11-25's speed, as shares of the screen the home just measured
+    /// (0.31 / 0.62 across, 0.25 / 0.51 down).
+    static func roughPoints(pad: Bool, span: (w: Int, h: Int)) -> [(Int, Int)] {
+        guard pad else { return roughStops.map { ($0, $0) } }
+        return [(0.31, 0.25), (0.62, 0.51)].map { (Int(($0.0 * Double(span.w)).rounded()), Int(($0.1 * Double(span.h)).rounded())) }
+    }
     static var targets: [(Double, Double)] {
         // 174 (user 11-25): on an iPad every point a tenth or more from the top, left and bottom edges (a miss past them
         // brings in Notification Center, recent apps, the Dock); the right side may come closer.
@@ -153,11 +161,11 @@ extension AutoCalibrator {
         }
 
         phase = .probeA
-        for u in Self.roughStops {
-            guard let p = try await click(u, u) else {
+        for (ux, uy) in Self.roughPoints(pad: CommandChannel.onPad(), span: CommandChannel.padSpan) {
+            guard let p = try await click(ux, uy) else {
                 return hits == 0 ? .noTaps : .failed("粗校准点击未到达，未保存参数。")
             }
-            record(u, u, p)
+            record(ux, uy, p)
         }
         guard let rough = lines() else { return .failed("粗校准落点无有效跨度，未保存参数。") }
         phase = .probeB

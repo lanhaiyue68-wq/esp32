@@ -582,13 +582,58 @@ import UIKit
 /// iPad): 辅助触控's floating button (its 轻点一下 set to 主屏幕) shows the home screen and the Dock; WeCom's icon there
 /// brings its window back on the right, then WeChat's on the left. Done by hand on the customer's iPad 11-26, 14:50.
 @MainActor enum XiaoLanRecall {
-    static let spotKey = "xiaolanAssistiveTouchSpot"
-    /// Where 辅助触控's button is (screen fractions): set under that key, else where the owner put it 11-26 (over the
-    /// Dock's Echo icon, measured on a frame: a translucent square 0.61–0.70 across, 0.927–0.986 down).
-    static var assistiveTouch: CGPoint {
-        if let a = UserDefaults.standard.array(forKey: spotKey) as? [Double], a.count == 2,
-           (0.03...0.97).contains(a[0]), (0.03...0.97).contains(a[1]) { return CGPoint(x: a[0], y: a[1]) }
-        return CGPoint(x: 0.655, y: 0.956)
+    /// 185 (Echo 184, 11-26: the owner had moved the button from over the Dock's Echo icon to the bottom-right corner;
+    /// 184's fixed spot, (0.655, 0.956), would have clicked whatever was there): 辅助触控's button found on the screen,
+    /// nil when it is not seen (then nothing is clicked). A rounded square ~88 px across at 960 wide, of one grey (its
+    /// translucent fill over a plain page), a lighter grey disk in its middle (~20 levels lighter), its sides 36–58 px
+    /// from that middle and alike, by an edge of the screen (iOS keeps it there). Looked for where 小藍 needs it: over an
+    /// app's page with the Dock hidden. A Python copy found it within 6 px on three frames (Echo; Settings, the pointer
+    /// on the button) and nothing in 150 other frames; over the Dock's icons or a coloured square it is not found (the
+    /// Dock is clicked straight away there).
+    static func assistiveTouchButton(_ px: WatchOCR.Pixels) -> CGPoint? {
+        let w = Double(px.w), h = Double(px.h), k = w / 960
+        func look(_ x: Double, _ y: Double) -> (l: Double, c: Int)? {
+            guard x >= 0, x < w, y >= 0, y < h else { return nil }
+            let (r, g, b) = px.rgb(x / w, y / h)
+            return (0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b), max(r, g, b) - min(r, g, b))
+        }
+        let band = 0.08, step = max(2.0, 4 * k)
+        var disk: [(dx: Double, dy: Double)] = []
+        for dx in stride(from: -10.0, through: 10, by: 5) {
+            for dy in stride(from: -10.0, through: 10, by: 5) where dx * dx + dy * dy <= 100 { disk.append((dx * k, dy * k)) }
+        }
+        let ring = (0..<16).map { a -> (Double, Double) in
+            let t = Double(a) / 16 * 2 * .pi
+            return (33 * k * cos(t), 33 * k * sin(t))
+        }
+        var best: (s: Double, p: CGPoint)?
+        for cy in stride(from: 0.03 * h, to: h, by: step) {
+            for cx in stride(from: 0.0, to: w, by: step)
+            where cx < band * w || cx > (1 - band) * w || cy > (1 - band) * h || cy < band * h {
+                let ds = disk.compactMap { look(cx + $0.dx, cy + $0.dy) }
+                guard ds.count == disk.count, let dMax = ds.map({ $0.l }).max(), let dMin = ds.map({ $0.l }).min(),
+                      ds.allSatisfy({ $0.c <= 30 }), dMax - dMin <= 24 else { continue }
+                let bs = ring.compactMap { look(cx + $0.0, cy + $0.1) }
+                guard bs.count == ring.count, let bMax = bs.map({ $0.l }).max(), let bMin = bs.map({ $0.l }).min(),
+                      bs.allSatisfy({ $0.c <= 30 }), bMax - bMin <= 22 else { continue }
+                let ld = ds.map({ $0.l }).reduce(0, +) / Double(ds.count), lb = bs.map({ $0.l }).reduce(0, +) / Double(bs.count)
+                guard ld - lb >= 20 else { continue }
+                var dist: [Int] = [], edges = 0
+                for (ux, uy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                    var found: (edge: Bool, r: Int)?
+                    for r in 36..<58 {
+                        guard let v = look(cx + ux * Double(r) * k, cy + uy * Double(r) * k) else { found = (false, r); break }
+                        if abs(v.l - lb) > 25 { found = (true, r); break }
+                    }
+                    guard let f = found else { break }
+                    dist.append(f.r)
+                    if f.edge { edges += 1 }
+                }
+                guard dist.count == 4, edges >= 2, let hi = dist.max(), let lo = dist.min(), hi - lo <= 14 else { continue }
+                if best == nil || ld - lb > best!.s { best = (ld - lb, CGPoint(x: cx / w, y: cy / h)) }
+            }
+        }
+        return best?.p
     }
 
     /// An icon's look around a spot (a box ~56 px at 960 wide): the share of it near white, the share strongly
