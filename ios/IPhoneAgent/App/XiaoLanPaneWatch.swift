@@ -53,6 +53,13 @@ extension AppModel {
                 await paneOrder(order, &state)
                 continue
             }
+            // 187 (user 11-27: "各位先收到一個消息…點進去了，正在要回呢，然後啟微又收到了一個消息。那這個時候呢先把各位的
+            // 回了，然後再去點啟微的…反過來也是一樣的"): while a line just read waits for its QA reply (15 s at most), nothing
+            // else is looked at; its chat stays open and the reply, an order, goes in first.
+            if repliesComing {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                continue
+            }
             guard board.connected, feed.watchable else {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
                 if !waitingLogged { waitingLogged = true; DebugLog.write("watch: waiting for the board and screen sharing") }
@@ -79,7 +86,7 @@ extension AppModel {
                 guard watching, !Task.isCancelled else { break }
                 // 183 (Echo 182 overnight, 11-26: an order waited 13–25 s for the other window's back to its list): an
                 // order first; the rest of the pass waits.
-                if ordersWaiting { break }
+                if ordersWaiting || repliesComing { break }  // 187: a reply on its way goes before the other window
                 await paneHandle(look, &state)
             }
             // 182 (user 11-26: "速度太慢了…跟安卓機比差遠了"): a shorter rest between passes (was 0.7 s).
@@ -195,6 +202,8 @@ extension AppModel {
 
     /// 183: an order is waiting (it goes before the rest of a pass).
     private var ordersWaiting: Bool { !chatTool.pending.isEmpty || !weworkTool.pending.isEmpty }
+    /// 187: a QA reply on its way to one of the apps.
+    private var repliesComing: Bool { chatTool.qaWaiting > 0 || weworkTool.qaWaiting > 0 }
 
     /// Every window on the screen now, read. 182 (user 11-26: "速度太慢了"): `side` reads that window only (each
     /// window's words cost a text recognition; a check after a tap needs only the window tapped).

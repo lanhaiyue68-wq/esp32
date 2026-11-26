@@ -113,9 +113,19 @@ import Foundation
     func report(_ messages: [ReadMessage]) {
         for m in messages {
             if state == .connected, let packet = Self.packet(m) { send(packet) { [weak self] in self?.reported += 1 } }
-            if Self.asksQA(m, config: config) { Task { [weak self] in await self?.askQA(m) } }
+            if Self.asksQA(m, config: config) {
+                qaWaiting += 1
+                Task { [weak self] in
+                    await self?.askQA(m)
+                    self?.qaWaiting -= 1
+                }
+            }
         }
     }
+
+    /// 187 (user 11-27: "各位先收到一個消息…正在要回呢，然後啟微又收到了一個消息…先把各位的回了，然後再去點啟微的"): the QA
+    /// callbacks still out (each 15 s at most); the watch waits for their replies before it looks at the other window.
+    @Published private(set) var qaWaiting = 0
 
     /// A read message as the engines report it: socketType 2, an item of type 101 (TYPE_RECEIVE_MESSAGE_LIST) with
     /// messageList [SubMessageBean: sender 0 others / 1 me, nameList, itemMessageList feature 2 = text]. ChatTool's
