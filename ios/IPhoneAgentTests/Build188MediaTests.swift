@@ -330,4 +330,12 @@ import UIKit
             XCTAssertLessThan(Double(w.height), 0.95)
         }
     }
+
+    func testAFileCardIsNotASentenceNamingTheFile() {
+        XCTAssertTrue(F.cardText("6原生家庭创伤治愈.docx"))
+        XCTAssertTrue(F.cardText("伤治愈.docx13K"))
+        XCTAssertFalse(F.cardText("【模拟服务器】收到：6原生家庭创伤治愈.docx13K"))
+        let rows = [[piece("6原生家庭创伤治愈.docx", 0.4, 0.35)], [piece("【模拟服务器】收到：6原生家庭创伤治愈.docx13K", 0.6, 0.42)]]
+        XCTAssertEqual(F.fileCard(rows, hint: "")?.y ?? 0, 0.35, accuracy: 0.001)
+    }
 }

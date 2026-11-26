@@ -300,11 +300,21 @@ extension AppModel {
             if await paneTap(preview, in: info.rect, wide: 0.04, tall: 0.01),
                let sheet = await paneLook(job.side, after: now(), tries: 6, until: { XiaoLanMediaFind.button($0.rows, "预览", bottom: 0.3) != nil }),
                let title = XiaoLanMediaFind.button(sheet.rows, "预览", bottom: 0.3) {
-                let grow = XiaoLanSpots.point(.sheetGrow, app: .wechat, width: width).map { Double($0.x) } ?? XiaoLanMediaFind.wechatSheetGrow
-                _ = await paneTap(CGPoint(x: grow, y: Double(title.y)), in: sheet.rect, wide: 0.02, tall: 0.01)
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                let shown = await paneLooks(after: now(), side: job.side).first { $0.side == job.side } ?? sheet
-                words = XiaoLanMediaFind.pageText(shown.rows, from: 0.08)
+                // 188 night (Echo 188, 11-27 06:05: the ∨ closed a preview already shown in full, and the file's page was
+                // read instead): what the preview shows is read first; the ∨ only when it shows little, and its page kept
+                // only when it shows more
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                let first = await paneLooks(after: now(), side: job.side).first { $0.side == job.side } ?? sheet
+                words = XiaoLanMediaFind.pageText(first.rows, from: Double(title.y) + 0.03)
+                if words.split(separator: "\n").count < 3 {
+                    let grow = XiaoLanSpots.point(.sheetGrow, app: .wechat, width: width).map { Double($0.x) } ?? XiaoLanMediaFind.wechatSheetGrow
+                    _ = await paneTap(CGPoint(x: grow, y: Double(title.y)), in: sheet.rect, wide: 0.02, tall: 0.01)
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    let shown = await paneLooks(after: now(), side: job.side).first { $0.side == job.side } ?? first
+                    let more = XiaoLanMediaFind.pageText(shown.rows, from: 0.08)
+                    let filePage = more.contains("文件大小") && more.contains("下载")
+                    if !filePage, more.count > words.count { words = more }
+                }
             }
             await paneMediaBack(job)
         }
@@ -407,9 +417,16 @@ extension AppModel {
         if let saw { parts.insert("网页（Safari）：\(saw)", at: 0) }
         if !text.isEmpty { parts.append("网页文字：\(text)") }
         // back side by side, then WeChat's page closed
-        var back = await paneRecall(attempt: 1)
-        if !back { back = await paneRecall(attempt: 2) }
-        if back { await paneMediaClosePage(job) } else { DebugLog.write("watch: wechat: WeChat and WeCom not called back after Safari") }
+        // 188 night (Echo 188, 11-27 06:18: both windows came back, but WeChat's showed the blocked page — no tab bar, no
+        // chat — so its app was not told, "not called back", the second try missed the Dock, the page was never closed
+        // and every WeChat order after failed: "屏幕上没有微信的窗口"): the page closed first, then both looked for
+        _ = await paneRecall(attempt: 1)
+        await paneMediaClosePage(job)
+        let told = Set(await paneLooks(after: now()).compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
+        if !(told.contains(.wechat) && told.contains(.wework)) {
+            DebugLog.write("watch: wechat: after Safari only \(told.map { "\($0)" }.sorted().joined(separator: ", ")) seen; called back once more")
+            if await paneRecall(attempt: 2) { await paneMediaClosePage(job) }
+        }
         guard !parts.isEmpty else { return (nil, "Safari 打开了，但没读到内容（\(url)）") }
         return (parts.joined(separator: "；"), nil)
     }

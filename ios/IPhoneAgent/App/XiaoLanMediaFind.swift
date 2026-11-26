@@ -131,9 +131,22 @@ enum XiaoLanMediaFind {
         CGPoint(x: max(0.05, Double(label.box.midX) - 0.07), y: max(0.1, Double(label.box.midY) - 0.06))
     }
 
+    /// A file card's own words: its name, and at most its size and 「未下载」 (「6原生家庭创伤治愈.docx」, 「伤治愈.docx13K」);
+    /// a sentence that names a file (the server's 「【模拟服务器】收到：6原生家庭创伤治愈.docx13K」) is none.
+    static func cardText(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        guard let name = fileName(t), let r = t.range(of: name) else { return false }
+        var rest = t.replacingCharacters(in: r, with: "")
+        rest = rest.replacingOccurrences(of: #"\d+(\.\d+)?[KMG]B?"#, with: "", options: [.regularExpression, .caseInsensitive])
+        rest = rest.replacingOccurrences(of: "未下载", with: "").replacingOccurrences(of: "已下载", with: "")
+        return rest.count <= 2
+    }
+
     /// The newest file card's name; `hint` (the line or preview) picks the card when several show.
+    /// 188 night (Echo 188, 11-27 05:49: WeCom's 「文件没有打开」 twice: the server's reply naming the file, lower down, was
+    /// clicked, not the card): a card's own words only.
     static func fileCard(_ rows: [[Piece]], hint: String) -> CGPoint? {
-        let all = pieces(rows).filter { fileName($0.text) != nil }
+        let all = pieces(rows).filter { cardText($0.text) }
         let want = fileName(hint).map { $0.lowercased() }
         let pick = all.last { p in
             guard let want, let name = fileName(p.text)?.lowercased() else { return false }

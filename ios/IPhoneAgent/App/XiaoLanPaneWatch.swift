@@ -624,6 +624,14 @@ extension AppModel {
                 state.leftAt["\(app.rawValue)|\(WatchOCR.titled(title).name)"] = now()  // 188 (missedLine)
             }
         case .unknown:
+            // 188 night: WeChat's 「如需浏览」 page left open (a link's trip to Safari cut short) is closed by its ✕; WeChat
+            // cannot be told by it, so its orders would find no window
+            if XiaoLanMediaFind.linkBlocked(look.rows),
+               let at = XiaoLanSpots.point(.pageClose, app: .wechat, width: Double(look.rect.width)) {
+                DebugLog.write("watch: a window is on WeChat's 「如需浏览」 page; closed by its ✕")
+                _ = await paneTap(at, in: look.rect, wide: 0.03, tall: 0.012)
+                return
+            }
             // 184: a news or team account's page left open (its back missed): back again.
             if XiaoLanPanes.cancelButton(look.rows) == nil, state.systemOpen.contains(look.side) {
                 DebugLog.write("watch: a window is still on a news or team account's page; back to its list")
