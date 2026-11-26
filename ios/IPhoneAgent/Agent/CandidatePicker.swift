@@ -64,6 +64,14 @@ enum CandidatePicker {
     /// The keyboard's name in the globe key's menu, bare and lowercased (Pilot from 156, Lan Agent before, 小藍 — Echo).
     static let ourKeyboardNames: Set<String> = ["pilot", "lanagent", "小藍echo", "小蓝echo", "小藍", "小蓝"]
 
+    /// 183 (Echo 182, 11-26: on the iPad the menu row 小藍 — Echo read as "小藍-Echo" or "小藍一Echo": "一" is a letter
+    /// and stayed in, so the row was not ours and 简体拼音 stayed): a bare, lowercased menu line that names 小藍's keyboard.
+    static func ourKeyboardName(_ line: String) -> Bool {
+        let l = line.replacingOccurrences(of: "一", with: "")
+        if ourKeyboardNames.contains(l) { return true }
+        return l.count <= 12 && l.contains("echo") && (l.contains("小藍") || l.contains("小蓝"))
+    }
+
     static func keyboardMenuOpen(rows: [[Piece]]) -> Bool {
         rows.contains { row in keyboardMenuWords.contains { bare(row.map(\.text).joined()).lowercased().hasPrefix($0) } }
     }
@@ -76,7 +84,7 @@ enum CandidatePicker {
         func left(_ row: [Piece]) -> Double { Double(row.map(\.box.minX).min() ?? 1) }
         let markers = rows.filter { row in keyboardMenuWords.contains { line(row).hasPrefix($0) } }.map(left)
         guard !markers.isEmpty else { return nil }
-        for row in rows where !row.isEmpty && ourKeyboardNames.contains(line(row)) {
+        for row in rows where !row.isEmpty && ourKeyboardName(line(row)) {
             let box = row.dropFirst().reduce(row[0].box) { $0.union($1.box) }
             guard box.midX < 0.7, markers.contains(where: { abs($0 - Double(box.minX)) < 0.08 }) else { continue }
             return CGPoint(x: box.midX, y: box.midY)

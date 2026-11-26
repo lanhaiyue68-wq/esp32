@@ -77,7 +77,9 @@ extension AppModel {
             }
         }
         guard let entry = found else {
-            DebugLog.write("keyboard: the keyboard menu has no Lan Agent row (try \(attempt)); closing it")
+            // 183: what the menu read, for the next miss (11-26 the iPad's 小藍 — Echo row was not matched).
+            let read = rows.map { $0.map(\.text).joined() }.filter { !$0.isEmpty }.suffix(12).joined(separator: " | ")
+            DebugLog.write("keyboard: the keyboard menu has no Lan Agent row (try \(attempt)); closing it; read: \(read)")
             try? await pointer.tap(Self.globeKey.x, Self.globeKey.y)
             return false
         }

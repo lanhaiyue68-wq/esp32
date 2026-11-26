@@ -108,11 +108,19 @@ enum WatchOCR {
     static let uiPhrases = ["按住说话", "按住說話", "松开发送", "鬆開發送", "松开取消", "鬆開取消", "滑到这里转文字",
                             "滑到這裡轉文字", "上滑取消"]
     static let uiTails = ["转换完成", "轉換完成", "转文字完成", "轉文字完成"]
+    /// WeCom's quick bar over a chat's input (180, 182: it tells WeCom's chats).
+    static let quickBarWords = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服", "推薦客服"]
 
+    /// 183 (Echo 182 overnight, 11-26: "¥发起收款 •推荐客服", "发起收款 ●推荐客服" reported 24 times): a line that is
+    /// WeCom's quick bar (its buttons read with their icons as ¥ • ●, a stray character at most) is dropped too.
     static func withoutUIWords(_ text: String) -> String {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let bare = t.filter { !$0.isWhitespace }
         if uiPhrases.contains(bare) { return "" }
+        let squeezed = bare.filter { !"¥￥•·・●○◎".contains($0) }
+        var rest = squeezed
+        for w in quickBarWords { rest = rest.replacingOccurrences(of: w, with: "") }
+        if rest.count < squeezed.count && rest.count <= 1 { return "" }
         for tail in uiTails where bare.hasSuffix(tail) {
             if let r = t.range(of: tail, options: .backwards) { t = String(t[..<r.lowerBound]) }
             t = t.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "•·・●")))

@@ -68,9 +68,12 @@ import Foundation
         // 177 (user 11-25: "右上角、右下角都不要有"): 176 pushed right when the arrow was not seen; it sat in the status
         // bar (not looked at: the clock changes there), and the push took it along the top into the top-right corner.
         // Unseen, it now goes down a little (a status-bar arrow comes out under it), at most three times, no edge pushed.
+        // 183 (Echo 182 overnight, 11-26: three times down took the pointer to 0.986, on the bottom edge): down, then
+        // up twice as far, then down again, so the tries end where they began.
         for step in 1...3 where spot == nil {
-            log("ipad home: arrow not seen; down a little (\(step))")
-            _ = try? await device.send("move 0 \(CommandChannel.padSpan.h * 8 / 100)")  // place unknown: slow (padPush)
+            let units = CommandChannel.padSpan.h * 8 / 100 * (step == 2 ? -2 : 1)
+            log("ipad home: arrow not seen; \(step == 2 ? "up" : "down") a little (\(step))")
+            _ = try? await device.send("move 0 \(units)")  // place unknown: slow (padPush)
             spot = await padSpot(nudge: 60)
             if spot == nil { spot = await padSpot(nudge: -60) }
         }
@@ -426,16 +429,6 @@ import Foundation
             log(String(format: "aim (%.3f, %.3f): pointer not found; clicking at the calibrated estimate", x, y))
             return
         }
-        /// Lost while correcting: the corrections moved it somewhere unseen, so start over from the corner.
-        func lost() async throws {
-            pos = nil
-            guard !unseenClicks else {
-                log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
-                if viaBorders(x, y) { try await fromBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
-                return
-            }
-            throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
-        }
         // Only a system gesture may start from the visible cursor's border inset.
         // The other axis, ordinary taps and all calibration points stay exact.
         func error(_ found: Double, _ target: Double) -> Double {
@@ -452,6 +445,23 @@ import Foundation
                          y: swipeStart || (edgeStart && (x <= 0.01 || x >= 0.99)) ? Self.edgeAlongTolerance : Self.aimTolerance)
         func onTarget(_ p: CGPoint) -> Bool {
             abs(error(Double(p.x), x)) <= tolerance.x && abs(error(Double(p.y), y)) <= tolerance.y
+        }
+        /// Lost while correcting: the corrections moved it somewhere unseen, so start over from the corner.
+        /// 183 (Echo 182 overnight, 11-26: "lost during correction", then the iPad home saw the arrow 0.005 from the
+        /// target, yet the back arrow was not clicked, 11–25 s each time): on the iPad, one more look after starting
+        /// over; seen on the target, it counts as seen.
+        func lost() async throws {
+            pos = nil
+            guard !unseenClicks else {
+                log(String(format: "aim (%.3f, %.3f): pointer lost during correction; clicking at the calibrated estimate", x, y))
+                if viaBorders(x, y) { try await fromBorder(x, y) } else { try await moveTo(dx(x), dy(y)) }
+                if CommandChannel.onPad(), let p = try await find(x, y), onTarget(p) {
+                    log(String(format: "aim (%.3f, %.3f): seen on the target after finding it again (%.3f, %.3f)", x, y, p.x, p.y))
+                    aimSaw = true
+                }
+                return
+            }
+            throw DeviceError(message: "Pointer was lost during correction; no click was sent.")
         }
         let miss = max(abs(error(Double(found.x), x)), abs(error(Double(found.y), y)))
         if !edgeStart && maps == nil && miss <= Self.maxMiss && !pinned(found, x, y) {  // a probe map already contains its measured offsets
@@ -545,6 +555,7 @@ import Foundation
     private func measure(_ x: Double, _ y: Double, model: Bool = true) async throws -> CGPoint? {
         guard let screen, let span else { return nil }
         let nudge = x < 0.9 ? Self.nudge : -Self.nudge  // stay clear of the screen edge
+        if CommandChannel.onPad() { return try await padMeasure(x, y, nudge: nudge, on: screen) }
         await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)  // pointer at rest
         try await device.send("move \(nudge) 0")
         // A frame captured while the BLE command was in flight can still precede the actual move.
@@ -566,6 +577,25 @@ import Foundation
             return p
         }
         return model ? await locate?(restored) : nil
+    }
+
+    /// 183 (Echo 182 overnight, 11-26: aim saw the pointer 23 times in 115 (15–30 % an hour, never better), while the
+    /// iPad home's padSpot saw it 74 times in 74; WeChat's back worked 24 % of the time, each miss 1.5–25 s): the frame
+    /// compared with the nudged one was the first new frame after the move back, taken before the pointer had come back,
+    /// so it often matched the nudged one and nothing moved. As padSpot: the frame before the nudge (the pointer at
+    /// rest) against the nudged one at rest; the move back is not waited for.
+    private func padMeasure(_ x: Double, _ y: Double, nudge: Int, on screen: ScreenSource) async throws -> CGPoint? {
+        await screen.settled(quiet: 0.2, least: 0.2, most: 1.0)
+        let before = screen.frame, sent = now()
+        try await device.send("move \(nudge) 0")
+        var after = await screen.fresh(since: sent, timeout: 1.0)
+        if after != nil {
+            await screen.settled(quiet: 0.15, least: 0.1, most: 0.6)
+            after = screen.frame
+        }
+        try await device.send("move \(-nudge) 0")
+        guard let before, let after else { return nil }
+        return Self.arrowBefore(before, after, near: CGPoint(x: x, y: y), nudge: nudge, window: 0.5)
     }
 
     /// Calibration check without tapping: move to a known point and measure the miss (fraction of the screen).
@@ -720,6 +750,12 @@ import Foundation
         let mx = Int((ex * Double(span.w)).rounded(.toNearestOrEven)), my = Int((ey * Double(span.h)).rounded(.toNearestOrEven))
         if maps != nil { try await ProbeMotion.move(device, mx, my) } else { try await device.send("move \(mx) \(my)") }
         if let p = pos { pos = (p.0 + mx, p.1 + my) }
+        try await device.send("click")
+        try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
+    }
+
+    /// 183: a click where the pointer rests, just seen on its target by an aim (小藍's clicks by a window's top).
+    func clickInPlace() async throws {
         try await device.send("click")
         try await Task.sleep(nanoseconds: UInt64(Self.tapGap * 1e9))
     }

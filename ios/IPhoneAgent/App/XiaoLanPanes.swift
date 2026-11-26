@@ -48,22 +48,48 @@ import UIKit
         let outerRight = stride(from: w - 1, to: min(w - 1, gap.b + w / 5), by: -1).first { edge($0) >= 0.7 } ?? w
         let (l0, l1) = (Double(outerLeft) / Double(w), Double(gap.a) / Double(w))
         let (r0, r1) = (Double(gap.b) / Double(w), Double(outerRight) / Double(w))
-        return [CGRect(x: l0, y: 0, width: l1 - l0, height: windowBottom(luma, w: w, h: h, from: outerLeft, to: gap.a)),
-                CGRect(x: r0, y: 0, width: r1 - r0, height: windowBottom(luma, w: w, h: h, from: gap.b, to: outerRight))]
+        return [CGRect(x: l0, y: 0, width: l1 - l0, height: windowBottom(px, luma, from: outerLeft, to: gap.a)),
+                CGRect(x: r0, y: 0, width: r1 - r0, height: windowBottom(px, luma, from: gap.b, to: outerRight))]
     }
 
-    /// Where a window ends above the Dock: the first row from 0.75 down that changes sharply nearly all the way across.
-    private static func windowBottom(_ luma: (Int, Int) -> Int, w: Int, h: Int, from: Int, to: Int) -> Double {
-        let span = to - from
+    /// 183: a window's bottom measured for sure (the wallpaper or the Dock right under its edge), by where the window is.
+    private struct KeptBottom { var w: Int; var h: Int; var from: Int; var to: Int; var bottom: Double }
+    private static var keptBottoms: [KeptBottom] = []
+
+    /// Where a window ends above the Dock: a row from 0.75 down that changes sharply nearly all the way across, with the
+    /// wallpaper or the Dock (coloured or dark, unlike any window) just under it.
+    /// 183 (Echo 182 overnight, 11-26: a chat open with its keyboard down ended at 0.829, the bottom of a wide green
+    /// bubble, so its input bar was cut off: "微信里没找到输入框" for every second line sent in a row, and the 按住 说话
+    /// bar never switched back): an edge with more window under it is no bottom. With none seen (a keyboard over the
+    /// bottom), the last bottom measured for sure at that place; never measured, the first sharp row (as before).
+    private static func windowBottom(_ px: WatchOCR.Pixels, _ luma: (Int, Int) -> Int, from: Int, to: Int) -> Double {
+        let w = px.w, h = px.h, span = to - from
         guard span > 20 else { return 1 }
         let xs = stride(from: from + span / 10, to: to - span / 10, by: max(1, span / 60)).map { $0 }
-        var y = Int(0.75 * Double(h))
-        while y < h {
+        let under = max(3, Int(0.008 * Double(h)))
+        func notWindow(_ x: Int, _ y: Int) -> Bool {
+            let i = (y * w + x) * 4
+            let r = Int(px.bytes[i]), g = Int(px.bytes[i + 1]), b = Int(px.bytes[i + 2])
+            return max(r, g, b) - min(r, g, b) >= 40 || (r * 3 + g * 6 + b) / 10 < 170
+        }
+        var y = Int(0.75 * Double(h)), first: Int?
+        while y < h - under {
             let sharp = xs.filter { abs(luma($0, y) - luma($0, y - 1)) >= 30 }.count
-            if Double(sharp) >= 0.7 * Double(xs.count) { return Double(y) / Double(h) }
+            if Double(sharp) >= 0.7 * Double(xs.count) {
+                if first == nil { first = y }
+                if Double(xs.filter { notWindow($0, y + under) }.count) >= 0.7 * Double(xs.count) {
+                    let bottom = Double(y) / Double(h)
+                    keptBottoms.removeAll { $0.w == w && $0.h == h && abs($0.from - from) <= 6 && abs($0.to - to) <= 6 }
+                    keptBottoms = Array((keptBottoms + [KeptBottom(w: w, h: h, from: from, to: to, bottom: bottom)]).suffix(8))
+                    return bottom
+                }
+            }
             y += 1
         }
-        return 1
+        if let kept = keptBottoms.last(where: { $0.w == w && $0.h == h && abs($0.from - from) <= 6 && abs($0.to - to) <= 6 }) {
+            return kept.bottom
+        }
+        return first.map { Double($0) / Double(h) } ?? 1
     }
 
     /// One window's picture, as its own frame.
@@ -122,9 +148,15 @@ import UIKit
     }
 
     /// The first line in a window's title band: WeCom puts "外部群 | 群主: …" under a group's name (0.071 vs 0.050).
+    /// 183 (Echo 182 overnight, 11-26, n=95: WeCom was in 企微测试群 and still sent back to its list): its group line
+    /// ("外部群 | 群主: 范兆磊") is never the title, even when the name above it was not read.
     static func titleLine(_ rows: [[Piece]]) -> String {
         let lines = rows.map { $0.filter { (0.035...0.09).contains($0.box.midY) && (0.18...0.82).contains($0.box.midX) } }
             .filter { !$0.isEmpty }
+            .filter { row in
+                let t = row.map(\.text).joined().filter { !$0.isWhitespace }
+                return !(t.contains("群主") || t.hasPrefix("外部群") || t.hasPrefix("内部群") || t.hasPrefix("內部群"))
+            }
             .sorted { ($0.map(\.box.midY).min() ?? 1) < ($1.map(\.box.midY).min() ?? 1) }
         return (lines.first ?? []).sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
             .trimmingCharacters(in: .whitespaces)
@@ -146,6 +178,14 @@ import UIKit
         return title.isEmpty ? .unknown : .chat(title)
     }
 
+    /// 183: a window's app told by the window alone (its tab bar or list title, WeCom's quick bar, the chosen tab's colour).
+    static func toldApp(_ rows: [[Piece]], crop: Data) -> XiaoLanOrders.App? {
+        if let a = app(rows) { return a }
+        if weworkBar(rows) { return .wework }
+        guard view(rows) == .list, let px = WatchOCR.Pixels(crop) else { return nil }
+        return tabApp(px)
+    }
+
     /// 180: a chat's app by what only WeCom's chats show: the quick bar over the input (企业名片, 快捷回复, 发起收款).
     static func chatApp(_ rows: [[Piece]]) -> XiaoLanOrders.App { weworkBar(rows) ? .wework : .wechat }
 
@@ -153,8 +193,7 @@ import UIKit
     /// WeCom; left alone", its list and the owner's private message never looked at): WeCom's quick bar over the input
     /// tells its chats wherever they are.
     static func weworkBar(_ rows: [[Piece]]) -> Bool {
-        let words = ["企业名片", "企業名片", "快捷回复", "快捷回覆", "发起收款", "發起收款", "推荐客服", "推薦客服"]
-        return rows.joined().contains { p in words.contains { p.text.contains($0) } }
+        rows.joined().contains { p in WatchOCR.quickBarWords.contains { p.text.contains($0) } }
     }
 
     /// 182 (Echo 181, 11-26: a chat left on its 按住 说话 bar, the white button taken for the input field: "小蓝输入法没有
@@ -170,9 +209,12 @@ import UIKit
     /// 182 (user 11-26: "點聊天空白處收鍵盤"; Esc did not put 小藍's keyboard down, and it covered the other window's
     /// tab bar): a spot of bare chat background above the input bar, clear across the middle (no bubble, no time line;
     /// avatars stay outside 0.15–0.85), lowest first. Nil when there is none.
+    /// 183 (Echo 182 overnight, 11-26: the tap went on a time line, "11月26日 星期四 04:08", and the keyboard stayed up;
+    /// its grey strokes fell between the 0.035 samples): every second pixel across, over a band 0.012 above and below.
     static func blankSpot(_ px: WatchOCR.Pixels, above bottom: Double) -> CGPoint? {
+        let stepX = max(2.0 / Double(px.w), 0.002), stepY = max(2.0 / Double(px.h), 0.002)
         func bare(_ y: Double) -> Bool {
-            stride(from: 0.15, through: 0.85, by: 0.035).allSatisfy { x in
+            stride(from: 0.15, through: 0.85, by: stepX).allSatisfy { x in
                 let (r, g, b) = px.rgb(x, y)
                 return (225...244).contains(r) && (225...244).contains(g) && (225...247).contains(b)
                     && max(r, g, b) - min(r, g, b) <= 8
@@ -180,10 +222,46 @@ import UIKit
         }
         var y = bottom - 0.03
         while y > 0.15 {
-            if bare(y), bare(y - 0.012), bare(y + 0.012) { return CGPoint(x: 0.5, y: y) }
+            if stride(from: y - 0.012, through: y + 0.012, by: stepY).allSatisfy(bare) { return CGPoint(x: 0.5, y: y) }
             y -= 0.006
         }
         return nil
+    }
+
+    /// 183: the top of a window where a click goes only on a pointer seen there (its title bar: the back arrow, 取消,
+    /// WeChat's ＋; the ••• and close above them).
+    static let topBand = 0.12
+
+    /// 183 (Echo 182 overnight, 11-26: a second 取消 after a search, clicked unseen, hit WeChat's ＋ on the list behind
+    /// it, and its menu stayed open for three minutes): the ＋ menu, by two of its rows.
+    static let plusMenuWords = ["发起群聊", "發起群聊", "添加朋友", "加好友", "扫一扫", "掃一掃", "收付款", "加入企业", "添加客户"]
+    static func plusMenu(_ rows: [[Piece]]) -> Bool {
+        let texts = rows.joined().map { $0.text.filter { !$0.isWhitespace } }
+        return Set(plusMenuWords.filter { w in texts.contains { $0.contains(w) } }).count >= 2
+    }
+    /// Where a click closes that menu and does nothing else: the title bar's bare left part (the list has no button there).
+    static let menuCloseSpot = CGPoint(x: 0.25, y: 0.058)
+
+    /// 183 (user 11-25: "所有紅點都要消失…行业资讯也要點掉"; logs 11-26: its mark stayed all night): the marked rows that
+    /// are no one's chat (news, team, tools). Opened after any chat's, read into the notices, never reported.
+    static func systemMarked(_ rows: [[Piece]], red: (CGRect) -> Double) -> [(name: String, at: CGPoint)] {
+        entries(rows).filter { notChats.contains($0.name) && red(badgeArea($0.box)) >= WatchChatOpen.badgeShare }
+            .sorted { $0.box.midY < $1.box.midY }
+            .map { (name: $0.name, at: CGPoint(x: 0.5, y: $0.box.midY)) }
+    }
+
+    /// 183 (Echo 182, 11-26: 简体拼音 over the chat, its white keys taken for the input field, a key typed; its letters
+    /// reported as 测试群's messages): the top of a system keyboard's keys in a window (window fractions), nil when none.
+    static func keyboardTop(_ rows: [[Piece]]) -> Double? {
+        let lowRows = rows.filter { ($0.map(\.box.minY).min() ?? 0) >= 0.45 }
+        let low = lowRows.joined()
+        // a key: one Latin letter, with the digit or sign printed over it on 简体拼音 ("1 q", "%z")
+        let letters = low.filter { p in
+            p.text.count <= 3 && p.text.filter { $0.isASCII && $0.isLetter }.count == 1
+        }
+        let words = low.filter { CandidatePicker.keyboardWords.contains($0.text.trimmingCharacters(in: .whitespaces)) }
+        guard letters.count >= 6 || CandidatePicker.keyboardUp(rows: lowRows) else { return nil }
+        return (letters + words).map { Double($0.box.minY) }.min()
     }
 
     /// 180: a chat of WeChat or WeCom by its background down the window's left margin: WeChat (237, 237, 237), WeCom
@@ -204,7 +282,8 @@ import UIKit
     /// buttons above it, 企业名片 / 快捷回复, is grey-white and left alone). Three columns, two of them white: the hint
     /// text (轻触说话转文字, 发消息或按住…) and WeChat's microphone cover one at most. Tapped left of the middle, on the
     /// hint, clear of the microphone.
-    static func inputField(_ px: WatchOCR.Pixels) -> CGPoint? {
+    /// 183: `above`, a system keyboard's top: its white keys are no field (the field sits over the keyboard).
+    static func inputField(_ px: WatchOCR.Pixels, above: Double = 1) -> CGPoint? {
         func white(_ y: Double) -> Bool {
             [0.135, 0.50, 0.66].filter { x in
                 let (r, g, b) = px.rgb(x, y)
@@ -212,7 +291,7 @@ import UIKit
             }.count >= 2
         }
         let step = 1 / Double(px.h)
-        var y = 1 - step, bottom: Double?
+        var y = min(1, above) - step, bottom: Double?
         while y > 0.3 {  // 180: with the keyboard up the field sits right over it, half way up the window
             if white(y) {
                 if bottom == nil { bottom = y }
@@ -268,7 +347,9 @@ import UIKit
     }
 
     /// Back from a chat to the list: the arrow at the window's top-left.
-    static let back = CGPoint(x: 0.055, y: 0.058)
+    /// 183 (Echo 182 overnight, 11-26: after a back click the pointer was found at 0.008 of the screen, by its left
+    /// edge): the click a little further in, still on the arrow.
+    static let back = CGPoint(x: 0.062, y: 0.058)
     /// 181 (Echo 180, 11-25: the left window's back arrow was clicked unseen, then again in place, and the second click
     /// closed WeChat; its ••• and close sit ~50 px above the arrow): where the pointer is found first, on the chat below
     /// the arrow (hovering there does nothing), before the short hop up to the arrow. A second spot if not seen there.
@@ -336,6 +417,29 @@ import UIKit
     }
 }
 
+/// 183 (Echo 182, 11-26: after the reinstall the first look at WeCom's 企微测试群 reported an old line, "监海乐: 你好";
+/// what had been read lived in memory only): what was read last in each chat ("wechat|测试群"), kept across launches.
+@MainActor enum PaneHistory {
+    static let key = "xiaolanPaneHistoryV1"
+
+    static func load() -> [String: [WatchReport.Line]] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: [WatchReport.Line]].self, from: data)) ?? [:]
+    }
+
+    static func save(_ history: [String: [WatchReport.Line]]) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(history), forKey: key)
+    }
+
+    /// The new lines of a chat whose history came from an earlier launch. With no overlap (more than a screenful
+    /// since, or the lines read differently) nothing is new, but the last line of someone's when a red mark opened it.
+    static func newAfterLaunch(_ lines: [WatchReport.Line], history: [WatchReport.Line], fromMark: Bool) -> [WatchReport.Line] {
+        let fresh = WatchReport.new(lines, history: history)
+        guard !lines.isEmpty, fresh.count == lines.count else { return fresh }
+        return fromMark ? Array(lines.filter { !$0.mine }.suffix(1)) : []
+    }
+}
+
 /// 181 (user 11-25: "兩個號在一個群里…就相當于是同一個人，就不用回復了"; "發了過后，他應該點開把那個紅點給點掉，而不是
 /// 應該回復"): WeChat's and WeCom's own accounts are one person. What one of them says in a group both are in is opened on
 /// the other side (its red mark goes) and never reported, so it is never answered. Who that is: the owner's names typed in
@@ -344,7 +448,8 @@ import UIKit
     struct Sent { var app: XiaoLanOrders.App; var chat: String; var text: String; var at: Double }
 
     static let learnedKey = "xiaolanSelvesV1"
-    static let sentWindow = 600.0  // seconds a sent line is looked for on the other side
+    // 183 (11-26: a line sent 33 min before came back on a scrolled-up screen and was reported): 4 hours, was 10 min.
+    static let sentWindow = 4 * 3600.0  // seconds a sent line is looked for on the other side
 
     /// The names learned so far (newest last, ten at most).
     static var learned: [String] { UserDefaults.standard.stringArray(forKey: learnedKey) ?? [] }
@@ -376,7 +481,28 @@ import UIKit
     /// The sender is the owner: one of `names` (typed or learned), WeCom's "@微信" tag and spaces left out.
     static func isOwner(_ sender: String, names: [String]) -> Bool {
         let s = XiaoLanPanes.listName(sender)
-        return !s.isEmpty && names.contains { n in XiaoLanPanes.listName(n) == s || person(n) == person(s) }
+        return !s.isEmpty && names.contains { n in XiaoLanPanes.listName(n) == s || person(n) == person(s) || readAlike(person(n), person(s)) }
+    }
+
+    /// 183 (Echo 182 overnight, 11-26: the owner's other account 蓝海乐 read as "监海乐", its line reported): letters the
+    /// reader has been seen to swap for one another. A name is the owner's when it differs from the owner's in one such
+    /// letter only; any other letter is another person (范光磊 is not 范兆磊).
+    static let alikeLetters: [Set<Character>] = [["蓝", "监", "篮"], ["藍", "監", "籃"]]
+    static func readAlike(_ owner: String, _ read: String) -> Bool {
+        let a = Array(owner), b = Array(read)
+        guard a.count == b.count, a.count >= 2 else { return false }
+        let differ = zip(a, b).filter { pair in pair.0 != pair.1 }
+        guard differ.count == 1, let pair = differ.first else { return false }
+        return alikeLetters.contains { $0.contains(pair.0) && $0.contains(pair.1) }
+    }
+
+    /// 183 (Echo 182 overnight, 11-26: "企业名片", "国企业名片", "企微测试群" as the senders of 24 lines reported): a
+    /// sender read as the chat's own name or as a button of WeCom's quick bar is no sender read.
+    static func noSender(_ sender: String, chat: String) -> Bool {
+        let s = XiaoLanPanes.listName(sender)
+        guard !s.isEmpty else { return false }
+        if WatchChatOpen.sameChat(s, listName: chat) || WatchChatOpen.sameChat(chat, listName: s) { return true }
+        return WatchOCR.quickBarWords.contains { s.contains($0) }
     }
 
     /// 182 (Echo 181, 11-26: "范兆磊＠某公司" in WeChat, learned as the owner, came back after a restart as a new

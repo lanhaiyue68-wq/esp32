@@ -1199,9 +1199,14 @@ enum WatchReport {
 /// What watch read, one JSON line per message in Documents/readlog/<day>.jsonl (visible in Files), and the summaries
 /// the user asks for next to it. Reading without replying is how the agent learns a chat.
 enum ReadLog {
-    static var folder: URL? {
+    static var folder: URL? { subfolder("readlog") }
+    /// 183 (user 11-25: "有用的都學下來，沒用的就棄掉"): what news and team accounts said (WeCom's 行业资讯 and the like),
+    /// kept apart from the chats (Documents/notices/<day>.jsonl); never reported or answered.
+    static var noticeFolder: URL? { subfolder("notices") }
+
+    private static func subfolder(_ name: String) -> URL? {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
-        let dir = docs.appendingPathComponent("readlog", isDirectory: true)
+        let dir = docs.appendingPathComponent(name, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
