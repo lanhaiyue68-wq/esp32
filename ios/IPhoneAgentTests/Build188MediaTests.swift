@@ -338,4 +338,30 @@ import UIKit
         let rows = [[piece("6原生家庭创伤治愈.docx", 0.4, 0.35)], [piece("【模拟服务器】收到：6原生家庭创伤治愈.docx13K", 0.6, 0.42)]]
         XCTAssertEqual(F.fileCard(rows, hint: "")?.y ?? 0, 0.35, accuracy: 0.001)
     }
+
+    /// Two windows on the wallpaper; `video`: the right one shows a picture whose left edge matches the wallpaper on
+    /// half its rows (Douyin's web page in WeCom, 11-27 06:58).
+    func split(video: Bool) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 960, height: 1280), format: format).jpegData(withCompressionQuality: 0.95) { r in
+            let c = r.cgContext
+            c.setFillColor(red: 0.78, green: 0.75, blue: 0.86, alpha: 1); c.fill(CGRect(x: 0, y: 0, width: 960, height: 1280))
+            c.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            c.fill(CGRect(x: 0, y: 0, width: 456, height: 1150)); c.fill(CGRect(x: 468, y: 0, width: 492, height: 1150))
+            guard video else { return }
+            for k in 0..<24 {  // bands: half of them the wallpaper's own colour at the window's edge
+                let y = 150 + CGFloat(k) * 40
+                if k % 2 == 0 { c.setFillColor(red: 0.78, green: 0.75, blue: 0.86, alpha: 1) } else { c.setFillColor(red: 0.2, green: 0.3, blue: 0.2, alpha: 1) }
+                c.fill(CGRect(x: 468, y: y, width: 492, height: 40))
+            }
+        }
+    }
+
+    func testTheGapKeptWhenAPictureBlursOneEdge() throws {
+        let normal = try XCTUnwrap(WatchOCR.Pixels(split(video: false)))
+        XCTAssertEqual(XiaoLanPanes.windows(normal).count, 2)
+        let page = try XCTUnwrap(WatchOCR.Pixels(split(video: true)))
+        XCTAssertEqual(XiaoLanPanes.windows(page).count, 2)  // not one window: no "a window is gone", the watch goes on
+    }
 }

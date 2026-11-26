@@ -41,7 +41,16 @@ import UIKit
                 if best == nil || s > best!.s { best = (e.x, f.x, s) }
             }
         }
+        // 188 night (Echo 188, 11-27 06:58: WeCom on Douyin's web page, a video's still against its left edge, which read
+        // sharp on 62% of the rows, under 0.7: no gap, one window; "a window is gone after the back arrow; watch stopped",
+        // WeCom left on the page, and every order after found no window): the gap last found, one of its edges still
+        // sharp nearly all the way and the other on 40% of the rows, is the gap still (it moves only when dragged)
+        if best == nil, let last = lastGap, last.w == w, last.h == h, last.a >= 1, last.b < w {
+            let (ea, eb) = (edge(last.a), edge(last.b))
+            if max(ea, eb) >= 0.9 && min(ea, eb) >= 0.4 { best = (last.a, last.b, ea + eb) }
+        }
         guard let gap = best else { return [CGRect(x: 0, y: 0, width: 1, height: 1)] }
+        lastGap = (w, h, gap.a, gap.b)
         // 181: a window moved in from the screen's side has an outer edge too; the wallpaper outside it is no part of
         // it (its taps are fractions of the window). Each window stays at least a fifth of the screen wide.
         let outerLeft = (1..<max(1, gap.a - w / 5)).first { edge($0) >= 0.7 } ?? 0
@@ -55,6 +64,8 @@ import UIKit
     /// 183: a window's bottom measured for sure (the wallpaper or the Dock right under its edge), by where the window is.
     private struct KeptBottom { var w: Int; var h: Int; var from: Int; var to: Int; var bottom: Double }
     private static var keptBottoms: [KeptBottom] = []
+    /// 188 night: the gap between the windows last found (frame size, its two edge columns).
+    private static var lastGap: (w: Int, h: Int, a: Int, b: Int)?
 
     /// Where a window ends above the Dock: a row from 0.75 down that changes sharply nearly all the way across, with the
     /// wallpaper or the Dock (coloured or dark, unlike any window) just under it.
