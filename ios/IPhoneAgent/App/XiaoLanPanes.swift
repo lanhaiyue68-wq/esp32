@@ -86,6 +86,32 @@ import UIKit
             }
             y += 1
         }
+        // 188 night (B24 again, Echo 188, 11-27 04:56: Echo's own window open behind the two, its light panel right under
+        // their bottoms, so no bottom "for sure" was found after the launch; the first sharp row, 0.788 (a time label over
+        // my newest line), was taken: every WeChat send's line was cut off the window's picture, 4 looks in vain and the
+        // list's preview, ~8 s a send): the window's side edge by the gap, sharp from the top down, stops at its rounded
+        // corner whatever is under it (measured: 0.866–0.884, the corner ~0.03). From 0.86 down it is the bottom (a
+        // keyboard's top is higher: 0.744 小藍's, its side edge stops at 0.766), and kept as measured.
+        let column = from > w / 3 ? from : to
+        if column >= 1, column < w {
+            var yy = Int(0.5 * Double(h)), miss = 0
+            var last: Int?
+            while yy < h {
+                if abs(luma(column, yy) - luma(column - 1, yy)) >= 30 {
+                    last = yy
+                    miss = 0
+                } else {
+                    miss += 1
+                    if miss >= 12 { break }
+                }
+                yy += 1
+            }
+            if let side = last.map({ min(1, Double($0) / Double(h) + 0.03) }), (0.86...0.97).contains(side) {
+                keptBottoms.removeAll { $0.w == w && $0.h == h && abs($0.from - from) <= 6 && abs($0.to - to) <= 6 }
+                keptBottoms = Array((keptBottoms + [KeptBottom(w: w, h: h, from: from, to: to, bottom: side)]).suffix(8))
+                return side
+            }
+        }
         if let kept = keptBottoms.last(where: { $0.w == w && $0.h == h && abs($0.from - from) <= 6 && abs($0.to - to) <= 6 }) {
             return kept.bottom
         }

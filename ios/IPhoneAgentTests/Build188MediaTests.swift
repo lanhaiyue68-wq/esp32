@@ -306,4 +306,28 @@ import UIKit
         XCTAssertEqual(F.mediaQuoteSpot(rows, nil, quote: "[文件] 6原生家庭创伤治愈.docx\n内容：…")?.y ?? 0, 0.5, accuracy: 0.001)
         XCTAssertNil(F.mediaQuoteSpot(rows, nil, quote: "这是什么"))
     }
+
+    // MARK: 188 night: a window's bottom over Echo's own panel
+
+    func testWindowBottomOverEchosPanel() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let jpeg = UIGraphicsImageRenderer(size: CGSize(width: 960, height: 1280), format: format).jpegData(withCompressionQuality: 0.95) { r in
+            let c = r.cgContext
+            c.setFillColor(red: 0.78, green: 0.75, blue: 0.86, alpha: 1); c.fill(CGRect(x: 0, y: 0, width: 960, height: 1280))  // wallpaper
+            c.setFillColor(red: 0.94, green: 0.94, blue: 0.95, alpha: 1); c.fill(CGRect(x: 25, y: 1150, width: 910, height: 70))  // Echo's panel
+            c.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            c.fill(CGRect(x: 0, y: 0, width: 456, height: 1110)); c.fill(CGRect(x: 468, y: 0, width: 492, height: 1110))
+            c.fill(CGRect(x: 0, y: 1110, width: 430, height: 40)); c.fill(CGRect(x: 494, y: 1110, width: 466, height: 40))  // rounded corners
+            c.setFillColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1)
+            c.fill(CGRect(x: 0, y: 1008, width: 456, height: 3)); c.fill(CGRect(x: 468, y: 1008, width: 492, height: 3))  // a sharp row at 0.79
+        }
+        let px = try XCTUnwrap(WatchOCR.Pixels(jpeg))
+        let windows = XiaoLanPanes.windows(px)
+        XCTAssertEqual(windows.count, 2)
+        for w in windows {
+            XCTAssertGreaterThan(Double(w.height), 0.86)  // not cut at the 0.79 row: the input bar and my newest line stay in
+            XCTAssertLessThan(Double(w.height), 0.95)
+        }
+    }
 }
