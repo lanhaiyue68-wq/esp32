@@ -1168,7 +1168,9 @@ extension AppModel {
         // 183 (Echo 182 overnight, 11-26: 小藍's keyboard came up with the chat, and its field was tapped anyway, ~2.3 s,
         // often at an estimate): the keyboard down before the row's tap and up after it opened its chat here belongs to
         // this window's field (180's case, the keyboard up from the other window, is still tapped).
-        if !focused, openedHere, await smallKeyboard(up: true, within: 0.6) {
+        // 188 night (Echo 187–188, 11-26/27 logs: WeCom raised no keyboard on opening a chat in 83 sends of 83, WeChat in 15
+        // of 17): WeCom's field is tapped at once, no 0.6 s wait for a keyboard that does not come.
+        if !focused, openedHere, app == .wechat, await smallKeyboard(up: true, within: 0.6) {
             DebugLog.write("watch: \(app.rawValue): the keyboard came up with \(chat); its field not tapped")
             focused = true
         }
@@ -1215,7 +1217,9 @@ extension AppModel {
             // the click, at the same height; moved, the new place is checked once more; never still, nothing is clicked.
             var still = false
             for _ in 0..<3 {
-                guard let again = await paneLook(look.side, after: now(), tries: 2, until: { _ in true }),
+                // 188 night: only the window's lower half is read (the field, the quick bar and any keyboard are there;
+                // its picture is whole): the check stays, at about half the reading (0 moves found in 83 WeCom sends)
+                guard let again = await paneLook(look.side, after: now(), tries: 2, band: (0.45, 1), until: { _ in true }),
                       let px2 = WatchOCR.Pixels(again.crop) else { break }
                 let keys2 = XiaoLanPanes.keyboardTop(again.rows)
                 if keys2 != nil, !CandidatePicker.ourKeyboardShown(rows: again.rows) {
