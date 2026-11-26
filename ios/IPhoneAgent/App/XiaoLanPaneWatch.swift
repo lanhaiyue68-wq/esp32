@@ -681,7 +681,11 @@ extension AppModel {
             let name = String(key.dropFirst(app.rawValue.count + 1))
             guard let preview = XiaoLanPanes.previewText(look.rows, of: name), let last = state.history[key]?.last else { continue }
             let body = WatchReport.previewBody(preview)
-            guard body.count >= 2, state.missedOpened[key] != body, !WatchReport.previewShows(body, last),
+            // 188 night (Echo 188, 11-27 05:06/05:11/05:13: 企微测试群 and 测试群 opened again three times for a list line
+            // that was the owner's own send, its line not read back after the send): what was sent there is no news
+            let mine = state.sent.contains { $0.app == app && WatchChatOpen.sameChat($0.chat, listName: name)
+                && XiaoLanSelf.previewShowsSent(preview, $0.text) }
+            guard body.count >= 2, !mine, state.missedOpened[key] != body, !WatchReport.previewShows(body, last),
                   !XiaoLanSelf.readBefore(body, known: state.seen[key] ?? []),
                   let row = XiaoLanPanes.entries(look.rows).first(where: { $0.name == name }) else { continue }
             state.missedOpened[key] = body
