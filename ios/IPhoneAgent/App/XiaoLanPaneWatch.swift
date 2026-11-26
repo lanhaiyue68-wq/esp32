@@ -80,7 +80,7 @@ extension AppModel {
                 // 188: the marks that come meanwhile are noted (not opened), so they go in the order they came
                 if now() - state.lastMarkNote > 1.0, board.connected, feed.watchable {
                     state.lastMarkNote = now()
-                    let seen = await paneLooks()
+                    let seen = await paneLooks(reuse: true)  // an order coming meanwhile waits for no reading
                     paneNoteMarks(seen, &state)
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
@@ -366,12 +366,14 @@ extension AppModel {
     /// is read alone when it still shows that app (its tab bar or WeCom's quick bar; a WeChat chat has neither, so a
     /// chat without WeCom's bar); otherwise both, as before.
     private func paneFind(_ app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> PaneLook? {
+        // 188 night (Echo 188, 11-27: 1.5 s from an order to the pointer's first move, the window read again though it
+        // had not changed since the watch read it a moment before): unchanged, the watch's own read is used
         if let side = state.apps.first(where: { $0.value == app })?.key,
-           let l = await paneLooks(side: side).first(where: { $0.side == side }) {
+           let l = await paneLooks(side: side, reuse: true).first(where: { $0.side == side }) {
             let told = XiaoLanPanes.toldApp(l.rows, crop: l.crop)
             if told == app || (told == nil && app == .wechat && l.view != .list && !XiaoLanPanes.weworkBar(l.rows)) { return l }
         }
-        let looks = await paneLooks()
+        let looks = await paneLooks(reuse: true)
         paneTell(looks, &state)
         return looks.first { state.apps[$0.side] == app }
     }
