@@ -656,7 +656,17 @@ import UIKit
 
     /// 185 (B8): what my newest line must show for a send to count: the text's last 6 characters (no spaces); the
     /// beginning matched older lines (「【小蓝测试】」, a customer's 「您好，」).
-    static func sendSignature(_ text: String) -> String { String(text.filter { !$0.isWhitespace }.suffix(6)) }
+    /// 187 (B40, Echo 186, 11-27: 「…（全形）~ 0024」 read back as 「…（全形）～0024」, the preview's emoji as 「③金」: a send
+    /// that went out reported failed): letters and digits only (`plain`), so signs, full-width forms and emoji read any
+    /// way still match; a text of fewer than four of them keeps its last six characters as they are.
+    static func sendSignature(_ text: String) -> String {
+        let p = plain(text)
+        return p.count >= 4 ? String(p.suffix(6)) : String(text.filter { !$0.isWhitespace }.suffix(6))
+    }
+    /// 187 (B40): `read` (a line, a preview) shows the signature of `text`, compared the way the signature was taken.
+    static func shows(_ read: String, signature: String, of text: String) -> Bool {
+        plain(text).count >= 4 ? plain(read).contains(signature) : read.filter { !$0.isWhitespace }.contains(signature)
+    }
 
     /// 186 (B24): a list preview shows the line just sent: its end, or (cut short with "…") its beginning, at least six
     /// characters of it, after a "sender:" as a group's or WeCom's preview may put first.
@@ -672,7 +682,10 @@ import UIKit
         // out was reported failed): the beginning counts only for a preview cut short with "…".
         let trimmed = preview.trimmingCharacters(in: .whitespaces)
         let cut = trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
-        return heads.contains { h in h.contains(tail) || (cut && h.count >= min(6, t.count) && t.hasPrefix(h)) }
+        let pt = plain(text)  // 187 (B40): letters and digits on both sides
+        return heads.contains { h in
+            shows(h, signature: tail, of: text) || (cut && plain(h).count >= min(6, pt.count) && pt.hasPrefix(plain(h)))
+        }
     }
 
     /// 184 (C12): a "sender" that is one of WeCom's quick bar buttons (a line of the bar, not of a person).

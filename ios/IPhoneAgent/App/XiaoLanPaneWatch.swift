@@ -1021,7 +1021,7 @@ extension AppModel {
         _ = await smallKeyboard(up: false, within: 1.0)
         func sentShown(_ l: PaneLook) -> WatchReport.Screen? {
             guard case .chat(let t) = l.view, let r = WatchOCR.screen(l.crop, title: t, rows: l.rows, banner: false),
-                  r.lines.last(where: \.mine).map({ $0.text.filter { !$0.isWhitespace }.contains(tail) }) == true else { return nil }
+                  r.lines.last(where: \.mine).map({ XiaoLanSelf.shows($0.text, signature: tail, of: text) }) == true else { return nil }
             return r
         }
         let after = await paneLook(look.side, after: now(), tries: 4) { sentShown($0) != nil }

@@ -126,6 +126,16 @@ import UIKit
         XCTAssertFalse(XiaoLanSelf.readBefore("你也好", known: known))
     }
 
+    /// B40: a line sent with signs and emoji is told by its letters and digits, however the signs were read back.
+    func testSentLineWithSignsAndEmoji() {
+        let text = "【小蓝测试】187 符号 😀👍 @#¥%&“引号”（全形）~ 0024"
+        let tail = XiaoLanSelf.sendSignature(text)
+        XCTAssertEqual(tail, "全形0024")
+        XCTAssertTrue(XiaoLanSelf.shows("【小蓝测试】187符号@#¥%&”引号”（全形）～0024", signature: tail, of: text))
+        XCTAssertFalse(XiaoLanSelf.shows("【小蓝测试】187并发个微0021", signature: tail, of: text))
+        XCTAssertTrue(XiaoLanSelf.shows("好", signature: XiaoLanSelf.sendSignature("好"), of: "好"))
+    }
+
     /// B32: a preview's beginning counts only when it is cut short with "…".
     func testPreviewBeginningOnlyWhenCut() {
         XCTAssertFalse(XiaoLanSelf.previewShowsSent("【小蓝测试】186个微0018", "【小蓝测试】186 个微 0018 连发2"))
