@@ -95,7 +95,10 @@ import UIKit
         XCTAssertTrue(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "企微测试群", app: .wechat, sent: sent, now: 150))
         XCTAssertFalse(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "企微测试群", app: .wework, sent: sent, now: 150))
         XCTAssertFalse(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "测试群", app: .wechat, sent: sent, now: 150))
-        XCTAssertFalse(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "企微测试群", app: .wechat, sent: sent, now: 900))
+        // 183 (11-26: a line sent 33 min before came back on a scrolled-up screen and was reported): 4 hours, was 10 min
+        XCTAssertTrue(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "企微测试群", app: .wechat, sent: sent, now: 900))
+        XCTAssertFalse(XiaoLanSelf.sentByOther("【小蓝测试】180企微发消息2300", chat: "企微测试群", app: .wechat, sent: sent,
+                                               now: 100 + XiaoLanSelf.sentWindow + 1))
         XCTAssertFalse(XiaoLanSelf.sentByOther("你好", chat: "企微测试群", app: .wechat, sent: sent, now: 150))
         XCTAssertTrue(XiaoLanSelf.isOwner("蓝海乐@微信", names: ["蓝海乐"]))
         XCTAssertFalse(XiaoLanSelf.isOwner("范兆磊", names: ["蓝海乐"]))
