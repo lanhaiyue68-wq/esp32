@@ -872,6 +872,24 @@ enum WatchReport {
         return heads.contains { h in !h.isEmpty && (t.contains(h) || h.contains(t)) }
     }
 
+    /// 187 (Echo 186, 11-27 首爾 23:58 and 00:03: 「【第三方测试】187断线1」 opened from its red mark in 测试群, the first
+    /// look there since the watch started again: nothing new found, its mark gone, never reported; 「187对照2」 three
+    /// minutes later, the same chat and keyboard, was): a red mark means someone wrote. When nothing new is anyone
+    /// else's, the line the list's preview shows is: the last line on the screen it shows, or its own words with the
+    /// preview's sender when the screen has none. A preview of no words ([语音], [图片]…, a draft) adds nothing.
+    static func markedLine(_ lines: [Line], fresh: [Line], preview: String?, sender: String?) -> Line? {
+        guard !fresh.contains(where: { !$0.mine }), let preview else { return nil }
+        let body = previewBody(preview)
+        var words = body
+        if sender != nil, let colon = body.firstIndex(where: { $0 == ":" || $0 == "：" }),
+           body.distance(from: body.startIndex, to: colon) <= 20 {
+            words = String(body[body.index(after: colon)...])
+        }
+        guard !words.isEmpty, !words.hasPrefix("[") else { return nil }
+        if let i = lines.lastIndex(where: { !$0.mine && previewShows(body, $0) }) { return lines[i] }
+        return Line(sender: sender ?? "", text: words, mine: false)
+    }
+
     /// A voice message as read: "[语音]", with what WeChat wrote out of it after when that shows (user 11-12).
     static func isVoice(_ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)

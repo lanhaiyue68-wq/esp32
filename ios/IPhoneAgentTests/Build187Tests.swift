@@ -77,6 +77,23 @@ import UIKit
         XCTAssertEqual(Pointer.learnedPadGain(1.14, units: 3003, span: 5854, moved: 0.40), 1.15, accuracy: 0.0001)  // kept ≤ 1.15
     }
 
+    /// 11-27: a red mark opened with nothing of anyone's new read: the line the list's preview shows is taken (from the
+    /// screen when it is there, else the preview's words); a voice's preview adds nothing; a line read new is enough.
+    func testRedMarkTakesThePreviewsLine() {
+        typealias L = WatchReport.Line
+        let screen = [L(sender: "我", text: "【小蓝测试】186 断线 0020", mine: true),
+                      L(sender: "主人蓝海乐", text: "【第三方测试】187 断线1", mine: false)]
+        let preview = "主人蓝海乐: 【第三方测试】187断线1"
+        XCTAssertEqual(WatchReport.markedLine(screen, fresh: [], preview: preview, sender: "主人蓝海乐"), screen[1])
+        XCTAssertEqual(WatchReport.markedLine([screen[0]], fresh: [], preview: preview, sender: "主人蓝海乐"),
+                       L(sender: "主人蓝海乐", text: "【第三方测试】187断线1", mine: false))
+        XCTAssertNil(WatchReport.markedLine(screen, fresh: [screen[1]], preview: preview, sender: "主人蓝海乐"))
+        XCTAssertNil(WatchReport.markedLine(screen, fresh: [], preview: "主人蓝海乐: [语音] 6\"", sender: "主人蓝海乐"))
+        XCTAssertNil(WatchReport.markedLine(screen, fresh: [], preview: nil, sender: nil))
+        // a private chat's preview has no sender: a colon in its words stays
+        XCTAssertEqual(WatchReport.markedLine([], fresh: [], preview: "明天:3点见", sender: nil)?.text, "明天:3点见")
+    }
+
     /// B32: a preview's beginning counts only when it is cut short with "…".
     func testPreviewBeginningOnlyWhenCut() {
         XCTAssertFalse(XiaoLanSelf.previewShowsSent("【小蓝测试】186个微0018", "【小蓝测试】186 个微 0018 连发2"))

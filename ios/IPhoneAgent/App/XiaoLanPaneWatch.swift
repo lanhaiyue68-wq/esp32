@@ -430,7 +430,8 @@ extension AppModel {
                 DebugLog.write("watch: \(app.rawValue): \(hit.name)'s row opened \(title) (the list moved); read as opened by its mark")
             }
             paneRead(app, chat, title: title, fromMark: true,
-                     markSender: same ? XiaoLanPanes.previewSender(look.rows, of: hit.name) : nil, &state)
+                     markSender: same ? XiaoLanPanes.previewSender(look.rows, of: hit.name) : nil,
+                     markPreview: same ? XiaoLanPanes.previewText(look.rows, of: hit.name) : nil, &state)
             state.quietSince[look.side] = now()
         case .chat(let title):
             // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has their grey background; the Settings app's 键盘 page
@@ -593,8 +594,9 @@ extension AppModel {
     /// The new messages of the chat in a window, reported to that app's server. Returns how many were new.
     @discardableResult
     /// 184 (C12): `markSender`, who the list's preview said wrote the line its red mark was for.
+    /// 187: `markPreview`, that preview as read (what the mark was for, when nothing new is read).
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
-                          _ state: inout PaneWatchState) -> Int {
+                          markPreview: String? = nil, _ state: inout PaneWatchState) -> Int {
         guard let read = WatchOCR.screen(look.crop, title: title, rows: look.rows) else { return 0 }  // 182: read once
         let name = read.title
         // 183: a news or team account's chat (left open) is no one's: never reported.
@@ -635,6 +637,14 @@ extension AppModel {
             // Opened for its red mark the first time: what came after my last line (at most 5) is the unread.
             let start = (lines.lastIndex { $0.mine }).map { $0 + 1 } ?? 0
             fresh = Array(lines[min(start, lines.count)...].suffix(5))
+        }
+        // 187: a red mark with nothing of anyone's new read: the line its preview shows (WatchReport.markedLine); what
+        // was read is logged and the window kept in diagnostics, so the cause can be seen.
+        if fromMark, let marked = WatchReport.markedLine(lines, fresh: fresh, preview: markPreview, sender: markSender) {
+            let tail = lines.suffix(3).map { "\($0.mine ? "mine" : $0.sender)「\($0.text)」" }.joined(separator: " ")
+            DebugLog.write("watch: \(app.rawValue): \(name): nothing of anyone's new under its red mark (\(fresh.count) new, \(before == nil ? "no" : "a") history, last read \(tail)); the preview's line taken: \(marked.text)")
+            WatchChatOpen.keepFrame(look.crop)
+            fresh.append(marked)
         }
         state.history[key] = rebase ? Array(lines.suffix(20)) : WatchReport.remember(fresh, screen: lines, history: before)
         if state.history[key] != before { PaneHistory.save(state.history) }  // 183
