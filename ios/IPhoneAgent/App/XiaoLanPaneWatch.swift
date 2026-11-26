@@ -338,7 +338,34 @@ extension AppModel {
     /// 182 (Echo 181, 11-26: half the backs failed, "pointer not seen below the arrow", and a window stayed in a chat for
     /// minutes, its list and red marks unseen): not seen at either spot, the kept position is forgotten (the next move
     /// finds the arrow first, ~1.7 s) and the two spots are tried once more. Still nothing is clicked unseen.
+    /// 187 (Echo 186, 11-27 00:32 首爾; user: "給啟微群發消息的時候…彈出來一個框，你點返回的時候，正好點到那個框，然後
+    /// 他就進去了。這時候你就以為你現在還在這個各位的群里面"): WeChat in 测试群, the owner wrote to 企微测试群, its banner
+    /// came down over the title bar just as the back arrow was clicked: the banner opened 企微测试群, whose lines were
+    /// reported as 测试群's and answered into 企微测试群 three times. A banner over the window's top is waited out (5 s
+    /// at most) before the back; after it, on a still screen, another chat open where the list should be is a click
+    /// gone wrong: back once more, nothing there read.
     private func paneBack(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
+        var look = look
+        var waited = 0.0
+        while WatchOCR.bannerShown(Array(look.rows.joined())), waited < 5 {
+            if waited == 0 { DebugLog.write("watch: \(who): a banner over the window's top; back after it goes") }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 0.5
+            guard let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }) else { break }
+            look = l
+        }
+        var left: String?
+        if case .chat(let t) = look.view { left = WatchOCR.titled(t).name }
+        guard await paneBackClick(look, who, refound: refound) else { return false }
+        guard let left, !refound else { return true }
+        await feed.settled(quiet: 0.3, least: 0.3, most: 1.5)
+        guard let after = await paneLooks(side: look.side).first(where: { $0.side == look.side }),
+              case .chat(let t) = after.view, !WatchReport.sameName(WatchOCR.titled(t).name, left) else { return true }
+        DebugLog.write("watch: \(who): back opened \(t), not the list (a banner clicked?); back once more, nothing read there")
+        return await paneBackClick(after, who)
+    }
+
+    private func paneBackClick(_ look: PaneLook, _ who: String, refound: Bool = false) async -> Bool {
         let arrow = XiaoLanPanes.onScreen(XiaoLanPanes.back, in: look.rect)
         // 187 (user 11-26: "從A點到B點，停頓一下，然後再到C點…中間為什麼要停頓，而不是直接就點過去"; B33, Echo 186, 11-26:
         // the blind hop up from the stop below the arrow fell short with 辅助触控's speed-up and clicked the top message's
@@ -388,7 +415,7 @@ extension AppModel {
             }
             DebugLog.write("watch: \(who): back: pointer not seen below the arrow; finding it first, then once more")
             pointer.forgetPosition()
-            return await paneBack(look, who, refound: true)
+            return await paneBackClick(look, who, refound: true)
         }
         DebugLog.write("watch: \(who): back: pointer not seen below the arrow; nothing clicked by the window's top")
         return false
@@ -437,6 +464,13 @@ extension AppModel {
                      markPreview: same ? XiaoLanPanes.previewText(look.rows, of: hit.name) : nil, &state)
             state.quietSince[look.side] = now()
         case .chat(let title):
+            // 187 (user 11-27: a sheet over the chat — "點那個叉…都可以把這個聊天框給它關掉"): another chat open over this one
+            // as a sheet (a banner clicked) is closed by its ✕ first; nothing under it or in it is read.
+            if let px = WatchOCR.Pixels(look.crop), let close = XiaoLanPanes.sheetClose(px) {
+                DebugLog.write("watch: \(title): another chat open over it as a sheet (a banner clicked?); closed by its ✕, nothing read")
+                _ = await paneSeenTap(XiaoLanPanes.onScreen(close, in: look.rect), half: (0.015, 0.012))
+                return
+            }
             // 180 (Echo 178, 11-25): a chat of WeChat or WeCom has their grey background; the Settings app's 键盘 page
             // was taken for a chat and its back arrow tapped. Any other window is left alone.
             // 182: WeCom's quick bar tells its chats too (11-26: WeCom in 企微测试群 was left alone for minutes).
@@ -600,6 +634,11 @@ extension AppModel {
     /// 187: `markPreview`, that preview as read (what the mark was for, when nothing new is read).
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
                           markPreview: String? = nil, _ state: inout PaneWatchState) -> Int {
+        // 187: under a sheet of another chat the title is this chat's, the lines are the other's: not read.
+        if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil {
+            DebugLog.write("watch: \(app.rawValue): \(title): another chat open over it as a sheet; not read")
+            return 0
+        }
         guard let read = WatchOCR.screen(look.crop, title: title, rows: look.rows) else { return 0 }  // 182: read once
         let name = read.title
         // 183: a news or team account's chat (left open) is no one's: never reported.
@@ -626,7 +665,7 @@ extension AppModel {
             } else if case let known = XiaoLanSelf.seenInApp(state.seen, app: app.rawValue, chat: key), !known.isEmpty {
                 // 185 (B18, Echo 184, 11-26: 「【第三方测试】群消息1」, read in 测试群, came again under 企微测试群 when one
                 // window's title was taken for the other's): what was read in any chat of this app counts.
-                let unseen = lines.filter { !known.contains(XiaoLanSelf.plain($0.text)) }
+                let unseen = lines.filter { !XiaoLanSelf.readBefore($0.text, known: known) }  // 187 (B38)
                 if unseen.count < lines.count {
                     DebugLog.write("watch: \(app.rawValue): \(name): no overlap with what was read; \(lines.count - unseen.count) line(s) read before left out")
                     fresh = unseen
@@ -853,6 +892,13 @@ extension AppModel {
                 return (false, "\(appName)的「\(chat)」停在「按住 说话」，没切回打字", nil)
             }
             (look, low, focused) = (t, t.rows, true)
+        }
+        // 187 (Echo 186, 11-27 00:33 首爾: three replies for 测试群 typed into 企微测试群's sheet over it, sent from WeChat):
+        // a sheet of another chat over this one: its field is the other chat's. Closed by its ✕; nothing typed.
+        if let spx = WatchOCR.Pixels(look.crop), let close = XiaoLanPanes.sheetClose(spx) {
+            DebugLog.write("watch: \(app.rawValue): another chat open over \(chat) as a sheet; closed by its ✕, not sent")
+            _ = await paneSeenTap(XiaoLanPanes.onScreen(close, in: look.rect), half: (0.015, 0.012))
+            return (false, "\(appName)里另一个聊天浮在「\(chat)」上面（点到了横幅），已关掉，这次没有发", nil)
         }
         // 183 (Echo 182 overnight, 11-26: 小藍's keyboard came up with the chat, and its field was tapped anyway, ~2.3 s,
         // often at an estimate): the keyboard down before the row's tap and up after it opened its chat here belongs to

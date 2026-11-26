@@ -477,6 +477,29 @@ import UIKit
             .map { CGPoint(x: 0.5, y: $0.box.midY) }
     }
 
+    /// 187 (user 11-27, with a picture of it on the phone: "點那個叉…或者點叉上面那一塊空白，都可以把這個聊天框給它關掉。如果
+    /// 是全框的話…你就點返回"; Echo 186, 11-27 00:32 首爾): a WeChat banner clicked opens its chat as a sheet over the chat
+    /// that was open, from about a quarter of the window down. The window's own title stays the chat under it (dimmed), so
+    /// the sheet's lines were reported as that chat's and three replies typed into the sheet went to the other group.
+    /// Measured on the iPad (11-27 00:42): the chat above the sheet dimmed to ~118 from edge to edge, the sheet's header
+    /// ~232, its top at 0.253 of the window, its ✕ at (0.077, 0.285); a chat, a chat under a keyboard, a list and a search
+    /// (nine frames) have no such edge. Where its ✕ is, nil when there is no sheet.
+    static func sheetClose(_ px: WatchOCR.Pixels) -> CGPoint? {
+        func lum(_ x: Double, _ y: Double) -> Double { let c = px.rgb(x, y); return Double(c.0 + c.1 + c.2) / 3 }
+        func dim(_ y: Double) -> Bool { [0.02, 0.5, 0.98].allSatisfy { lum($0, y) < 170 } }
+        func light(_ y: Double) -> Bool { [0.05, 0.95].allSatisfy { lum($0, y) > 200 } }
+        var y = 0.15
+        while y < 0.85 {
+            if dim(y), light(y + 0.03) {
+                var top = y
+                while top < y + 0.03, lum(0.5, top) < 170 { top += 0.002 }
+                return CGPoint(x: 0.077, y: top + 0.032)
+            }
+            y += 0.005
+        }
+        return nil
+    }
+
     /// Searching: the 取消 by the search field at the top (no chat has it there).
     static func cancelButton(_ rows: [[Piece]]) -> CGPoint? {
         rows.joined().first { $0.box.midY < 0.13 && ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) }
@@ -611,6 +634,24 @@ import UIKit
         var all = seen[key] ?? []
         for (k, v) in seen where k != key && k.hasPrefix(app + "|") { all.formUnion(v) }
         return all
+    }
+
+    /// 187 (B38, Echo 186, 11-27 00:19 首爾: WeCom's 企微测试群, no overlap with its history, reported 「【第三万测试】185
+    /// 企微群分工」 (方 read as 万) and 「二行当成别人的新消息」 (the end of an older line, its start above the window) as
+    /// new): a line of six or more characters was read before when it is part of a line read before, or a line read
+    /// before with one character in ten read differently. Digits are never "read differently": 0018 is not 0019.
+    static func readBefore(_ text: String, known: Set<String>) -> Bool {
+        let t = plain(text)
+        if known.contains(t) { return true }
+        guard t.count >= 6 else { return false }
+        let x = Array(t)
+        return known.contains { k in
+            if k.count > t.count { return k.contains(t) }
+            let y = Array(k)
+            guard y.count == x.count else { return false }
+            let differ = zip(x, y).filter { $0 != $1 }
+            return differ.count <= max(1, x.count / 10) && !differ.contains { $0.isNumber || $1.isNumber }
+        }
     }
 
     /// 185 (B8): what my newest line must show for a send to count: the text's last 6 characters (no spaces); the

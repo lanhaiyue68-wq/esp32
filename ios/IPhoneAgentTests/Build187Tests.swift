@@ -103,6 +103,29 @@ import UIKit
         XCTAssertEqual(Double(XiaoLanPanes.searchResult("测试群", found)?.y ?? 0), 0.31, accuracy: 0.001)
     }
 
+    /// User 11-27: a chat open over this one as a sheet (the chat above it dimmed edge to edge, ~118; the sheet ~237 from
+    /// a quarter down) is found with its ✕; a chat, or a chat with a dark picture between grey edges, has none.
+    func testSheetOverAChatIsFound() throws {
+        let sheet = window { c in self.fill(c, CGRect(x: 0, y: 0, width: 480, height: 290), 118) }
+        let close = try XCTUnwrap(XiaoLanPanes.sheetClose(try XCTUnwrap(WatchOCR.Pixels(sheet))))
+        XCTAssertEqual(Double(close.x), 0.077, accuracy: 0.001)
+        XCTAssertEqual(Double(close.y), 290.0 / 1150 + 0.032, accuracy: 0.008)
+        XCTAssertNil(XiaoLanPanes.sheetClose(try XCTUnwrap(WatchOCR.Pixels(window { _ in }))))
+        let picture = window { c in self.fill(c, CGRect(x: 100, y: 300, width: 280, height: 300), 40) }
+        XCTAssertNil(XiaoLanPanes.sheetClose(try XCTUnwrap(WatchOCR.Pixels(picture))))
+    }
+
+    /// B38: a line misread by a character, or the end of a longer line read before, was read before; a number is not.
+    func testReadBeforeForgivesAMisreadNotANumber() {
+        let known: Set<String> = [XiaoLanSelf.plain("【第三方测试】185企微群分工"),
+                                  XiaoLanSelf.plain("【小蓝测试】181 企微发消息 第二行当成别人的新消息"),
+                                  XiaoLanSelf.plain("【小蓝测试】186 个微 0018")]
+        XCTAssertTrue(XiaoLanSelf.readBefore("【第三万测试】185企微群分工", known: known))
+        XCTAssertTrue(XiaoLanSelf.readBefore("二行当成别人的新消息", known: known))
+        XCTAssertFalse(XiaoLanSelf.readBefore("【小蓝测试】186 个微 0019", known: known))
+        XCTAssertFalse(XiaoLanSelf.readBefore("你也好", known: known))
+    }
+
     /// B32: a preview's beginning counts only when it is cut short with "…".
     func testPreviewBeginningOnlyWhenCut() {
         XCTAssertFalse(XiaoLanSelf.previewShowsSent("【小蓝测试】186个微0018", "【小蓝测试】186 个微 0018 连发2"))
