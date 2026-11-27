@@ -503,10 +503,8 @@ enum Vision {
         let look = 1.2 * Double(cell), reach = 0.75 * Double(cell), most = 1.2 * Double(cell)
         var remaining = changed
         var tips: [CGPoint] = []
-        for _ in 0..<4 where !remaining.isEmpty {
-            var counts: [Int: Int] = [:]
-            for p in remaining { counts[((p.y - y0) / cell) * 100_000 + (p.x - x0) / cell, default: 0] += 1 }
-            guard let densest = counts.max(by: { $0.value < $1.value })?.key else { break }
+        /// The patch around a cell: the changed pixels near it, centred on their own centroid; its tip when it is a pointer's.
+        func cut(_ densest: Int, _ remaining: [(x: Int, y: Int)]) -> (rest: [(x: Int, y: Int)], tip: (x: Int, y: Int)?) {
             let gx = Double(x0 + (densest % 100_000) * cell) + Double(cell) / 2
             let gy = Double(y0 + (densest / 100_000) * cell) + Double(cell) / 2
             var sx = 0.0, sy = 0.0, sn = 0.0
@@ -520,13 +518,29 @@ enum Vision {
                 let dx = Double(p.x) - cx, dy = Double(p.y) - cy
                 if dx * dx + dy * dy <= reach * reach { patch.append(p) } else { rest.append(p) }
             }
-            remaining = rest
             guard let minX = patch.map(\.x).min(), let maxX = patch.map(\.x).max(),
-                  let minY = patch.map(\.y).min(), let maxY = patch.map(\.y).max() else { continue }
+                  let minY = patch.map(\.y).min(), let maxY = patch.map(\.y).max() else { return (rest, nil) }
             let n = Double(patch.count)
-            guard n >= 60 * scale, n <= 600 * scale, Double(maxX - minX) <= most, Double(maxY - minY) <= most,
-                  let tip = patch.min(by: { $0.x + $0.y < $1.x + $1.y }) else { continue }
-            tips.append(CGPoint(x: Double(tip.x) / Double(w), y: Double(tip.y) / Double(h)))
+            guard n >= 60 * scale, n <= 600 * scale, Double(maxX - minX) <= most, Double(maxY - minY) <= most else { return (rest, nil) }
+            return (rest, patch.min(by: { $0.x + $0.y < $1.x + $1.y }))
+        }
+        for _ in 0..<4 where !remaining.isEmpty {
+            var counts: [Int: Int] = [:]
+            for p in remaining { counts[((p.y - y0) / cell) * 100_000 + (p.x - x0) / cell, default: 0] += 1 }
+            guard let densestCount = counts.values.max() else { break }
+            // 192 (CI 45970277047: Build184Tests' pointer in a window's title bar, passed on 190 and 191, found nothing):
+            // two cells as dense, the one taken was the Dictionary's order — another each run — and from one of them
+            // the patch took in both spots and neither was a pointer. The tied cells are tried in order; the first whose
+            // patch is a pointer's is kept, else the first, as before.
+            var taken: (rest: [(x: Int, y: Int)], tip: (x: Int, y: Int)?)?
+            for densest in counts.filter({ $0.value == densestCount }).map({ $0.key }).sorted() {
+                let c = cut(densest, remaining)
+                if taken == nil || c.tip != nil { taken = c }
+                if c.tip != nil { break }
+            }
+            guard let t = taken else { break }
+            remaining = t.rest
+            if let tip = t.tip { tips.append(CGPoint(x: Double(tip.x) / Double(w), y: Double(tip.y) / Double(h))) }
         }
         return tips
     }
