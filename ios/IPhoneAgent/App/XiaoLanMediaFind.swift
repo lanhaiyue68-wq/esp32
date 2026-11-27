@@ -584,7 +584,7 @@ enum XiaoLanMediaFind {
     /// 195 (N85): of the digits read off bubbles, those under the last line the history goes on from (XiaoLanBatch.anchor,
     /// where this read's new lines start) and under every line of mine; one over them is an old message OCR never gave,
     /// not a new one. (Not by the words read before: 「2」 sent again is new though 「2」 was read before.)
-    static func belowRead(_ found: [(text: String, y: Double)], lines: [WatchReport.Line], history: [WatchReport.Line]) -> [(text: String, y: Double)] {
+    @MainActor static func belowRead(_ found: [(text: String, y: Double)], lines: [WatchReport.Line], history: [WatchReport.Line]) -> [(text: String, y: Double)] {
         var floor = lines.filter(\.mine).compactMap(\.y).max() ?? 0
         if let start = XiaoLanBatch.anchor(lines, history: history), start.index > 0, start.index <= lines.count,
            let y = lines[start.index - 1].y { floor = max(floor, y) }
@@ -594,7 +594,7 @@ enum XiaoLanMediaFind {
     /// 195 (N76/N80): the lines read with those digits put in their places (by height on the window), each one's sender
     /// the nearest other's line over it, else `sender` (the chat's name). N81 (测试群 11-28 00:12: 蓝海乐's 「你好」, then
     /// 主人蓝海乐's lone 「1」 — the line over it was another's): in a group, the name over its bubble (`rows`).
-    static func withDigits(_ lines: [WatchReport.Line], _ found: [(text: String, y: Double)], sender: String,
+    @MainActor static func withDigits(_ lines: [WatchReport.Line], _ found: [(text: String, y: Double)], sender: String,
                            group: Bool = false, rows: [[Piece]] = []) -> [WatchReport.Line] {
         var out = lines
         for d in found {
@@ -625,7 +625,7 @@ enum XiaoLanMediaFind {
     /// 195 (N81): a group's name row right over a message whose words start at `y` (as WatchOCR.lines takes a name:
     /// just right of the avatars, short; measured 11-28: 主人蓝海乐 0.555, its 「1」's ink from 0.579), in the list's
     /// form; nil: none read there.
-    static func nameOver(_ rows: [[Piece]], y: Double) -> String? {
+    @MainActor static func nameOver(_ rows: [[Piece]], y: Double) -> String? {
         rows.joined().filter { p in
             let mid = Double(p.box.midY), t = p.text.trimmingCharacters(in: .whitespaces)
             return mid >= y - 0.04 && mid <= y - 0.008 && Double(p.box.minX) < 0.2 && Double(p.box.maxX) < 0.6
