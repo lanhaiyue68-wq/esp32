@@ -61,6 +61,8 @@ struct PaneWatchState {
     var replyField: (side: Int, at: CGPoint)?
     /// 189 (speed): the window as it showed my line just sent, while the next order is for the same chat (no new look).
     var lastShown: (app: XiaoLanOrders.App, chat: String, look: AppModel.PaneLook, at: Double)?
+    /// 189 (N20): the title of the chat each side was last read in with no banner over its top.
+    var openChat: [Int: String] = [:]
 }
 
 @MainActor private var paneHeldTurn = 0
@@ -534,6 +536,7 @@ extension AppModel {
         switch look.view {
         case .list:
             state.quietSince[look.side] = nil
+            state.openChat[look.side] = nil  // 189 (N20)
             state.systemOpen.remove(look.side)  // 184
             guard let app = state.apps[look.side], let image = UIImage(data: look.crop)?.cgImage else { return }
             let marks = XiaoLanPanes.marked(look.rows, red: { Vision.redShare(image, in: $0) })
@@ -654,7 +657,19 @@ extension AppModel {
             guard let app = state.apps[look.side] else { return }
             // 184 (C13): a mark's row clicked on this side within 10 s, the chat not seen open then: opened by its mark.
             let fromMark = state.markTapped.removeValue(forKey: look.side).map { now() - $0 < 10 } ?? false
-            let reported = paneRead(app, look, title: title, fromMark: fromMark, &state)
+            // 189 (N20, Echo 189, 11-27 12:55 首爾: WeChat in 测试群, a banner of 企微测试群 came down over its title; the
+            // banner's chat name was read as the window's title, 测试群's 「您在干嘛」 went to the server as a private line of
+            // 「企微测试群」): under a banner the chat is the one last read on this side without one
+            var chatTitle = title
+            if WatchOCR.bannerShown(Array(look.rows.joined()), px: WatchOCR.Pixels(look.crop)) {
+                if let known = state.openChat[look.side], !WatchReport.sameName(WatchOCR.titled(title).name, WatchOCR.titled(known).name) {
+                    DebugLog.write("watch: \(app.rawValue): 「\(title)」 read at the window's top under a banner; still \(known) under it")
+                    chatTitle = known
+                }
+            } else {
+                state.openChat[look.side] = title
+            }
+            let reported = paneRead(app, look, title: chatTitle, fromMark: fromMark, &state)
             if reported > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
@@ -669,13 +684,14 @@ extension AppModel {
             // 189 (speed; user 11-27 「還有辦法壓縮時間嗎」): another chat of this app marked on its list when it was last seen
             // waits for this one: 1 s, then back to it.
             let othersMarked = state.markSeen.keys.contains { k in
-                k.hasPrefix("\(app.rawValue)|") && !WatchChatOpen.sameChat(WatchOCR.titled(title).name, listName: String(k.dropFirst(app.rawValue.count + 1)))
+                k.hasPrefix("\(app.rawValue)|") && !WatchChatOpen.sameChat(WatchOCR.titled(chatTitle).name, listName: String(k.dropFirst(app.rawValue.count + 1)))
             }
             if let quiet = state.quietSince[look.side], now() - quiet > (othersMarked ? 1 : 5), !ordersWaiting {
-                DebugLog.write("watch: \(app.rawValue): \(title) quiet; back to the list")
+                DebugLog.write("watch: \(app.rawValue): \(chatTitle) quiet; back to the list")
                 _ = await paneBack(look, app.rawValue)
                 state.quietSince[look.side] = nil
-                state.leftAt["\(app.rawValue)|\(WatchOCR.titled(title).name)"] = now()  // 188 (missedLine)
+                state.openChat[look.side] = nil
+                state.leftAt["\(app.rawValue)|\(WatchOCR.titled(chatTitle).name)"] = now()  // 188 (missedLine)
             }
         case .unknown:
             // 188 night: WeChat's 「如需浏览」 page left open (a link's trip to Safari cut short) is closed by its ✕; WeChat
@@ -1174,8 +1190,13 @@ extension AppModel {
         }
         // 180: a list's title is no chat to send to (178 replied "into 微信", the WeChat list read as a chat).
         guard !XiaoLanPanes.listTitles.contains(WatchOCR.titled(chat).name) else { return (false, "「\(chat)」不是会话", nil) }
+        let openHere = state.openChat  // 189 (N20)
         func isChat(_ l: PaneLook) -> Bool {
-            if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: chat) }
+            guard case .chat(let t) = l.view else { return false }
+            if WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: chat) { return true }
+            // 189 (N20): a banner over the window's top: the chat under it is the one last read there without one
+            if let known = openHere[l.side], WatchChatOpen.sameChat(WatchOCR.titled(known).name, listName: chat),
+               WatchOCR.bannerShown(Array(l.rows.joined()), px: WatchOCR.Pixels(l.crop)) { return true }
             return false
         }
         var openedHere = false, banded = false
