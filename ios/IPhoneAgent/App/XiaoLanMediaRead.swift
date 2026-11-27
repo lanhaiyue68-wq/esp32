@@ -174,6 +174,21 @@ extension AppModel {
         return back
     }
 
+    /// 193 (N70, Echo 193 11-27 21:36: WeCom's menu came up with 「引用」 right under the pointer — the press's spot — its
+    /// label hidden, so 「no 引用」 and the reply went plain): the menu after a long press; up without `word` (its other
+    /// words read: 复制, 转发, 删除…), looked at again with the pointer moved to the window's edge, level with the press
+    /// (no click).
+    private func paneMenuAfterPress(_ side: Int, _ rect: CGRect, _ word: String, pressedY: Double) async -> PaneLook? {
+        guard let menu = await paneLook(side, after: now(), tries: 4, until: { l in
+            XiaoLanMediaFind.menuItem(l.rows, word) != nil || XiaoLanMediaFind.menuBand(l.rows) != nil
+        }) else { return nil }
+        if XiaoLanMediaFind.menuItem(menu.rows, word) != nil || XiaoLanMediaFind.menuBand(menu.rows) == nil { return menu }
+        let aside = XiaoLanPanes.onScreen(CGPoint(x: 0.97, y: pressedY), in: rect)
+        try? await pointer.point(Double(aside.x), Double(aside.y), aim: false, rehome: false)
+        DebugLog.write("watch: a menu up without 「\(word)」 read; the pointer moved off it and the menu read again (N70)")
+        return await paneLook(side, after: now(), tries: 3, until: { XiaoLanMediaFind.menuItem($0.rows, word) != nil }) ?? menu
+    }
+
     /// A long-press menu closed by a click on a bare spot of the chat's right edge; none found, nothing clicked.
     private func paneMediaCloseMenu(_ menu: PaneLook) async {
         guard let spot = XiaoLanMediaFind.blankSpot(menu.rows) else {
@@ -279,7 +294,7 @@ extension AppModel {
         // 193 (N47, Echo 192 18:05: the press landed on the note, but the lowest 「转文字」 on the window — the small button
         // beside the bubble — was taken for the menu's and clicked): the menu is up when its other words show (引用, 删除,
         // 收藏…); 「转文字」 only within it, never where the small button was
-        guard let menu = await paneLook(job.side, after: now(), tries: 4, until: { XiaoLanMediaFind.menuBand($0.rows) != nil }),
+        guard let menu = await paneMenuAfterPress(job.side, chat.rect, "转文字", pressedY: Double(spot.y)),  // 193 (N70)
               let band = XiaoLanMediaFind.menuBand(menu.rows) else { return (nil, "长按语音后没看到菜单（引用／删除／收藏）") }
         let buttonNow = XiaoLanMediaFind.voiceButton(chat.rows, beside: spot)  // where the small button was before the press
         // 转文字 only where its words are read: a place learned or measured could be 取消转换's (never clicked)
@@ -1011,9 +1026,22 @@ extension AppModel {
     /// 188 (user 11-27: 「給別人回消息要引用那條消息回復」): the line answered long-pressed and 「引用」 clicked, so the
     /// reply goes as its quote (WeChat: the field empty, 小藍's keyboard up; WeCom: the field holding 「@名字」, 简体拼音
     /// up). False: nothing quoted (a menu opened is closed), the reply goes plain.
-    func paneQuote(_ quote: String, _ look: PaneLook, _ who: String) async -> Bool {
+    func paneQuote(_ quote: String, _ shown: PaneLook, _ who: String) async -> Bool {
+        var look = shown
         // 188: a voice note, video, picture, file or link is quoted by its own place on the window
-        let media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
+        var media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
+        // 193 (N72, Echo 193 11-27 21:35: the second reply's line was under 小藍's keyboard, left up by the first send —
+        // 「not on the window; replied without a quote」): not found with 小藍's keyboard up, it is put down and looked for again
+        if media == nil, XiaoLanMediaFind.quoteSpot(look.rows, quote: quote) == nil,
+           keyboardBridge.onScreen() || CandidatePicker.ourKeyboardShown(rows: look.rows) {
+            DebugLog.write("watch: \(who): the line to quote not seen with 小藍's keyboard up; put down and looked for again (N72)")
+            _ = await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true)
+            _ = await smallKeyboard(up: false, within: 1.0)
+            if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                look = again
+                media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
+            }
+        }
         guard let spot = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote) else {
             DebugLog.write("watch: \(who): the line to quote (「\(quote.prefix(20))」) is not on the window; replied without a quote")
             return false
@@ -1026,7 +1054,7 @@ extension AppModel {
         }
         // 引用 only where its words are read: WeChat's menu has 删除 beside it, so a learned or measured place is never
         // clicked blind (it is kept, for the record and /spots)
-        guard let menu = await paneLook(look.side, after: now(), tries: 4, until: { XiaoLanMediaFind.menuItem($0.rows, "引用") != nil }),
+        guard let menu = await paneMenuAfterPress(look.side, look.rect, "引用", pressedY: Double(spot.y)),  // 193 (N70)
               let item = XiaoLanMediaFind.menuItem(menu.rows, "引用") else {
             if let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }) { await paneMediaCloseMenu(l) }
             DebugLog.write("watch: \(who): no 引用 after the long press; replied without a quote")

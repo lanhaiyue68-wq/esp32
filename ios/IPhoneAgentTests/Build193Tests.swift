@@ -399,6 +399,126 @@ import UIKit
         XCTAssertEqual(F.newestWords(["你好", "这里面是什么东西", "[图片]"]), "这里面是什么东西")
     }
 
+    // MARK: a mark's messages counted by their avatars (Echo 193 on the iPad, 11-27 21:14)
+
+    func at(_ t: String, _ y: Double, mine: Bool = false) -> Line { Line(sender: mine ? "我" : "蓝海乐", text: t, mine: mine, y: y) }
+
+    /// WeCom: its mark said 2, the owner sent 「1」「2」; OCR gave the lone 「1」 no words, so the newest two lines were the
+    /// old Xiaohongshu link and 「2」, and the link was opened and answered again. Its avatars (measured off that frame):
+    /// 0.718 「2」, 0.662 「1」, 0.508 the link, 0.392 the voice note, 0.274 the quote.
+    func testAMarkIsCountedByAvatarsNotByWordsRead() {
+        let lines = [at("这里面是什么", 0.283), at("这里面是什么东西，给我看一下。", 0.40), at("粉粉嫩嫩的，阳光也偏爱～https://xhslink.cn/o/gLhgko7VJj", 0.516),
+                     at("2", 0.724)]
+        let tops = [0.718, 0.662, 0.508, 0.392, 0.274]
+        let pick = XiaoLanBatch.pick(lines, history: nil, opened: .mark(2), avatarTops: tops, previewY: 0.724)
+        XCTAssertEqual(pick.lines.map(\.text), ["2"], "never the old link above 「1」's avatar")
+        XCTAssertEqual(XiaoLanBatch.pick(lines, history: nil, opened: .mark(2)).lines.count, 2, "192's count of lines took the link")
+    }
+
+    /// WeChat: the mark read 2 as 「1」「2」 had come; 「3」 came before the chat opened. Its preview showed 「2」: one avatar
+    /// below it came after, so the two are counted from 「2」 up — 「1」「2」 — and 「3」 with them.
+    func testALineThatCameAfterTheMarkWasReadIsCountedToo() {
+        let lines = [at("好的，这个我帮您查一下，稍等～", 0.30, mine: true), at("1", 0.50), at("2", 0.60), at("3", 0.70)]
+        let tops = [0.693, 0.593, 0.493]
+        let pick = XiaoLanBatch.pick(lines, history: nil, opened: .mark(2), avatarTops: tops, previewY: 0.60)
+        XCTAssertEqual(pick.lines.map(\.text), ["1", "2", "3"])
+        // fewer avatars than the number (scrolled off the window): the newest lines, as before
+        XCTAssertEqual(XiaoLanBatch.pick(lines, history: nil, opened: .mark(3), avatarTops: [0.693, 0.593]).lines.map(\.text), ["1", "2", "3"])
+    }
+
+    func testALinesPlaceIsNoPartOfIt() {
+        XCTAssertEqual(Line(sender: "a", text: "b", mine: false, y: 0.1), Line(sender: "a", text: "b", mine: false, y: 0.6))
+        XCTAssertEqual(WatchOCR.lines([WatchOCR.Piece(text: "你好", box: CGRect(x: 0.2, y: 0.4, width: 0.1, height: 0.02), kind: .theirs)],
+                                      title: "蓝海乐").lines.first?.y ?? 0, 0.4, accuracy: 0.0001)
+    }
+
+    /// A WeCom window drawn as the iPad shows it: the chat's grey, others' avatars down the left, the quick bar's green
+    /// icon at the bottom left (no avatar), above the input field.
+    func testAvatarsAreFoundDownTheLeft() throws {
+        let size = CGSize(width: 490, height: 1280)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor(red: 236 / 255, green: 236 / 255, blue: 240 / 255, alpha: 1).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.4, green: 0.7, blue: 0.3, alpha: 1).setFill()
+            for y in [0.30, 0.40, 0.50, 0.60] { ctx.fill(CGRect(x: 0.03 * 490, y: y * 1280, width: 0.08 * 490, height: 0.035 * 1280)) }
+            ctx.fill(CGRect(x: 0.03 * 490, y: 0.795 * 1280, width: 0.03 * 490, height: 0.012 * 1280))  // the quick bar's icon
+        }
+        let px = try XCTUnwrap(image.pngData().flatMap { WatchOCR.Pixels($0) })
+        let rows = [[q("：服务总结", x: 0.047, y: 0.7945, w: 0.1765, h: 0.015)], [q("山企业名片", x: 0.2843, y: 0.795, w: 0.18, h: 0.015)]]
+        let bar = try XCTUnwrap(F.quickBarTop(rows))
+        XCTAssertEqual(bar, 0.7945, accuracy: 0.0001)
+        let tops = F.avatarTops(px, bottom: bar - 0.005)
+        XCTAssertEqual(tops.count, 4, "\(tops)")
+        for (found, want) in zip(tops, [0.60, 0.50, 0.40, 0.30]) { XCTAssertEqual(found, want, accuracy: 0.003) }
+    }
+
+    /// N67 (Echo 193 11-27 21:13): the reply went out and showed, read 「相等」 for 「稍等」; one letter read differently is
+    /// still the line sent — never a digit, never two.
+    func testASentLineReadWithOneLetterWrongIsSent() {
+        let text = "好的，这个我帮您查一下，稍等～", tail = XiaoLanSelf.sendSignature(text)
+        XCTAssertTrue(XiaoLanSelf.shows("好的，这个我帮您查一下，相等～", signature: tail, of: text))
+        let numbered = "【小蓝测试】186 个微 0018"
+        XCTAssertFalse(XiaoLanSelf.shows("【小蓝测试】186 个微 0019", signature: XiaoLanSelf.sendSignature(numbered), of: numbered))
+        XCTAssertFalse(XiaoLanSelf.shows("好的，这个我帮您查一下，相看～", signature: "您查一下稍等", of: "您查一下稍等"), "two letters wrong")
+    }
+
+    /// N66 (Echo 193 11-27 21:13; the iPad's 简体拼音 read at 21:25): the globe is one key right of 「.？123」 at the bottom
+    /// left, (0.125, 0.969) — not the iPhone's (0.122, 0.952), which three clicks missed; one click there brought 小藍.
+    func testTheIPadsGlobeKeyIsRightOfItsNumbersKey() {
+        let rows = [[q("a", x: 0.0725, y: 0.853, w: 0.015, h: 0.014)], [q(".？123", x: 0.0165, y: 0.9615, w: 0.051, h: 0.015)],
+                    [q("X", x: 0.2145, y: 0.913, w: 0.017, h: 0.014)], [q(".3123", x: 0.781, y: 0.963, w: 0.05, h: 0.014)]]
+        let globe = AppModel.globeSpot(rows, pad: true)
+        XCTAssertEqual(Double(globe.x), 0.125, accuracy: 0.004)
+        XCTAssertEqual(Double(globe.y), 0.969, accuracy: 0.002)
+        XCTAssertEqual(AppModel.globeSpot([], pad: true), AppModel.padGlobeKey, "not read: where it was measured")
+        XCTAssertEqual(AppModel.globeSpot(rows, pad: false), AppModel.globeKey, "a phone as before")
+    }
+
+    /// N71 (Echo 193 11-27 21:29): 蓝海乐 read with no mark; the history (read with the keyboard over the chat) ended on
+    /// 「2」, too short to find, so the last line read was found by the voice note's words, not surely; 「1」, never read
+    /// before (OCR had given it no words), sat above my two old replies and was answered. Not surely found, only what
+    /// comes after my last line is new.
+    func testALineAboveMyOldRepliesIsNeverNew() {
+        let reply = "好的，这个我帮您查一下，稍等～"
+        let history = [theirs("[语音] 5\""), theirs("吧啦啦啦啦啦，三哥。"), theirs("2")]
+        let lines = [theirs("[语音] 5\""), theirs("吧啦啦啦啦啦，三哥。"), theirs("1"), theirs("2"), theirs("3"), mine(reply), mine(reply)]
+        let seen: Set<String> = [XiaoLanSelf.plain("2"), XiaoLanSelf.plain("3"), XiaoLanSelf.plain(reply)]
+        XCTAssertTrue(XiaoLanBatch.pick(lines, history: history, opened: .live, seen: seen).lines.isEmpty)
+        // a line of theirs after my last one is still new so
+        XCTAssertEqual(XiaoLanBatch.pick(lines + [theirs("还在吗")], history: history, opened: .live, seen: seen).lines.map(\.text), ["还在吗"])
+    }
+
+    /// N73 (Echo 193 11-27 21:35): WeCom's question quoting a file — a white bubble mostly taken by its 248 quote box — was
+    /// a picture by its colour (0.31 white), and its words, the question among them, were dropped; a photo still is one.
+    func testAQuoteBubbleIsNoPicture() throws {
+        let size = CGSize(width: 490, height: 1280)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            func fill(_ c: UIColor, _ x: Double, _ y: Double, _ w: Double, _ h: Double) {
+                c.setFill(); ctx.fill(CGRect(x: x * 490, y: y * 1280, width: w * 490, height: h * 1280))
+            }
+            fill(UIColor(red: 236 / 255, green: 236 / 255, blue: 240 / 255, alpha: 1), 0, 0, 1, 1)
+            fill(UIColor(white: 254 / 255, alpha: 1), 0.14, 0.30, 0.6, 0.09)                                // the bubble
+            fill(UIColor(red: 248 / 255, green: 248 / 255, blue: 250 / 255, alpha: 1), 0.15, 0.305, 0.58, 0.065)  // its quote box
+            for i in 0..<6 {  // a photo: patches of colour
+                fill(UIColor(hue: CGFloat(i) / 6, saturation: 0.6, brightness: 0.7, alpha: 1), 0.14 + Double(i) * 0.06, 0.50, 0.06, 0.12)
+            }
+        }
+        let px = try XCTUnwrap(image.pngData().flatMap { WatchOCR.Pixels($0) })
+        XCTAssertFalse(F.isPicture(px, CGRect(x: 0.14, y: 0.30, width: 0.6, height: 0.09), pieces: []), "the quote bubble")
+        XCTAssertTrue(F.isPicture(px, CGRect(x: 0.14, y: 0.50, width: 0.36, height: 0.12), pieces: []), "a photo")
+    }
+
+    /// N75 (Echo 193 11-27 21:35): a stray 「し」 was reported and answered; one character of Chinese or a digit still is words.
+    func testAStrayKanaIsNoMessage() {
+        XCTAssertEqual(WatchOCR.withoutUIWords("し"), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("好"), "好")
+        XCTAssertEqual(WatchOCR.withoutUIWords("3"), "3")
+    }
+
     // MARK: the lead model
 
     func testTheLeadModelGoesFirst() {

@@ -1093,7 +1093,7 @@ extension AppModel {
         let name = read.title
         // 183: a news or team account's chat (left open) is no one's: never reported.
         if XiaoLanPanes.notChats.contains(XiaoLanPanes.listName(name)) { return 0 }
-        let lines = read.lines.map { WatchReport.Line(sender: XiaoLanPanes.listName($0.sender), text: $0.text, mine: $0.mine) }
+        let lines = read.lines.map { WatchReport.Line(sender: XiaoLanPanes.listName($0.sender), text: $0.text, mine: $0.mine, y: $0.y) }
         let key = "\(app.rawValue)|\(name)"
         let before = state.history[key]
         // 193 (N46/N52/N60/N61/N63; user 11-27: 「紅點上的數字是幾就只處理最新那幾條，舊的一律不回、不點開」): which lines are
@@ -1102,8 +1102,23 @@ extension AppModel {
         let firstSinceLaunch = before != nil && state.loaded.remove(key) != nil
         let opened: XiaoLanBatch.Opened = missed ? .missed : (fromMark ? .mark(markCount) : .live)
         let echoList = state.echoes[key] ?? []
+        // 193 (Echo 193 on the iPad 11-27 21:14: WeCom's mark said 2, 「1」 was not read at all — OCR gives a lone 「1」 no
+        // words — and the newest two lines were the old Xiaohongshu link and 「2」; WeChat's mark read 2 while 「3」 came in
+        // before the chat opened, and 「1」 was left out): a mark's messages counted by their avatars, from the line its
+        // preview showed down
+        var avatarTops: [Double]?
+        var previewY: Double?
+        if fromMark, !missed, case .mark(let n?) = opened, n > 0, let px = WatchOCR.Pixels(look.crop) {
+            let bottom = min(px.inputTop(from: 0.3) ?? 0.93, XiaoLanMediaFind.quickBarTop(look.rows) ?? 1) - 0.005
+            avatarTops = XiaoLanMediaFind.avatarTops(px, bottom: bottom)
+            if let preview = markPreview {
+                let body = WatchReport.previewBody(preview)
+                if !body.isEmpty { previewY = lines.last(where: { !$0.mine && WatchReport.previewShows(body, $0) })?.y }
+            }
+        }
         let pick = XiaoLanBatch.pick(lines, history: before, opened: opened, firstSinceLaunch: firstSinceLaunch,
-                                     seen: state.seen[key] ?? [], isEcho: { XiaoLanMediaFind.isEcho($0.text, of: echoList) })
+                                     seen: state.seen[key] ?? [], isEcho: { XiaoLanMediaFind.isEcho($0.text, of: echoList) },
+                                     avatarTops: avatarTops, previewY: previewY)
         var fresh = pick.lines
         if fromMark || missed || !pick.anchored || firstSinceLaunch {
             DebugLog.write("watch: \(app.rawValue): \(name): \(fresh.count) new (\(pick.why))")
@@ -1477,6 +1492,13 @@ extension AppModel {
                 if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                     (look, low) = (again, again.rows)
                 }
+            } else if focused, !keyboardBridge.onScreen() {
+                // 193 (N72's own: the quote's search put 小藍's keyboard down, the line still not found): the field is
+                // tapped again as with no keyboard, on the window as it is now
+                focused = false
+                if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                    (look, low) = (again, again.rows)
+                }
             }
         }
         // The input field: the white box at the bottom of the window (WeCom's row of buttons above it is left alone).
@@ -1571,7 +1593,14 @@ extension AppModel {
         try? await Task.sleep(nanoseconds: 250_000_000)  // 182: was 0.4 s
         // 188: quoted on WeChat the field is empty, and a backspace in an empty field takes the quote off (WeCom's 「@名字」
         // is cleared as any text: its quote stays until a second backspace, measured 11-27).
-        if !(quoted && app == .wechat) {
+        // 193 (N74, Echo 193 11-27 21:36, the owner: 「企微裡面他會引用這個消息，然後再粘貼他說的話發出去，但是發出去之後，他
+        // 引用的消息沒有了」): in WeCom's private chat 引用 leaves the field empty too (no 「@名字」; that was a group's), and
+        // the backspace took the quote off: quoted, the field is cleared only when an 「@…」 shows in it
+        let atInField = quoted && low.joined().contains { p in
+            let t = p.text.trimmingCharacters(in: .whitespaces)
+            return Double(p.box.midY) > 0.6 && (t.hasPrefix("@") || t.hasPrefix("＠"))
+        }
+        if !quoted || (app == .wework && atInField) {
             do {
                 try await pointer.key("cmd+a")
                 try await pointer.key("backspace")

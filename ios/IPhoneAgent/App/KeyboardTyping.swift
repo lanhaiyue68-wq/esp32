@@ -8,6 +8,21 @@ extension AppModel {
     /// The globe key under every keyboard on this iPhone, bottom left (logs 11-06/11-08 screenshots: 72,1218 of 592x1280).
     static let globeKey = CGPoint(x: 0.122, y: 0.952)
 
+    /// 193 (N66, Echo 193 on the iPad 11-27 21:13: three clicks at the iPhone's (0.122, 0.952) switched nothing — the
+    /// iPad's 简体拼音 has 「.?123」 at (0.042, 0.969) and the globe right of it at (0.125, 0.969), lower — and the owner
+    /// switched by hand; one click there brought 小藍 at once): on an iPad the globe is one key right of 「.?123」 read at
+    /// the keyboard's bottom left (OCR: 「.？123」, 「.3123」), else where it was measured; on a phone, as before.
+    static let padGlobeKey = CGPoint(x: 0.125, y: 0.969)
+    static func globeSpot(_ rows: [[CandidatePicker.Piece]], pad: Bool) -> CGPoint {
+        guard pad else { return globeKey }
+        if let numbers = rows.joined().first(where: { p in
+            p.text.contains("123") && Double(p.box.midX) < 0.1 && Double(p.box.midY) > 0.93
+        }) {
+            return CGPoint(x: Double(numbers.box.midX) + 0.083, y: Double(numbers.box.midY))
+        }
+        return padGlobeKey
+    }
+
     /// Lan Agent's keyboard on screen for the focused field. Five globe clicks never brought it up (logs(9) 11-08);
     /// holding the globe key opens the keyboard menu (鍵盤設定…, 简体拼音, English (US), 表情符號, 繁體拼音, Lan Agent),
     /// where a click on "Lan Agent" picks it (user 11-08: a click on the globe shows no menu). Hold the globe once,
@@ -52,12 +67,13 @@ extension AppModel {
                 return false
             }
             if await dockInTheWay() { return false }  // 189 (N14)
+            let globe = Self.globeSpot(rows, pad: CommandChannel.onPad())  // 193 (N66)
             // 184 (Echo 183, 11-26, iPad: from 简体拼音 one click on the globe went straight to 小藍, twice; held, the
             // globe's menu was missed once and its 小藍 row clicked at an estimate the next time): on an iPad the globe is
             // clicked first, up to three times round the keyboards, 小藍 looked for after each; the menu after that.
             if attempt == 1, CommandChannel.onPad() {
                 for click in 1...3 {
-                    do { try await pointer.tap(Self.globeKey.x, Self.globeKey.y) } catch { break }
+                    do { try await pointer.tap(globe.x, globe.y) } catch { break }
                     if await lanAgentKeyboardUp(within: 1.2) {
                         DebugLog.write("keyboard: Lan Agent's keyboard on screen after \(click) globe click(s)")
                         return true
@@ -66,7 +82,7 @@ extension AppModel {
                 DebugLog.write("keyboard: three globe clicks did not bring Lan Agent's keyboard; its menu next")
                 continue
             }
-            do { try await pointer.longPress(Self.globeKey.x, Self.globeKey.y) } catch { return false }
+            do { try await pointer.longPress(globe.x, globe.y) } catch { return false }
             if await lanAgentKeyboardUp(within: 0.4) {
                 DebugLog.write("keyboard: Lan Agent's keyboard on screen after holding the globe key (try \(attempt))")
                 return true
@@ -117,7 +133,8 @@ extension AppModel {
             // 183: what the menu read, for the next miss (11-26 the iPad's 小藍 — Echo row was not matched).
             let read = rows.map { $0.map(\.text).joined() }.filter { !$0.isEmpty }.suffix(12).joined(separator: " | ")
             DebugLog.write("keyboard: the keyboard menu has no Lan Agent row (try \(attempt)); closing it; read: \(read)")
-            try? await pointer.tap(Self.globeKey.x, Self.globeKey.y)
+            let globe = Self.globeSpot(rows, pad: CommandChannel.onPad())  // 193 (N66)
+            try? await pointer.tap(globe.x, globe.y)
             return false
         }
         do { try await pointer.tap(entry.x, entry.y) } catch { return false }

@@ -19,8 +19,13 @@ import Foundation
 
     struct Pick { var lines: [WatchReport.Line]; var anchored: Bool; var why: String }
 
+    /// `avatarTops`: the tops of others' avatars on the window, lowest first (XiaoLanMediaFind.avatarTops); `previewY`:
+    /// where the line the list's preview showed when the mark was read starts. With them a mark's number counts
+    /// messages by their avatars, from that line down (a line OCR gave no words never pulls in an older one; one that
+    /// came in after the mark was read is among them).
     static func pick(_ lines: [WatchReport.Line], history: [WatchReport.Line]?, opened: Opened, firstSinceLaunch: Bool = false,
-                     seen: Set<String> = [], isEcho: (WatchReport.Line) -> Bool = { _ in false }) -> Pick {
+                     seen: Set<String> = [], isEcho: (WatchReport.Line) -> Bool = { _ in false },
+                     avatarTops: [Double]? = nil, previewY: Double? = nil) -> Pick {
         let mineAt = lines.lastIndex { $0.mine }
         let afterMine = mineAt.map { $0 + 1 } ?? 0
         let start = anchor(lines, history: history ?? [])
@@ -31,6 +36,15 @@ import Foundation
         switch opened {
         case .mark(let n?) where n > 0:
             let others = lines[min(afterMine, lines.count)...].filter { !$0.mine && !isEcho($0) }
+            // 193 (Echo 193 11-27 21:14): counted by avatars when n of them show above the ones that came after the preview
+            if let tops = avatarTops {
+                let later = previewY.map { py in tops.filter { $0 > py + 0.005 }.count } ?? 0
+                if tops.count >= later + n {
+                    let cut = tops[later + n - 1] - 0.008
+                    return Pick(lines: others.filter { ($0.y ?? 1) >= cut }, anchored: start != nil,
+                                why: "its red mark said \(n), counted by avatars" + (later > 0 ? " (\(later) more came after its preview)" : ""))
+                }
+            }
             return Pick(lines: Array(others.suffix(n)), anchored: start != nil, why: "its red mark said \(n)")
         case .mark:
             if let start {
@@ -48,7 +62,11 @@ import Foundation
             guard let start else {
                 return Pick(lines: [], anchored: false, why: "nothing on the window goes on from the last line read")
             }
-            return Pick(lines: after(start.index, sure: start.sure), anchored: true, why: "after the last line read")
+            // 193 (N71, Echo 193 11-27 21:29: 蓝海乐 read with no mark, the last line read found only by an older line of
+            // the history (not sure); a lone 「1」 above my two old replies — never read before, OCR had given it no
+            // words — was taken for new and answered): found not surely, what is new comes after my last line too
+            let from = start.sure ? start.index : max(start.index, afterMine)
+            return Pick(lines: after(from, sure: start.sure), anchored: true, why: "after the last line read")
         }
     }
 

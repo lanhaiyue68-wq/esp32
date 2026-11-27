@@ -120,6 +120,9 @@ enum WatchOCR {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let bare = t.filter { !$0.isWhitespace }
         if uiPhrases.contains(bare) { return "" }
+        // 193 (N75, Echo 193 11-27 21:35: a stray 「し」 read off WeChat's window went to the server as a message and was
+        // answered): a line of one or two kana only is no one's words here (the chats are Chinese; an icon read as kana)
+        if (1...2).contains(bare.count), bare.unicodeScalars.allSatisfy({ (0x3040...0x30FF).contains($0.value) }) { return "" }
         // 185 (B19, Echo 184, 11-26: WeChat's voice notes 2" and 6" were reported as 「小）2"」「小）6"」): a line that is
         // a voice note's length (its speaker read as a stray character or two) is no text.
         if bare.range(of: #"^[^0-9]{0,2}[0-9]{1,2}["”″＂']$"#, options: .regularExpression) != nil { return "" }
@@ -191,7 +194,7 @@ enum WatchOCR {
                 let text = withoutUIWords(o.text)
                 if !text.isEmpty {
                     lines.append(WatchReport.Line(sender: o.kind == .mine ? "我" : (sender.isEmpty ? name : sender), text: text,
-                                                  mine: o.kind == .mine))
+                                                  mine: o.kind == .mine, y: o.top))  // 193: its place, to count by avatars
                 }
             }
             open = nil
@@ -222,7 +225,7 @@ enum WatchOCR {
                 // 192 (B30, Echo 185 11-26: 测试群's 「185要撤回」 recalled, the chat's grey 「"主人蓝海乐" 撤回了一条消息」 not
                 // reported, the server keeping what was taken back): someone's recall is a line of its own
                 if let who = XiaoLanMediaFind.recaller(p.text) {
-                    lines.append(WatchReport.Line(sender: who, text: XiaoLanMediaFind.recallLine(who), mine: false))
+                    lines.append(WatchReport.Line(sender: who, text: XiaoLanMediaFind.recallLine(who), mine: false, y: top))
                     continue
                 }
                 // A name sits just right of the avatars, short; times and system lines are centred and wide.

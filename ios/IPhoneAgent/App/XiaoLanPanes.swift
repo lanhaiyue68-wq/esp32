@@ -844,7 +844,20 @@ import UIKit
     /// or two), never more, so 「…0018」 is still not 「…0018 连发2」.
     static func shows(_ read: String, signature: String, of text: String) -> Bool {
         guard plain(text).count >= 4 else { return read.filter { !$0.isWhitespace }.contains(signature) }
-        return plain(read).contains(signature) || showsInOrder(read, tailRuns(text))
+        return plain(read).contains(signature) || showsInOrder(read, tailRuns(text)) || oneMisread(plain(read), signature)
+    }
+
+    /// 193 (N67, Echo 193 11-27 21:13: 「好的，这个我帮您查一下，稍等～」 went out and showed, read 「…相等～」; reported not
+    /// sent, the owner told): the six-letter signature found with one letter read differently — never a digit (…0018 is
+    /// not …0019).
+    static func oneMisread(_ read: String, _ signature: String) -> Bool {
+        let s = Array(signature), r = Array(read)
+        guard s.count >= 6, r.count >= s.count else { return false }
+        for i in 0...(r.count - s.count) {
+            let differ = zip(r[i..<(i + s.count)], s).filter { $0 != $1 }
+            if differ.count == 1, !differ.contains(where: { $0.isNumber || $1.isNumber }) { return true }
+        }
+        return false
     }
     /// 188: the text's last six letters and digits (as `plain` keeps them), split where the text had anything else.
     static func tailRuns(_ text: String) -> [String] {

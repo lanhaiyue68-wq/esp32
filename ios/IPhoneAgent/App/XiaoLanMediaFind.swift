@@ -520,6 +520,34 @@ enum XiaoLanMediaFind {
 
     static func isBackground(_ c: (Int, Int, Int)) -> Bool { WatchOCR.kind(of: c) == .grey }
 
+    /// 193 (Echo 193 11-27 21:14: a lone 「1」 gave OCR no words, and counting lines reached an old message): the tops of
+    /// the avatars of others' messages (the window's left strip, avatarAt), lowest first, between `top` and `bottom`;
+    /// each message of theirs has its own (measured on the iPad: WeChat 10–20 and WeCom 13–17, quote, voice, link, 1, 2
+    /// all one each; a voice note's words under it none).
+    static func avatarTops(_ px: WatchOCR.Pixels, top: Double = 0.09, bottom: Double) -> [Double] {
+        var tops: [Double] = []
+        let step = 1.0 / Double(px.h)
+        var y = bottom - step
+        var runEnd: Double?
+        while y > top {
+            if avatarAt(px, y) {
+                if runEnd == nil { runEnd = y }
+            } else if let end = runEnd {
+                let start = y + step
+                if end - start >= 0.02 { tops.append(start) }
+                runEnd = nil
+            }
+            y -= step
+        }
+        return tops
+    }
+
+    /// The top of WeCom's quick bar over its input field (服务总结, 企业名片, 发起收款, 客户转账); nil: none showing.
+    static func quickBarTop(_ rows: [[Piece]]) -> Double? {
+        let words = ["服务总结", "企业名片", "发起收款", "客户转账", "服務總結", "企業名片", "發起收款", "客戶轉賬"]
+        return rows.joined().filter { p in words.contains { p.text.contains($0) } }.map { Double($0.box.minY) }.min()
+    }
+
     /// The message's extent from `start`: right of the avatar until the chat's grey, down until three rows of it.
     static func block(_ px: WatchOCR.Pixels, from start: Double, bottom: Double) -> CGRect? {
         let y = start + 0.015
@@ -562,7 +590,12 @@ enum XiaoLanMediaFind {
             for j in 1...8 {
                 let c = px.rgb(Double(r.minX) + Double(r.width) * Double(j) / 9, Double(r.minY) + Double(r.height) * Double(i) / 7)
                 n += 1
-                if WatchOCR.kind(of: c) == .mine || (c.0 >= 250 && c.1 >= 250 && c.2 >= 250) { plainColour += 1 }
+                // 193 (N73, Echo 193 11-27 21:35: WeCom's question quoting a file — its quote box 248, in a white bubble —
+                // came to 0.31 of white, was taken for a picture, and its words, the question among them, were dropped as
+                // words on a picture): a quote box's light grey (240–251, neutral) is a bubble's too. Checked on Echo 191's
+                // and 192's frames: of 327 pictures found only WeCom's two quote bubbles change.
+                let quoteGrey = max(c.0, c.1, c.2) - min(c.0, c.1, c.2) <= 8 && min(c.0, c.1, c.2) >= 240
+                if WatchOCR.kind(of: c) == .mine || (c.0 >= 250 && c.1 >= 250 && c.2 >= 250) || quoteGrey { plainColour += 1 }
             }
         }
         return Double(plainColour) / Double(n)

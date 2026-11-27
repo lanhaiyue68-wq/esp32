@@ -804,7 +804,13 @@ struct ReadMessage: Codable, Equatable {
 }
 
 enum WatchReport {
-    struct Line: Equatable, Codable { var sender: String; var text: String; var mine: Bool }
+    struct Line: Equatable, Codable {
+        var sender: String; var text: String; var mine: Bool
+        /// 193: where the line starts on the window (its top, a fraction), when read off one; never part of what a line is
+        /// (two reads of one line are the same line wherever it showed).
+        var y: Double? = nil
+        static func == (a: Line, b: Line) -> Bool { a.sender == b.sender && a.text == b.text && a.mine == b.mine }
+    }
     struct Screen: Equatable { var title = ""; var group: Bool; var lines: [Line]; var proven: Set<String> = [] }
 
     /// A notification banner at the top of the screen (iOS's for WeChat over another app, or WeChat's own): a title line
