@@ -2476,11 +2476,16 @@ extension AppModel {
             return
         }
         if WatchSettings.noModel {
-            // 165: 小藍 runs orders by fixed steps only (docs/xiaolan-engine-logic.md); this one has none yet, and no
-            // model is asked instead.
-            DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) has no fixed steps yet in 小藍")
-            link.finish(send, ok: false, reason: ChatToolLink.reasonNoSteps)
-            return
+            // 165: 小藍 runs orders by fixed steps only (docs/xiaolan-engine-logic.md); this one has none yet.
+            // 192 (B14; user 11-27: 「前期先讓大模型學習好…然後再寫成固定步驟…對于長時間來運營來說，它是最省錢的」): while
+            // a model is set, it does the order (the planner looking at the screen), each run kept in Documents/traces
+            // — every step's action and the frame it was decided on — to be written into fixed steps; no model, as before.
+            guard (try? await settings.client("planner")) != nil else {
+                DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) has no fixed steps yet in 小藍, and no model is set")
+                link.finish(send, ok: false, reason: ChatToolLink.reasonNoSteps)
+                return
+            }
+            DebugLog.write("watch: order \(send.type) (\(send.app.rawValue)) has no fixed steps yet: the model does it, its steps kept to learn from (B14)")
         }
         if !job.media.isEmpty {
             do {

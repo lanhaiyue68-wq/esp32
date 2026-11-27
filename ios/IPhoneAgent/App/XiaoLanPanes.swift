@@ -251,6 +251,15 @@ import UIKit
     /// 182 (Echo 181, 11-26: WeCom left in 企微测试群, a title WeChat has too, was nobody's window: "no chat of WeChat or
     /// WeCom; left alone", its list and the owner's private message never looked at): WeCom's quick bar over the input
     /// tells its chats wherever they are.
+    /// 192 (B26): a window of Echo's own — two of its pages' titles or rows read in it.
+    static let echoWords: Set<String> = ["微信守候", "守候設定", "打開微信", "打開企業微信", "開發板與畫面", "指令記錄", "工具箱",
+                                         "進階設定", "開始守候", "停止守候", "Echo",
+                                         // as OCR may read them (simplified)
+                                         "守候设定", "打开微信", "打开企业微信", "开发板与画面", "指令记录", "进阶设定", "开始守候"]
+    static func echoWindow(_ rows: [[Piece]]) -> Bool {
+        rows.joined().filter { echoWords.contains($0.text.filter { !$0.isWhitespace }) }.count >= 2
+    }
+
     static func weworkBar(_ rows: [[Piece]]) -> Bool {
         rows.joined().contains { p in WatchOCR.quickBarWords.contains { p.text.contains($0) } }
     }
@@ -708,6 +717,16 @@ import UIKit
     }
 
     /// The sender is the owner: one of `names` (typed or learned), WeCom's "@微信" tag and spaces left out.
+    /// 192 (O1): a group the other app has been in too (its history holds a chat of that name), so both accounts are in it.
+    static func sharedGroup(_ name: String, app: XiaoLanOrders.App, chats: [String]) -> Bool {
+        let other = app == .wechat ? XiaoLanOrders.App.wework : .wechat
+        return chats.contains { k in
+            let parts = k.split(separator: "|", maxSplits: 1).map(String.init)
+            return parts.count == 2 && parts[0] == other.rawValue
+                && (WatchChatOpen.sameChat(parts[1], listName: name) || WatchChatOpen.sameChat(name, listName: parts[1]))
+        }
+    }
+
     static func isOwner(_ sender: String, names: [String]) -> Bool {
         let s = XiaoLanPanes.listName(sender)
         return !s.isEmpty && names.contains { n in XiaoLanPanes.listName(n) == s || person(n) == person(s) || readAlike(person(n), person(s)) }

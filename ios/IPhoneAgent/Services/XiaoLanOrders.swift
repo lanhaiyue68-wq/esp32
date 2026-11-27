@@ -169,15 +169,25 @@ enum XiaoLanOrders {
     static func job(type: Int, app: App, f: Fields, chat: String) -> Job? {
         guard let name = Self.label(type, app) else { return nil }
         let a = app.name
+        #if XIAOLAN
+        // 192 (B14; user 11-27: the model learns the orders first, its runs then written into fixed steps): on the
+        // iPad both apps are open side by side; the model works in its app's window only
+        let start = "iPad 屏幕左右分屏：一边是微信，一边是企业微信（看窗口顶部的标题和底部的标签分辨）。这个任务只在\(a)那一边的窗口里做，"
+            + "不要点另一边的窗口，不要回主屏幕，不要关掉、缩小或切换窗口和 App。"
+        let end = "\n做完后让\(a)那一边回到消息列表，然后完成（done）；做不到就 fail，并写明原因。"
+        let listBack = "\(a)那一边的消息列表"
+        #else
         let start = app == .wework ? "先打开企业微信（open 企业微信）。" : ""
         let end = "\n做完后回到微信的聊天列表，然后完成（done）；做不到就 fail，并写明原因。"
+        let listBack = "微信的聊天列表"
+        #endif
         let open = "在\(a)里打开会话“\(chat)”（不在这个会话就回到消息列表找，列表里没有就用顶部搜索）"
         let look = "只看不改：不要发送任何消息、不要改任何设置。"
         func job(_ task: String, steps: Int = 25, texts: [String] = []) -> Job {
             Job(label: name, task: start + task + end, steps: steps, texts: texts.filter { !$0.isEmpty })
         }
         func read(_ task: String, json: String, steps: Int = 30) -> Job {
-            Job(label: name, task: start + look + task + "\n读完后回到微信的聊天列表，用 done 完成，answer 只写一行 JSON：" + json
+            Job(label: name, task: start + look + task + "\n读完后回到" + listBack + "，用 done 完成，answer 只写一行 JSON：" + json
                     + "\n读不到就 fail，并写明原因。", steps: steps, readOnly: true, query: true)
         }
         func message(_ who: String) -> String {

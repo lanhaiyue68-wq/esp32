@@ -60,7 +60,12 @@ enum XiaoLanMediaFind {
 
     /// The first web address in the words: http(s)://…, or www.….
     static func url(in text: String) -> String? {
-        let t = text.replacingOccurrences(of: "：", with: ":").replacingOccurrences(of: "／", with: "/")
+        var t = text.replacingOccurrences(of: "：", with: ":").replacingOccurrences(of: "／", with: "/")
+        // 192 (N38, the iPad read Douyin's 「https://v.douyin.com/fv63」 as 「.nttps://v.aouyin.com/fv63」, 11-27 16:43):
+        // a misread scheme is still one
+        if t.range(of: #"https?://"#, options: [.regularExpression, .caseInsensitive]) == nil {
+            t = t.replacingOccurrences(of: #"[A-Za-z]{0,2}t{1,2}ps?://"#, with: "https://", options: .regularExpression)
+        }
         guard let r = t.range(of: #"(https?://|www\.)[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+"#, options: [.regularExpression, .caseInsensitive])
         else { return nil }
         let u = String(t[r]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]'"))
@@ -130,6 +135,25 @@ enum XiaoLanMediaFind {
     /// 0.30/0.49 of WeCom's window, the click that opened it 0.06 left and 0.06 up).
     static func videoSpot(_ label: Piece) -> CGPoint {
         CGPoint(x: max(0.05, Double(label.box.midX) - 0.07), y: max(0.1, Double(label.box.midY) - 0.06))
+    }
+
+    /// 192 (B30): who took a message back, from the chat's grey line (WeChat 「"主人蓝海乐" 撤回了一条消息」, WeCom
+    /// 「主人蓝海乐撤回了一条消息」); nil for my own (「你撤回了一条消息 重新编辑」) and any other line.
+    static func recaller(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard let r = t.range(of: "撤回了一条消息") ?? t.range(of: "撤回了一條消息") ?? t.range(of: "撤回了一條訊息") else { return nil }
+        let who = t[..<r.lowerBound].trimmingCharacters(in: CharacterSet(charactersIn: " \"“”「」'‘’"))
+        guard !who.isEmpty, who != "你", who != "我", who.count <= 30 else { return nil }
+        return who
+    }
+
+    /// The line a recall is reported as.
+    static func recallLine(_ who: String) -> String { "[撤回] \(who) 撤回了一条消息" }
+
+    /// 192 (B28): a file card's size line alone — 「12KB未下载」, 「486KB 未下载」, 「15K」, 「1.2MB 已下载」.
+    static func fileSizeLine(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        return t.range(of: #"^\d+(\.\d+)?[KMG]B?(未下载|已下载|已过期|未下載|已下載)?$"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     /// A file card's own words: its name, and at most its size and 「未下载」 (「6原生家庭创伤治愈.docx」, 「伤治愈.docx13K」);
@@ -313,7 +337,8 @@ enum XiaoLanMediaFind {
         let blocks = pictureBlocks(px, pieces: pieces, top: top, bottom: bottom)
         let pictures = blocks.filter { b in !videos.contains { v in b.insetBy(dx: -0.02, dy: -0.02).contains(CGPoint(x: v.midX, y: v.midY)) } }
         for b in pictures {
-            out.append(WatchOCR.Piece(text: "[图片]", box: CGRect(x: Double(b.minX), y: Double(b.minY), width: 0.08, height: 0.02), kind: .theirs))
+            let label = channelsAuthor(pieces, in: b).map { "[视频号] \($0)" } ?? "[图片]"  // 192 (N43)
+            out.append(WatchOCR.Piece(text: label, box: CGRect(x: Double(b.minX), y: Double(b.minY), width: 0.08, height: 0.02), kind: .theirs))
         }
         let covered = blocks  // a video's thumbnail is one of them; words on one not found are .other, never lines anyway
         for p in pieces {
@@ -335,6 +360,15 @@ enum XiaoLanMediaFind {
     /// blue). Its top is level with the avatar's, under the sender's name in a group.
     static func pictureBlocks(_ px: WatchOCR.Pixels, pieces: [WatchOCR.Piece], top: Double, bottom: Double) -> [CGRect] {
         var blocks: [CGRect] = []
+        func consider(_ start: Double, cut: Bool) {
+            guard let r = block(px, from: start, bottom: bottom), r.width >= 0.12, r.height >= 0.06,
+                  !cut || (Double(r.minX) < 0.25 && Double(r.maxX) < 0.78),
+                  isPicture(px, r, pieces: pieces), !blocks.contains(where: { $0.intersects(r) }) else { return }
+            blocks.append(r)
+        }
+        // 192 (N43, Echo 191 11-27 15:45: the 视频号 card at the window's top, its avatar scrolled off, was never found):
+        // a message cut by the top is looked at too — someone else's (left, short of the right side where mine end)
+        consider(top, cut: true)
         var y = top
         var wasAvatar = avatarAt(px, y)
         while y < bottom - 0.06 {
@@ -346,11 +380,43 @@ enum XiaoLanMediaFind {
             if let name = pieces.first(where: { $0.kind == .grey && Double($0.box.minX) < 0.3 && abs(Double($0.box.minY) - y) < 0.02 }) {
                 start = Double(name.box.maxY) + 0.004
             }
-            guard let r = block(px, from: start, bottom: bottom), r.width >= 0.12, r.height >= 0.06,
-                  bubbleShare(px, r) < 0.5, !blocks.contains(where: { $0.intersects(r) }) else { continue }
-            blocks.append(r)
+            consider(start, cut: false)
         }
-        return blocks
+        return blocks.sorted { $0.minY < $1.minY }
+    }
+
+    /// A block of picture, not a bubble of words: under half of it a bubble's plain colour; or (192, N48, Echo 191
+    /// 11-27 16:23: a photo of a white form — a portrait, a barcode, small print — taken for a white bubble, so the
+    /// chat itself went to the model) mostly white and tall, with next to no chat-sized words in it (a link's card, white
+    /// too, has its title in them).
+    static func isPicture(_ px: WatchOCR.Pixels, _ r: CGRect, pieces: [WatchOCR.Piece]) -> Bool {
+        if bubbleShare(px, r) < 0.5 { return true }
+        return Double(r.height) >= 0.1 && chatWordsShare(pieces, in: r) < 0.1
+    }
+
+    /// The share of a block's height under words of a chat's size (0.013 of the window tall or more; a page's print in
+    /// a photo is half that): a bubble of words is most of it.
+    static func chatWordsShare(_ pieces: [WatchOCR.Piece], in r: CGRect) -> Double {
+        let spans = pieces.filter { r.contains(CGPoint(x: $0.box.midX, y: $0.box.midY)) && Double($0.box.height) >= 0.013 }
+            .map { (Double($0.box.minY), Double($0.box.maxY)) }.sorted { $0.0 < $1.0 }
+        var covered = 0.0, end = Double(r.minY)
+        for (a, b) in spans {
+            let s = max(a, end)
+            if b > s { covered += b - s; end = b }
+        }
+        return r.height > 0 ? covered / Double(r.height) : 0
+    }
+
+    /// 192 (N43, a 视频号 card, 11-27 15:45: a photo, its author over its bottom left — 「凶露露Iulu0517」, the icon read as
+    /// a sign — nothing else written on it): the author, a name with a handle's letters or digits; else nil.
+    static func channelsAuthor(_ pieces: [WatchOCR.Piece], in block: CGRect) -> String? {
+        let inside = pieces.filter { block.contains(CGPoint(x: $0.box.midX, y: $0.box.midY)) && !plain($0.text).isEmpty }
+        guard (1...2).contains(inside.count), let p = inside.max(by: { $0.box.midY < $1.box.midY }),
+              Double(block.maxY) - Double(p.box.midY) < 0.05, Double(p.box.minX) - Double(block.minX) < 0.06 else { return nil }
+        let name = String(p.text.drop(while: { !($0.isLetter || $0.isNumber) }))
+        let n = plain(name)
+        guard (3...24).contains(n.count), n.contains(where: { $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        return name
     }
 
     /// An avatar in the window's left strip at this height: colour, or light and dark side by side.
@@ -370,7 +436,10 @@ enum XiaoLanMediaFind {
     /// The message's extent from `start`: right of the avatar until the chat's grey, down until three rows of it.
     static func block(_ px: WatchOCR.Pixels, from start: Double, bottom: Double) -> CGRect? {
         let y = start + 0.015
-        var x = 0.14
+        // 192 (N48/N43, Echo 191 11-27 16:23: on the iPad's WeChat window the avatar ends right at 0.14, so the block
+        // began on its edge, 0 wide, and no picture was ever found): past the avatar, then the gap, to the message
+        var x = 0.06
+        while x < 0.3, !isBackground(px.rgb(x, y)) { x += 0.005 }
         while x < 0.6, isBackground(px.rgb(x, y)) { x += 0.005 }
         guard x < 0.6 else { return nil }
         let left = x
@@ -429,6 +498,14 @@ enum XiaoLanMediaFind {
         }.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
     }
 
+    /// 192 (N47, Echo 191 11-27 16:21: two notes, only the older had 「转文字」 beside it, and the newer's job clicked
+    /// it): this note's own 「转文字」, right of its bubble at its height; nil when it has none.
+    static func voiceButton(_ rows: [[Piece]], beside bubble: CGPoint) -> CGPoint? {
+        let y = Double(bubble.y)
+        return voiceButtons(rows).filter { abs(Double($0.y) - y) < 0.02 && Double($0.x) > Double(bubble.x) }
+            .min { abs(Double($0.y) - y) < abs(Double($1.y) - y) }
+    }
+
     static func videoLabels(_ rows: [[Piece]]) -> [Piece] {
         pieces(rows).filter { p in
             guard let s = clockSeconds(p.text), s > 0 else { return false }
@@ -475,25 +552,121 @@ enum XiaoLanMediaFind {
 
     /// 191 (N38, Echo 190 11-27: the report said Kuaishou's address, Xiaohongshu's line was clicked): the line of this
     /// job's link — its address read alike (or the start of it, cut by a fold), else its words' start — else the rank's.
+    /// 192 (N38 still, N49): the line of this job's link message, chosen among messages, not lines (a share is two to
+    /// four lines, each looking like a link, so a rank counted in lines landed on another share: Douyin's job clicked
+    /// Kuaishou's 「打开【快手】」, 11-27 15:38; WeCom's Xiaohongshu job clicked the line under the address, 16:24):
+    /// its address read alike, else its words most alike, else the rank's message. The line given is the one holding
+    /// the address's own characters (an address wrapped after 「https://」 is on the next line), else the message's first.
     static func linkLine(_ rows: [[Piece]], text: String, rank: Int) -> Piece? {
-        let spots = linkSpots(rows)
-        if let key = linkKey(text), let p = spots.last(where: { q in
-            guard let k = linkKey(q.text) else { return false }
+        let bubbles = linkBubbles(rows)
+        if let key = linkKey(text), let b = bubbles.last(where: { b in
+            guard let k = b.url.flatMap(linkKey) else { return false }
             return sameLink(k, key) || (k.count >= 8 && key.hasPrefix(k)) || (key.count >= 8 && k.hasPrefix(key))
-        }) { return p }
-        let head = String(plain(text.replacingOccurrences(of: "[链接]", with: "")).prefix(6))
-        if head.count >= 4, let p = spots.last(where: { plain($0.text).hasPrefix(head) }) { return p }
-        return pick(spots, rank: rank)
+        }) { return b.line }
+        let want = plain(text.replacingOccurrences(of: "[链接]", with: ""))
+        if want.count >= 4 {
+            let scored = bubbles.map { ($0, likeness(want, plain($0.words))) }
+            if let top = scored.map({ $0.1 }).max(), top >= 0.5, let b = scored.last(where: { $0.1 == top }) { return b.0.line }
+        }
+        return pick(bubbles, rank: rank)?.line
     }
 
-    /// Where an address starts on its line (a full text's 「最... https://v.douyin.com/」): its 「h」's place, a little in.
-    static func addressStart(_ p: Piece) -> CGPoint {
-        let t = p.text
-        guard let r = t.range(of: "http", options: .caseInsensitive) ?? t.range(of: "www.", options: .caseInsensitive) else {
-            return CGPoint(x: Double(p.box.midX), y: Double(p.box.midY))
+    /// 192: a link message on the window: its lines, its words (lines joined, ends trimmed: an address wrapped across
+    /// them is whole again), its address, and the line holding the address's own characters (else its first).
+    struct LinkBubble { let lines: [Piece]; let words: String; let url: String?; let line: Piece }
+
+    static func linkBubbles(_ rows: [[Piece]]) -> [LinkBubble] {
+        let all = pieces(rows)
+        var taken = Set<Int>()
+        var out: [LinkBubble] = []
+        for (i, p) in all.enumerated() where !taken.contains(i) {
+            let lines = bubbleLines(rows, from: p)
+            for q in lines { if let j = all.firstIndex(where: { $0.box == q.box && $0.text == q.text }) { taken.insert(j) } }
+            let words = lines.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined()
+            let u = url(in: words)
+            guard u != nil || lines.contains(where: { shareText($0.text) || url(in: $0.text) != nil }) else { continue }
+            // a share with no address: its own words' line, never a group's name line over the bubble
+            let line = addressHolder(lines) ?? lines.first(where: { shareText($0.text) }) ?? lines[0]
+            out.append(LinkBubble(lines: lines, words: words, url: u, line: line))
         }
-        let start = Double(t.distance(from: t.startIndex, to: r.lowerBound)) + 2
-        return CGPoint(x: Double(p.box.minX) + Double(p.box.width) * min(start / Double(max(t.count, 1)), 0.95), y: Double(p.box.midY))
+        return out
+    }
+
+    /// Of a message's lines, the one the address's own characters are on: a line with a whole address; the line after
+    /// one ending in a cut 「https://」 or 「www.」 (WeCom, 11-27: 「粉粉嫩嫩的，阳光也偏爱～ https://」 /
+    /// 「xhslink.cn/o/gLh9ko7VJj 把这段复」); a line starting with a host and path.
+    static func addressHolder(_ lines: [Piece]) -> Piece? {
+        if let p = lines.first(where: { url(in: $0.text) != nil }) { return p }
+        for (i, p) in lines.enumerated() where i + 1 < lines.count {
+            let t = p.text.trimmingCharacters(in: .whitespaces).lowercased()
+            if t.hasSuffix("://") || t.hasSuffix("http") || t.hasSuffix("https") || t.hasSuffix("https:") || t.hasSuffix("www.") {
+                return lines[i + 1]
+            }
+        }
+        return lines.first { hostRun($0.text) != nil }
+    }
+
+    /// The run of an address's characters on a line: from 「http」/「www.」, else a host and path at the line's start
+    /// (「xhslink.cn/o/gLh9ko7VJj 把这段复」); in characters.
+    static func hostRun(_ text: String) -> Range<Int>? {
+        let chars = Array(text)
+        let isAddress: (Character) -> Bool = { c in
+            c.isASCII && (c.isLetter || c.isNumber || "-._~:/?#[]@!$&'()*+,;=%".contains(c))
+        }
+        let lower = text.lowercased()
+        var start: Int?
+        if let r = lower.range(of: "http") ?? lower.range(of: "www.") {
+            start = lower.distance(from: lower.startIndex, to: r.lowerBound)
+        } else if let first = chars.firstIndex(where: { !$0.isWhitespace }), isAddress(chars[first]) {
+            start = first
+        }
+        guard let s = start else { return nil }
+        var e = s
+        while e < chars.count, isAddress(chars[e]) { e += 1 }
+        let run = String(chars[s..<e])
+        guard e - s >= 6, run.contains("."), run.contains("/") || run.lowercased().hasPrefix("http") || run.lowercased().hasPrefix("www.") else {
+            return nil
+        }
+        return s..<e
+    }
+
+    /// Where the `at`th character of a line sits across it, wide (Chinese) characters counted whole and narrow ones
+    /// (letters, digits, marks) a little over half (an address is half the width its count says beside Chinese).
+    static func characterX(_ p: Piece, at: Double) -> Double {
+        let chars = Array(p.text)
+        guard !chars.isEmpty else { return Double(p.box.midX) }
+        let widths = chars.map { CandidatePicker.isWide($0) ? 1.0 : 0.55 }
+        let total = widths.reduce(0, +)
+        let whole = min(max(0, Int(at)), chars.count)
+        var before = widths[0..<whole].reduce(0, +)
+        if whole < chars.count { before += widths[whole] * (at - Double(whole)) }
+        return Double(p.box.minX) + Double(p.box.width) * min(before / total, 0.97)
+    }
+
+    /// Where an address starts on its line (a full text's 「最... https://v.douyin.com/」): its 「h」's place, a little in;
+    /// 192: also a wrapped address's rest at a line's start (「xhslink.cn/o/…」).
+    static func addressStart(_ p: Piece) -> CGPoint {
+        guard let r = hostRun(p.text) else { return CGPoint(x: Double(p.box.midX), y: Double(p.box.midY)) }
+        return CGPoint(x: characterX(p, at: Double(r.lowerBound) + 2), y: Double(p.box.midY))
+    }
+
+    /// 192 (N49): the middle of an address's characters on its line (the first click), else the line's middle.
+    static func addressMiddle(_ p: Piece) -> CGPoint {
+        guard let r = hostRun(p.text) else { return CGPoint(x: Double(p.box.midX), y: Double(p.box.midY)) }
+        return CGPoint(x: characterX(p, at: Double(r.lowerBound + r.upperBound) / 2), y: Double(p.box.midY))
+    }
+
+    /// How alike two lines' words are (0–1): the share of the shorter's character pairs (its first 40 characters)
+    /// found in the other; OCR's misreads (「1.07」 read 「107」) cost a pair or two, not the match.
+    static func likeness(_ a: String, _ b: String) -> Double {
+        func pairs(_ s: String) -> [String] {
+            let c = Array(s.prefix(40))
+            return c.count < 2 ? [s] : (0..<(c.count - 1)).map { String(c[$0...($0 + 1)]) }
+        }
+        let (x, y) = (pairs(a), Set(pairs(b)))
+        let (short, long) = x.count <= y.count ? (x, y) : (pairs(b), Set(x))
+        guard !short.isEmpty else { return 0 }
+        return Double(short.filter { long.contains($0) }.count) / Double(short.count)
     }
 
     /// 191 (measured 11-27 15:12: Douyin's page in WeChat 「抱歉出错了 / 请尝试在抖音内观看 / 打开抖音」): a page that only
@@ -741,6 +914,54 @@ enum XiaoLanMediaFind {
         return Int(line[r].filter(\.isNumber))
     }
 
+    // MARK: 192 a page wider than its window (N50)
+
+    /// 192 (N50, Echo 191 11-27 16:26: WeCom's preview of a .docx in the half-screen window is wider than it, every line
+    /// cut at the window's right edge, 「…大赤天中、黄」; dragged left, the rest showed, 「黄金殿内，召」): three lines or
+    /// more reaching the right edge.
+    static func cutOnRight(_ rows: [[Piece]], from top: Double = 0.08) -> Bool {
+        pieces(rows, top: top, bottom: 0.97).filter { Double($0.box.maxX) >= 0.96 && $0.text.count >= 4 }.count >= 3
+    }
+
+    /// The lines of a wide page read in parts (each dragged further left), each part's line joined to the line at its
+    /// height so far by the characters they share; a line only in a later part is added at its height.
+    static func joinWide(_ parts: [[Piece]]) -> [String] {
+        var lines: [(y: Double, text: String)] = []
+        for part in parts {
+            for p in part.sorted(by: { $0.box.midY < $1.box.midY }) {
+                let y = Double(p.box.midY)
+                if let i = lines.indices.min(by: { abs(lines[$0].y - y) < abs(lines[$1].y - y) }), abs(lines[i].y - y) < 0.012 {
+                    lines[i].text = overlapJoin(lines[i].text, p.text)
+                } else {
+                    lines.append((y: y, text: p.text))
+                    lines.sort { $0.y < $1.y }
+                }
+            }
+        }
+        return lines.map { $0.text }
+    }
+
+    /// Two reads of one line, the second further right: joined where the first's end is the second's start (OCR may
+    /// misread a character there, so the second's first four are looked for near the first's end); the second alone
+    /// when it holds the first; the first when the second adds nothing.
+    static func overlapJoin(_ a: String, _ b: String) -> String {
+        let x = Array(a), y = Array(b)
+        guard !x.isEmpty else { return b }
+        guard !y.isEmpty else { return a }
+        if b.contains(a) { return b }
+        if a.contains(b) { return a }
+        for k in stride(from: min(x.count, y.count), through: 2, by: -1) where Array(x.suffix(k)) == Array(y.prefix(k)) {
+            return a + String(y.dropFirst(k))
+        }
+        let head = Array(y.prefix(4))
+        if head.count == 4 {
+            for start in stride(from: x.count - 4, through: max(0, x.count - 40), by: -1) where start >= 0 && Array(x[start..<(start + 4)]) == head {
+                return String(x[..<start]) + b
+            }
+        }
+        return a + b
+    }
+
     /// A page's words top to bottom (a file's preview, a link's page), without its bars, at most `most` characters.
     static func pageText(_ rows: [[Piece]], from top: Double = 0.08, to bottom: Double = 0.95, most: Int = 800) -> String {
         let lines = rows.compactMap { row -> String? in
@@ -834,10 +1055,16 @@ enum XiaoLanMediaFind {
     }
 
     /// For the model looking at pictures and video frames: what it is, briefly, in Chinese; no numbers of a person.
+    /// 192: which app a look is made in, said before the ask (the window's bar names both).
+    static func appSaid(_ app: XiaoLanOrders.App) -> String {
+        app == .wework ? "（这是在企业微信里。）" : "（这是在微信里，不是企业微信。）"
+    }
+
     static let lookSystem = """
     你是聊天助手的眼睛。用户发来的是聊天软件里一张图片、一个视频的几帧截图，或者点开的网页截图。\
     用简体中文简短说明内容（不超过120字）：是什么东西、主要的人和物、画面里写着的重要文字。\
     如果是证件、银行卡、合同等含个人信息的，只说是什么类型，不要抄写姓名以外的号码（身份证号、手机号、卡号等）。\
+    截图顶部的状态栏可能同时写着「微信」「企业微信」等几个 App 的名字，不要据此说是在哪个 App 里；问题里说了是哪个 App 才照说。\
     只输出说明本身，不要加前缀。
     """
 

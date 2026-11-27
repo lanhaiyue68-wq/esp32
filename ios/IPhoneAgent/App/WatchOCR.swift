@@ -205,7 +205,10 @@ enum WatchOCR {
                 if var o = open, o.kind == p.kind {
                     let sameRow = abs((top + bottom) / 2 - (o.top + o.bottom) / 2) < min(height, o.height) / 2
                     let nextRow = top - o.bottom < 0.7 * max(height, o.height)
-                    if sameRow || nextRow {
+                    // 192 (B28, Echo 185 11-26: 「6原生家庭创伤治愈.docx」 and 「12KB未下载」 reported as two messages): a file
+                    // card's size, smaller and lower under its name, is the card's
+                    let cardSize = XiaoLanMediaFind.fileSizeLine(p.text) && XiaoLanMediaFind.fileName(o.text) != nil && top - o.bottom < 0.05
+                    if sameRow || nextRow || cardSize {
                         o.text += sameRow ? " " + p.text : p.text
                         o.bottom = max(o.bottom, bottom)
                         open = o
@@ -216,6 +219,12 @@ enum WatchOCR {
                 open = (p.kind, p.text, top, bottom, height)
             case .grey:
                 close()
+                // 192 (B30, Echo 185 11-26: 测试群's 「185要撤回」 recalled, the chat's grey 「"主人蓝海乐" 撤回了一条消息」 not
+                // reported, the server keeping what was taken back): someone's recall is a line of its own
+                if let who = XiaoLanMediaFind.recaller(p.text) {
+                    lines.append(WatchReport.Line(sender: who, text: XiaoLanMediaFind.recallLine(who), mine: false))
+                    continue
+                }
                 // A name sits just right of the avatars, short; times and system lines are centred and wide.
                 if group, p.box.minX < 0.2, p.box.maxX < 0.6 { sender = p.text.trimmingCharacters(in: .whitespaces) }
             case .other:

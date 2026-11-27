@@ -13,6 +13,8 @@ struct PaneWatchState {
     /// Since when each side has been in a chat with nothing new (back to the list after a while).
     var quietSince: [Int: Double] = [:]
     var frontSince: Double?, lastHop = -Double.infinity, hopped = false
+    /// 192 (B26): one window theirs, the other neither theirs nor Echo's: logged once while it lasts.
+    var oddSideLogged = false
     /// 180: what each side showed that is no chat of WeChat or WeCom (logged once, left alone).
     var notChat: [Int: String] = [:]
     /// 181: what 小藍 sent lately, to know the owner's other account when its line shows up on the other side.
@@ -171,7 +173,19 @@ extension AppModel {
                 || XiaoLanPanes.cancelButton(l.rows) != nil
                 || (WatchOCR.Pixels(l.crop).map { XiaoLanPanes.chatBackground($0) } ?? false)
         }
-        if theirs.count >= 2 { state.frontSince = nil; return true }
+        if theirs.count >= 2 { (state.frontSince, state.oddSideLogged) = (nil, false); return true }
+        // 192 (B26, Echo 185 11-26 21:40: WeCom left on its real-name check, neither a chat nor a list, so only one
+        // window was theirs; the apps were opened by URL every 11 s and the watch never began): two windows, one of
+        // theirs and the other no page of Echo's, is watching as it is; the side it knows is watched, the other left
+        // alone (it shows as no chat, logged once).
+        if theirs.count == 1, looks.count >= 2, !looks.contains(where: { XiaoLanPanes.echoWindow($0.rows) }) {
+            if !state.oddSideLogged {
+                state.oddSideLogged = true
+                DebugLog.write("watch: one window is WeChat's or WeCom's, the other neither (nor Echo): watching the one (B26)")
+            }
+            state.frontSince = nil
+            return true
+        }
         let t = now()
         if state.frontSince == nil { state.frontSince = t }
         guard let since = state.frontSince, t - since >= (state.hopped ? 8 : 1), t - state.lastHop >= 5 else { return false }
@@ -1080,6 +1094,9 @@ extension AppModel {
             }
         }
         var own: [String] = [], unread: [String] = []
+        // 192 (O1, Echo 185 11-26: in 企微测试群 a member with the owner's name was taken for the owner and never
+        // reported): 「a group both accounts are in」, as the rule says — the other app has been in this group too
+        let shared = read.group && XiaoLanSelf.sharedGroup(name, app: app, chats: Array(state.history.keys))
         let echoes = state.echoes[key] ?? []
         var echoed = 0
         let others = fresh.filter { line in
@@ -1109,8 +1126,8 @@ extension AppModel {
                 // 183 (11-26: a tester called 蓝海乐 wrote privately to WeCom and was never answered, the owner's name):
                 // in a group both accounts are in, the name is enough; in a private chat only what the owner said on
                 // the other side is the owner's.
-                if read.group { own.append(line.sender); return false }
-                DebugLog.write("watch: \(app.rawValue): \(name): \(line.sender) has the owner's name in a private chat, not a line the owner sent: reported")
+                if shared { own.append(line.sender); return false }
+                DebugLog.write("watch: \(app.rawValue): \(name): \(line.sender) has the owner's name \(read.group ? "in a group the other account was not seen in (O1)" : "in a private chat"), not a line the owner sent: reported")
             }
             return true
         }
