@@ -376,4 +376,23 @@ import UIKit
         XCTAssertTrue(WatchOCR.bannerShown(lines))            // words alone: as before
         XCTAssertFalse(WatchOCR.bannerShown(lines, px: px))  // on my green bubble: no banner
     }
+
+    func testAWideGreenBubbleIsNoWindowBottom() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let jpeg = UIGraphicsImageRenderer(size: CGSize(width: 960, height: 1280), format: format).jpegData(withCompressionQuality: 0.95) { r in
+            let c = r.cgContext
+            c.setFillColor(red: 0.9, green: 0.47, blue: 0.63, alpha: 1); c.fill(CGRect(x: 0, y: 0, width: 960, height: 1280))  // a pink wallpaper, the Dock's colours
+            c.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            c.fill(CGRect(x: 0, y: 0, width: 456, height: 1110)); c.fill(CGRect(x: 468, y: 0, width: 492, height: 1110))
+            c.fill(CGRect(x: 0, y: 1110, width: 430, height: 40)); c.fill(CGRect(x: 494, y: 1110, width: 466, height: 40))
+            c.setFillColor(red: 149 / 255, green: 236 / 255, blue: 105 / 255, alpha: 1)
+            c.fill(CGRect(x: 40, y: 975, width: 400, height: 55))  // the server's wide green reply at 0.76
+        }
+        let px = try XCTUnwrap(WatchOCR.Pixels(jpeg))
+        let windows = XiaoLanPanes.windows(px)
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(Double(windows.first?.height ?? 0), 0.898, accuracy: 0.02)  // not 0.76: my newest line stays in
+        XCTAssertEqual(Double(windows.last?.height ?? 0), 0.898, accuracy: 0.02)
+    }
 }
