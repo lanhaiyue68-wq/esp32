@@ -1347,6 +1347,17 @@ extension AppModel {
                 }
                 guard keys == nil else { return (false, "\(appName)的系统键盘盖住了输入框，没能收起来（没有点）", nil) }
             }
+            // 189 (N31, Echo 189, 11-27 12:42 首爾: 小藍's keyboard left up over WeChat's 蓝海乐, its field under it not found,
+            // 「微信里没找到输入框」 for four replies in a row, none sent): 小藍's own keyboard up here is put down first (it may
+            // be the other window's field's), then the field is found at the bottom as ever
+            if keys == nil, keyboardBridge.onScreen() || CandidatePicker.ourKeyboardShown(rows: low) {
+                DebugLog.write("watch: \(app.rawValue): 小藍's keyboard up over \(chat) before the field's tap; put down first")
+                if await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true), await smallKeyboard(up: false, within: 1.0),
+                   let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                    (look, low) = (again, again.rows)
+                    keys = XiaoLanPanes.keyboardTop(low)
+                }
+            }
             guard let px = WatchOCR.Pixels(look.crop), var field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
                 return (false, "\(appName)里没找到输入框", nil)
             }
