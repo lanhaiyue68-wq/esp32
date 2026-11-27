@@ -165,6 +165,29 @@ import UIKit
         XCTAssertNil(XiaoLanMediaFind.linkKey("你好"))
     }
 
+    /// N29 (190): an address the chat would not open goes to Safari by x-safari-, 「www.…」 with https://; Safari is
+    /// known by the domain at the top, read loosely, and not by a chat's title.
+    func testAnUnopenedLinkGoesToSafari() throws {
+        XCTAssertEqual(XiaoLanMediaFind.safariURL("www.baidu.com")?.absoluteString, "x-safari-https://www.baidu.com")
+        XCTAssertEqual(XiaoLanMediaFind.safariURL("https://v.douyin.com/abc/")?.absoluteString, "x-safari-https://v.douyin.com/abc/")
+        XCTAssertEqual(XiaoLanMediaFind.safariURL("http://a.cn/x")?.absoluteString, "x-safari-http://a.cn/x")
+        XCTAssertNil(XiaoLanMediaFind.safariURL(""))
+        XCTAssertNil(XiaoLanMediaFind.safariURL("www.baidu.com 看看"))
+        func top(_ t: String, y: Double = 0.03) -> [[CandidatePicker.Piece]] {
+            [[CandidatePicker.Piece(text: t, box: CGRect(x: 0.4, y: y, width: 0.2, height: 0.02))]]
+        }
+        XCTAssertTrue(XiaoLanMediaFind.safariShown(top("baidu.com"), link: "www.baidu.com"))
+        XCTAssertTrue(XiaoLanMediaFind.safariShown(top("m.baidu.com"), link: "https://www.baidu.com"))
+        XCTAssertTrue(XiaoLanMediaFind.safariShown(top("baiau.com"), link: "www.baidu.com"), "a letter misread")
+        XCTAssertTrue(XiaoLanMediaFind.safariShown(top("douyin.com"), link: "https://v.douyin.com/abc/"))
+        XCTAssertFalse(XiaoLanMediaFind.safariShown(top("蓝海乐"), link: "www.baidu.com"))
+        XCTAssertFalse(XiaoLanMediaFind.safariShown(top("taobao.com"), link: "www.baidu.com"))
+        XCTAssertFalse(XiaoLanMediaFind.safariShown(top("baidu.com", y: 0.5), link: "www.baidu.com"), "not at the top")
+        XCTAssertFalse(XiaoLanMediaFind.safariShown(top("baidu.com")), "no link given: only Safari's name")
+        XCTAssertEqual(Double(try XCTUnwrap(XiaoLanMediaFind.copyItem(top("复制链接"))).x), 0.5, accuracy: 0.001)
+        XCTAssertNil(XiaoLanMediaFind.copyItem(top("百度一下")))
+    }
+
     /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
     func testAPrivateLineWithNoSenderIsItsChatsPersons() {
         XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")

@@ -244,8 +244,37 @@ enum XiaoLanMediaFind {
     }
 
     /// Safari over the whole screen: its name in the status bar, or an address bar's domain at the top.
-    static func safariShown(_ rows: [[Piece]]) -> Bool {
-        rows.joined().contains { p in Double(p.box.midY) < 0.08 && p.text.lowercased().contains("safari") }
+    /// 190 (N29): with `link` (the address Echo opened), its domain in the address bar counts too (「baidu.com」 for
+    /// 「www.baidu.com」, a letter misread or 「m.」 before it allowed).
+    static func safariShown(_ rows: [[Piece]], link: String? = nil) -> Bool {
+        // a domain as compared: no scheme, no 「www.」, nothing from its first 「/」, letters and digits only
+        func host(_ s: String) -> String {
+            var t = s.lowercased()
+            for head in ["https://", "http://", "www."] where t.hasPrefix(head) { t.removeFirst(head.count) }
+            return String(t.prefix { $0 != "/" }).filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        }
+        let key = link.flatMap { url(in: $0) }.map(host) ?? ""
+        return rows.joined().contains { p in
+            guard Double(p.box.midY) < 0.08 else { return false }
+            if p.text.lowercased().contains("safari") { return true }
+            let seen = host(p.text.trimmingCharacters(in: .whitespaces))
+            guard key.count >= 4, seen.count >= 4 else { return false }
+            return seen.contains(key) || key.hasSuffix(seen) || sameLink(key, seen)
+        }
+    }
+
+    /// 190 (N29): a copy in a long-press menu: the bubble's 「复制」, a link's own 「复制链接」/「复制网址」, or iOS's 「拷贝」.
+    static func copyItem(_ rows: [[Piece]]) -> CGPoint? {
+        button(rows, "复制链接") ?? button(rows, "复制网址") ?? menuItem(rows, "复制") ?? menuItem(rows, "拷贝")
+    }
+
+    /// 190 (N29): the address as read, opened by Echo in Safari (x-safari-, whatever the default browser): only a place
+    /// to start, the copied address is pasted over it. 「www.…」 gets https://.
+    static func safariURL(_ address: String) -> URL? {
+        let a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty, !a.contains(" ") else { return nil }
+        let full = a.lowercased().hasPrefix("http://") || a.lowercased().hasPrefix("https://") ? a : "https://" + a
+        return URL(string: "x-safari-" + full)
     }
 
     // MARK: messages with no words of their own, as lines
