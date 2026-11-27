@@ -23,6 +23,8 @@ struct PaneWatchState {
     var keyboardDown: [Int: Double] = [:]
     /// 183: the chats whose history came from an earlier launch (PaneHistory), not read since.
     var loaded: Set<String> = []
+    /// 192 (user 11-27: 「過一段時間我會問你，你也能知道」): what was seen in each chat's media ("app|chat"), by its key.
+    var mediaSeen: [String: [(key: String, seen: String)]] = [:]
     /// 183: every line's words read in each chat since the launch (XiaoLanSelf.plain), for a screen that does not go on
     /// from the history (scrolled up).
     var seen: [String: Set<String>] = [:]
@@ -217,6 +219,18 @@ extension AppModel {
         DebugLog.write("watch: no window of WeChat or WeCom on the screen for 30 s; brought back itself: no; the owner is asked")
         notifier.post(.failed, title: "小蓝看不到微信和企业微信",
                       body: "屏幕被别的 App 盖住了，小蓝用辅助触控自己切回试了 3 次没成功。请手动切回微信和企业微信左右分屏。", run: "xiaolan-watch")
+    }
+
+    /// 192 (N46, Echo 191 15:58: 蓝海乐's mark showed 「2」, not among the window's words): the number on a chat's red
+    /// mark — from the window's words, else its corner read alone four times larger (Vision on the iPad, no model).
+    func paneMarkCount(_ look: PaneLook, name: String) async -> Int? {
+        if let n = XiaoLanPanes.markCount(look.rows, name: name) { return n }
+        guard let row = XiaoLanPanes.entries(look.rows).first(where: { $0.name == name }),
+              let corner = XiaoLanPanes.cropLarger(look.crop, XiaoLanPanes.badgeArea(row.box)) else { return nil }
+        let read = await CandidatePicker.rowsOffMain(in: corner, top: 0, bottom: 1)
+        let n = read.joined().compactMap { XiaoLanPanes.markNumber($0.text) }.first
+        DebugLog.write("watch: \(name)'s red mark read alone: \(n.map { String($0) } ?? "no number") (\(read.joined().map(\.text).joined(separator: " ")))")
+        return n
     }
 
     /// 184 (C15b): the two windows brought back as by hand (XiaoLanRecall): 辅助触控's button when the Dock is not in
@@ -560,7 +574,7 @@ extension AppModel {
                 return
             }
             // 191 (user 11-27: 「一個未讀，兩個未讀…一二三四那種的」): the number on its mark, read before the row is opened
-            let markCount = XiaoLanPanes.markCount(look.rows, name: hit.name)
+            let markCount = await paneMarkCount(look, name: hit.name)
             DebugLog.write("watch: \(app.rawValue): red mark on \(hit.name)\(markCount.map { " (\($0) unread)" } ?? ""); opening it")
             guard await paneTap(hit.at, in: look.rect, tall: Self.rowTall) else { return }
             let opened = await paneLook(look.side, after: now()) { l in
@@ -1126,7 +1140,23 @@ extension AppModel {
         var jobs: [MediaJob] = []
         let kinds = messages.map { XiaoLanMediaFind.kind(of: $0.text) }
         var plain: [ReadMessage] = []
+        // 192 (N45): a line of others quoting a link, a file, a picture or a video (its grey quote under it) is a question
+        // about that message: opened, looked at, and the line reported with what was seen
+        let quotePx = WatchOCR.Pixels(look.crop)
         for (i, m) in messages.enumerated() {
+            if kinds[i] == nil, let px = quotePx,
+               let q = XiaoLanMediaFind.quoteUnder(look.rows, line: m.text,
+                                                   rank: messages[(i + 1)...].filter { $0.text == m.text }.count,
+                                                   isBox: { let k = WatchOCR.kind($0, px); return k != .theirs && k != .mine }),
+               let qk = XiaoLanMediaFind.quotedKind(q.text), MediaSettings.on(qk) {
+                DebugLog.write("watch: \(app.rawValue): \(name): 「\(m.text.prefix(20))」 quotes a \(qk.rawValue): 「\(q.text.prefix(40))」")
+                var job = MediaJob(app: app, side: look.side, chat: name, group: read.group, sender: m.sender, kind: qk,
+                                   text: q.text, atMe: m.atMe)
+                job.question = m.text
+                job.questionRank = messages[(i + 1)...].filter { $0.text == m.text }.count
+                jobs.append(job)
+                continue
+            }
             guard let kind = kinds[i], MediaSettings.on(kind) else { plain.append(m); continue }
             // 189 (N32, Echo 189, 11-27 12:58–12:59 首爾: https://www.baidu.com, opened and read, came again as
             // 「…baiau.com」 then 「…bardu.com」 — read differently each time — and was opened again and answered twice): a

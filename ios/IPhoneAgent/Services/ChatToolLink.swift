@@ -256,6 +256,18 @@ import Foundation
     }
 
     /// The QA callback's reply text, or nil when it gives none to send (an empty text means: do not reply).
+    /// 192 (N44): the words of a reported line to quote in its answer — its first line, a 「[链接]」-style tag left out
+    /// (what the chat shows is the address itself); none for a line with no words of its own (「[语音] 4"」).
+    static func quoteLine(_ text: String) -> String {
+        var first = text.components(separatedBy: .newlines).first ?? ""
+        first = first.trimmingCharacters(in: .whitespaces)
+        if first.hasPrefix("["), let close = first.firstIndex(of: "]"), first.distance(from: first.startIndex, to: close) <= 6 {
+            first = String(first[first.index(after: close)...]).trimmingCharacters(in: .whitespaces)
+        }
+        let words = first.filter { $0.isLetter }
+        return words.count >= 2 ? first : ""
+    }
+
     static func qaReply(_ data: Data) -> String? {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], (obj["code"] as? Int ?? 0) == 0,
               let info = (obj["data"] as? [String: Any])?["info"] as? [String: Any],
@@ -307,7 +319,10 @@ import Foundation
             }
             let id = Self.qaPrefix + UUID().uuidString
             let raw = Self.json(["type": Self.sendMessage, "titleList": [m.chat], "receivedContent": text]) ?? ""
-            queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date(), turn: turn)
+            // 192 (N44; user 188 「給別人回消息要引用那條消息回復」, 11-27 「你再引用我這句話回我」: the server's answers went
+            // plain): the answer quotes the line it answers
+            queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", quote: Self.quoteLine(m.text),
+                          raw: raw, app: app), now: Date(), turn: turn)
             note("↩ 伺服器回覆 · \(m.chat)")
             DebugLog.write("chattool: QA reply for \(m.chat) queued (turn \(turn.map { String($0) } ?? "-"), \(text.count) characters)")  // 189 (N16)
         } catch {

@@ -501,8 +501,30 @@ enum XiaoLanMediaFind {
     static func appOnlyPage(_ rows: [[Piece]]) -> Bool {
         rows.joined().contains { p in
             let t = p.text.filter { !$0.isWhitespace }
-            return t.contains("抱歉出错") || t.contains("请尝试在") || t.contains("内观看") || t == "打开抖音" || t == "打开快手"
+            // 192 (N39, Echo 191 15:36: Kuaishou's playable page had a 「打开快手」 button and went to ··· for it): only an
+            // error page counts, never an app's button
+            return t.contains("抱歉出错") || t.contains("请尝试在") || t.contains("内观看")
         }
+    }
+
+    /// 192 (N41, measured 11-27 15:37; user: 「可能離開微信打開第三方這種啊，你都要點取消…不點取消的話，你返回不了」):
+    /// WeChat's 「可能离开微信，打开第三方应用」 sheet (取消 / 继续), raised by a page's video at its end or by its app
+    /// button. Its 取消, where it shows.
+    static func leaveSheet(_ rows: [[Piece]]) -> CGPoint? {
+        let all = Array(rows.joined())
+        guard all.contains(where: { leaveWords($0.text) }) else { return nil }
+        return button(rows, "取消")
+    }
+    static func leaveWords(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        return t.contains("离开微信") || t.contains("打开第三方应用") || t.contains("第三方应用")
+    }
+
+    /// 192 (measured 11-27 15:45: Douyin's video in WeChat ran its 3:01 to 「去抖音重播」; Kuaishou's and Xiaohongshu's end
+    /// on the 「离开微信」 sheet): a line that says the video is over.
+    static func videoOver(_ line: String) -> Bool {
+        let t = line.filter { !$0.isWhitespace }
+        return t.contains("重播") || leaveWords(t)
     }
 
     /// 191: 「用默认浏览器打开」 in a page's ··· menu (measured 11-27: the first row's last item, its label cut by the
@@ -518,13 +540,17 @@ enum XiaoLanMediaFind {
     /// 「发弹幕」, 「App内打开」): a page with a video to start by a click on its middle; where (the window's share).
     static func pageVideoSpot(_ rows: [[Piece]]) -> CGPoint? {
         let all = Array(rows.joined())
+        // 192 (N39, measured 11-27 15:36–15:41: Kuaishou's 「打开快手，看更多精彩视频」 「分享」, Douyin's 「打开抖音看精彩视频」
+        // 「打开App」 「展开」): any of these pages, its video started by a click between its top bar and its first mark
         let marks = all.filter { p in
             let t = p.text.filter { !$0.isWhitespace }
-            return t == "关注" || t.contains("发弹幕") || t.contains("App内打开") || t.contains("xiaohongshu")
+            return t == "关注" || t == "+关注" || t == "分享" || t == "展开" || t.contains("发弹幕") || t.contains("App内打开")
+                || t.contains("打开App") || t.contains("看更多精彩视频") || t.contains("看精彩视频") || t == "打开快手"
+                || t.contains("xiaohongshu") || t.contains("kuaishou") || t.contains("chenzhongtech") || t.contains("douyin")
         }
         guard marks.count >= 2 else { return nil }
-        let bottom = all.first { $0.text.filter { !$0.isWhitespace } == "关注" }.map { Double($0.box.minY) - 0.03 } ?? 0.5
-        return CGPoint(x: 0.5, y: (0.09 + max(0.2, bottom)) / 2)
+        let below = marks.map { Double($0.box.minY) }.filter { $0 > 0.3 }.min() ?? 0.6
+        return CGPoint(x: 0.45, y: min(0.6, max(0.25, (0.15 + below) / 2)))
     }
 
     /// 191 (measured 11-27 15:18: a 视频号 card in the chat, a picture with a ▶ and its author at the bottom, 「♥露露lulu0517」;
@@ -726,6 +752,79 @@ enum XiaoLanMediaFind {
     }
 
     /// What the report says: the line as read, then what was seen. Failing, why (so the line is never lost).
+    // MARK: 192 a question quoting a message (N45)
+
+    /// 192 (N45; user 11-27: 「我引用這個抖音鏈接：『這裡面是什麼？』…你就會點開它去看…然後你再引用我這句話回我」;
+    /// measured 15:58: under 「这里面讲了什么」 a grey box 「蓝海乐：9.20复制打开抖音，看 / 看【爱折腾的JOE的作品】赢了…」, or
+    /// 「蓝海乐：📄中国经济今明两 / 年深度研判，pdf」 with a PDF mark at its right): the quote under the line of others whose
+    /// words are `line` — its words without 「name：」, and its first line's middle (a click there opens what it quotes:
+    /// a link's message to its full text, a file to its page). `isBox`: off a bubble (the quote's grey).
+    /// `rank`: which of the lines with these words, from the bottom (two 「这里面讲了什么」 asked about two messages).
+    static func quoteUnder(_ rows: [[Piece]], line: String, rank: Int = 0, isBox: (CGRect) -> Bool) -> (text: String, at: CGPoint)? {
+        let ps = pieces(rows)
+        let want = plain(line)
+        guard want.count >= 2, let top = pick(ps.filter({ p in
+            let t = plain(p.text)
+            return t.count >= 2 && !isBox(p.box) && (want.hasPrefix(t) || t.hasPrefix(want))
+        }), rank: rank) else { return nil }
+        var bottom = Double(top.box.maxY)
+        var head: Piece?
+        for p in ps where Double(p.box.minY) > Double(top.box.minY) + 0.005 && abs(Double(p.box.minX) - Double(top.box.minX)) < 0.06 {
+            if Double(p.box.minY) - bottom > 0.05 { break }
+            if isBox(p.box) {
+                if quoteHead(p.text) { head = p }
+                break
+            }
+            bottom = Double(p.box.maxY)  // another line of the bubble
+        }
+        guard let head else { return nil }
+        var text = head.text, last = head
+        for p in ps where Double(p.box.minY) > Double(head.box.maxY) - 0.004 {
+            if Double(p.box.minY) - Double(last.box.maxY) > 0.012 { break }
+            guard abs(Double(p.box.minX) - Double(head.box.minX)) < 0.04, isBox(p.box) else { continue }  // 「PDF」 beside it
+            text += p.text
+            last = p
+        }
+        guard let colon = text.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
+        let body = String(text[text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        return body.isEmpty ? nil : (body, CGPoint(x: Double(head.box.midX), y: Double(head.box.midY)))
+    }
+
+    /// A quote's first line: 「name：…」, the name 1–20 long.
+    static func quoteHead(_ text: String) -> Bool {
+        guard let i = text.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return false }
+        return (1...20).contains(text.distance(from: text.startIndex, to: i)) && !text.hasPrefix("http")
+    }
+
+    /// What a quote quotes: a kind of message read by opening it; a file's name read loosely (「研判，pdf」, 「研判 .pdf」).
+    static func quotedKind(_ text: String) -> Kind? {
+        if let k = kind(of: text) { return k }
+        let t = text.lowercased().filter { !$0.isWhitespace }
+        for ext in fileExtensions where t.count > ext.count + 1 && t.hasSuffix(ext) {
+            if let c = t.dropLast(ext.count).last, ".，,。".contains(c) { return .file }
+        }
+        return nil
+    }
+
+    /// 192 (user 11-27: 「別人發了一個…我一時半會兒沒問你…過一段時間我會問你，你也能知道」): what a message is known by
+    /// in a chat's memory of what was seen — its address, its file's name, else its first words.
+    static func memoryKey(_ text: String) -> String {
+        if let k = linkKey(text) { return k }
+        if let f = fileName(text) { return plain(f.lowercased()) }
+        return String(plain(text.lowercased()).prefix(12))
+    }
+    static func sameMemory(_ a: String, _ b: String) -> Bool {
+        a == b || (a.count >= 8 && b.count >= 8 && (a.hasPrefix(b) || b.hasPrefix(a) || sameLink(a, b)))
+    }
+
+    /// The question reported with what it quotes and what was seen in it (or why not).
+    static func quotedReport(question: String, quoted: String, kind: Kind, seen: String?, failed: String?) -> String {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let what = "引用的\(label(kind))：\(quoted)"
+        if let seen, !seen.isEmpty { return "\(q)\n（\(what)；小蓝看了：\(seen)）" }
+        return "\(q)\n（\(what)；小蓝没能打开看：\(failed ?? "原因不明")）"
+    }
+
     static func report(_ line: String, kind: Kind, seen: String?, failed: String?) -> String {
         let head = line.trimmingCharacters(in: .whitespacesAndNewlines)
         let mark = "[\(label(kind))]"

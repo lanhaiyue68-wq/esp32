@@ -263,6 +263,58 @@ import UIKit
         XCTAssertEqual(XiaoLanPanes.markCount(many, name: "蓝海乐"), 99)
     }
 
+    /// N45 (192): two 「这里面讲了什么」, each quoting a message (rows as read at 15:58, screen fractions): each finds its
+    /// own quote; a link share and a file read loosely 「，pdf」 are known by kind; the report carries what was seen.
+    func testAQuestionQuotingAMessage() throws {
+        func p(_ t: String, _ x: Double, _ y: Double, _ w: Double = 0.3) -> [CandidatePicker.Piece] {
+            [CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: 0.02))]
+        }
+        let rows = [p("9.20复制打开抖音，看看", 0.1, 0.3), p("【爱折腾的JOE的作品.更多", 0.1, 0.323),
+                    p("这里面讲了什么", 0.1, 0.48, 0.17), p("蓝海乐：9.20复制打开抖音，看", 0.1, 0.525), p("看【爱折腾昀JOE昀作品】赢了…", 0.1, 0.542),
+                    p("这里面讲了什么", 0.1, 0.594, 0.17), p("蓝海乐：山中国经济今明两", 0.1, 0.634, 0.24), p("PDF", 0.35, 0.646, 0.03),
+                    p("年深度研判，pdf", 0.1, 0.654, 0.15)]
+        let box: (CGRect) -> Bool = { $0.minY > 0.52 && $0.minY < 0.56 || $0.minY > 0.63 && $0.minY < 0.67 }  // the two quotes' grey
+        let second = try XCTUnwrap(XiaoLanMediaFind.quoteUnder(rows, line: "这里面讲了什么", rank: 0, isBox: box))
+        XCTAssertEqual(second.text, "山中国经济今明两年深度研判，pdf")
+        XCTAssertEqual(XiaoLanMediaFind.quotedKind(second.text), .file)
+        let first = try XCTUnwrap(XiaoLanMediaFind.quoteUnder(rows, line: "这里面讲了什么", rank: 1, isBox: box))
+        XCTAssertTrue(first.text.hasPrefix("9.20复制打开抖音"))
+        XCTAssertEqual(XiaoLanMediaFind.quotedKind(first.text), .link)
+        XCTAssertEqual(Double(first.at.y), 0.535, accuracy: 0.001)
+        XCTAssertNil(XiaoLanMediaFind.quoteUnder(rows, line: "9.20复制打开抖音，看看", isBox: box), "a share has no quote under it")
+        XCTAssertFalse(XiaoLanMediaFind.quoteHead("https://v.douyin.com/x"))
+        let report = XiaoLanMediaFind.quotedReport(question: "这里面讲了什么", quoted: second.text, kind: .file, seen: "内容：经济增速", failed: nil)
+        XCTAssertEqual(report, "这里面讲了什么\n（引用的文件：山中国经济今明两年深度研判，pdf；小蓝看了：内容：经济增速）")
+        XCTAssertEqual(ChatToolLink.quoteLine(report), "这里面讲了什么", "the answer quotes the question")
+        XCTAssertEqual(ChatToolLink.quoteLine("[链接] https://v.douyin.com/abc/\n网页：…"), "https://v.douyin.com/abc/")
+        XCTAssertEqual(ChatToolLink.quoteLine("[语音] 4\"\n语音转文字：多少钱"), "", "no words of its own to quote")
+        XCTAssertTrue(XiaoLanMediaFind.sameMemory(XiaoLanMediaFind.memoryKey("https://v.douyin.com/y2OT5I9zhXI/"),
+                                                  XiaoLanMediaFind.memoryKey("看 https://v.douyin.com/y2OT5l9zhXI/ :0pm")))
+    }
+
+    /// 192 (N39–N41, N46): Kuaishou's playable page is no error page and has a video to start; WeChat's leave sheet is
+    /// cancelled; 「重播」 or that sheet end a video; a mark's number read alone.
+    func testPlayablePagesTheLeaveSheetAndAMarksNumber() throws {
+        func p(_ t: String, _ y: Double, x: Double = 0.1) -> [CandidatePicker.Piece] {
+            [CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: 0.3, height: 0.02))]
+        }
+        let kuaishou = [p("快手", 0.05), p("v.m.chenzhongtech.com", 0.07), p("分享", 0.65, x: 0.85), p("@宝红", 0.83),
+                        p("打开快手，看更多精彩视频", 0.9), p("打开快手", 0.93, x: 0.85)]
+        XCTAssertFalse(XiaoLanMediaFind.appOnlyPage(kuaishou))
+        let play = try XCTUnwrap(XiaoLanMediaFind.pageVideoSpot(kuaishou))
+        XCTAssertTrue((0.25...0.6).contains(Double(play.y)))
+        let sheet = [p("可能离开微信，打开第三方应用", 0.45), [CandidatePicker.Piece(text: "取消", box: CGRect(x: 0.25, y: 0.55, width: 0.08, height: 0.02)),
+                                                     CandidatePicker.Piece(text: "继续", box: CGRect(x: 0.65, y: 0.55, width: 0.08, height: 0.02))]]
+        XCTAssertNotNil(XiaoLanMediaFind.leaveSheet(sheet))
+        XCTAssertNil(XiaoLanMediaFind.leaveSheet([p("取消", 0.6)]), "a 取消 alone is no leave sheet")
+        XCTAssertTrue(XiaoLanMediaFind.videoOver("去抖音重播"))
+        XCTAssertTrue(XiaoLanMediaFind.videoOver("可能离开微信，打开第三方应用"))
+        XCTAssertFalse(XiaoLanMediaFind.videoOver("没有任何一家公司可以像"))
+        XCTAssertEqual(XiaoLanPanes.markNumber("2"), 2)
+        XCTAssertEqual(XiaoLanPanes.markNumber("99+"), 99)
+        XCTAssertNil(XiaoLanPanes.markNumber("蓝海乐"))
+    }
+
     /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
     func testAPrivateLineWithNoSenderIsItsChatsPersons() {
         XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")

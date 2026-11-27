@@ -147,6 +147,20 @@ import UIKit
         return UIImage(cgImage: part).jpegData(compressionQuality: 0.92)
     }
 
+    /// 192 (N46): a part of a picture, made `scale` times larger, on white (small words read better that way).
+    static func cropLarger(_ jpeg: Data, _ r: CGRect, scale: CGFloat = 4) -> Data? {
+        guard let part = crop(jpeg, r), let image = UIImage(data: part) else { return nil }
+        let size = CGSize(width: image.size.width * scale + 40, height: image.size.height * scale + 40)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let large = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(x: 20, y: 20, width: image.size.width * scale, height: image.size.height * scale))
+        }
+        return large.jpegData(compressionQuality: 0.92)
+    }
+
     /// A point in a window (its fractions) on the whole screen.
     static func onScreen(_ p: CGPoint, in r: CGRect) -> CGPoint {
         CGPoint(x: r.minX + p.x * r.width, y: r.minY + p.y * r.height)
@@ -474,11 +488,17 @@ import UIKit
         guard let row = entries(rows).first(where: { $0.name == name }) else { return nil }
         let area = badgeArea(row.box).insetBy(dx: -0.01, dy: -0.01)
         for p in rows.joined() where area.contains(CGPoint(x: p.box.midX, y: p.box.midY)) {
-            let t = p.text.filter { !$0.isWhitespace }
-            let digits = t.hasSuffix("+") ? String(t.dropLast()) : t
-            if !digits.isEmpty, digits.count <= 3, digits.allSatisfy(\.isASCII), let n = Int(digits), n > 0 { return n }
+            if let n = markNumber(p.text) { return n }
         }
         return nil
+    }
+
+    /// A mark's number as read: 「4」, 「99+」 (99); nil for anything else.
+    static func markNumber(_ text: String) -> Int? {
+        let t = text.filter { !$0.isWhitespace }
+        let digits = t.hasSuffix("+") ? String(t.dropLast()) : t
+        guard !digits.isEmpty, digits.count <= 3, digits.allSatisfy(\.isASCII), let n = Int(digits), n > 0 else { return nil }
+        return n
     }
 
     /// The chats with a red mark, top first (fractions of the window): the row to tap.

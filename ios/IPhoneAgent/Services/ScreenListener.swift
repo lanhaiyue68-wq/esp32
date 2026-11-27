@@ -150,14 +150,17 @@ private final class Transcript: @unchecked Sendable {
     }
 
     /// Subtitles in the order they showed, each once (a subtitle stays up for several frames, a caption for all).
+    /// 192 (N42, Echo 191 11-27: a page's own words, the same every second, came back 255 times): each line once.
     static func merge(_ seen: [String], _ line: String) -> [String] {
-        guard subtitle(line), !seen.suffix(8).contains(line) else { return seen }
+        guard subtitle(line), !seen.contains(line) else { return seen }
         return seen + [line]
     }
 
     /// What plays for `seconds`: the screen's audio turned to text (Mandarin, on the phone where it can), in segments of
     /// under a minute, and the subtitles read off the frames once a second.
-    static func listen(seconds: Double, frame: () -> Data?) async -> String {
+    /// 192: `ended`, a line read on the frame that says the video is over (Douyin's 「重播」, the 「离开微信」 sheet that
+    /// Kuaishou and Xiaohongshu raise at their end): the listen stops there.
+    static func listen(seconds: Double, frame: () -> Data?, ended: ((String) -> Bool)? = nil) async -> String {
         let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
         let canSpeak = authorized && (recognizer?.isAvailable ?? false)
         var spoken: [String] = []
@@ -174,7 +177,8 @@ private final class Transcript: @unchecked Sendable {
         // 134 (11-15): every listen tried the phone first and lost its first second and those words; once seen, the
         // server is used from the start until the app restarts.
         var onPhone = !Self.phoneRecognitionOff
-        while Date() < end, !Task.isCancelled {
+        var over = false
+        while Date() < end, !Task.isCancelled, !over {
             // One segment: a request of its own (a recognition off the phone stops at about a minute).
             let segmentEnd = min(end, Date().addingTimeInterval(55))
             var request: SFSpeechAudioBufferRecognitionRequest?
@@ -193,10 +197,12 @@ private final class Transcript: @unchecked Sendable {
                 _ = ScreenAudio.shared.takeCount()
                 ScreenAudio.shared.attach(r)
             }
-            while Date() < segmentEnd, !Task.isCancelled {
+            while Date() < segmentEnd, !Task.isCancelled, !over {
                 if let shown = frame() {
-                    for row in await CandidatePicker.rowsOffMain(in: shown, top: 0.45, bottom: 0.93) {
-                        subtitles = merge(subtitles, row.map(\.text).joined())
+                    for row in await CandidatePicker.rowsOffMain(in: shown, top: 0.3, bottom: 0.93) {
+                        let line = row.map(\.text).joined()
+                        if let ended, ended(line) { over = true }
+                        if row.first.map({ Double($0.box.midY) >= 0.45 }) ?? false { subtitles = merge(subtitles, line) }
                     }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

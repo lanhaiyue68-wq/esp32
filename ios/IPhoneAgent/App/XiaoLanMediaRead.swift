@@ -14,6 +14,10 @@ struct MediaJob {
     var atMe: Bool
     /// Which of its kind on the window, from the bottom (0: the newest), when several came together.
     var rank = 0
+    /// 192 (N45): a line of others quoting this message (「这里面讲了什么」), answered with what is seen in it; which of
+    /// the lines with those words, from the bottom.
+    var question = ""
+    var questionRank = 0
 }
 
 /// Frames grabbed while a video plays (main actor only).
@@ -34,7 +38,18 @@ extension AppModel {
         for job in jobs {
             let began = now()
             watchStatus = "看\(XiaoLanMediaFind.label(job.kind))：\(job.chat)…"
-            let got = await paneMedia(job)
+            // 192 (user 11-27: 「別人發了一個…過一段時間我會問你，你也能知道」): what was seen in a message is kept per chat;
+            // a question quoting one already seen is answered from it, nothing opened again
+            let memory = "\(job.app.rawValue)|\(job.chat)"
+            let key = XiaoLanMediaFind.memoryKey(job.text)
+            let known = job.question.isEmpty ? nil : state.mediaSeen[memory]?.last(where: { XiaoLanMediaFind.sameMemory($0.key, key) })
+            if known != nil { DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the quoted \(job.kind.rawValue) was seen before; answered from it") }
+            let got: (seen: String?, why: String?)
+            if let known { got = (known.seen, nil) } else { got = await paneMedia(job) }
+            if known == nil, let seen = got.seen {
+                state.mediaSeen[memory, default: []].append((key: key, seen: seen))
+                if (state.mediaSeen[memory]?.count ?? 0) > 30 { state.mediaSeen[memory]?.removeFirst() }
+            }
             // 188 (大藍's joinVoiceText): the words a voice note was turned into show as a line under it next time:
             // kept, so that line is not a new message
             let said = "语音转文字："
@@ -49,7 +64,8 @@ extension AppModel {
                     continue
                 }
             }
-            let text = XiaoLanMediaFind.report(job.text, kind: job.kind, seen: got.seen, failed: got.why)
+            let text = job.question.isEmpty ? XiaoLanMediaFind.report(job.text, kind: job.kind, seen: got.seen, failed: got.why)
+                : XiaoLanMediaFind.quotedReport(question: job.question, quoted: job.text, kind: job.kind, seen: got.seen, failed: got.why)
             let message = ReadMessage(chat: job.chat, group: job.group, sender: job.sender, text: text, atMe: job.atMe)
             ReadLog.append([message])
             watchRead += 1
@@ -63,6 +79,7 @@ extension AppModel {
         guard var look = await paneMediaChat(job) else { return (nil, "「\(job.chat)」已经不在窗口里") }
         // 191 (N29; Echo 191 15:25): 小藍's keyboard down first, the chat looked at again once it settles (every kind)
         if await paneMediaKeyboardDown(job), let again = await paneMediaChat(job, after: now()) { look = again }
+        if !job.question.isEmpty { return await paneMediaQuoted(job, look) }
         switch job.kind {
         case .voice: return await paneMediaVoice(job, look)
         case .video: return await paneMediaVideo(job, look)
@@ -342,8 +359,9 @@ extension AppModel {
     /// WeCom: the card opens a preview on the window, 「关闭」 at its top left. WeChat: the file's page (预览, 下载) →
     /// 预览 → a sheet rising, whose ∨ at the top left once makes it the whole page; two backs to the chat. The words
     /// read off the page (OCR) are its content.
-    private func paneMediaFile(_ job: MediaJob, _ look: PaneLook) async -> (seen: String?, why: String?) {
-        guard let card = XiaoLanMediaFind.fileCard(look.rows, hint: job.text) else { return (nil, "没找到文件卡片") }
+    /// 192 (N45): `at`, a quote of the file to click instead of its card (measured 11-27 16:00: the same page opens).
+    private func paneMediaFile(_ job: MediaJob, _ look: PaneLook, at: CGPoint? = nil) async -> (seen: String?, why: String?) {
+        guard let card = at ?? XiaoLanMediaFind.fileCard(look.rows, hint: job.text) else { return (nil, "没找到文件卡片") }
         guard await paneTap(card, in: look.rect, wide: 0.1, tall: 0.01) else { return (nil, "文件没点到") }
         var words = ""
         let width = Double(look.rect.width)
@@ -403,6 +421,36 @@ extension AppModel {
         return ("\(named)内容：\(words)", nil)
     }
 
+    /// 192 (N45, measured 11-27 15:59–16:00): the quote under the question clicked opens what it quotes — a link's
+    /// message to its full text (as 「更多」 does: its blue address clicked there), a file to its page (预览, 下载),
+    /// anything else to its own viewer — read as that message would be, then back on the chat.
+    private func paneMediaQuoted(_ job: MediaJob, _ look: PaneLook) async -> (seen: String?, why: String?) {
+        let px = WatchOCR.Pixels(look.crop)
+        guard let q = XiaoLanMediaFind.quoteUnder(look.rows, line: job.question, rank: job.questionRank, isBox: { box in
+            guard let px else { return false }
+            let k = WatchOCR.kind(box, px)
+            return k != .theirs && k != .mine
+        }) else { return (nil, "没在聊天里找到这句引用的那条") }
+        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 「\(job.question.prefix(20))」 quotes a \(job.kind.rawValue) 「\(q.text.prefix(30))」; its quote clicked")
+        let r: (seen: String?, why: String?)
+        switch job.kind {
+        case .link:
+            r = await paneMediaFolded(job, look, more: q.at, url: XiaoLanMediaFind.url(in: job.text) ?? "")
+        case .file:
+            r = await paneMediaFile(job, look, at: q.at)
+        case .voice:  // a voice note is never played (user's rule): only what was seen of it before can answer
+            return (nil, "引用的是语音，之前没转过文字，不点开播放")
+        default:
+            guard await paneTap(q.at, in: look.rect, wide: 0.05, tall: 0.008),
+                  let opened = await paneLook(job.side, after: now(), tries: 6, until: { !self.isJobChat($0, job) }), !isJobChat(opened, job) else {
+                return (nil, "点了引用，没有打开")
+            }
+            r = await paneMediaPage(job, opened, url: "")
+        }
+        await paneMediaEnsureChat(job)
+        return r
+    }
+
     /// The address's own line clicked: the app's browser over the chat; its words and a look by the model, then back
     /// (up to three backs). 191 (Echo 190, 11-27 首爾 15:06–15:18, the owner's four shares measured by hand):
     /// - N29: 小藍's keyboard left up after a reply took the link's first click (the second opened it): put down first,
@@ -419,6 +467,8 @@ extension AppModel {
             return (nil, "没在聊天里找到网址")
         }
         let url = XiaoLanMediaFind.url(in: job.text) ?? XiaoLanMediaFind.url(in: piece.text) ?? ""
+        // 192 (N38 still, Echo 191 15:38: Douyin's job clicked Kuaishou's line; the same rows matched right off the device)
+        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the link's line 「\(piece.text)」 of \(XiaoLanMediaFind.linkSpots(chat.rows).map { "「\($0.text)」" }.joined()) for 「\(job.text.prefix(60))」")
         if let more = XiaoLanMediaFind.moreSpot(chat.rows, from: piece) {
             let r = await paneMediaFolded(job, chat, more: more, url: url)
             await paneMediaEnsureChat(job)
@@ -516,7 +566,11 @@ extension AppModel {
     /// A link's page opened over the chat: read (WeChat's blocked or app-only page: in Safari), then back.
     private func paneMediaPage(_ job: MediaJob, _ page: PaneLook, url: String) async -> (seen: String?, why: String?) {
         try? await Task.sleep(nanoseconds: 2_500_000_000)  // the page loads
-        let shown = await paneLooks(after: now(), side: job.side).first { $0.side == job.side } ?? page
+        var shown = await paneLooks(after: now(), side: job.side).first { $0.side == job.side } ?? page
+        // 192 (N41; user 11-27: 「可能離開微信打開第三方這種…你都要點取消」): that sheet first
+        if await paneMediaCancelLeave(job), let again = await paneLooks(after: now(), side: job.side).first(where: { $0.side == job.side }) {
+            shown = again
+        }
         // 188 (user 11-27: 「出現現在這個畫面就複製下來去瀏覽器看」): WeChat would not open it → Safari
         if job.app == .wechat, XiaoLanMediaFind.linkBlocked(shown.rows) {
             return await paneMediaSafari(job, shown, url: url)
@@ -528,13 +582,15 @@ extension AppModel {
         let words = XiaoLanMediaFind.pageText(shown.rows, from: 0.04, most: 500)
         var parts: [String] = []
         var frames = [shown.crop]
-        // 191 (user 11-27: 「中間有一個那個播放的按鈕，你點一下它就可以播放」)
+        // 191 (user 11-27: 「中間有一個那個播放的按鈕，你點一下它就可以播放」); 192 (user: 「你試試能不能播放完」; Douyin's
+        // 3:01 ran to its end in WeChat, 11-27 15:45): watched to its end (「重播」 or the 「离开微信」 sheet), 3 min at most
         if let spot = XiaoLanMediaFind.pageVideoSpot(shown.rows) {
             _ = await paneTap(spot, in: shown.rect, wide: 0.05, tall: 0.03)
-            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a video on the page; played, watched and listened to for \(XiaoLanMediaFind.pageVideoMost) s")
-            let watched = await paneMediaWatch(rect: shown.rect, seconds: XiaoLanMediaFind.pageVideoMost)
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a video on the page; played, watched and listened to until it ends")
+            let watched = await paneMediaWatch(rect: shown.rect, seconds: XiaoLanMediaFind.videoMost, ended: XiaoLanMediaFind.videoOver)
             frames += watched.frames
             if !watched.heard.isEmpty { parts.append("视频说了：\(watched.heard)") }
+            _ = await paneMediaCancelLeave(job)  // the sheet its end raised
         }
         let saw = await paneMediaLook(frames, ask: "这是聊天里点开的链接网页（\(url)）的截图（有视频时是播放中按时间先后的几张），说明网页的标题和主要内容。")
         await paneMediaBack(job)
@@ -546,7 +602,8 @@ extension AppModel {
 
     /// Watched and listened to for `seconds`: the sound and subtitles to text (ScreenListener), two frames of `rect` on
     /// the way.
-    private func paneMediaWatch(rect: CGRect, seconds: Int) async -> (heard: String, frames: [Data]) {
+    /// 192 (N42): only this window's picture is listened to (its subtitles), until `ended` says the video is over.
+    private func paneMediaWatch(rect: CGRect, seconds: Int, ended: ((String) -> Bool)? = nil) async -> (heard: String, frames: [Data]) {
         let box = FrameBox()
         let grab = Task { @MainActor [weak self] in
             for k in 1...2 {
@@ -555,18 +612,31 @@ extension AppModel {
                 box.frames.append(crop)
             }
         }
-        let heard = await ScreenListener.listen(seconds: Double(seconds), frame: { self.feed.frame })
+        let heard = await ScreenListener.listen(seconds: Double(seconds), frame: { self.feed.frame.flatMap { XiaoLanPanes.crop($0, rect) } },
+                                                ended: ended)
         grab.cancel()
         return (heard.trimmingCharacters(in: .whitespacesAndNewlines), box.frames)
+    }
+
+    /// 192 (N41): WeChat's 「可能离开微信，打开第三方应用」 sheet on the job's window: its 取消 (never 继续: Kuaishou's
+    /// went to a page to download the app, 11-27 15:37). True when one was there.
+    private func paneMediaCancelLeave(_ job: MediaJob) async -> Bool {
+        guard let l = await paneLooks(after: now(), side: job.side).first(where: { $0.side == job.side }),
+              let cancel = XiaoLanMediaFind.leaveSheet(l.rows) else { return false }
+        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 「离开微信，打开第三方应用」; 取消")
+        _ = await paneTap(cancel, in: l.rect, wide: 0.04, tall: 0.012)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        return true
     }
 
     /// 191 (measured 11-27 15:12, Douyin's 「抱歉出错了」 page): its ··· at the window's top right; 「用默认浏览器打开」 at
     /// the end of the menu's first row, its label cut by the window's edge, its icon over it; Safari over the whole
     /// screen ~5 s after, the page there with its player (「00:00 / 03:01」). Read there (paneSafariRead).
     private func paneMediaDefaultBrowser(_ job: MediaJob, _ page: PaneLook, url: String) async -> (seen: String?, why: String?) {
-        let title = page.rows.joined().filter { Double($0.box.midY) < 0.09 }.min { $0.box.midY < $1.box.midY }
-        let dots = CGPoint(x: 0.93, y: title.map { Double($0.box.midY) } ?? 0.06)
-        guard await paneTap(dots, in: page.rect, wide: 0.01, tall: 0.006),
+        // 192 (N40, Echo 191 15:35: the status bar's words, at the window's very top, were taken for the title and 0.016
+        // was clicked, unseen, nothing): level with the back arrow, as wide as the ··· button
+        let dots = CGPoint(x: 0.93, y: Double(XiaoLanPanes.back.y))
+        guard await paneTap(dots, in: page.rect, wide: 0.05, tall: 0.02),
               let menu = await paneLook(job.side, after: now(), tries: 5, until: { XiaoLanMediaFind.defaultBrowserItem($0.rows) != nil }),
               let item = XiaoLanMediaFind.defaultBrowserItem(menu.rows) else {
             await paneMediaCancelSheet(job)
