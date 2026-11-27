@@ -510,6 +510,9 @@ import Foundation
         guard let span else { throw DeviceError(message: "pointer not calibrated") }
         let unseenClicks = !required || trusted
         aimSaw = false
+        seenOff = nil
+        let hop = hopFromSeen
+        hopFromSeen = nil
         guard var found = try await find(x, y) else {
             guard unseenClicks else {
                 log(String(format: "aim (%.3f, %.3f): pointer not found", x, y))
@@ -590,6 +593,12 @@ import Foundation
                 found = p
                 continue
             }
+            // 189 (N12): the caller hops from a stop seen near the target; no correction toward the screen's corner here
+            if let hop, abs(error(fx, x)) <= hop, abs(error(fy, y)) <= hop {
+                log(String(format: "aim (%.3f, %.3f): seen at (%.3f, %.3f), near it; the caller hops from there", x, y, fx, fy))
+                seenOff = found
+                return
+            }
             let mx = Int((error(fx, x) * gain.w).rounded(.toNearestOrEven)), my = Int((error(fy, y) * gain.h).rounded(.toNearestOrEven))
             // 188 (B44): 187 corrected here without a word, and its log read "straight to the arrow" though it had stopped
             log(String(format: "aim (%.3f, %.3f): seen at (%.3f, %.3f), off by more than (±%.3f, ±%.3f); correcting by %ld, %ld units",
@@ -619,6 +628,13 @@ import Foundation
     /// 181: the last aim saw the pointer on its target (not clicked at an estimate). 小藍's back arrow by a window's top
     /// is clicked only by a short hop from a spot where the pointer was seen like this.
     private(set) var aimSaw = false
+    /// 189 (N12, Echo 188, 11-27 11:36: aiming at WeChat's back arrow (0.029, 0.044) by the screen's top-left corner, the
+    /// first stop was seen at (0.069, 0.122) and corrected toward the corner, where it was lost; the back took ~16 s, the
+    /// short hop from a seen spot working every time): a caller that hops from where the pointer is seen sets this, the
+    /// hop's longest leg (screen fractions; one aim only). A first stop seen off the target within it is left there,
+    /// `seenOff`, for the caller's hop (one curve and one hop, no stop on the way).
+    var hopFromSeen: Double?
+    var seenOff: CGPoint?
 
     private func find(_ x: Double, _ y: Double) async throws -> CGPoint? {
         if let finder { return try await finder(x, y) }

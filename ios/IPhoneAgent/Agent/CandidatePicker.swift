@@ -360,8 +360,76 @@ enum CandidatePicker {
                 i = next
             }
             let pieces = split(chars)
+            // 189 (N17): one piece of Chinese narrower in words than in width is read once more on its own
+            if pieces.count == 1, let again = reread(crop, box: observation.boundingBox, read: s) {
+                return [Piece(text: again, box: pieces[0].box)]
+            }
             return pieces.isEmpty ? nil : pieces
         }
+    }
+
+    /// 189 (N17, Echo 188, 11-27 11:37 首爾: 「好的嗎」 in plain view, its box three characters wide, was read 「好嗎」 and
+    /// answered so; its list preview read 「好昀嗎」): a line of Chinese characters (no space in it) whose box is wider
+    /// than what was read by most of a character is read again on its own at twice the size, Traditional Chinese allowed
+    /// too. The new reading is taken only when it keeps every character read, in order, adds what was missing, and fits
+    /// the box; otherwise nil (the first reading stands). A Chinese character is about as wide as its line is tall
+    /// (measured 11-27: 0.90–0.96 of the box's height per character).
+    static func reread(_ crop: CGImage, box: CGRect, read s: String) -> String? {
+        let chars = Array(s.filter { !$0.isWhitespace })
+        guard (1...16).contains(chars.count), chars.count == s.count, chars.allSatisfy(isWide) else { return nil }
+        let cw = Double(crop.width), ch = Double(crop.height)
+        let w = Double(box.width) * cw, h = Double(box.height) * ch
+        guard h >= 6 else { return nil }
+        let fits = w / (h * 0.92)
+        guard fits - Double(chars.count) >= 0.75 else { return nil }
+        let pad = h * 0.4, padUp = h * 0.25  // little above and under: no part of the lines around it
+        let rect = CGRect(x: Double(box.minX) * cw - pad, y: (1 - Double(box.maxY)) * ch - padUp, width: w + 2 * pad, height: h + 2 * padUp)
+            .integral.intersection(CGRect(x: 0, y: 0, width: cw, height: ch))
+        guard rect.width > 4, rect.height > 4, let piece = crop.cropping(to: rect), let big = twice(piece) else { return nil }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = rereadLanguages
+        request.usesLanguageCorrection = false
+        do { try VNImageRequestHandler(cgImage: big, options: [:]).perform([request]) } catch { return nil }
+        // the line itself: the biggest text found there (a sliver of a line around it reads as a small one)
+        let line = (request.results ?? []).max { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }
+        guard let text = line?.topCandidates(1).first?.string else { return nil }
+        let again = Array(text.filter { !$0.isWhitespace })
+        guard again.count > chars.count, Double(again.count) <= fits + 0.6, keepsInOrder(chars, again) else { return nil }
+        return String(again)
+    }
+
+    /// Simplified first (the customers' and the apps' words), Traditional too, then English; only what this iOS reads.
+    static let rereadLanguages: [String] = {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        let have = Set((try? request.supportedRecognitionLanguages()) ?? [])
+        let want = ["zh-Hans", "zh-Hant", "en-US"].filter { have.contains($0) }
+        return want.isEmpty ? ["zh-Hans", "en-US"] : want
+    }()
+
+    /// A Chinese character or full-width punctuation (as wide as the line is tall).
+    static func isWide(_ c: Character) -> Bool {
+        c.unicodeScalars.allSatisfy { u in
+            (0x4E00...0x9FFF).contains(u.value) || (0x3400...0x4DBF).contains(u.value) || (0xF900...0xFAFF).contains(u.value)
+                || (0x3000...0x303F).contains(u.value) || (0xFF01...0xFF5E).contains(u.value)
+        }
+    }
+
+    /// Every character of `a`, in order, in `b`.
+    static func keepsInOrder(_ a: [Character], _ b: [Character]) -> Bool {
+        var i = 0
+        for c in b where i < a.count && c == a[i] { i += 1 }
+        return i == a.count
+    }
+
+    static func twice(_ image: CGImage) -> CGImage? {
+        let w = image.width * 2, h = image.height * 2
+        guard let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return context.makeImage()
     }
 }
 

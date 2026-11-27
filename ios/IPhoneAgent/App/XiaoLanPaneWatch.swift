@@ -52,6 +52,15 @@ struct PaneWatchState {
     /// 188 (大藍's missedLine): when each chat was left for the list, and the list preview already opened again for.
     var leftAt: [String: Double] = [:]
     var missedOpened: [String: String] = [:]
+    /// 189 (N16): texts typed by 小藍 so far (an order failed with this unchanged typed nothing), and the orders
+    /// already sent once more.
+    var typed = 0
+    var retried: Set<String> = []
+    /// 189 (speed): where the input field is in the window whose line waits for its QA reply (the pointer goes there
+    /// meanwhile, no click).
+    var replyField: (side: Int, at: CGPoint)?
+    /// 189 (speed): the window as it showed my line just sent, while the next order is for the same chat (no new look).
+    var lastShown: (app: XiaoLanOrders.App, chat: String, look: AppModel.PaneLook, at: Double)?
 }
 
 @MainActor private var paneHeldTurn = 0
@@ -77,6 +86,18 @@ extension AppModel {
             // 回了，然後再去點啟微的…反過來也是一樣的"): while a line just read waits for its QA reply (15 s at most), nothing
             // else is looked at; its chat stays open and the reply, an order, goes in first.
             if repliesComing {
+                // 189 (speed; user 11-27 「還有辦法壓縮時間嗎」): while the server thinks, the pointer goes to the field the
+                // reply is typed in (no click): the send's own move is then a few units, ~1 s off each reply
+                if let f = state.replyField {
+                    state.replyField = nil
+                    do {
+                        try await pointer.point(Double(f.at.x), Double(f.at.y), aim: false, rehome: false)
+                        DebugLog.write(String(format: "watch: a reply on its way; the pointer at the field (%.3f, %.3f) meanwhile", f.at.x, f.at.y))
+                    } catch {
+                        DebugLog.write("watch: the pointer not moved to the field: \(error.localizedDescription)")
+                    }
+                    continue
+                }
                 // 188: the marks that come meanwhile are noted (not opened), so they go in the order they came
                 if now() - state.lastMarkNote > 1.0, board.connected, feed.watchable {
                     state.lastMarkNote = now()
@@ -221,6 +242,8 @@ extension AppModel {
         guard let wechat = await dock().wechat ?? icons.wechat else { log("WeChat's icon not seen in the Dock"); return false }
         log(String(format: "the Dock's WeChat at (%.3f, %.3f)", wechat.x, wechat.y))
         guard await paneSeenTap(wechat, half: (0.03, 0.025)) else { log("WeChat's icon not clicked"); return false }
+        // 189 (N14): the pointer off the Dock (no click), so it does not stay up over the windows' bottoms
+        try? await pointer.point(0.5, 0.45, aim: false, rehome: false)
         try? await Task.sleep(nanoseconds: 1_200_000_000)
         let told = Set(await paneLooks(after: now()).compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
         let back = told.contains(.wechat) && told.contains(.wework)
@@ -318,6 +341,7 @@ extension AppModel {
             return false
         }
         var seen = pointer.aimSaw
+        if !seen, pointer.seenOff != nil { return false }  // 189 (N12): the caller hops from where it was seen
         if !seen, let p = try? await pointer.lookFor(Double(s.x), Double(s.y)),
            abs(Double(p.x - s.x)) <= max(half.x, 0.008), abs(Double(p.y - s.y)) <= max(half.y, 0.008) {
             DebugLog.write(String(format: "watch: tap at (%@) by a window's top: pointer seen at (%.3f, %.3f), on the button", at, p.x, p.y))
@@ -437,8 +461,28 @@ extension AppModel {
             let windows = await paneWindowCount()
             let t = now()
             // 188 (B44): the arrow's own size; 187's first stops at 0.014 and 0.035 for 0.029 were on it (the user saw)
-            if await paneSeenTap(arrow, half: (0.02, 0.012)) {
+            // 189 (N12): a first stop seen near the arrow (within 0.1) is the short hop's start, as the stop below it is
+            pointer.seenOff = nil
+            pointer.hopFromSeen = 0.1
+            let direct = await paneSeenTap(arrow, half: (0.02, 0.012))
+            pointer.hopFromSeen = nil
+            if direct {
                 DebugLog.write("watch: \(who): back: " + String(format: "straight to the arrow (%.3f, %.3f), seen on it", Double(arrow.x), Double(arrow.y)))
+                if windows == 2, await paneWindowCount(after: t) == 1 {
+                    DebugLog.write("watch: a window is gone after the back arrow; watch stopped")
+                    stopWatch("有一个窗口不见了：请点 Dock 上它的图标叫回来，再开守候")
+                    return false
+                }
+                return true
+            }
+            if let s = pointer.seenOff {
+                pointer.seenOff = nil
+                do { try await pointer.clickBy(Double(arrow.x - s.x), Double(arrow.y - s.y)) } catch {
+                    DebugLog.write("watch: \(who): back: the click failed: \(error.localizedDescription)")
+                    return false
+                }
+                DebugLog.write("watch: \(who): back: " + String(format: "the first stop seen at (%.3f, %.3f), then the short hop to the arrow (%.3f, %.3f)",
+                                                                Double(s.x), Double(s.y), Double(arrow.x), Double(arrow.y)))
                 if windows == 2, await paneWindowCount(after: t) == 1 {
                     DebugLog.write("watch: a window is gone after the back arrow; watch stopped")
                     stopWatch("有一个窗口不见了：请点 Dock 上它的图标叫回来，再开守候")
@@ -551,6 +595,7 @@ extension AppModel {
                 }
                 current = (again, t)
             }
+            paneNoteReplyField(current.look, &state)  // 189 (speed)
             await paneMediaRun(&state)  // 188
             state.quietSince[look.side] = now()
         case .chat(let title):
@@ -609,9 +654,11 @@ extension AppModel {
             guard let app = state.apps[look.side] else { return }
             // 184 (C13): a mark's row clicked on this side within 10 s, the chat not seen open then: opened by its mark.
             let fromMark = state.markTapped.removeValue(forKey: look.side).map { now() - $0 < 10 } ?? false
-            if paneRead(app, look, title: title, fromMark: fromMark, &state) > 0 || state.quietSince[look.side] == nil {
+            let reported = paneRead(app, look, title: title, fromMark: fromMark, &state)
+            if reported > 0 || state.quietSince[look.side] == nil {
                 state.quietSince[look.side] = now()
             }
+            if reported > 0 { paneNoteReplyField(look, &state) }  // 189 (speed)
             if !state.media.isEmpty {  // 188
                 await paneMediaRun(&state)
                 state.quietSince[look.side] = now()
@@ -619,7 +666,12 @@ extension AppModel {
             // The engines watch the whole list: a chat that stays quiet is left for the list (its red marks). 182 (user
             // 11-26: "速度太慢了"): 5 s, was 8 s (other chats' messages waited that long first).
             // 183: not while an order waits (it may be for this chat, and it goes first).
-            if let quiet = state.quietSince[look.side], now() - quiet > 5, !ordersWaiting {
+            // 189 (speed; user 11-27 「還有辦法壓縮時間嗎」): another chat of this app marked on its list when it was last seen
+            // waits for this one: 1 s, then back to it.
+            let othersMarked = state.markSeen.keys.contains { k in
+                k.hasPrefix("\(app.rawValue)|") && !WatchChatOpen.sameChat(WatchOCR.titled(title).name, listName: String(k.dropFirst(app.rawValue.count + 1)))
+            }
+            if let quiet = state.quietSince[look.side], now() - quiet > (othersMarked ? 1 : 5), !ordersWaiting {
                 DebugLog.write("watch: \(app.rawValue): \(title) quiet; back to the list")
                 _ = await paneBack(look, app.rawValue)
                 state.quietSince[look.side] = nil
@@ -691,6 +743,13 @@ extension AppModel {
             let name = String(key.dropFirst(app.rawValue.count + 1))
             guard let preview = XiaoLanPanes.previewText(look.rows, of: name), let last = state.history[key]?.last else { continue }
             let body = WatchReport.previewBody(preview)
+            // 189 (N16, Echo 188, 11-27 11:36: 「主人蓝海乐：你們好嗎」, read and asked of the server moments before, was not
+            // known by its words with the group's 「sender：」 before them: 测试群 opened again and the line asked twice): the
+            // words after the sender count too
+            let said = body.firstIndex(where: { $0 == ":" || $0 == "：" }).flatMap { i -> String? in
+                body.distance(from: body.startIndex, to: i) <= 20 ? String(body[body.index(after: i)...]) : nil
+            }
+            if let said, said.count >= 2, XiaoLanSelf.readBefore(said, known: state.seen[key] ?? []) { continue }
             // 188 night (Echo 188, 11-27 05:06/05:11/05:13: 企微测试群 and 测试群 opened again three times for a list line
             // that was the owner's own send, its line not read back after the send): what was sent there is no news
             let mine = state.sent.contains { $0.app == app && WatchChatOpen.sameChat($0.chat, listName: name)
@@ -703,6 +762,16 @@ extension AppModel {
             return (name: name, at: CGPoint(x: 0.5, y: row.box.midY))
         }
         return nil
+    }
+
+    /// 189 (speed): the input field of a chat whose line now waits for its QA reply (screen fractions), for the pointer
+    /// meanwhile; only the bar's field (at the window's bottom, or over a keyboard), never a bubble.
+    private func paneNoteReplyField(_ look: PaneLook, _ state: inout PaneWatchState) {
+        guard repliesComing, let px = WatchOCR.Pixels(look.crop) else { return }
+        let keys = XiaoLanPanes.keyboardTop(look.rows)
+        guard let field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1),
+              keys != nil || Double(field.y) >= 0.8 else { return }
+        state.replyField = (side: look.side, at: XiaoLanPanes.onScreen(field, in: look.rect))
     }
 
     /// 188: each chat's red mark noted when first seen; marks gone are forgotten (WeCom's groups on WeChat's side are
@@ -1055,8 +1124,26 @@ extension AppModel {
             return
         }
         watchStatus = "发送到 \(order.chat)…"
+        let typedBefore = state.typed
         let sent = await paneSend(order.text, to: order.chat, app: order.app, quote: order.quote, &state)
+        if !sent.ok {
+            DebugLog.write("watch: \(order.app.rawValue): the message to \(order.chat) not sent: \(sent.why)")  // 189 (N16)
+            // 189 (N16, Echo 188, 11-27 11:36: 测试群's QA reply failed before a word was typed and was dropped; the line was
+            // asked again 14 s later): a QA reply not sent with nothing typed goes once more, first (nothing can go twice)
+            if ChatToolLink.isQA(order.messageId), state.typed == typedBefore, state.retried.insert(order.key).inserted {
+                DebugLog.write("watch: nothing was typed for it; the reply to \(order.chat) goes once more, first")
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                link.retry(order)
+                return
+            }
+        }
+        state.retried.remove(order.key)
         link.finish(order, ok: sent.ok, reason: sent.ok ? (order.at.isEmpty ? "" : ChatToolLink.reasonNoAt) : sent.why)
+        // 189 (speed; user 11-27: the second of two replies to 企微测试群 began 4 s after the first was sent): the next order
+        // for the same chat starts from the window as it showed this line sent, no new look of both windows
+        if sent.ok, let shown = sent.shown, link.pending.contains(where: { $0.app == order.app && $0.chat == order.chat }) {
+            state.lastShown = (app: order.app, chat: order.chat, look: shown, at: now())
+        }
         // 183 (Echo 182 overnight, 11-26: the answer waited 1.5–2.5 s for the keyboard to go down): answered first.
         if let shown = sent.shown { await paneDismissKeyboard(shown) }
     }
@@ -1066,7 +1153,16 @@ extension AppModel {
     private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App, quote: String = "",
                           _ state: inout PaneWatchState) async -> (ok: Bool, why: String, shown: PaneLook?) {
         let appName = app == .wework ? "企业微信" : "微信"
-        guard var look = await paneFind(app, &state) else {
+        // 189 (speed): the window just seen showing my line in this chat, the order before being for it too (the field
+        // is still found and checked on a new look below)
+        var found: PaneLook?
+        if let s = state.lastShown, s.app == app, s.chat == chat, now() - s.at < 4 {
+            found = s.look
+        } else {
+            found = await paneFind(app, &state)
+        }
+        state.lastShown = nil
+        guard var look = found else {
             return (false, "屏幕上没有\(appName)的窗口（请把微信和企业微信左右分屏）", nil)
         }
         // 183: WeChat's ＋ menu over the list: closed first (none of its rows clicked).
@@ -1294,6 +1390,7 @@ extension AppModel {
         }
         // 185 (B7/B8/B11): true only when the field held exactly this text and emptied after the return (小藍's own
         // check); then 小藍 puts itself down (B10). Not sent: the field is emptied here, no draft is left (B21).
+        state.typed += 1  // 189 (N16): from here a failed order may have typed something; it is not sent again
         let returned = await keyboardBridge.type(text, enter: true, within: 5, dismiss: true)
         guard returned else {
             // 188 (B41, Echo 187, 11-27: a WeCom private reply went out — its list preview showed it — but was reported

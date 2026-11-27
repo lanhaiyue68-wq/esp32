@@ -108,10 +108,18 @@ import Foundation
     /// The next message the server asked for, or nil. Hand it back with `finish` when it is sent or given up.
     func nextCommand() -> Command? {
         guard !pending.isEmpty else { return nil }
-        let c = pending.removeFirst()
-        turns[c.key] = nil
-        return c
+        return pending.removeFirst()  // 189: its turn kept until it is finished (retry)
     }
+
+    /// 189 (N16, Echo 188, 11-27 11:36 首爾: 测试群's QA reply failed before a word was typed — the failure kept only on
+    /// 小藍's page — and was dropped; the line was opened and asked again 14 s later): an order handed back unsent, with
+    /// nothing typed, goes first again, its turn and tally kept.
+    func retry(_ c: Command) {
+        pending.insert(c, at: 0)
+    }
+
+    /// 189: an order the QA callback's reply made (its result stays on the iPad).
+    static func isQA(_ messageId: String) -> Bool { messageId.hasPrefix(qaPrefix) }
 
     /// 188 (user 11-27: 「先收到的消息先回，後面來的在後面排著，前面的回完了再接著回第二個…不管是企微還是個微，都要按
     /// 收到的順序依次回復」): one count for WeChat's and WeCom's links together. A message asked of the QA callback takes
@@ -130,9 +138,7 @@ import Foundation
     /// The order of that turn, taken off the queue.
     func take(turn: Int) -> Command? {
         guard let i = pending.firstIndex(where: { turns[$0.key] == turn }) else { return nil }
-        let c = pending.remove(at: i)
-        turns[c.key] = nil
-        return c
+        return pending.remove(at: i)  // 189: its turn kept until it is finished (retry)
     }
 
     /// What was read: one packet per message over the socket (ChatTool's dedupe then drops a message read twice), and
@@ -271,11 +277,15 @@ import Foundation
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(code), let text = Self.qaReply(data) else { return }
+            guard (200..<300).contains(code), let text = Self.qaReply(data) else {
+                DebugLog.write("chattool: QA callback for \(m.chat) gave nothing to send (HTTP \(code))")  // 189 (N16)
+                return
+            }
             let id = Self.qaPrefix + UUID().uuidString
             let raw = Self.json(["type": Self.sendMessage, "titleList": [m.chat], "receivedContent": text]) ?? ""
             queue(Command(chat: m.chat, text: text, type: Self.sendMessage, messageId: id, key: id + "#0", raw: raw, app: app), now: Date(), turn: turn)
             note("↩ 伺服器回覆 · \(m.chat)")
+            DebugLog.write("chattool: QA reply for \(m.chat) queued (turn \(turn.map { String($0) } ?? "-"), \(text.count) characters)")  // 189 (N16)
         } catch {
             DebugLog.write("chattool: QA callback failed: \(error.localizedDescription); asked again when the link is back")
             unasked.append(m)  // 187
@@ -382,6 +392,7 @@ import Foundation
     /// A command watch sent (or gave up on). Once every chat of its order is done, the order's result goes up and is
     /// returned; until then nil.
     @discardableResult func finish(_ c: Command, ok: Bool, reason: String = "", now: Date = Date(), sending: Bool = true) -> String? {
+        turns[c.key] = nil  // 189: kept from take/nextCommand until here (retry)
         guard var t = tallies[c.key] else { return nil }
         if ok { t.ok.append(c.chat) } else { t.failed.append(c.chat) }
         // 184 (Echo 183, 11-26: a line with @ went out and the answer said nothing of the @ left out; only a failure's
@@ -395,6 +406,8 @@ import Foundation
         let label = XiaoLanOrders.label(t.type, app) ?? "\(t.type)"
         note((t.failed.isEmpty ? "✓ " : "✗ ") + label + " · " + (t.ok + t.failed).joined(separator: "、")
              + (t.reasons.isEmpty ? "" : "：" + t.reasons.joined(separator: "；")), now: now)
+        // 189 (N16): a failure is in the debug log too (a QA reply's was only on 小藍's page)
+        if !t.failed.isEmpty { DebugLog.write("chattool: \(label) to \(t.failed.joined(separator: "、")) failed: \(t.reasons.joined(separator: "；"))") }
         if Self.isLocal(t.messageId) { return nil }  // a tool-box order or a QA reply: its result stays on the iPad
         if sending, let packet { send(packet) }
         return packet

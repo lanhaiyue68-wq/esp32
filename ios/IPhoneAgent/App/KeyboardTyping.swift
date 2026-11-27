@@ -51,6 +51,7 @@ extension AppModel {
                 DebugLog.write("keyboard: no keyboard on screen to switch from")
                 return false
             }
+            if await dockInTheWay() { return false }  // 189 (N14)
             // 184 (Echo 183, 11-26, iPad: from 简体拼音 one click on the globe went straight to 小藍, twice; held, the
             // globe's menu was missed once and its 小藍 row clicked at an estimate the next time): on an iPad the globe is
             // clicked first, up to three times round the keyboards, 小藍 looked for after each; the menu after that.
@@ -77,6 +78,24 @@ extension AppModel {
         }
         DebugLog.write("keyboard: Lan Agent's keyboard did not come up after \(tries) tries (is it added in Settings › Keyboards?)")
         return false
+    }
+
+    /// 189 (N14, Echo 188 night, 11-27: after a trip to Safari the Dock stayed up at the screen's bottom, and the globe key
+    /// was clicked at its estimate (0.122, 0.952) three times, in the Dock's row; the keyboard over it took the clicks, but
+    /// an icon there would have opened another app over the windows): the Dock's icons in view (not under a keyboard),
+    /// the pointer goes up out of its way first (no click); the Dock still in view, the globe key is not clicked.
+    private func dockInTheWay() async -> Bool {
+        guard CommandChannel.onPad(), let frame = await freshFrame(), let px = WatchOCR.Pixels(frame) else { return false }
+        let icons = XiaoLanRecall.dockIcons(px)
+        guard icons.wechat != nil || icons.wework != nil else { return false }
+        DebugLog.write("keyboard: the Dock is up at the screen's bottom; the pointer up out of its way before the globe key")
+        try? await pointer.point(0.5, 0.45, aim: false, rehome: false)
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        guard let again = await freshFrame(), let px2 = WatchOCR.Pixels(again) else { return true }
+        let still = XiaoLanRecall.dockIcons(px2)
+        guard still.wechat != nil || still.wework != nil else { return false }
+        DebugLog.write("keyboard: the Dock is still up; the globe key not clicked at its estimate")
+        return true
     }
 
     /// The keyboard menu is open: click "Lan Agent" in it. Without that row (not added, or not read), close the menu
