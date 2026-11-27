@@ -494,14 +494,32 @@ enum XiaoLanMediaFind {
 
     /// The words that came onto the window after a voice note was turned into words: what is new, below `below`, without
     /// the apps' own marks (「转换完成」, the seconds, 「转文字」).
-    static func added(before: [Piece], after: [Piece], below: Double = 0.3) -> String {
+    /// 189 (N27/N28, Echo 189, 11-27 12:40 首爾: a voice note's words read as 「小））で"多少錢？G+在这」 — its own length
+    /// and the input bar with them — and another's as 「我们按套餐收费：基础版」, a line of my older reply that scrolled into
+    /// view as the words came in under the note): with the note's length given, only what is new under that note (the
+    /// `rank`-th newest of that length), within 0.2 of the window, is its words.
+    static func added(before: [Piece], after: [Piece], below: Double = 0.3, seconds: Int? = nil, rank: Int = 0) -> String {
         let known = Set(before.map { plain($0.text) })
+        var floor = below, ceiling = 1.0
+        if let seconds {
+            let notes = after.filter { voiceSeconds($0.text) == seconds }.sorted { $0.box.midY > $1.box.midY }
+            if !notes.isEmpty {  // not found: everything new below `below`, as before
+                floor = Double(notes[min(rank, notes.count - 1)].box.maxY)
+                ceiling = floor + 0.2
+            }
+        }
         let new = after.filter { p in
-            let t = plain(p.text)
-            return Double(p.box.midY) > below && !t.isEmpty && !known.contains(t) && !t.contains("转换完成")
+            let t = plain(p.text), y = Double(p.box.midY)
+            return y > floor && y <= ceiling && !t.isEmpty && !known.contains(t) && !t.contains("转换完成")
                 && !t.contains("转文字") && voiceSeconds(p.text) == nil && t != "✓"
         }.sorted { $0.box.midY < $1.box.midY }
         return new.map(\.text).joined()
+    }
+
+    /// A voice note's length in its line as reported (「[语音] 9"」 → 9).
+    static func noteSeconds(_ line: String) -> Int? {
+        guard let r = line.range(of: #"(\d{1,2})["″”“'’]"#, options: .regularExpression) else { return nil }
+        return Int(line[r].filter(\.isNumber))
     }
 
     /// A page's words top to bottom (a file's preview, a link's page), without its bars, at most `most` characters.

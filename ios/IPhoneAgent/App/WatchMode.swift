@@ -852,7 +852,9 @@ enum WatchReport {
     /// and a "…" at the end taken off; empty for the owner's own draft ([草稿]).
     static func previewBody(_ preview: String) -> String {
         var s = preview.filter { !$0.isWhitespace }
-        if s.hasPrefix("[草稿]") { return "" }
+        // 189 (N25, Echo 189, 11-27 12:39 首爾: 「［草稿］」 — full-width brackets, as the iPad's reading gives them — opened
+        // 蓝海乐 again as a line not read and was reported as a message): a draft, either brackets, is no one's line
+        if s.hasPrefix("[草稿]") || s.hasPrefix("［草稿］") || s.hasPrefix("[草稿］") || s.hasPrefix("［草稿]") { return "" }
         s = s.replacingOccurrences(of: #"^(\[(有人@我|@所有人|\d+条|\d+條|\d+则|\d+則)\])+"#, with: "", options: .regularExpression)
         while s.hasSuffix("…") || s.hasSuffix(".") { s.removeLast() }
         return s

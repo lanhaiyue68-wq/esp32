@@ -150,7 +150,8 @@ extension AppModel {
         for _ in 0..<10 {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let l = await paneMediaChat(job, after: now()) else { return (nil, "转文字时聊天被换掉了") }
-            let words = XiaoLanMediaFind.added(before: before, after: Array(l.rows.joined()))
+            let words = XiaoLanMediaFind.added(before: before, after: Array(l.rows.joined()),
+                                               seconds: XiaoLanMediaFind.noteSeconds(job.text), rank: job.rank)  // 189 (N27/N28)
             if !words.isEmpty && words == last { break }
             last = words
         }

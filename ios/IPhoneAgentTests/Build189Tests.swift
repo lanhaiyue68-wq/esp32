@@ -108,6 +108,28 @@ import UIKit
         XCTAssertEqual(WatchOCR.withoutUIWords("¥299 一个月吗"), "¥299 一个月吗")
     }
 
+    /// N27/N28: a voice note's words are what is new right under it, not an older line scrolled into view or the bar.
+    func testAVoiceNotesWordsAreWhatIsNewUnderIt() {
+        func p(_ t: String, _ y: Double, x: Double = 0.2) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y - 0.008, width: 0.2, height: 0.016))
+        }
+        let before = [p("在吗", 0.40), p("9\"", 0.60)]
+        let after = [p("我们按套餐收费：基础版", 0.30, x: 0.5), p("在吗", 0.35), p("9\"", 0.55),
+                     p("我想请问一下有没有优惠", 0.60), p("G+在这", 0.95)]
+        XCTAssertEqual(XiaoLanMediaFind.added(before: before, after: after, below: 0.2, seconds: 9), "我想请问一下有没有优惠")
+        XCTAssertEqual(XiaoLanMediaFind.added(before: before, after: after, below: 0.2),
+                       "我们按套餐收费：基础版我想请问一下有没有优惠G+在这", "without the note's length: everything new, as before")
+        XCTAssertEqual(XiaoLanMediaFind.noteSeconds("[语音] 9\""), 9)
+        XCTAssertNil(XiaoLanMediaFind.noteSeconds("[语音]"))
+    }
+
+    /// N25: a draft's preview with full-width brackets is no line.
+    func testADraftWithFullWidthBracketsIsNoLine() {
+        XCTAssertEqual(WatchReport.previewBody("［草稿］你好"), "")
+        XCTAssertEqual(WatchReport.previewBody("[草稿]你好"), "")
+        XCTAssertEqual(WatchReport.previewBody("蓝海乐：你好"), "蓝海乐：你好")
+    }
+
     func testRereadLanguagesStartWithSimplifiedChinese() {
         XCTAssertEqual(CandidatePicker.rereadLanguages.first, "zh-Hans")
     }
