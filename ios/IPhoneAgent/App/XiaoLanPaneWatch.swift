@@ -987,7 +987,7 @@ extension AppModel {
             } else if case let known = XiaoLanSelf.seenInApp(state.seen, app: app.rawValue, chat: key), !known.isEmpty {
                 // 185 (B18, Echo 184, 11-26: 「【第三方测试】群消息1」, read in 测试群, came again under 企微测试群 when one
                 // window's title was taken for the other's): what was read in any chat of this app counts.
-                let unseen = lines.filter { !XiaoLanSelf.readBefore($0.text, known: known) }  // 187 (B38)
+                let unseen = XiaoLanSelf.unseen(lines, known: known)  // 187 (B38); 189 (N21): only after the last known or mine
                 if unseen.count < lines.count {
                     DebugLog.write("watch: \(app.rawValue): \(name): no overlap with what was read; \(lines.count - unseen.count) line(s) read before left out")
                     fresh = unseen

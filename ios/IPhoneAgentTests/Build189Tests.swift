@@ -72,6 +72,23 @@ import UIKit
         XCTAssertNil(CandidatePicker.reread(crop, box: box, read: "好嗎"))
     }
 
+    /// N21: a screen that does not go on from the history; an old line misread this time is above lines read and mine.
+    func testOnlyWhatFollowsTheLastLineReadOrMineIsNew() {
+        typealias L = WatchReport.Line
+        let known: Set<String> = [XiaoLanSelf.plain("好的吗")]
+        let lines = [L(sender: "主人蓝海乐", text: "遠好嗎", mine: false),  // 「還好嗎」, answered at 11:37, misread
+                     L(sender: "", text: "【模拟服务器】收到：還好嗎", mine: true),
+                     L(sender: "主人蓝海乐", text: "好的吗", mine: false),
+                     L(sender: "", text: "【模拟服务器】收到：好的吗", mine: true),
+                     L(sender: "主人蓝海乐", text: "我在等你我回我", mine: false)]
+        XCTAssertEqual(XiaoLanSelf.unseen(lines, known: known).map(\.text), ["我在等你我回我"])
+        // nothing read before and nothing mine on it: every line, as before
+        let fresh = [L(sender: "甲", text: "第一句", mine: false), L(sender: "乙", text: "第二句", mine: false)]
+        XCTAssertEqual(XiaoLanSelf.unseen(fresh, known: []).map(\.text), ["第一句", "第二句"])
+        // a line read before at the bottom: nothing new
+        XCTAssertEqual(XiaoLanSelf.unseen(Array(lines.prefix(3)), known: known).map(\.text), [])
+    }
+
     func testRereadLanguagesStartWithSimplifiedChinese() {
         XCTAssertEqual(CandidatePicker.rereadLanguages.first, "zh-Hans")
     }

@@ -706,6 +706,17 @@ import UIKit
     /// 企微群分工」 (方 read as 万) and 「二行当成别人的新消息」 (the end of an older line, its start above the window) as
     /// new): a line of six or more characters was read before when it is part of a line read before, or a line read
     /// before with one character in ten read differently. Digits are never "read differently": 0018 is not 0019.
+    /// 189 (N21, Echo 189, 11-27 12:55 首爾; user: 「企微多了一個遠好嗎，這是之前的了」): 企微测试群 opened again for a new
+    /// line, nothing on its screen going on from the history; 「還好嗎」, answered at 11:37, misread 「遠好嗎」 this time
+    /// (three characters: no misread is forgiven so short) counted as new and was answered again. New lines come at the
+    /// bottom: of a screen that does not go on from the history only what follows the last line read before, or mine,
+    /// can be new (and not read before itself).
+    static func unseen(_ lines: [WatchReport.Line], known: Set<String>) -> [WatchReport.Line] {
+        let last = lines.lastIndex { $0.mine || readBefore($0.text, known: known) }
+        let after = last.map { Array(lines[($0 + 1)...]) } ?? lines
+        return after.filter { !readBefore($0.text, known: known) }
+    }
+
     static func readBefore(_ text: String, known: Set<String>) -> Bool {
         let t = plain(text)
         if known.contains(t) { return true }
