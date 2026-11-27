@@ -90,7 +90,7 @@ extension AppModel {
             let plannerModel = try await settings.client("planner")
             #if XIAOLAN
             // 193: 小藍's lead model plans first (LeadModel), the other if it fails
-            agent.planner = PlusChat.planner(fallback: plannerModel, lead: LeadModel.current)
+            agent.planner = PlusChat.planner(fallback: plannerModel, lead: LeadModel.planner)  // 197: its own lead
             #else
             agent.planner = PlusChat.planner(fallback: plannerModel)  // phase C: Plus commands, Doubao if it fails
             #endif

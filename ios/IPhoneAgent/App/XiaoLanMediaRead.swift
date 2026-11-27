@@ -1036,10 +1036,10 @@ extension AppModel {
     /// 188 (user 11-27: 「給別人回消息要引用那條消息回復」): the line answered long-pressed and 「引用」 clicked, so the
     /// reply goes as its quote (WeChat: the field empty, 小藍's keyboard up; WeCom: the field holding 「@名字」, 简体拼音
     /// up). False: nothing quoted (a menu opened is closed), the reply goes plain.
-    func paneQuote(_ quote: String, _ shown: PaneLook, _ who: String) async -> Bool {
+    func paneQuote(_ quote: String, _ shown: PaneLook, _ who: String, fromEnd: Int = 1) async -> Bool {
         var look = shown
         // 188: a voice note, video, picture, file or link is quoted by its own place on the window
-        var media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
+        var media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
         // 193 (N72, Echo 193 11-27 21:35: the second reply's line was under 小藍's keyboard, left up by the first send —
         // 「not on the window; replied without a quote」): not found with 小藍's keyboard up, it is put down and looked for again
         if media == nil, XiaoLanMediaFind.quoteSpot(look.rows, quote: quote) == nil,
@@ -1049,7 +1049,7 @@ extension AppModel {
             _ = await smallKeyboard(up: false, within: 1.0)
             if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                 look = again
-                media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
+                media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
             }
         }
         var found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)

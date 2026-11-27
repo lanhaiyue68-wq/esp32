@@ -271,6 +271,7 @@ struct XiaoLanSettingsTab: View {
     @AppStorage(WatchSettings.weworkURLKey) private var weworkURL = ""
     @AppStorage(WatchSettings.weworkCodeKey) private var weworkCode = ""
     @AppStorage(LeadModel.key) private var lead = LeadModel.codex.rawValue  // 193
+    @AppStorage(LeadModel.plannerKey) private var plannerLead = LeadModel.codex.rawValue  // 197
     @State private var advanced = false
 
     var body: some View {
@@ -300,11 +301,15 @@ struct XiaoLanSettingsTab: View {
                 }
                 // 193 (user 11-27: 「Codex 為主（豆包副）或豆包為主（Codex 副），隨時互換」)
                 Section {
-                    Picker("主模型", selection: $lead) {
+                    Picker("看圖、看影片", selection: $lead) {
+                        ForEach(LeadModel.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                    }
+                    // 197 (user 11-28: 規劃豆包不太行): planning a new order chooses on its own
+                    Picker("學新指令（規劃）", selection: $plannerLead) {
                         ForEach(LeadModel.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
                     }
                 } header: {
-                    Text("看圖、看影片、學新指令")
+                    Text("主模型")
                 } footer: {
                     Text("主模型先做；失敗、沒回答、看不清或額度用完才換副模型。每一步找點擊位置固定用豆包（要快）；守候、讀訊息、發訊息都是固定步驟，不用模型。")
                 }

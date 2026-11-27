@@ -109,8 +109,10 @@ extension AppModel {
 
         case ("POST", "/lead"):
             // 193: the lead model set from the computer ({"lead":"codex"|"doubao"}), as the settings page does
+            // 197: {"planner":"codex"|"doubao"} sets the planning order's lead on its own
             if let lead = LeadModel(rawValue: text("lead")) { LeadModel.current = lead }
-            return .json(["lead": .str(LeadModel.current.rawValue)])
+            if let planner = LeadModel(rawValue: text("planner")) { LeadModel.planner = planner }
+            return .json(["lead": .str(LeadModel.current.rawValue), "planner": .str(LeadModel.planner.rawValue)])
 
         case ("POST", "/media"):
             // 188: reading voice notes, videos, pictures, files and links, tried by hand: "set" turns kinds (and "quote")
@@ -213,6 +215,7 @@ extension AppModel {
             "keyboard": .bool(keyboardBridge.onScreen()),
             "takeover": .int(agent.takeover),
             "lead": .str(LeadModel.current.rawValue),  // 193
+            "planner_lead": .str(LeadModel.planner.rawValue),  // 197
         ]
         if feed.updated > 0 { status["frame_age_s"] = .num(((now() - feed.updated) * 10).rounded() / 10) }
         if let last = agent.steps.last { status["last"] = .obj(last) }

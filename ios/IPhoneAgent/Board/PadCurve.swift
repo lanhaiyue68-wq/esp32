@@ -25,26 +25,32 @@ import Foundation
 /// constants ~1 in 4); the rest is ±1 % that no per-direction gain removed. The user: "弧度還是要隨機，包括每一次的長度
 /// 都要隨機…可以小一點，但是不能固定": the bow, its side, where it bulges and the number of pieces are all random.
 enum PadCurve {
-    /// Shorter moves stay one `move` (a bow of a few units shows nothing and only slows the pointer). 174: 640, the
-    /// shortest fast move iPadOS takes at full gain; a shorter one goes straight, lengthened by CommandChannel.padShort.
+    /// 174–196: shorter moves went as one straight `move`. 197 (N91; user 11-28: 「你的貝塞爾曲綫怎麽沒用上」「必須强制走！
+    /// 不要設立門檻！」; Echo 195: every hop inside one window was a straight line, the board keeping its curve inside the
+    /// move's own box): every move is a curve, however short. Under `shortest` the bow is 8–16 % (5–8 % of a short move
+    /// shows nothing) and the whole curve is lengthened by `scale` (CommandChannel.padShort's ratio: iPadOS starts a short
+    /// move slower). Measured from the computer on Echo 195 (11-28 02:31, bz.py): 10 such curves, the shortest ~380
+    /// units, all on their buttons at the first stop (within 0.010).
     static let shortest = 640.0
     static let maxPieces = 30  // the board takes 40 pieces a stroke
 
-    static func stroke(from p: (x: Int, y: Int), by d: (x: Int, y: Int), span: (w: Int, h: Int),
+    static func stroke(from p: (x: Int, y: Int), by d: (x: Int, y: Int), span: (w: Int, h: Int), scale: Double = 1,
                        random: (ClosedRange<Double>) -> Double = { Double.random(in: $0) }) -> String? {
         let len = hypot(Double(d.x), Double(d.y))
-        guard len >= shortest else { return nil }
+        guard len > 0 else { return nil }
         let w = Double(span.w), h = Double(span.h)
         let p0 = (x: Double(p.x), y: Double(p.y))
         let p3 = (x: p0.x + Double(d.x), y: p0.y + Double(d.y))
         func onScreen(_ q: (x: Double, y: Double)) -> Bool { q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h }
-        guard onScreen(p0), onScreen(p3) else { return nil }  // a push past an edge stays straight
+        guard onScreen(p0), onScreen(p3) else { return nil }  // a push past an edge: padPushParts
         let ux = Double(d.x) / len, uy = Double(d.y) / len
         let a = random(0.25...0.38), z = 1 - a  // the same either end: the bow goes out and comes back alike
-        var bow = len * random(0.05...0.08)  // 188: was 0.06–0.12
+        var bow = len * (len < shortest ? random(0.08...0.16) : random(0.05...0.08))  // 188: was 0.06–0.12
         let first: Double = random(0...1) < 0.5 ? -1 : 1
         var found: (c1: (x: Double, y: Double), c2: (x: Double, y: Double), off: (x: Double, y: Double))?
-        for _ in 0..<4 where found == nil {  // near an edge: the other side, then a smaller bow
+        // near an edge: the other side, then a smaller bow; never straight (both ends are on the screen, so a small
+        // enough bow always is: a Bezier stays inside its control points)
+        for _ in 0..<10 where found == nil {
             for side in [first, -first] where found == nil {
                 let off = (x: -uy * side * bow, y: ux * side * bow)
                 let c1 = (x: p0.x + Double(d.x) * a + off.x, y: p0.y + Double(d.y) * a + off.y)
@@ -70,13 +76,14 @@ enum PadCurve {
         let e = (x: aim.x - p0.x, y: aim.y - p0.y)
         let a1 = (x: p0.x + e.x * a + off.x, y: p0.y + e.y * a + off.y)
         let a2 = (x: p0.x + e.x * z + off.x, y: p0.y + e.y * z + off.y)
-        let end = (x: Int(e.x.rounded()), y: Int(e.y.rounded()))
-        let n = min(maxPieces, max(8, Int(len / 80 * random(0.9...1.1))))  // 188: how long it takes varies too
+        let k = max(1, scale)  // 197 (N91): a short curve sent longer, as padShort sends a short move
+        let end = (x: Int((e.x * k).rounded()), y: Int((e.y * k).rounded()))
+        let n = min(maxPieces, max(8, Int(len * k / 80 * random(0.9...1.1))))  // 188: how long it takes varies too
         var pieces: [String] = []
         var last = (x: 0, y: 0)
         for i in 1...n {
             let b = point(Double(i) / Double(n), a1, a2, aim)
-            let q = i == n ? end : (x: Int((b.x - p0.x).rounded()), y: Int((b.y - p0.y).rounded()))
+            let q = i == n ? end : (x: Int(((b.x - p0.x) * k).rounded()), y: Int(((b.y - p0.y) * k).rounded()))
             if q.x != last.x || q.y != last.y { pieces.append("\(q.x - last.x) \(q.y - last.y)") }
             last = q
         }

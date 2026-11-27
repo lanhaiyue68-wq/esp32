@@ -535,8 +535,8 @@ import UIKit
             XCTAssertLessThan(hypot(Double(p.0 - from.0 - by.0), Double(p.1 - from.1 - by.1)), len * 0.04)
             XCTAssertGreaterThan(bow, len * 0.04, "a bow that shows")
         }
-        // short, past an edge, place unknown, button down, not a move: sent as they are
-        XCTAssertNil(PadCurve.stroke(from: (100, 100), by: (200, 100), span: span))
+        // 197 (N91): a short one is a curve too; past an edge, place unknown, button down, not a move: sent as they are
+        XCTAssertNotNil(PadCurve.stroke(from: (100, 100), by: (200, 100), span: span))
         XCTAssertNil(PadCurve.stroke(from: (0, 0), by: (2500, 0), span: span))
         XCTAssertNil(CommandChannel.padCurved("move 600 600", from: nil, span: span, held: false))
         XCTAssertNil(CommandChannel.padCurved("move 600 600", from: (0, 0), span: span, held: true))

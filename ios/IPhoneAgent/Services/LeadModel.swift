@@ -17,6 +17,14 @@ enum LeadModel: String, CaseIterable {
 
     var label: String { self == .codex ? "Codex 為主（豆包為副）" : "豆包為主（Codex 為副）" }
 
+    /// 197 (user 11-28: 「看圖看視頻交給豆包，規劃豆包就不太行了吧」; Echo 195 17:48: 豆包 planning 206 went 20 steps without
+    /// opening WeChat's ＋): planning an order has its own lead, Codex unless set; `current` stays for pictures and videos.
+    static let plannerKey = "xiaolanPlannerLeadV1"
+    static var planner: LeadModel {
+        get { UserDefaults.standard.string(forKey: plannerKey).flatMap(LeadModel.init(rawValue:)) ?? .codex }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: plannerKey) }
+    }
+
     /// Who is asked, in turn: the lead first when it can be asked (Codex signed in and switched on; a 豆包 key set),
     /// then the other.
     static func order(_ lead: LeadModel, codex: Bool, doubao: Bool) -> [LeadModel] {

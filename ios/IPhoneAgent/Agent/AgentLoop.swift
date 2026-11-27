@@ -4609,6 +4609,17 @@ extension Pointer: Gestures {}
                     DebugLog.write("open \(app): a part of \(host); opening \(host)")
                     act["app"] = .str(host)
                 }
+                // 197 (N90): on an iPad a tap whose thought names a label read close to it goes to that label's middle
+                if name == "tap", CommandChannel.onPad(), let frame = screen?.frame, let x = act["x"]?.double,
+                   let y = act["y"]?.double, let thought = act["thought"]?.str, !thought.isEmpty {
+                    let pieces = await CandidatePicker.rowsOffMain(in: frame, top: 0, bottom: 1).flatMap { $0 }
+                    if let s = TapSnap.spot(x: x / 1000, y: y / 1000, thought: thought, pieces: pieces) {
+                        DebugLog.write(String(format: "tap: (%.0f, %.0f) moved onto the label the thought names, (%.0f, %.0f) (N90)",
+                                              x, y, Double(s.x) * 1000, Double(s.y) * 1000))
+                        act["x"] = .num((Double(s.x) * 1000).rounded())
+                        act["y"] = .num((Double(s.y) * 1000).rounded())
+                    }
+                }
                 do { try await perform(act) }
                 catch let absent as AppNotOnPhone {
                     // 127 over the cloud 11-12 (g4): "美团外卖" is a part of 美团, not an app; the item was skipped as "not

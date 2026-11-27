@@ -630,10 +630,21 @@ enum XiaoLanMediaFind {
     /// N89 (测试群 on the iPad 11-28 01:20: every name row of 主人蓝海乐 read 「主人监海乐」 — small grey letters, 蓝 as 监 each
     /// time — so no name was read more often): first a name one character off one of `names` (the chats' names read off
     /// the lists, large and read right) is that name.
+    /// 197 (N83's edge: a new member 「主人蓝海东」 who wrote once, beside 主人蓝海乐 who wrote often, was taken for him):
+    /// one character off counts as OCR's slip only when the two characters are ones it mixes up (on these windows: 蓝 read
+    /// as 监; the rest look alike in the same way); any other difference is another person.
+    static let slips: [Set<Character>] = [["蓝", "监", "篮", "藍"], ["乐", "樂"], ["己", "已", "巳"], ["未", "末"], ["土", "士"],
+                                          ["人", "入", "八"], ["日", "曰"], ["王", "玉"], ["大", "太", "犬"], ["天", "夭"],
+                                          ["刀", "力"], ["干", "千", "于"], ["贝", "见"], ["白", "自"], ["0", "O", "o"], ["1", "l", "I"]]
+    static func ocrSlip(_ a: String, _ b: String) -> Bool {
+        guard a != b, WatchReport.sameName(a, b) else { return false }
+        return zip(Array(a), Array(b)).filter { $0.0 != $0.1 }.allSatisfy { p in slips.contains { $0.contains(p.0) && $0.contains(p.1) } }
+    }
+
     static func steadySenders(_ lines: [WatchReport.Line], known: [String], names: Set<String> = []) -> [WatchReport.Line] {
         let listed = lines.map { l -> WatchReport.Line in
             guard !l.mine, !l.sender.isEmpty, !names.contains(l.sender),
-                  let right = names.first(where: { WatchReport.sameName($0, l.sender) }) else { return l }
+                  let right = names.first(where: { ocrSlip($0, l.sender) }) else { return l }
             var fixed = l
             fixed.sender = right
             return fixed
@@ -642,7 +653,7 @@ enum XiaoLanMediaFind {
         for s in listed.filter({ !$0.mine }).map(\.sender) + known where !s.isEmpty { count[s, default: 0] += 1 }
         return listed.map { l in
             guard !l.mine, count[l.sender] == 1,
-                  let steady = count.filter({ $0.key != l.sender && $0.value >= 2 && WatchReport.sameName($0.key, l.sender) })
+                  let steady = count.filter({ $0.key != l.sender && $0.value >= 2 && ocrSlip($0.key, l.sender) })
                     .max(by: { $0.value < $1.value })?.key else { return l }
             var fixed = l
             fixed.sender = steady
@@ -1041,23 +1052,26 @@ enum XiaoLanMediaFind {
 
     /// Where a message a reply quotes is, when it is a voice note, a video, a picture, a file or a link (the quote is
     /// what was reported: 「[语音] 4"\n语音转文字：…」): the newest of that kind on the window.
-    static func mediaQuoteSpot(_ rows: [[Piece]], _ px: WatchOCR.Pixels?, quote: String) -> CGPoint? {
+    /// 197 (N78, Echo 195 11-28: two photos in one batch, both answers quoted the newest): `fromEnd`, which of that kind
+    /// counting from the newest (1); answers go oldest first, so an earlier one quotes an earlier one.
+    static func mediaQuoteSpot(_ rows: [[Piece]], _ px: WatchOCR.Pixels?, quote: String, fromEnd: Int = 1) -> CGPoint? {
+        func nth<T>(_ all: [T]) -> T? { all.isEmpty ? nil : all[max(0, all.count - max(1, fromEnd))] }
         let first = quote.split(separator: "\n").first.map { String($0) } ?? quote
         var found: Kind? = tag(first)
         if found == nil, url(in: first) != nil { found = .link }
         if found == nil, fileName(first) != nil { found = .file }
         guard let kind = found else { return nil }
         switch kind {
-        case .voice: return voiceSpots(rows).last ?? voiceButtons(rows).last.map { CGPoint(x: max(0.16, Double($0.x) - 0.12), y: Double($0.y)) }
-        case .video: return videoLabels(rows).last.map(videoSpot)
+        case .voice: return nth(voiceSpots(rows)) ?? nth(voiceButtons(rows)).map { CGPoint(x: max(0.16, Double($0.x) - 0.12), y: Double($0.y)) }
+        case .video: return nth(videoLabels(rows)).map(videoSpot)
         case .file: return fileCard(rows, hint: first)
-        case .link: return linkSpots(rows).last.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        case .link: return nth(linkSpots(rows)).map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
         case .image:
             guard let px else { return nil }
             let words = rows.joined().map { WatchOCR.Piece(text: $0.text, box: $0.box, kind: .other) }
             // 195 (N78: a photo's answer is quoted by 「[图片]」 now): only the chat's part, never the input bar or a keyboard
             let bottom = min(px.inputTop(from: 0.3) ?? 0.93, quickBarTop(rows) ?? 1, 0.93)
-            return pictureBlocks(px, pieces: words, top: 0.09, bottom: bottom).last.map { CGPoint(x: $0.midX, y: $0.midY) }
+            return nth(pictureBlocks(px, pieces: words, top: 0.09, bottom: bottom)).map { CGPoint(x: $0.midX, y: $0.midY) }
         }
     }
 

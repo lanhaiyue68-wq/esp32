@@ -512,7 +512,7 @@ extension AppModel {
     /// 183 (Echo 182 overnight, 11-26: an order's first look read both windows, ~1.5 s): the window known to hold `app`
     /// is read alone when it still shows that app (its tab bar or WeCom's quick bar; a WeChat chat has neither, so a
     /// chat without WeCom's bar); otherwise both, as before.
-    private func paneFind(_ app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> PaneLook? {
+    func paneFind(_ app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> PaneLook? {
         // 188 night (Echo 188, 11-27: 1.5 s from an order to the pointer's first move, the window read again though it
         // had not changed since the watch read it a moment before): unchanged, the watch's own read is used
         if let side = state.apps.first(where: { $0.value == app })?.key,
@@ -1033,7 +1033,7 @@ extension AppModel {
     /// 184 (Echo 183, 11-26: the title bar's bare spot was never clicked, the pointer unseen there, and the menu stayed
     /// open, tried every 2 s): the list's bare part under its rows (wide, low, an ordinary click), the title bar only
     /// when the list is full.
-    private func paneCloseMenu(_ look: PaneLook) async {
+    func paneCloseMenu(_ look: PaneLook) async {
         DebugLog.write("watch: a window shows the ＋ menu; closing it (none of its rows clicked)")
         let below = (XiaoLanPanes.entries(look.rows).map { Double($0.box.maxY) }.max() ?? 0.2) + 0.08
         if below < 0.8 {
@@ -1072,7 +1072,7 @@ extension AppModel {
     /// 173 (user 11-25: "這不是兩邊都有嗎"): a chat not in view on the list: its search box, the name typed with 小藍's
     /// keyboard, the result row with that name. Nil (and the search closed) when it is not found.
     /// 184 (Echo 183, 11-26: the box was never clicked and the answer said "搜不到"): `why`, when no search ran.
-    private func paneSearch(_ chat: String, _ look: PaneLook) async -> (row: CGPoint?, why: String?) {
+    func paneSearch(_ chat: String, _ look: PaneLook) async -> (row: CGPoint?, why: String?) {
         let box = XiaoLanPanes.searchBox(look.rows) ?? CGPoint(x: 0.5, y: 0.11)
         DebugLog.write("watch: \(chat) is not in view on the list; searching for it")
         guard await paneTap(box, in: look.rect) else { return (nil, "没点到搜索框") }
@@ -1089,7 +1089,7 @@ extension AppModel {
         return (nil, nil)
     }
 
-    private func paneCloseSearch(_ side: Int) async {
+    func paneCloseSearch(_ side: Int) async {
         guard let l = await paneLooks().first(where: { $0.side == side }) else { return }
         if let cancel = XiaoLanPanes.cancelButton(l.rows) { _ = await paneTap(cancel, in: l.rect, wide: 0.03) }
     }
@@ -1379,6 +1379,12 @@ extension AppModel {
             link.finish(order, ok: done.ok, reason: done.why)
             return
         }
+        // 197 (user 11-28: 「寫成固定步驟」; N90): create, change and dissolve a group by fixed steps, not by the model
+        if [206, 207, 219].contains(order.type) {
+            let done = await paneGroupOrder(order, &state)
+            link.finish(order, ok: done.ok, reason: done.why)
+            return
+        }
         guard order.type == ChatToolLink.sendMessage else { await runOrder(order); return }
         if let why = PrivacyGuard.check(order.text, words: WatchSettings.privateWords, numbers: WatchSettings.blockNumbers) {
             DebugLog.write("watch: order withheld: \(why)")
@@ -1387,7 +1393,11 @@ extension AppModel {
         }
         watchStatus = "发送到 \(order.chat)…"
         let typedBefore = state.typed
-        var sent = await paneSend(order.text, to: order.chat, app: order.app, quote: order.quote, &state)
+        // 197 (N78): answers to the same kind of line (two 「[图片]」) still waiting for this chat after this one: this one
+        // quotes that many up from the newest (answers go oldest first)
+        let sameKind = order.quote.isEmpty ? 0
+            : link.pending.filter { $0 != order && $0.app == order.app && $0.chat == order.chat && $0.quote == order.quote }.count
+        var sent = await paneSend(order.text, to: order.chat, app: order.app, quote: order.quote, quoteFromEnd: 1 + sameKind, &state)
         sent.why = ChatToolLink.notSentSaid(sent.why, wework: order.app == .wework)  // 193 (N64)
         if !sent.ok {
             DebugLog.write("watch: \(order.app.rawValue): the message to \(order.chat) not sent: \(sent.why)")  // 189 (N16)
@@ -1426,7 +1436,7 @@ extension AppModel {
 
     /// Open `chat` in its app's window (already open, or a row on its list), type `text` and send it. `shown`: the
     /// window showing the line sent (its keyboard is put down after the answer).
-    private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App, quote: String = "",
+    private func paneSend(_ text: String, to chat: String, app: XiaoLanOrders.App, quote: String = "", quoteFromEnd: Int = 1,
                           _ state: inout PaneWatchState) async -> (ok: Bool, why: String, shown: PaneLook?) {
         let appName = app == .wework ? "企业微信" : "微信"
         // 189 (speed): the window just seen showing my line in this chat, the order before being for it too (the field
@@ -1566,7 +1576,7 @@ extension AppModel {
         // quoted (the line not on the window, no 引用 in its menu): the reply goes plain, as before.
         var quoted = false
         if !quote.isEmpty, MediaSettings.quoteOn {
-            quoted = await paneQuote(quote, look, app.rawValue)
+            quoted = await paneQuote(quote, look, app.rawValue, fromEnd: quoteFromEnd)
             if quoted {
                 focused = true
                 if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {

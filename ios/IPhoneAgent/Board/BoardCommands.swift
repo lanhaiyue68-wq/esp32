@@ -262,12 +262,15 @@ extension HIDDevice {
         guard (step ?? padStep) == padShortStep, (pace ?? padPaceMs) == padShortPace else { return nil }
         let parts = command.split(separator: " ")
         guard parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
-        let len = hypot(Double(dx), Double(dy))
+        guard let k = padShortRatio(hypot(Double(dx), Double(dy))) else { return nil }
+        return "move \(Int((Double(dx) * k).rounded())) \(Int((Double(dy) * k).rounded()))"
+    }
+    /// What a short fast move of `len` app units is sent as, over `len` (nil: long enough to go as it is). 197 (N91): also
+    /// a short curve's (PadCurve.stroke's scale).
+    static func padShortRatio(_ len: Double) -> Double? {
         guard len > 0, let i = padShortTable.firstIndex(where: { $0.want >= len }), i > 0 else { return nil }
         let (a, b) = (padShortTable[i - 1], padShortTable[i])
-        let sendLen = a.send + (b.send - a.send) * (len - a.want) / (b.want - a.want)
-        let k = sendLen / len
-        return "move \(Int((Double(dx) * k).rounded())) \(Int((Double(dy) * k).rounded()))"
+        return (a.send + (b.send - a.send) * (len - a.want) / (b.want - a.want)) / len
     }
     /// 188 (B43, 11-27): app units the pointer was moved by reckoning (sent, not seen) since it was last seen. 187
     /// learned the gain from a hop whose start had been reckoned over ~60 strokes sent from the computer: it was
@@ -389,7 +392,9 @@ extension HIDDevice {
         let from = Self.padPos
         do {
             _ = try await sendWatched("step \(Self.padSlowStep)")
-            _ = try await sendWatched("move \(Int((Double(dx) * Self.padSlowRatio).rounded())) 0")
+            // 197 (N91): a small curve too, its units scaled by the slow ratio (the pace it goes at)
+            let curve = from.flatMap { PadCurve.stroke(from: $0, by: (dx, 0), span: Self.padSpan, scale: Self.padSlowRatio) }
+            _ = try await sendWatched(curve ?? "move \(Int((Double(dx) * Self.padSlowRatio).rounded())) 0")
             _ = try await sendWatched("step \(Self.padStep)")
         } catch {
             Self.padPos = nil
@@ -400,15 +405,20 @@ extension HIDDevice {
         Self.padReckoned("move \(dx) 0")  // 188
     }
 
-    /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known, no button is down (a drag
-    /// keeps its line) and the move is long enough to show one; otherwise nil (sent as it is).
+    /// 171: a `move` on an iPad goes as a curve (PadCurve) when the pointer's place is known and no button is down (a
+    /// drag keeps its line); otherwise nil (sent as it is).
+    /// 197 (N91; user 11-28: 「必須强制走！不要設立門檻！」): however short; a short one lengthened as padShort would
+    /// (only at padShort's pace; at another pace it goes as asked).
     static func padCurved(_ command: String, from pos: (x: Int, y: Int)?, span: (w: Int, h: Int), held: Bool,
+                          step: Int? = nil, pace: Int? = nil,
                           random: (ClosedRange<Double>) -> Double = { Double.random(in: $0) }) -> String? {
         let parts = command.split(separator: " ")
         guard !held, let pos, parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else {
             return nil
         }
-        return PadCurve.stroke(from: pos, by: (dx, dy), span: span, random: random)
+        let atShortPace = (step ?? padStep) == padShortStep && (pace ?? padPaceMs) == padShortPace
+        let scale = atShortPace ? padShortRatio(hypot(Double(dx), Double(dy))) ?? 1 : 1
+        return PadCurve.stroke(from: pos, by: (dx, dy), span: span, scale: scale, random: random)
     }
 
     static func heldAfter(_ command: String, was held: Bool) -> Bool {
