@@ -235,6 +235,20 @@ import UIKit
         XCTAssertFalse(XiaoLanMediaFind.channelsPlayer([[p("露露lulu0517", 0.3)]], author: author), "the author at the bottom")
     }
 
+    /// 191 (user 11-27: 「自動切換這個模型」): Seed-2.0-mini's stronger sibling on the same key is Seed-2.1-lite (its
+    /// newest), never a video maker or itself; a doubtful answer sends the look to the other model.
+    func testTheStrongerModelAndADoubtfulAnswer() {
+        let listed = ["doubao-seedance-2-5-flash-261115", "doubao-seed-2-0-mini-260428", "doubao-seed-2-1-lite-260801",
+                      "doubao-seed-2-1-lite-260915", "doubao-seed-2-0-lite-260301", "doubao-seedream-5-0-260101"]
+        XCTAssertEqual(Settings.stronger(than: "doubao-seed-2-0-mini-260428", in: listed), "doubao-seed-2-1-lite-260915")
+        XCTAssertEqual(Settings.stronger(than: "doubao-seed-2-1-lite-260915", in: ["doubao-seed-2-1-lite-260915", "doubao-seed-2-0-lite-260301"]),
+                       "doubao-seed-2-0-lite-260301", "never itself")
+        XCTAssertNil(Settings.stronger(than: "qwen-vl-max", in: ["qwen-vl-max", "qwen-plus"]))
+        XCTAssertTrue(XiaoLanMediaFind.unsure("图片太模糊，看不清内容"))
+        XCTAssertTrue(XiaoLanMediaFind.unsure("一张图"))
+        XCTAssertFalse(XiaoLanMediaFind.unsure("一个女生在楼下录口播，抬头看到有东西跑过去"))
+    }
+
     /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
     func testAPrivateLineWithNoSenderIsItsChatsPersons() {
         XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")

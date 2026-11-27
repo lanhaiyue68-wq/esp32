@@ -621,6 +621,15 @@ enum XiaoLanMediaFind {
     /// 191: a video on a page or a 视频号 player, its length not shown: watched and listened to this long (s).
     static let pageVideoMost = 30
 
+    /// 191: a model's answer that it could not see (then the other model is asked): too short, or its own words of
+    /// doubt.
+    static let unsureMarks = ["看不清", "看不出", "无法看清", "无法识别", "无法判断", "无法确定", "不能确定", "不确定", "不清楚",
+                              "模糊不清", "抱歉"]
+    static func unsure(_ answer: String) -> Bool {
+        let t = answer.filter { !$0.isWhitespace }
+        return t.count < 8 || unsureMarks.contains { t.contains($0) }
+    }
+
     /// WeCom's player ✕ (an icon OCR cannot read) at the window's top left: measured at the screen's (0.529, 0.053),
     /// the right window starting at ~0.505 and ~0.495 wide.
     static let weworkPlayerClose = CGPoint(x: 0.05, y: 0.053)

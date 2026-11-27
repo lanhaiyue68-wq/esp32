@@ -108,17 +108,40 @@ extension AppModel {
     }
 
     /// Pictures (a picture, a video's frames, a web page) to the model; nil: no model, or it said nothing.
+    /// 191 (user 11-27: 「搞一個程序，可以自動切換這個模型」): the models of the one key switched by themselves. One
+    /// picture: the quick model set in Settings (Seed-2.0-mini) first; a video's frames (three or more): the stronger
+    /// sibling (Seed-2.1-lite, Settings.strongerClient) first. One failing, answering nothing, or saying it cannot see
+    /// (XiaoLanMediaFind.unsure): the other asked once; both unsure, the longer answer kept.
     func paneMediaLook(_ images: [Data], ask: String) async -> String? {
         guard !images.isEmpty else { return nil }
-        do {
-            let client = try await settings.client("actor")
-            let r = try await client.chat(system: XiaoLanMediaFind.lookSystem, text: ask, images: images, maxTokens: 400)
-            let t = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return t.isEmpty ? nil : t
-        } catch {
-            DebugLog.write("watch: media: the model did not look: \(error.localizedDescription)")
+        let quick: LLMClient?
+        do { quick = try await settings.client("actor") } catch {
+            DebugLog.write("watch: media: no quick model: \(error.localizedDescription)")
+            quick = nil
+        }
+        let strong = await settings.strongerClient()
+        var order = [quick, strong].compactMap { $0 }
+        if images.count >= 3, let strong { order = [strong] + [quick].compactMap { $0 } }
+        if order.count == 2, order[0].model == order[1].model { order.removeLast() }
+        guard !order.isEmpty else {
+            DebugLog.write("watch: media: the model did not look: no model set")
             return nil
         }
+        var kept: [String] = []
+        for (i, client) in order.enumerated() {
+            let started = now()
+            do {
+                let r = try await client.chat(system: XiaoLanMediaFind.lookSystem, text: ask, images: images, maxTokens: 400)
+                let t = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                DebugLog.write(String(format: "watch: media: %@ looked at %ld picture(s) in %.1f s", client.model, images.count, now() - started))
+                if !t.isEmpty, !XiaoLanMediaFind.unsure(t) { return t }
+                if !t.isEmpty { kept.append(t) }
+                DebugLog.write("watch: media: \(client.model) answered nothing sure\(i + 1 < order.count ? "; the other model asked" : "")")
+            } catch {
+                DebugLog.write("watch: media: \(client.model) did not look: \(error.localizedDescription)\(i + 1 < order.count ? "; the other model asked" : "")")
+            }
+        }
+        return kept.max { $0.count < $1.count }
     }
 
     // MARK: each kind

@@ -179,6 +179,37 @@ import UIKit
         return LLMClient(baseURL: baseURL, model: own.isEmpty ? try await resolvedModel() : own, apiKey: apiKey,
                          extra: extra, tokenParam: tokenParam)
     }
+
+    /// 191 (user 11-27: 「搞一個程序，可以自動切換這個模型…這一個 API 是可以來回切換這些模型的」): the stronger sibling of the
+    /// actor's model on the same endpoint and key — for Seed-2.0-mini, Seed-2.1-lite (else 2.0-lite, else 2.0-pro) —
+    /// thinking off as for the actor; nil when the endpoint lists none. The list is fetched once if not yet.
+    func strongerClient() async -> LLMClient? {
+        if models.isEmpty, !strongerListed {
+            strongerListed = true
+            await loadModels()
+        }
+        let own = actorModel.isEmpty ? model : actorModel
+        guard let pick = Self.stronger(than: own, in: models) else { return nil }
+        var extra = self.extra
+        if baseURL.lowercased().contains("volces.com"), extra["thinking"] == nil { extra["thinking"] = ["type": "disabled"] }
+        if baseURL.lowercased().contains("dashscope"), extra["enable_thinking"] == nil { extra["enable_thinking"] = false }
+        return LLMClient(baseURL: baseURL, model: pick, apiKey: apiKey, extra: extra, tokenParam: tokenParam)
+    }
+    private var strongerListed = false
+
+    /// The stronger sibling's ID in the endpoint's list (its newest dated one); never a video or picture maker, a
+    /// thinking-only model, or the same model.
+    static func stronger(than own: String, in list: [String]) -> String? {
+        let o = own.lowercased()
+        for want in ["seed-2-1-lite", "seed-2-0-lite", "seed-2-0-pro"] {
+            let hits = list.filter { id in
+                let l = id.lowercased()
+                return l.contains(want) && !l.contains("thinking") && !l.contains("seedance") && !l.contains("seedream") && l != o
+            }
+            if let best = hits.max() { return best }
+        }
+        return nil
+    }
 }
 
 enum Keychain {
