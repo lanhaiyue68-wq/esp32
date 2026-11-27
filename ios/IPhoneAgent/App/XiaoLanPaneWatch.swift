@@ -241,13 +241,16 @@ extension AppModel {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             icons = await dock()
         }
-        guard let wework = icons.wework else { log("WeCom's icon not seen in the Dock"); return false }
-        log(String(format: "the Dock's WeCom at (%.3f, %.3f)", wework.x, wework.y))
-        guard await paneSeenTap(wework, half: (0.03, 0.025)) else { log("WeCom's icon not clicked"); return false }
-        try? await Task.sleep(nanoseconds: 1_200_000_000)
-        guard let wechat = await dock().wechat ?? icons.wechat else { log("WeChat's icon not seen in the Dock"); return false }
+        // 191 (measured 11-27 15:15 首爾, Echo 190: from the Home Screen WeCom first came back alone on the right and the
+        // Dock went down, so WeChat's click fell on the wallpaper; WeChat first left the Dock up and WeCom joined it on
+        // the right): WeChat first, then WeCom, which only clicked where the Dock shows it now
+        guard let wechat = icons.wechat else { log("WeChat's icon not seen in the Dock"); return false }
         log(String(format: "the Dock's WeChat at (%.3f, %.3f)", wechat.x, wechat.y))
         guard await paneSeenTap(wechat, half: (0.03, 0.025)) else { log("WeChat's icon not clicked"); return false }
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard let wework = await dock().wework else { log("WeCom's icon not seen in the Dock after WeChat's"); return false }
+        log(String(format: "the Dock's WeCom at (%.3f, %.3f)", wework.x, wework.y))
+        guard await paneSeenTap(wework, half: (0.03, 0.025)) else { log("WeCom's icon not clicked"); return false }
         // 189 (N14): the pointer off the Dock (no click), so it does not stay up over the windows' bottoms
         try? await pointer.point(0.5, 0.45, aim: false, rehome: false)
         try? await Task.sleep(nanoseconds: 1_200_000_000)
@@ -1542,7 +1545,7 @@ extension AppModel {
     }
 
     /// 183: 小藍's keyboard up (or down, `up` false) within `seconds`.
-    private func smallKeyboard(up: Bool, within seconds: Double) async -> Bool {
+    func smallKeyboard(up: Bool, within seconds: Double) async -> Bool {  // 191: also XiaoLanMediaRead's
         let end = now() + seconds
         while now() < end {
             if keyboardBridge.onScreen() == up { return true }

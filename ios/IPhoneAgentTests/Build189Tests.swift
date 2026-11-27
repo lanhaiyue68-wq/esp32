@@ -188,6 +188,53 @@ import UIKit
         XCTAssertNil(XiaoLanMediaFind.copyItem(top("百度一下")))
     }
 
+    /// N37/N38 (191): the owner's four shares as the iPad read them (11-27 15:20): Douyin's folded share is a link, each
+    /// job finds its own line, the folded ones their 「更多」.
+    func testSharesFindTheirOwnLinesAndFolds() throws {
+        func p(_ t: String, _ y: Double, _ w: Double = 0.55, x: Double = 0.2) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: 0.02))
+        }
+        let rows: [[CandidatePicker.Piece]] = [
+            [p("1.07复制打开抖音，看看", 0.12)], [p("【dontbesilent聊赚钱.更多", 0.142)],
+            [p("https://xhslink.cn/o/7CHZf", 0.2)], [p("N6alKN拷走链接，去【小红", 0.222)], [p("书】逛逛分享～", 0.244, 0.3)],
+            [p("https://v.kuaishou.com/nq2", 0.305)], [p("LENRb...更多", 0.327, 0.25)],
+        ]
+        XCTAssertEqual(XiaoLanMediaFind.kind(of: "1.07复制打开抖音，看看【dontbesilent聊赚钱.更多"), .link)
+        XCTAssertNil(XiaoLanMediaFind.kind(of: "我在小红书上看到你们的"))
+        XCTAssertEqual(XiaoLanMediaFind.tag("[视频号] 露露lulu0517"), .image)
+        let ks = try XCTUnwrap(XiaoLanMediaFind.linkLine(rows, text: "[链接] https://V.kuaishou.com/nq2LENRD..更多", rank: 0))
+        XCTAssertTrue(ks.text.contains("kuaishou"))
+        let xhs = try XCTUnwrap(XiaoLanMediaFind.linkLine(rows, text: "https://xhslink.cn/o/7CHZfN6qlKN 拷走链接", rank: 0))
+        XCTAssertTrue(xhs.text.contains("xhslink"), "the job's own line, not the newest")
+        let dy = try XCTUnwrap(XiaoLanMediaFind.linkLine(rows, text: "1.07复制打开抖音，看看【dontbesilent聊赚钱.更多", rank: 0))
+        XCTAssertTrue(dy.text.contains("抖音"))
+        let more = try XCTUnwrap(XiaoLanMediaFind.moreSpot(rows, from: ks))
+        XCTAssertEqual(more.y, 0.337, accuracy: 0.001)
+        XCTAssertGreaterThan(more.x, 0.4, "on 「更多」 at the line's end")
+        XCTAssertNotNil(XiaoLanMediaFind.moreSpot(rows, from: dy))
+        XCTAssertNil(XiaoLanMediaFind.moreSpot(rows, from: xhs), "Xiaohongshu's is not folded")
+        XCTAssertGreaterThan(XiaoLanMediaFind.addressStart(p("最... https://v.douyin.com/", 0.5, 0.8, x: 0.1)).x, 0.25)
+    }
+
+    /// 191: Douyin's app-only page, the ··· menu's 「用默认浏览器打开」, Xiaohongshu's video page, a 视频号 card and player.
+    func testPagesMenusAndChannelsCards() throws {
+        func p(_ t: String, _ y: Double, x: Double = 0.2, w: Double = 0.3) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: 0.02))
+        }
+        XCTAssertTrue(XiaoLanMediaFind.appOnlyPage([[p("抱歉出错了", 0.55)], [p("请尝试在抖音内观看", 0.58)], [p("打开抖音", 0.66)]]))
+        XCTAssertFalse(XiaoLanMediaFind.appOnlyPage([[p("百度一下，你就知道", 0.3)]]))
+        XCTAssertEqual(XiaoLanMediaFind.defaultBrowserItem([[p("转发给朋友", 0.49), p("用默认", 0.49, x: 0.89, w: 0.1)]])?.text, "用默认")
+        let note = [[p("梨形身材的茶茶", 0.53), p("关注", 0.53, x: 0.45, w: 0.06)], [p("发弹幕", 0.65)], [p("App内打开", 0.95)]]
+        let play = try XCTUnwrap(XiaoLanMediaFind.pageVideoSpot(note))
+        XCTAssertTrue((0.2...0.4).contains(Double(play.y)))
+        XCTAssertNil(XiaoLanMediaFind.pageVideoSpot([[p("百度一下", 0.3)]]))
+        let card = CGRect(x: 0.17, y: 0.37, width: 0.37, height: 0.18)
+        let author = try XCTUnwrap(XiaoLanMediaFind.cardAuthor([[p("♥露露lulu0517", 0.525, x: 0.17, w: 0.28)]], in: card))
+        XCTAssertEqual(author, "露露lulu0517")
+        XCTAssertTrue(XiaoLanMediaFind.channelsPlayer([[p("露露lulu0517", 0.93)]], author: "W露露lulu0517"))
+        XCTAssertFalse(XiaoLanMediaFind.channelsPlayer([[p("露露lulu0517", 0.3)]], author: author), "the author at the bottom")
+    }
+
     /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
     func testAPrivateLineWithNoSenderIsItsChatsPersons() {
         XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")

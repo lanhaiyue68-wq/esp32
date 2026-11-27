@@ -42,6 +42,7 @@ enum XiaoLanMediaFind {
         case "语音", "語音", "Voice": return .voice
         case "视频", "視頻", "影片", "Video": return .video
         case "图片", "圖片", "照片", "Photo", "Image": return .image
+        case "视频号", "視頻號", "Channels": return .image  // 191 (N37): its card is a picture; clicked, its player
         case "文件", "檔案", "File": return .file
         case "链接", "鏈接", "連結", "Link": return .link
         default: return nil
@@ -51,7 +52,7 @@ enum XiaoLanMediaFind {
     /// What a chat line or a preview is; nil: plain words (or a sticker, a red packet, …, which are not read).
     static func kind(of text: String) -> Kind? {
         if let k = tag(text) { return k }
-        if url(in: text) != nil { return .link }
+        if url(in: text) != nil || shareText(text) { return .link }  // 191 (N37): a share with its address folded away
         if fileName(text) != nil { return .file }
         if voiceSeconds(text) != nil { return .voice }
         return nil
@@ -435,7 +436,113 @@ enum XiaoLanMediaFind {
         }
     }
 
-    static func linkSpots(_ rows: [[Piece]]) -> [Piece] { pieces(rows).filter { url(in: $0.text) != nil } }
+    /// A line of a link: its address, or (191, N37) a share's own words with no address shown (Douyin's folded share).
+    static func linkSpots(_ rows: [[Piece]]) -> [Piece] { pieces(rows).filter { url(in: $0.text) != nil || shareText($0.text) } }
+
+    // MARK: 191 shares (N37, N38)
+
+    /// 191 (N37, Echo 190 11-27 首爾 15:06: Douyin's and Kuaishou's shares came folded, 「…更多」, Douyin's address not
+    /// shown at all, so neither was a link): a share's own words, its address shown or not.
+    static let shareMarks = ["复制打开抖音", "复制打开快手", "打开【快手】", "去【小红书】", "打开【小红书】", "复制打开小红书",
+                             "v.douyin.com", "kuaishou.com", "xhslink", "xiaohongshu.com"]
+    static func shareText(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        return shareMarks.contains { t.contains($0) }
+    }
+
+    /// WeChat's fold: a long message cut, 「…更多」 at its end (OCR: 「聊赚钱.更多」, 「LENRb...更多」).
+    static func folded(_ text: String) -> Bool { text.filter { !$0.isWhitespace }.hasSuffix("更多") }
+
+    /// The lines of the bubble whose line `p` is: `p` and those just under it (a line's gap, measured 0.022 apart; the
+    /// next bubble 0.05 lower).
+    static func bubbleLines(_ rows: [[Piece]], from p: Piece) -> [Piece] {
+        var lines = [p]
+        for q in pieces(rows) where Double(q.box.minY) > Double(lines.last!.box.minY) + 0.005 {
+            guard Double(q.box.minY) - Double(lines.last!.box.maxY) < 0.03,
+                  abs(Double(q.box.minX) - Double(p.box.minX)) < 0.12 else { continue }
+            lines.append(q)
+        }
+        return lines
+    }
+
+    /// The 「更多」 of a folded message whose line `p` is: the middle of the last two characters of the bubble's line
+    /// that ends with it.
+    static func moreSpot(_ rows: [[Piece]], from p: Piece) -> CGPoint? {
+        guard let q = bubbleLines(rows, from: p).first(where: { folded($0.text) }) else { return nil }
+        let n = Double(max(q.text.count, 2))
+        return CGPoint(x: Double(q.box.minX) + Double(q.box.width) * (n - 1) / n, y: Double(q.box.midY))
+    }
+
+    /// 191 (N38, Echo 190 11-27: the report said Kuaishou's address, Xiaohongshu's line was clicked): the line of this
+    /// job's link — its address read alike (or the start of it, cut by a fold), else its words' start — else the rank's.
+    static func linkLine(_ rows: [[Piece]], text: String, rank: Int) -> Piece? {
+        let spots = linkSpots(rows)
+        if let key = linkKey(text), let p = spots.last(where: { q in
+            guard let k = linkKey(q.text) else { return false }
+            return sameLink(k, key) || (k.count >= 8 && key.hasPrefix(k)) || (key.count >= 8 && k.hasPrefix(key))
+        }) { return p }
+        let head = String(plain(text.replacingOccurrences(of: "[链接]", with: "")).prefix(6))
+        if head.count >= 4, let p = spots.last(where: { plain($0.text).hasPrefix(head) }) { return p }
+        return pick(spots, rank: rank)
+    }
+
+    /// Where an address starts on its line (a full text's 「最... https://v.douyin.com/」): its 「h」's place, a little in.
+    static func addressStart(_ p: Piece) -> CGPoint {
+        let t = p.text
+        guard let r = t.range(of: "http", options: .caseInsensitive) ?? t.range(of: "www.", options: .caseInsensitive) else {
+            return CGPoint(x: Double(p.box.midX), y: Double(p.box.midY))
+        }
+        let start = Double(t.distance(from: t.startIndex, to: r.lowerBound)) + 2
+        return CGPoint(x: Double(p.box.minX) + Double(p.box.width) * min(start / Double(max(t.count, 1)), 0.95), y: Double(p.box.midY))
+    }
+
+    /// 191 (measured 11-27 15:12: Douyin's page in WeChat 「抱歉出错了 / 请尝试在抖音内观看 / 打开抖音」): a page that only
+    /// sends you to the app.
+    static func appOnlyPage(_ rows: [[Piece]]) -> Bool {
+        rows.joined().contains { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return t.contains("抱歉出错") || t.contains("请尝试在") || t.contains("内观看") || t == "打开抖音" || t == "打开快手"
+        }
+    }
+
+    /// 191: 「用默认浏览器打开」 in a page's ··· menu (measured 11-27: the first row's last item, its label cut by the
+    /// window's edge, read 「用默认」 / 「用默认浏览器打开」).
+    static func defaultBrowserItem(_ rows: [[Piece]]) -> Piece? {
+        rows.joined().first { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return t.hasPrefix("用默认") || t.contains("默认浏览器") || t.contains("浏览器打开")
+        }
+    }
+
+    /// 191 (measured 11-27 15:11: Xiaohongshu's note in WeChat, its video paused under a faint ▶, the author's 「关注」,
+    /// 「发弹幕」, 「App内打开」): a page with a video to start by a click on its middle; where (the window's share).
+    static func pageVideoSpot(_ rows: [[Piece]]) -> CGPoint? {
+        let all = Array(rows.joined())
+        let marks = all.filter { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return t == "关注" || t.contains("发弹幕") || t.contains("App内打开") || t.contains("xiaohongshu")
+        }
+        guard marks.count >= 2 else { return nil }
+        let bottom = all.first { $0.text.filter { !$0.isWhitespace } == "关注" }.map { Double($0.box.minY) - 0.03 } ?? 0.5
+        return CGPoint(x: 0.5, y: (0.09 + max(0.2, bottom)) / 2)
+    }
+
+    /// 191 (measured 11-27 15:18: a 视频号 card in the chat, a picture with a ▶ and its author at the bottom, 「♥露露lulu0517」;
+    /// clicked, its player over the window, playing, the author again at its bottom): the author's name on a block.
+    static func cardAuthor(_ rows: [[Piece]], in block: CGRect) -> String? {
+        let inside = rows.joined().filter { block.insetBy(dx: -0.01, dy: -0.01).contains(CGPoint(x: $0.box.midX, y: $0.box.midY)) }
+        guard let p = inside.max(by: { $0.box.midY < $1.box.midY }), Double(p.box.midY) > Double(block.midY) else { return nil }
+        let name = String(p.text.drop(while: { !($0.isLetter || $0.isNumber) }))
+        return plain(name).count >= 3 ? name : nil
+    }
+
+    /// The same author at the bottom of what opened: a 视频号 player (its last six letters, the icon before it read as
+    /// anything).
+    static func channelsPlayer(_ rows: [[Piece]], author: String) -> Bool {
+        let want = String(plain(author).suffix(6))
+        guard want.count >= 3 else { return false }
+        return rows.joined().contains { Double($0.box.midY) > 0.7 && plain($0.text).contains(want) }
+    }
 
     /// Where a message a reply quotes is, when it is a voice note, a video, a picture, a file or a link (the quote is
     /// what was reported: 「[语音] 4"\n语音转文字：…」): the newest of that kind on the window.
@@ -511,6 +618,8 @@ enum XiaoLanMediaFind {
 
     /// The longest a video is watched and listened to (user 11-27: three minutes; longer ones are cut and said so).
     static let videoMost = 180
+    /// 191: a video on a page or a 视频号 player, its length not shown: watched and listened to this long (s).
+    static let pageVideoMost = 30
 
     /// WeCom's player ✕ (an icon OCR cannot read) at the window's top left: measured at the screen's (0.529, 0.053),
     /// the right window starting at ~0.505 and ~0.495 wide.
