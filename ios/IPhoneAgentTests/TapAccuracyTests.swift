@@ -56,7 +56,9 @@ import UIKit
         let ended = expectation(description: "agent completed")
         agent.onFinish = { ended.fulfill() }
         try agent.start("给测试群发你好")
-        await fulfillment(of: [ended], timeout: 15)
+        // 194: it took 9.4–12.9 s on CI (192, 193) and over 15 s once the runner was slower (CI 46012399100, the whole
+        // suite 633 s for 482–526 s): its time is the runner's, not the agent's
+        await fulfillment(of: [ended], timeout: 30)
         agent.stop()
         XCTAssertEqual(phone.typed, 1)
         XCTAssertTrue(agent.steps.contains { $0["reason"] == .str(AgentLoop.sentAgainReason) })
