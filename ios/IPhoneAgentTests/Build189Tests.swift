@@ -249,6 +249,20 @@ import UIKit
         XCTAssertFalse(XiaoLanMediaFind.unsure("一个女生在楼下录口播，抬头看到有东西跑过去"))
     }
 
+    /// 191 (user 11-27: 「一個未讀，兩個未讀…一二三四那種的」): the number on a chat's red mark, at its avatar's top right;
+    /// 「99+」 as 99; a bare dot (a muted chat) or another row's number is none.
+    func testTheNumberOnARedMark() {
+        func p(_ t: String, _ x: Double, _ y: Double, _ w: Double, _ h: Double = 0.02) -> [CandidatePicker.Piece] {
+            [CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y, width: w, height: h))]
+        }
+        let list = [p("4", 0.165, 0.135, 0.02, 0.015), p("蓝海乐", 0.22, 0.17, 0.1), p("好的，这个我帮您查一下", 0.22, 0.2, 0.4, 0.018),
+                    p("测试群", 0.22, 0.27, 0.1), p("蓝海乐：多少钱", 0.22, 0.3, 0.3, 0.018)]
+        XCTAssertEqual(XiaoLanPanes.markCount(list, name: "蓝海乐"), 4)
+        XCTAssertNil(XiaoLanPanes.markCount(list, name: "测试群"), "no number on its row")
+        let many = [p("99+", 0.16, 0.135, 0.03, 0.015), p("蓝海乐", 0.22, 0.17, 0.1), p("好的", 0.22, 0.2, 0.2, 0.018)]
+        XCTAssertEqual(XiaoLanPanes.markCount(many, name: "蓝海乐"), 99)
+    }
+
     /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
     func testAPrivateLineWithNoSenderIsItsChatsPersons() {
         XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")

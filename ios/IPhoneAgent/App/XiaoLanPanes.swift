@@ -468,6 +468,19 @@ import UIKit
         CGRect(x: title.minX - 0.075, y: title.midY - 0.045, width: 0.07, height: 0.05)
     }
 
+    /// 191 (user 11-27: 「未讀…就是帶那個紅色的小點，一個未讀，兩個未讀…一二三四那種的」): the number on a chat's red mark
+    /// (「4」, 「99+」 as 99), read in its badge area; nil for a muted chat's bare dot or a number not read.
+    static func markCount(_ rows: [[Piece]], name: String) -> Int? {
+        guard let row = entries(rows).first(where: { $0.name == name }) else { return nil }
+        let area = badgeArea(row.box).insetBy(dx: -0.01, dy: -0.01)
+        for p in rows.joined() where area.contains(CGPoint(x: p.box.midX, y: p.box.midY)) {
+            let t = p.text.filter { !$0.isWhitespace }
+            let digits = t.hasSuffix("+") ? String(t.dropLast()) : t
+            if !digits.isEmpty, digits.count <= 3, digits.allSatisfy(\.isASCII), let n = Int(digits), n > 0 { return n }
+        }
+        return nil
+    }
+
     /// The chats with a red mark, top first (fractions of the window): the row to tap.
     static func marked(_ rows: [[Piece]], red: (CGRect) -> Double) -> [(name: String, at: CGPoint)] {
         entries(rows).filter { !notChats.contains($0.name) && red(badgeArea($0.box)) >= WatchChatOpen.badgeShare }

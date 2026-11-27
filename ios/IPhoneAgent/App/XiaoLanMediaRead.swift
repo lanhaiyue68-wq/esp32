@@ -60,7 +60,9 @@ extension AppModel {
     }
 
     func paneMedia(_ job: MediaJob) async -> (seen: String?, why: String?) {
-        guard let look = await paneMediaChat(job) else { return (nil, "「\(job.chat)」已经不在窗口里") }
+        guard var look = await paneMediaChat(job) else { return (nil, "「\(job.chat)」已经不在窗口里") }
+        // 191 (N29; Echo 191 15:25): 小藍's keyboard down first, the chat looked at again once it settles (every kind)
+        if await paneMediaKeyboardDown(job), let again = await paneMediaChat(job, after: now()) { look = again }
         switch job.kind {
         case .voice: return await paneMediaVoice(job, look)
         case .video: return await paneMediaVideo(job, look)
@@ -290,7 +292,6 @@ extension AppModel {
         else { return await fromThumbnail("not found as a block") }
         let width = Double(look.rect.width)
         let author = XiaoLanMediaFind.cardAuthor(look.rows, in: block)  // 191: a 视频号 card's
-        _ = await paneMediaKeyboardDown(job)
         guard await paneTap(CGPoint(x: block.midX, y: block.midY), in: look.rect, wide: Double(block.width) / 3, tall: Double(block.height) / 3),
               let viewer = await paneLook(job.side, after: now(), tries: 6, until: { !self.isJobChat($0, job) }), !isJobChat(viewer, job)
         else { return await fromThumbnail("not opened") }
@@ -414,7 +415,6 @@ extension AppModel {
     ///   page with a video (Xiaohongshu's) started by a click on it, watched and listened to.
     private func paneMediaLink(_ job: MediaJob, _ look: PaneLook) async -> (seen: String?, why: String?) {
         var chat = look
-        if await paneMediaKeyboardDown(job), let again = await paneMediaChat(job, after: now()) { chat = again }
         guard var piece = XiaoLanMediaFind.linkLine(chat.rows, text: job.text, rank: job.rank) else {
             return (nil, "没在聊天里找到网址")
         }
@@ -452,6 +452,9 @@ extension AppModel {
         DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 小藍's keyboard up before a message's click; put down first")
         _ = await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true)
         _ = await smallKeyboard(up: false, within: 1.0)
+        // 191 (Echo 191 15:25: the chat slid down ~0.2 as the keyboard went, and the line read before it went was
+        // clicked: 视频号's card was pressed for Douyin's link): the chat still before it is looked at again
+        await feed.settled(quiet: 0.3, least: 0.3, most: 2)
         return true
     }
 

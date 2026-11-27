@@ -559,7 +559,9 @@ extension AppModel {
                 }
                 return
             }
-            DebugLog.write("watch: \(app.rawValue): red mark on \(hit.name); opening it")
+            // 191 (user 11-27: 「一個未讀，兩個未讀…一二三四那種的」): the number on its mark, read before the row is opened
+            let markCount = XiaoLanPanes.markCount(look.rows, name: hit.name)
+            DebugLog.write("watch: \(app.rawValue): red mark on \(hit.name)\(markCount.map { " (\($0) unread)" } ?? ""); opening it")
             guard await paneTap(hit.at, in: look.rect, tall: Self.rowTall) else { return }
             let opened = await paneLook(look.side, after: now()) { l in
                 if case .chat(let t) = l.view { return WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: hit.name) }
@@ -590,7 +592,7 @@ extension AppModel {
             var current = (look: chat, title: title)
             for attempt in 0..<7 {
                 let done = paneRead(app, current.look, title: current.title, fromMark: true, markSender: markSender,
-                                    markPreview: markPreview, lastTry: attempt == 6, &state)
+                                    markPreview: markPreview, markCount: markCount, lastTry: attempt == 6, &state)
                 if done >= 0 { break }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let name = WatchOCR.titled(title).name
@@ -600,7 +602,7 @@ extension AppModel {
                 }), case .chat(let t) = again.view, WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: name) else {
                     DebugLog.write("watch: \(app.rawValue): \(name) is no longer in its window; its preview's line taken")
                     _ = paneRead(app, current.look, title: current.title, fromMark: true, markSender: markSender,
-                                 markPreview: markPreview, lastTry: true, &state)
+                                 markPreview: markPreview, markCount: markCount, lastTry: true, &state)
                     break
                 }
                 current = (again, t)
@@ -944,7 +946,8 @@ extension AppModel {
     /// Returns how many messages were reported; -1 when the window could not be read (188: the caller looks again).
     /// `lastTry` (188, B45): a window opened by its red mark that still cannot be read reports its preview's line.
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
-                          markPreview: String? = nil, lastTry: Bool = true, _ state: inout PaneWatchState) -> Int {
+                          markPreview: String? = nil, markCount: Int? = nil, lastTry: Bool = true,
+                          _ state: inout PaneWatchState) -> Int {
         // 187: under a sheet of another chat the title is this chat's, the lines are the other's: not read.
         if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil {
             DebugLog.write("watch: \(app.rawValue): \(title): another chat open over it as a sheet; not read")
@@ -978,6 +981,13 @@ extension AppModel {
         var fresh = WatchReport.new(lines, history: before)
         if let before, state.loaded.remove(key) != nil {  // 183: the first look since a restart
             fresh = PaneHistory.newAfterLaunch(lines, history: before, fromMark: fromMark)
+            // 191 (user 11-27: 「已讀的最新的就不要回復了…像剛才那個金鑰，它就是已讀的」; Echo 191 15:25: a chat left open
+            // when watching started, its last line long read by the owner, was answered): with no red mark, what an
+            // open chat shows when watching starts is read
+            if !fromMark, !fresh.isEmpty {
+                DebugLog.write("watch: \(app.rawValue): \(name): open when watching started, no red mark: \(fresh.count) line(s) taken as read")
+                fresh = []
+            }
         }
         // 183 (Echo 182 overnight, 11-26 21:11: WeCom showed 企微测试群 scrolled up; nothing on it went on from the
         // history, so all of it counted as new, and 0040, which 小藍 had sent from WeChat 33 minutes before and which
@@ -1008,6 +1018,18 @@ extension AppModel {
             // Opened for its red mark the first time: what came after my last line (at most 5) is the unread.
             let start = (lines.lastIndex { $0.mine }).map { $0 + 1 } ?? 0
             fresh = Array(lines[min(start, lines.count)...].suffix(5))
+        }
+        // 191 (user 11-27: 「只回未讀的…未讀就是帶那個紅色的小點，一個未讀、兩個未讀…有一二三四那種的才可以…已讀的就
+        // 不要回復了」; Echo 191 15:25: the owner's same four shares sent again, three taken as read before for their words
+        // seen at 15:06, one answered): opened by a red mark whose number was read, the unread are the last that many
+        // lines of others after my last line, whatever was read before.
+        if fromMark, let n = markCount, n > 0 {
+            let start = (lines.lastIndex { $0.mine }).map { $0 + 1 } ?? 0
+            let unreadLines = Array(lines[min(start, lines.count)...].filter { !$0.mine }.suffix(n))
+            if unreadLines.map(\.text) != fresh.filter({ !$0.mine }).map(\.text) {
+                DebugLog.write("watch: \(app.rawValue): \(name): its red mark said \(n) unread; \(unreadLines.count) line(s) taken as new (was \(fresh.count))")
+            }
+            fresh = unreadLines
         }
         // 187: a red mark with nothing of anyone's new read: the line its preview shows (WatchReport.markedLine); what
         // was read is logged and the window kept in diagnostics, so the cause can be seen.
