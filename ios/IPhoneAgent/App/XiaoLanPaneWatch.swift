@@ -55,7 +55,7 @@ struct PaneWatchState {
     /// 189 (N16): texts typed by 小藍 so far (an order failed with this unchanged typed nothing), and the orders
     /// already sent once more.
     var typed = 0
-    var retried: Set<String> = []
+    var retried: [String: Int] = [:]  // 189 (N33): how often each order went again
     /// 189 (speed): where the input field is in the window whose line waits for its QA reply (the pointer goes there
     /// meanwhile, no click).
     var replyField: (side: Int, at: CGPoint)?
@@ -65,6 +65,8 @@ struct PaneWatchState {
     var openChat: [Int: String] = [:]
     /// 189 (N22): the words of lines reported as someone else's (XiaoLanSelf.plain), and when.
     var reportedLines: [String: Double] = [:]
+    /// 189 (N32): per chat, the links opened lately (XiaoLanMediaFind.linkKey), and when.
+    var linksSeen: [String: [(key: String, at: Double)]] = [:]
 }
 
 @MainActor private var paneHeldTurn = 0
@@ -1101,6 +1103,18 @@ extension AppModel {
         var plain: [ReadMessage] = []
         for (i, m) in messages.enumerated() {
             guard let kind = kinds[i], MediaSettings.on(kind) else { plain.append(m); continue }
+            // 189 (N32, Echo 189, 11-27 12:58–12:59 首爾: https://www.baidu.com, opened and read, came again as
+            // 「…baiau.com」 then 「…bardu.com」 — read differently each time — and was opened again and answered twice): a
+            // link of this chat read in the last 30 minutes, give or take two letters, is not opened again
+            if kind == .link, let key = XiaoLanMediaFind.linkKey(m.text) {
+                let chatKey = "\(app.rawValue)|\(name)"
+                let recent = (state.linksSeen[chatKey] ?? []).filter { t - $0.at < 1800 }
+                if recent.contains(where: { XiaoLanMediaFind.sameLink($0.key, key) }) {
+                    DebugLog.write("watch: \(app.rawValue): \(name): the link 「\(m.text.prefix(40))」 was read before (read a little differently); not again")
+                    continue
+                }
+                state.linksSeen[chatKey] = recent + [(key: key, at: t)]
+            }
             let rank = kinds[(i + 1)...].filter { $0 == kind }.count  // the newest of its kind is 0
             jobs.append(MediaJob(app: app, side: look.side, chat: name, group: read.group, sender: m.sender, kind: kind,
                                  text: m.text, atMe: m.atMe, rank: rank))
@@ -1158,14 +1172,23 @@ extension AppModel {
             DebugLog.write("watch: \(order.app.rawValue): the message to \(order.chat) not sent: \(sent.why)")  // 189 (N16)
             // 189 (N16, Echo 188, 11-27 11:36: 测试群's QA reply failed before a word was typed and was dropped; the line was
             // asked again 14 s later): a QA reply not sent with nothing typed goes once more, first (nothing can go twice)
-            if ChatToolLink.isQA(order.messageId), state.typed == typedBefore, state.retried.insert(order.key).inserted {
-                DebugLog.write("watch: nothing was typed for it; the reply to \(order.chat) goes once more, first")
-                try? await Task.sleep(nanoseconds: 800_000_000)
+            // 189 (N33, Echo 189, 11-27 12:59 首爾: four replies to 蓝海乐 failed twice each and were dropped, the customer
+            // never answered and the owner never told): three more tries, 1, 3 and 6 s apart; then the owner is told
+            let tries = state.retried[order.key, default: 0]
+            if ChatToolLink.isQA(order.messageId), state.typed == typedBefore, tries < 3 {
+                state.retried[order.key] = tries + 1
+                DebugLog.write("watch: nothing was typed for it; the reply to \(order.chat) goes again, first (try \(tries + 2) of 4)")
+                try? await Task.sleep(nanoseconds: UInt64([1, 3, 6][tries]) * 1_000_000_000)
                 link.retry(order)
                 return
             }
+            if ChatToolLink.isQA(order.messageId) {
+                DebugLog.write("watch: \(order.app.rawValue): the reply to \(order.chat) not sent after \(tries + 1) tries; the owner is told")
+                notifier.post(.failed, title: "小蓝有一条回复没发出去",
+                              body: "「\(order.chat)」：\(sent.why)。请看一下这个聊天，需要的话手动回复。", run: "xiaolan-watch")
+            }
         }
-        state.retried.remove(order.key)
+        state.retried[order.key] = nil
         link.finish(order, ok: sent.ok, reason: sent.ok ? (order.at.isEmpty ? "" : ChatToolLink.reasonNoAt) : sent.why)
         // 189 (speed; user 11-27: the second of two replies to 企微测试群 began 4 s after the first was sent): the next order
         // for the same chat starts from the window as it showed this line sent, no new look of both windows

@@ -535,6 +535,33 @@ enum XiaoLanMediaFind {
         return words.isEmpty ? nil : words
     }
 
+    /// 189 (N32): a link's address as compared: lowercased, no scheme, no 「www.」, letters and digits only; nil when
+    /// the line holds no address.
+    static func linkKey(_ line: String) -> String? {
+        guard var u = url(in: line)?.lowercased() else { return nil }
+        for head in ["https://", "http://", "www."] where u.hasPrefix(head) { u.removeFirst(head.count) }
+        if u.hasPrefix("www.") { u.removeFirst(4) }
+        let key = u.filter { $0.isLetter || $0.isNumber }
+        return key.count >= 4 ? key : nil
+    }
+
+    /// Two link keys alike but for a misread letter (as the iPad reads 「baidu」: 「baiau」, 「bardu」), two in a long one
+    /// (16+ letters); a short link's code differing by more is another link.
+    static func sameLink(_ a: String, _ b: String) -> Bool {
+        let x = Array(a), y = Array(b)
+        let most = min(x.count, y.count) >= 16 ? 2 : 1
+        guard abs(x.count - y.count) <= most, !x.isEmpty, !y.isEmpty else { return a == b }
+        var row = Array(0...y.count)
+        for i in 1...x.count {
+            var next = [i] + Array(repeating: 0, count: y.count)
+            for j in 1...y.count {
+                next[j] = min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1))
+            }
+            row = next
+        }
+        return row[y.count] <= most
+    }
+
     /// A voice note's length in its line as reported (「[语音] 9"」 → 9).
     static func noteSeconds(_ line: String) -> Int? {
         guard let r = line.range(of: #"(\d{1,2})["″”“'’]"#, options: .regularExpression) else { return nil }

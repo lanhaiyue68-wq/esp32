@@ -180,14 +180,25 @@ extension AppModel {
         // playing video never is — for its full 2.5 s, and the controls with the time had hidden by then; 13 s, "没看到
         // 播放进度"): looked at with no such wait; no time on the second look and the chat gone, one click on the player
         // shows its controls
-        var opened: PaneLook?
+        var opened: PaneLook?, away: PaneLook?
         for attempt in 0..<4 {
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard let l = await paneLooks(side: job.side).first(where: { $0.side == job.side }) else { continue }
             if XiaoLanMediaFind.playerLength(l.rows) != nil { opened = l; break }
+            if !isJobChat(l, job) { away = l }
             if attempt == 1, !isJobChat(l, job) { _ = await paneTap(CGPoint(x: 0.5, y: 0.45), in: l.rect, wide: 0.1, tall: 0.05) }
         }
-        guard let player = opened, let length = XiaoLanMediaFind.playerLength(player.rows) else {
+        // 189 (N34, Echo 189, 11-27 13:12 首爾: WeCom's player opened over 蓝海乐 but its time was never read; 「视频没有
+        // 打开」 and closed unseen): the player up (the chat gone) with no time read is watched for the thumbnail's length
+        // (10 s when none was read)
+        var length = opened.flatMap { XiaoLanMediaFind.playerLength($0.rows) }
+        if length == nil, let a = away, await paneMediaChat(job, after: now()) == nil {
+            let guess = XiaoLanMediaFind.clockSeconds(job.text) ?? 10
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the player is up, its time not read; watched for \(guess) s")
+            opened = a
+            length = guess
+        }
+        guard let player = opened, let length else {
             if await paneMediaChat(job, after: now()) == nil { await paneMediaCloseVideo(job, rect: look.rect) }
             return (nil, "视频没有打开（没看到播放进度）")
         }

@@ -185,13 +185,13 @@ import Foundation
     /// callback keys (receivedName, rawSpoken, atMe…) stay on the item; ChatTool reads messageList when it is there.
     static func packet(_ m: ReadMessage) -> String? {
         let sub: [String: Any] = [
-            "sender": m.sender == "me" ? 1 : 0, "textType": plainText, "nameList": [m.sender],
+            "sender": m.sender == "me" ? 1 : 0, "textType": plainText, "nameList": [Self.who(m)],
             "itemMessageList": [["feature": 2, "text": m.text]],
         ]
         let item: [String: Any] = [
             "type": receiveMessageList, "titleList": [m.chat], "roomType": m.group ? internalGroup : privateChat,
             "messageList": [sub],
-            "groupName": m.group ? m.chat : "", "receivedName": m.sender, "rawSpoken": m.text, "atMe": m.atMe ? "1" : "",
+            "groupName": m.group ? m.chat : "", "receivedName": Self.who(m), "rawSpoken": m.text, "atMe": m.atMe ? "1" : "",
             "textType": plainText, "sender": m.sender == "me" ? 1 : 0,
         ]
         return json(["socketType": listSocket, "list": [item]])
@@ -246,8 +246,12 @@ import Foundation
         return c.replyAll || !m.group || m.atMe
     }
 
+    /// 189 (N34, Echo 189, 11-27 13:12 首爾: a private chat's video, its line taken from the list's preview, went to the
+    /// server with no sender, and was not answered): a private chat's line with no sender read is its chat's person's.
+    static func who(_ m: ReadMessage) -> String { m.sender.isEmpty && !m.group ? m.chat : m.sender }
+
     static func qaBody(_ m: ReadMessage) -> [String: Any] {
-        ["spoken": m.text, "rawSpoken": m.text, "receivedName": m.sender, "groupName": m.chat, "groupRemark": "",
+        ["spoken": m.text, "rawSpoken": m.text, "receivedName": Self.who(m), "groupName": m.chat, "groupRemark": "",
          "roomType": m.group ? internalGroup : privateChat, "atMe": m.atMe ? "true" : "false", "textType": plainText]
     }
 

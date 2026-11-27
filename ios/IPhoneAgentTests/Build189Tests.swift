@@ -153,6 +153,25 @@ import UIKit
         XCTAssertNil(XiaoLanPanes.inputField(try XCTUnwrap(WatchOCR.Pixels(window(bar: false)))), "a bubble on the chat's grey is no field")
     }
 
+    /// N32: one link read three ways is one link; another link is not.
+    func testALinkReadALittleDifferentlyIsTheSameLink() throws {
+        let a = try XCTUnwrap(XiaoLanMediaFind.linkKey("https://www.baidu.com"))
+        let b = try XCTUnwrap(XiaoLanMediaFind.linkKey("[链接] https://www.baiau.com"))
+        let c = try XCTUnwrap(XiaoLanMediaFind.linkKey("https://www.bardu.com"))
+        XCTAssertEqual(a, "baiducom")
+        XCTAssertTrue(XiaoLanMediaFind.sameLink(a, b))
+        XCTAssertTrue(XiaoLanMediaFind.sameLink(a, c))
+        XCTAssertFalse(XiaoLanMediaFind.sameLink(a, try XCTUnwrap(XiaoLanMediaFind.linkKey("https://www.taobao.com"))))
+        XCTAssertNil(XiaoLanMediaFind.linkKey("你好"))
+    }
+
+    /// N34: a private chat's line with no sender is its person's; a group's stays nameless.
+    func testAPrivateLineWithNoSenderIsItsChatsPersons() {
+        XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "", text: "［视频］", atMe: false)), "蓝海乐")
+        XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "测试群", group: true, sender: "", text: "你好", atMe: false)), "")
+        XCTAssertEqual(ChatToolLink.who(ReadMessage(chat: "蓝海乐", group: false, sender: "蓝海乐", text: "你好", atMe: false)), "蓝海乐")
+    }
+
     /// N25: a draft's preview with full-width brackets is no line.
     func testADraftWithFullWidthBracketsIsNoLine() {
         XCTAssertEqual(WatchReport.previewBody("［草稿］你好"), "")
