@@ -257,17 +257,22 @@ import Foundation
 
     /// The QA callback's reply text, or nil when it gives none to send (an empty text means: do not reply).
     /// 192 (N44): the words of a reported line to quote in its answer — its first line, a 「[链接]」-style tag left out
-    /// (what the chat shows is the address itself); none for a line with no words of its own (「[语音] 4"」).
+    /// (what the chat shows is the address itself).
+    /// 195 (N78, Echo 194 11-28 00:40: the answer to a photo went without its quote; user: every reply quotes its line):
+    /// a line with no words of its own (「[图片]」, 「[语音] 4"」, 「[视频]」) is quoted by its tag, and paneQuote finds it by
+    /// its place on the window (XiaoLanMediaFind.mediaQuoteSpot).
     static func quoteLine(_ text: String) -> String {
         var first = text.components(separatedBy: .newlines).first ?? ""
         first = first.trimmingCharacters(in: .whitespaces)
+        var tag = ""
         if first.hasPrefix("["), let close = first.firstIndex(of: "]"), first.distance(from: first.startIndex, to: close) <= 6 {
+            tag = String(first[...close])
             first = String(first[first.index(after: close)...]).trimmingCharacters(in: .whitespaces)
         }
         // 193 (N59, Echo 192 11-27 18:24: 「1」「2」「3」 answered without their quotes; user: every reply quotes its line,
         // one character too): any letter or digit is words enough; a voice note's length alone (「4"」) is none
-        if XiaoLanMediaFind.voiceSeconds(first) != nil { return "" }
-        return first.contains(where: { $0.isLetter || $0.isNumber }) ? first : ""
+        if XiaoLanMediaFind.voiceSeconds(first) != nil { return tag }
+        return first.contains(where: { $0.isLetter || $0.isNumber }) ? first : tag
     }
 
     /// 193 (N64, Echo 192 11-27 18:32: WeCom's failed send told as 「微信里没有发出去」): said for the app it failed in.

@@ -88,6 +88,7 @@ extension AppModel {
         state.history = PaneHistory.load()  // 183: what was read before a restart is not new again
         state.loaded = Set(state.history.keys)
         var waitingLogged = false
+        var shareGoneSince: Double?, shareGoneTold = false  // 195 (N79)
         DebugLog.write("watch: 小藍 side by side: WeChat and WeCom both watched, either side, no model")
         while watching && !Task.isCancelled {
             if let order = paneNextOrder() {  // 188: in the order the messages came, both apps together
@@ -122,9 +123,23 @@ extension AppModel {
             guard board.connected, feed.watchable else {
                 watchStatus = String(localized: "Waiting for the board and Screen Mirroring…")
                 if !waitingLogged { waitingLogged = true; DebugLog.write("watch: waiting for the board and screen sharing") }
+                // 195 (N79, Echo 194 11-28 00:43: sharing stopped by hand, the watch waited — no blind clicks — but only
+                // Echo's own screen said so): the sharing gone over 20 s, the owner is told once; back, the watch goes on
+                if board.connected, !feed.watchable {
+                    let since = shareGoneSince ?? now()
+                    shareGoneSince = since
+                    if !shareGoneTold, XiaoLanPanes.shareGoneSay(now() - since) {
+                        shareGoneTold = true
+                        DebugLog.write("watch: no screen sharing for 20 s; the owner told (N79)")
+                        notifier.post(.mirroring, title: "小蓝的屏幕共享停了",
+                                      body: "请回到 Echo 重新共享整个屏幕，守候会自己接着做。", run: "xiaolan-watch")
+                    }
+                }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 continue
             }
+            if shareGoneTold { DebugLog.write("watch: screen sharing back; the watch goes on (N79)") }
+            (shareGoneSince, shareGoneTold) = (nil, false)
             waitingLogged = false
             if await paneShareLost(&state) { break }  // 193 (N65)
             if UIApplication.shared.applicationState == .active {
@@ -1093,7 +1108,7 @@ extension AppModel {
         let name = read.title
         // 183: a news or team account's chat (left open) is no one's: never reported.
         if XiaoLanPanes.notChats.contains(XiaoLanPanes.listName(name)) { return 0 }
-        let lines = read.lines.map { WatchReport.Line(sender: XiaoLanPanes.listName($0.sender), text: $0.text, mine: $0.mine, y: $0.y) }
+        var lines = read.lines.map { WatchReport.Line(sender: XiaoLanPanes.listName($0.sender), text: $0.text, mine: $0.mine, y: $0.y) }
         let key = "\(app.rawValue)|\(name)"
         let before = state.history[key]
         // 193 (N46/N52/N60/N61/N63; user 11-27: 「紅點上的數字是幾就只處理最新那幾條，舊的一律不回、不點開」): which lines are
@@ -1108,14 +1123,36 @@ extension AppModel {
         // preview showed down
         var avatarTops: [Double]?
         var previewY: Double?
-        if fromMark, !missed, case .mark(let n?) = opened, n > 0, let px = WatchOCR.Pixels(look.crop) {
+        if let px = WatchOCR.Pixels(look.crop) {
             let bottom = min(px.inputTop(from: 0.3) ?? 0.93, XiaoLanMediaFind.quickBarTop(look.rows) ?? 1) - 0.005
-            avatarTops = XiaoLanMediaFind.avatarTops(px, bottom: bottom)
-            if let preview = markPreview {
-                let body = WatchReport.previewBody(preview)
-                if !body.isEmpty { previewY = lines.last(where: { !$0.mine && WatchReport.previewShows(body, $0) })?.y }
+            let tops = XiaoLanMediaFind.avatarTops(px, bottom: bottom)
+            // 195 (N76): an avatar with no line read beside it, its bubble read as digits (a lone 「1」). N80 (195's review:
+            // only a red mark's read did it, so a lone 「1」 that came in with the chat open, or under a mark whose number
+            // was not read, was still lost): every read of a window read does it. N85 (195's review: a digit hidden under
+            // the pointer or a keyboard in one read and given by its pixels in the next, with no line of mine under it,
+            // was found only not surely, and as never read it was taken for new): with no mark's count to go by, only
+            // digits under where the history goes on and under every line of mine are put in (a new one comes in at the
+            // bottom)
+            if screenRead != nil {
+                var found = XiaoLanMediaFind.unreadDigits(px, tops: tops, lines: lines, bottom: bottom)
+                let counted: Bool = { if case .mark(let n?) = opened, n > 0 { return true }; return false }()
+                if !counted { found = XiaoLanMediaFind.belowRead(found, lines: lines, history: before ?? []) }
+                lines = XiaoLanMediaFind.withDigits(lines, found, sender: XiaoLanPanes.listName(name), group: read.group, rows: look.rows)
+                for d in found {
+                    DebugLog.write("watch: \(app.rawValue): \(name): 「\(d.text)」 read off its bubble's pixels at y \(String(format: "%.3f", d.y)), OCR gave it no words (N76)")
+                }
+            }
+            if fromMark, !missed, case .mark(let n?) = opened, n > 0 {
+                avatarTops = tops
+                if let preview = markPreview {
+                    let body = WatchReport.previewBody(preview)
+                    if !body.isEmpty { previewY = lines.last(where: { !$0.mine && WatchReport.previewShows(body, $0) })?.y }
+                }
             }
         }
+        // 195 (N83, 测试群 11-28 00:12: 「2」 reported as 「主人监海乐」's, its name row read with 蓝 as 监): in a group, a name
+        // read once that is one character off a name read more often here or before is that name
+        if read.group { lines = XiaoLanMediaFind.steadySenders(lines, known: (before ?? []).map(\.sender)) }
         let pick = XiaoLanBatch.pick(lines, history: before, opened: opened, firstSinceLaunch: firstSinceLaunch,
                                      seen: state.seen[key] ?? [], isEcho: { XiaoLanMediaFind.isEcho($0.text, of: echoList) },
                                      avatarTops: avatarTops, previewY: previewY)
@@ -1492,10 +1529,12 @@ extension AppModel {
                 if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                     (look, low) = (again, again.rows)
                 }
-            } else if focused, !keyboardBridge.onScreen() {
+            } else {
                 // 193 (N72's own: the quote's search put 小藍's keyboard down, the line still not found): the field is
                 // tapped again as with no keyboard, on the window as it is now
-                focused = false
+                if focused, !keyboardBridge.onScreen() { focused = false }
+                // 195 (N70b: a place by its neighbours clicked may have raised a keyboard with no quote bar read; a menu
+                // closed, a page backed out of): the window looked at again, never the field of the look before the quote
                 if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                     (look, low) = (again, again.rows)
                 }

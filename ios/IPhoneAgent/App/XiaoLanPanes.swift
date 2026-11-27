@@ -192,6 +192,16 @@ import UIKit
     /// frame; a still screen sends idle notes).
     static func shareQuiet(_ seconds: Double) -> Bool { seconds > 20 }
 
+    /// 195 (N79): the screen sharing gone (iOS said so) long enough to tell the owner: over 20 s (a restart of the
+    /// sharing by hand takes ~10 s).
+    static func shareGoneSay(_ seconds: Double) -> Bool { seconds > 20 }
+
+    /// 195 (N70b): two looks show the same chat (its title's name), as a click left it; a page told nothing of is none.
+    static func sameChat(_ a: View, _ b: View) -> Bool {
+        guard case .chat(let x) = a, case .chat(let y) = b else { return false }
+        return WatchChatOpen.sameChat(WatchOCR.titled(x).name, listName: WatchOCR.titled(y).name)
+    }
+
     /// 193 (N58, Echo 192 18:24: the owner typing, WeChat's title read 「对方正在输入…」 and the Douyin link's job filed
     /// under that name; the server knew no such chat): a chat title that only says the other side is typing or talking.
     static func typingTitle(_ title: String) -> Bool {

@@ -83,7 +83,7 @@ enum XiaoLanBadge {
 
     /// The digits of a disc's light pixels, left to right: runs of columns with light in them, a run as wide as it is
     /// tall cut in two at its faintest column (two digits touching), specks left out.
-    static func split(_ light: [Double], w: Int, h: Int) -> [Glyph] {
+    static func split(_ light: [Double], w: Int, h: Int, cut: Bool = true) -> [Glyph] {
         let on = 0.45
         func lit(_ i: Int, _ rows: Range<Int>) -> Bool { rows.contains { light[$0 * w + i] >= on } }
         func rowsOf(_ cols: Range<Int>) -> Range<Int>? {
@@ -104,7 +104,7 @@ enum XiaoLanBadge {
         var parts: [(cols: Range<Int>, rows: Range<Int>)] = []
         for run in runs {
             guard let rows = rowsOf(run), Double(rows.count) >= 0.33 * Double(h) else { continue }
-            if Double(run.count) > 1.05 * Double(rows.count), run.count >= 4 {
+            if cut, Double(run.count) > 1.05 * Double(rows.count), run.count >= 4 {
                 let third = run.count / 3
                 let middle = (run.lowerBound + third)..<(run.upperBound - third)
                 let cut = middle.min { a, b in
@@ -127,11 +127,11 @@ enum XiaoLanBadge {
     /// 193 (Echo 192's marks read on the iPad 11-27 evening: WeChat's 「6」 was taken for 5 by shape alone, 0.093 to
     /// 0.098): a glyph with a closed loop is never 1, 2, 3, 5 or 7; with two, only 8. No loop seen says nothing (a thin
     /// font's loops may close up at this size).
-    static func classify(_ g: Glyph) -> (digit: Character, distance: Double)? {
+    static func classify(_ g: Glyph, with set: [(Character, Glyph)] = XiaoLanBadge.templates) -> (digit: Character, distance: Double)? {
         let loops = holes(g)
         let allowed: Set<Character> = loops >= 2 ? ["8"] : (loops == 1 ? ["0", "4", "6", "8", "9"] : Set("0123456789"))
         var best: (Character, Double)?
-        for (digit, big) in templates where allowed.contains(digit) {
+        for (digit, big) in set where allowed.contains(digit) {
             let t = shrink(big, w: g.w, h: g.h)
             var ssd = 0.0
             for k in 0..<g.v.count { let d = g.v[k] - t[k]; ssd += d * d }
@@ -193,6 +193,55 @@ enum XiaoLanBadge {
             }
         }
         return out
+    }
+
+    // MARK: 195 (N76/N77) the digits in a message's bubble
+
+    /// The system font's digits as a chat's words show them (regular weight), drawn once.
+    static let textTemplates: [(Character, Glyph)] = "0123456789".compactMap { d in drawn(d, weight: .regular).map { (d, $0) } }
+
+    /// 195 (N76, Echo 194 11-28 00:12: WeCom's lone 「1」 gave OCR no words — its avatar was counted, its line never read —
+    /// and it was not answered; N77, 00:11: WeChat's 「3」 was not found to quote): the digits in a message's bubble
+    /// `area` (fractions of the window), dark on its light, and the top of their ink; nil: no ink, more than three marks,
+    /// or a mark no digit surely — a Chinese character is about as wide as it is tall, a digit far narrower (measured on
+    /// Echo 194's WeCom frame of 23:14: 「1」 6 × 15 pixels, 「2」 10 × 15).
+    static func bubbleDigits(_ px: WatchOCR.Pixels, in area: CGRect) -> (text: String, top: Double)? {
+        let x0 = max(0, Int(Double(area.minX) * Double(px.w))), x1 = min(px.w, Int(Double(area.maxX) * Double(px.w)))
+        let y0 = max(0, Int(Double(area.minY) * Double(px.h))), y1 = min(px.h, Int(Double(area.maxY) * Double(px.h)))
+        let w = x1 - x0, h = y1 - y0
+        guard w > 6, h > 6 else { return nil }
+        var lum = [Double](repeating: 0, count: w * h)
+        for j in 0..<h {
+            for i in 0..<w {
+                let k = ((y0 + j) * px.w + x0 + i) * 4
+                lum[j * w + i] = (Double(px.bytes[k]) * 3 + Double(px.bytes[k + 1]) * 6 + Double(px.bytes[k + 2])) / 10
+            }
+        }
+        // the bubble's paper: its lightest; ink: how far toward black (the chat's grey around it, ~18 darker, is none)
+        guard let paper = lum.max(), paper >= 200 else { return nil }
+        let ink = lum.map { min(1, max(0, (paper - $0) / (paper - 60))) }
+        // 195 (N82, 测试群 on the iPad 11-28 00:12: a group's name row sits at the avatar's top, over the bubble, and its
+        // grey letters ran into 「1」 — one mark 0.52 wide, as tall as both — so no group's lone digit was read): only the
+        // bubble's own rows, those mostly its paper (the longest run of them); the name's are on the chat's grey
+        var runs: [[Int]] = []
+        for j in 0..<h where (0..<w).filter({ lum[j * w + $0] >= paper - 10 }).count * 2 >= w {
+            if let last = runs.last?.last, last + 1 == j { runs[runs.count - 1].append(j) } else { runs.append([j]) }
+        }
+        guard let body = runs.max(by: { $0.count < $1.count }) else { return nil }
+        let inked = body.filter { j in (0..<w).contains { ink[j * w + $0] >= 0.45 } }
+        guard let a = inked.first, let b = inked.last, b - a + 1 >= 6 else { return nil }
+        let band = Array(ink[(a * w)..<((b + 1) * w)])
+        // a chat's digits never touch (a character as wide as tall is not cut in two), and each is as tall as the line
+        // (口 in 嗯 is not)
+        let found = split(band, w: w, h: b - a + 1, cut: false)
+        guard (1...3).contains(found.count) else { return nil }
+        var digits = ""
+        for g in found {
+            guard g.aspect <= 0.8, Double(g.h) >= 0.85 * Double(b - a + 1),
+                  let d = classify(g, with: textTemplates), d.distance < 0.22 else { return nil }
+            digits.append(d.digit)
+        }
+        return (digits, Double(y0 + a) / Double(px.h))
     }
 
     /// The system font's digits, white on black, cut to their ink, drawn once.

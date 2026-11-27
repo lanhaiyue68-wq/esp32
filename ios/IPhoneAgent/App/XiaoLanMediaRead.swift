@@ -1042,7 +1042,13 @@ extension AppModel {
                 media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote)
             }
         }
-        guard let spot = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote) else {
+        var found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)
+        // 195 (N77): digits OCR gives no words now (a lone 「3」) found by others' bubbles read as digits
+        if found == nil, let px = WatchOCR.Pixels(look.crop), let d = XiaoLanMediaFind.digitSpot(px, rows: look.rows, quote: quote) {
+            DebugLog.write("watch: \(who): 「\(quote)」 in no words read; its bubble found by its digits' pixels (N77)")
+            found = d
+        }
+        guard let spot = found else {
             DebugLog.write("watch: \(who): the line to quote (「\(quote.prefix(20))」) is not on the window; replied without a quote")
             return false
         }
@@ -1054,22 +1060,47 @@ extension AppModel {
         }
         // 引用 only where its words are read: WeChat's menu has 删除 beside it, so a learned or measured place is never
         // clicked blind (it is kept, for the record and /spots)
-        guard let menu = await paneMenuAfterPress(look.side, look.rect, "引用", pressedY: Double(spot.y)),  // 193 (N70)
-              let item = XiaoLanMediaFind.menuItem(menu.rows, "引用") else {
+        let pressed = await paneMenuAfterPress(look.side, look.rect, "引用", pressedY: Double(spot.y))  // 193 (N70)
+        var read = pressed.flatMap { XiaoLanMediaFind.menuItem($0.rows, "引用") }
+        // 195 (N70b): 「引用」 still not read, its place between the neighbours read
+        if read == nil, let m = pressed, let band = XiaoLanMediaFind.menuBand(m.rows), let slot = XiaoLanMediaFind.quoteSlot(m.rows, in: band) {
+            DebugLog.write("watch: \(who): 「引用」 not read; its place by its neighbours (\(String(format: "%.3f, %.3f", Double(slot.x), Double(slot.y)))) clicked (N70b)")
+            read = slot
+        }
+        guard let menu = pressed, let item = read else {
             if let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }) { await paneMediaCloseMenu(l) }
             DebugLog.write("watch: \(who): no 引用 after the long press; replied without a quote")
             return false
         }
+        let inferred = XiaoLanMediaFind.menuItem(menu.rows, "引用") == nil
         guard await paneTap(item, in: menu.rect, wide: 0.03, tall: 0.008) else {
             await paneMediaCloseMenu(menu)
             return false
         }
         let app = XiaoLanPanes.chatApp(look.rows)
-        if let taught = XiaoLanSpots.taught(.menuQuote, found: item, from: spot) {
+        if !inferred, let taught = XiaoLanSpots.taught(.menuQuote, found: item, from: spot) {
             XiaoLanSpots.learn(.menuQuote, app: app, width: Double(look.rect.width), at: taught)
         }
         let bar = await paneLook(look.side, after: now(), tries: 4, until: { XiaoLanMediaFind.quoteBar($0.rows, quote: quote) != nil })
         let shown = bar.map { XiaoLanMediaFind.quoteBar($0.rows, quote: quote) != nil } ?? false
+        // 195 (N70b): the place by its neighbours clicked and no quote bar came: not taken as quoted (another item may
+        // have been hit). A menu still up is closed; another titled page on the window (a 转发 or 添加至 page) is backed
+        // out of once; the reply goes plain.
+        if inferred, !shown {
+            var after = bar
+            if after == nil { after = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) }
+            if let l = after {
+                if XiaoLanMediaFind.menuBand(l.rows) != nil {
+                    await paneMediaCloseMenu(l)
+                } else if case .chat = l.view, !XiaoLanPanes.sameChat(l.view, look.view) {
+                    // another titled page (not a window told nothing of: nothing clicked blind)
+                    DebugLog.write("watch: \(who): another page on the window after the place by its neighbours was clicked; back once (N70b)")
+                    _ = await paneBackClick(l, who)
+                }
+            }
+            DebugLog.write("watch: \(who): 「\(quote.prefix(20))」: the place by its neighbours clicked, no quote bar seen; replied without a quote (N70b)")
+            return false
+        }
         DebugLog.write("watch: \(who): 「\(quote.prefix(20))」 quoted" + (shown ? "" : " (its bar not seen)"))
         return true
     }

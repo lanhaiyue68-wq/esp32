@@ -287,7 +287,7 @@ import UIKit
         XCTAssertEqual(report, "这里面讲了什么\n（引用的文件：山中国经济今明两年深度研判，pdf；小蓝看了：内容：经济增速）")
         XCTAssertEqual(ChatToolLink.quoteLine(report), "这里面讲了什么", "the answer quotes the question")
         XCTAssertEqual(ChatToolLink.quoteLine("[链接] https://v.douyin.com/abc/\n网页：…"), "https://v.douyin.com/abc/")
-        XCTAssertEqual(ChatToolLink.quoteLine("[语音] 4\"\n语音转文字：多少钱"), "", "no words of its own to quote")
+        XCTAssertEqual(ChatToolLink.quoteLine("[语音] 4\"\n语音转文字：多少钱"), "[语音]", "195 (N78): no words of its own, quoted by its tag")
         XCTAssertTrue(XiaoLanMediaFind.sameMemory(XiaoLanMediaFind.memoryKey("https://v.douyin.com/y2OT5I9zhXI/"),
                                                   XiaoLanMediaFind.memoryKey("看 https://v.douyin.com/y2OT5l9zhXI/ :0pm")))
     }

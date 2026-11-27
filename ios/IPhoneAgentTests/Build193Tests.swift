@@ -290,7 +290,7 @@ import UIKit
     func testOneCharacterLinesAreQuoted() throws {
         XCTAssertEqual(ChatToolLink.quoteLine("1"), "1")
         XCTAssertEqual(ChatToolLink.quoteLine("3"), "3")
-        XCTAssertEqual(ChatToolLink.quoteLine("[语音] 4\"\n语音转文字：多少钱"), "")
+        XCTAssertEqual(ChatToolLink.quoteLine("[语音] 4\"\n语音转文字：多少钱"), "[语音]")  // 195 (N78)
         let at = try XCTUnwrap(F.quoteSpot(weChat, quote: "3"))
         XCTAssertEqual(Double(at.y), 0.131, accuracy: 0.002)
         XCTAssertNotNil(F.quoteBar([[q("蓝海乐：3", x: 0.2, y: 0.8, w: 0.2, h: 0.02)]], quote: "3"))

@@ -542,6 +542,151 @@ enum XiaoLanMediaFind {
         return tops
     }
 
+    /// 195 (N76, Echo 194 11-28 00:12: WeCom's mark said 2, 「1」's avatar was counted but OCR gave the lone 「1」 no words,
+    /// so only 「2」 was reported): others' messages whose avatar has no line read beside it, their bubble read as digits
+    /// (XiaoLanBadge.bubbleDigits); each one's digits and the top of their ink, lowest first. A picture, a sticker or a
+    /// bubble of words OCR missed is no digits: nothing.
+    static func unreadDigits(_ px: WatchOCR.Pixels, tops: [Double], lines: [WatchReport.Line], bottom: Double) -> [(text: String, y: Double)] {
+        tops.compactMap { avatar -> (text: String, y: Double)? in
+            // N84: from its bubble's top (a group's name row is between the avatar's top and it)
+            let top = bubbleTop(px, from: avatar)
+            let read = lines.contains { l in !l.mine && (l.y.map { $0 >= top - 0.012 && $0 <= top + 0.045 } ?? false) }
+            guard !read, let b = block(px, from: top, bottom: bottom), b.width > 0.02, b.height > 0.015,
+                  bubbleShare(px, b) >= 0.7, let d = XiaoLanBadge.bubbleDigits(px, in: b) else { return nil }
+            return (text: d.text, y: d.top)
+        }
+    }
+
+    /// 195 (N84, 195's review on 测试群 of 11-28 00:12: the bubble began 0.015 under the avatar's top — its name row
+    /// over it — and block's row across, 0.015 down, fell on its first white row by one pixel; a taller name row, and the
+    /// name's width is measured, not the bubble's): the first row from an avatar's top, within 0.045, with a run of a
+    /// bubble's white (0.02 of the window wide) right of the avatars; none, the avatar's top (a private chat's bubble
+    /// starts there).
+    static func bubbleTop(_ px: WatchOCR.Pixels, from top: Double) -> Double {
+        let need = max(3, Int(0.02 * Double(px.w)))
+        let x0 = Int(0.15 * Double(px.w)), x1 = Int(0.45 * Double(px.w))  // past the avatars (WeChat to 0.144; a white one is no bubble)
+        var y = Int(top * Double(px.h))
+        let last = min(px.h - 1, Int((top + 0.045) * Double(px.h)))
+        while y <= last {
+            var run = 0
+            for x in x0..<x1 {
+                let i = (y * px.w + x) * 4
+                if px.bytes[i] >= 247 && px.bytes[i + 1] >= 247 && px.bytes[i + 2] >= 247 {
+                    run += 1
+                    if run >= need { return Double(y) / Double(px.h) }
+                } else { run = 0 }
+            }
+            y += 1
+        }
+        return top
+    }
+
+    /// 195 (N85): of the digits read off bubbles, those under the last line the history goes on from (XiaoLanBatch.anchor,
+    /// where this read's new lines start) and under every line of mine; one over them is an old message OCR never gave,
+    /// not a new one. (Not by the words read before: 「2」 sent again is new though 「2」 was read before.)
+    static func belowRead(_ found: [(text: String, y: Double)], lines: [WatchReport.Line], history: [WatchReport.Line]) -> [(text: String, y: Double)] {
+        var floor = lines.filter(\.mine).compactMap(\.y).max() ?? 0
+        if let start = XiaoLanBatch.anchor(lines, history: history), start.index > 0, start.index <= lines.count,
+           let y = lines[start.index - 1].y { floor = max(floor, y) }
+        return found.filter { $0.y > floor }
+    }
+
+    /// 195 (N76/N80): the lines read with those digits put in their places (by height on the window), each one's sender
+    /// the nearest other's line over it, else `sender` (the chat's name). N81 (测试群 11-28 00:12: 蓝海乐's 「你好」, then
+    /// 主人蓝海乐's lone 「1」 — the line over it was another's): in a group, the name over its bubble (`rows`).
+    static func withDigits(_ lines: [WatchReport.Line], _ found: [(text: String, y: Double)], sender: String,
+                           group: Bool = false, rows: [[Piece]] = []) -> [WatchReport.Line] {
+        var out = lines
+        for d in found {
+            let named = group ? nameOver(rows, y: d.y) : nil
+            let who = named ?? out.last(where: { !$0.mine && ($0.y ?? 0) < d.y })?.sender ?? sender
+            let at = out.firstIndex { ($0.y ?? 0) > d.y } ?? out.count
+            out.insert(WatchReport.Line(sender: who, text: d.text, mine: false, y: d.y), at: at)
+        }
+        return out
+    }
+
+    /// 195 (N83, 测试群 on the iPad 11-28 00:12: 「2」 went to the server as 「主人监海乐」's, its name row read with 蓝 as 监,
+    /// the same name read right two rows up): a sender read once that is one character off another read more often (on
+    /// the window, or `known`: the history's) is that one; names of four characters or more only (WatchReport.sameName).
+    static func steadySenders(_ lines: [WatchReport.Line], known: [String]) -> [WatchReport.Line] {
+        var count: [String: Int] = [:]
+        for s in lines.filter({ !$0.mine }).map(\.sender) + known where !s.isEmpty { count[s, default: 0] += 1 }
+        return lines.map { l in
+            guard !l.mine, count[l.sender] == 1,
+                  let steady = count.filter({ $0.key != l.sender && $0.value >= 2 && WatchReport.sameName($0.key, l.sender) })
+                    .max(by: { $0.value < $1.value })?.key else { return l }
+            var fixed = l
+            fixed.sender = steady
+            return fixed
+        }
+    }
+
+    /// 195 (N81): a group's name row right over a message whose words start at `y` (as WatchOCR.lines takes a name:
+    /// just right of the avatars, short; measured 11-28: 主人蓝海乐 0.555, its 「1」's ink from 0.579), in the list's
+    /// form; nil: none read there.
+    static func nameOver(_ rows: [[Piece]], y: Double) -> String? {
+        rows.joined().filter { p in
+            let mid = Double(p.box.midY), t = p.text.trimmingCharacters(in: .whitespaces)
+            return mid >= y - 0.04 && mid <= y - 0.008 && Double(p.box.minX) < 0.2 && Double(p.box.maxX) < 0.6
+                && (1...20).contains(t.count) && !WatchReport.timeLabel(t)
+        }.max { $0.box.midY < $1.box.midY }
+            .map { XiaoLanPanes.listName($0.text.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// 195 (N77, Echo 194 11-28 00:11: WeChat's 「3」, read when it came, was in no OCR piece when its answer came to be
+    /// quoted — 「not on the window; replied without a quote」): a quote of one to three digits found by others' bubbles,
+    /// the newest first, read as digits; its bubble's middle, or nil.
+    static func digitSpot(_ px: WatchOCR.Pixels, rows: [[Piece]], quote: String) -> CGPoint? {
+        let want = plain(quote)
+        guard (1...3).contains(want.count), want.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        let bottom = min(px.inputTop(from: 0.3) ?? 0.93, quickBarTop(rows) ?? 1) - 0.005
+        for avatar in avatarTops(px, bottom: bottom) {
+            let top = bubbleTop(px, from: avatar)  // N84
+            guard let b = block(px, from: top, bottom: bottom), b.width > 0.02, b.height > 0.015, bubbleShare(px, b) >= 0.7,
+                  let d = XiaoLanBadge.bubbleDigits(px, in: b), d.text == want else { continue }
+            // N82: on the digits themselves (~0.013 tall), never by a group's name row over the bubble
+            return CGPoint(x: b.midX, y: d.top + 0.007)
+        }
+        return nil
+    }
+
+    /// 195 (N70b, Echo 194 11-28 00:11: WeCom's menu up, 「引用」 read in none of four looks — the pointer moved off it
+    /// too — and the reply went without its quote): where 「引用」 is when its neighbours are read. WeCom's one row 复制
+    /// 转发 引用 添加至 翻译 多选 (measured 11-28 00:13: 转发 0.239, 引用 0.375, 添加至 0.509 of the window); WeChat's
+    /// second row 引用 提醒 连续朗读 under 收藏 背景播放 转文字 (11-27 19:57). The place one step (the menu's spacing) left of
+    /// 添加至 or 提醒, nothing read there, with 转发 one step further left on its row, or another row's item right above
+    /// or under it; nil otherwise (nothing clicked blind).
+    static func quoteSlot(_ rows: [[Piece]], in band: ClosedRange<Double>) -> CGPoint? {
+        func word(_ p: Piece) -> String { p.text.filter { !$0.isWhitespace } }
+        let items = rows.joined().filter { band.contains(Double($0.box.midY)) && (1...4).contains(word($0).count) }
+        // the step: the spacing of items side by side on one row (a row: middles within 0.008 of its first)
+        var rowsOfItems: [[Piece]] = []
+        for p in items.sorted(by: { $0.box.midY < $1.box.midY }) {
+            if let first = rowsOfItems.last?.first, abs(Double(p.box.midY - first.box.midY)) <= 0.008 {
+                rowsOfItems[rowsOfItems.count - 1].append(p)
+            } else { rowsOfItems.append([p]) }
+        }
+        let gaps = rowsOfItems.flatMap { row -> [Double] in
+            let xs = row.map { Double($0.box.midX) }.sorted()
+            return zip(xs.dropFirst(), xs).map { $0 - $1 }.filter { $0 > 0.03 }
+        }.sorted()
+        guard gaps.count >= 2 else { return nil }
+        let step = gaps[gaps.count / 2]
+        guard step > 0.05, step < 0.3 else { return nil }
+        for next in ["添加至", "提醒"] {
+            guard let n = items.first(where: { word($0) == next }) else { continue }
+            let y = Double(n.box.midY), x = Double(n.box.midX) - step
+            guard x > 0.02 else { continue }
+            let row = items.filter { abs(Double($0.box.midY) - y) < 0.01 }
+            guard !row.contains(where: { abs(Double($0.box.midX) - x) < 0.4 * step }) else { continue }
+            let forward = row.contains { word($0).contains("转发") && abs(Double($0.box.midX) - (x - step)) < 0.25 * step }
+            let column = items.contains { abs(Double($0.box.midY) - y) >= 0.03 && abs(Double($0.box.midX) - x) < 0.25 * step }
+            if forward || column { return CGPoint(x: x, y: y) }
+        }
+        return nil
+    }
+
     /// The top of WeCom's quick bar over its input field (服务总结, 企业名片, 发起收款, 客户转账); nil: none showing.
     static func quickBarTop(_ rows: [[Piece]]) -> Double? {
         let words = ["服务总结", "企业名片", "发起收款", "客户转账", "服務總結", "企業名片", "發起收款", "客戶轉賬"]
@@ -882,7 +1027,9 @@ enum XiaoLanMediaFind {
         case .image:
             guard let px else { return nil }
             let words = rows.joined().map { WatchOCR.Piece(text: $0.text, box: $0.box, kind: .other) }
-            return pictureBlocks(px, pieces: words, top: 0.09, bottom: 0.93).last.map { CGPoint(x: $0.midX, y: $0.midY) }
+            // 195 (N78: a photo's answer is quoted by 「[图片]」 now): only the chat's part, never the input bar or a keyboard
+            let bottom = min(px.inputTop(from: 0.3) ?? 0.93, quickBarTop(rows) ?? 1, 0.93)
+            return pictureBlocks(px, pieces: words, top: 0.09, bottom: bottom).last.map { CGPoint(x: $0.midX, y: $0.midY) }
         }
     }
 
