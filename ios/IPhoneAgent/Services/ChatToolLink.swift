@@ -130,6 +130,7 @@ import Foundation
         return turnCount
     }
     private var turns: [String: Int] = [:]  // a waiting order's key → its turn
+    private var askedLately: [(said: String, at: Date)] = []  // 189 (N19)
     private var asking: Set<Int> = []       // turns whose QA reply is still coming
     /// The earliest turn among the orders waiting here.
     var firstTurn: Int? { pending.compactMap { turns[$0.key] }.min() }
@@ -153,6 +154,16 @@ import Foundation
                 }
             }
             if Self.asksQA(m, config: config) {
+                // 189 (N19, Echo 189, 11-27 12:51 首爾: 企微测试群's 「你好啊」「我敢」 reported at :28 and again at :45, when
+                // the chat was opened again for the next line): the same line of the same sender in the same chat is
+                // asked of the QA callback once in 90 s (two replies to it would go out)
+                let said = "\(m.chat)|\(m.sender)|\(XiaoLanSelf.plain(m.text))", t = Date()
+                askedLately = askedLately.filter { t.timeIntervalSince($0.at) < 90 }
+                if askedLately.contains(where: { $0.said == said }) {
+                    DebugLog.write("chattool: 「\(m.text.prefix(20))」 in \(m.chat) was asked of the QA callback moments ago; not asked again")
+                    continue
+                }
+                askedLately.append((said: said, at: t))
                 qaWaiting += 1
                 let turn = Self.takeTurn()  // 188: its turn is when it was read
                 asking.insert(turn)
@@ -252,17 +263,26 @@ import Foundation
         guard let url = Self.configURL(server, robot: robot) else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled else { return }
-            config = Self.robotConfig(data)
-            if let c = config {
-                note("⚙ 機器人設定：回調\(c.openCallback && !c.callbackUrl.isEmpty ? "開" : "關")・\(c.replyAll ? "全部回覆" : "只回私聊與 @")\(c.autoReply ? "" : "・不自動回覆")")
-            } else {
-                note("⚙ 伺服器沒有給機器人設定（不走 QA 回調）")
+        // 189 (N18, Echo 189, 11-27 12:51 首爾: 小藍 started with the network not up yet, 「似乎已断开与互联网的连接」; the
+        // socket came back 7 s later but the robot settings were never asked again, so no line went to the QA callback
+        // and nothing was answered until the watch was started again): not loaded, asked again 2, 4, 8 … 30 s later.
+        var wait: UInt64 = 2
+        while !Task.isCancelled {
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                guard !Task.isCancelled else { return }
+                config = Self.robotConfig(data)
+                if let c = config {
+                    note("⚙ 機器人設定：回調\(c.openCallback && !c.callbackUrl.isEmpty ? "開" : "關")・\(c.replyAll ? "全部回覆" : "只回私聊與 @")\(c.autoReply ? "" : "・不自動回覆")")
+                } else {
+                    note("⚙ 伺服器沒有給機器人設定（不走 QA 回調）")
+                }
+                return
+            } catch {
+                DebugLog.write("chattool: robot settings not loaded: \(error.localizedDescription); asked again in \(wait) s")
+                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+                wait = min(wait * 2, 30)
             }
-        } catch {
-            DebugLog.write("chattool: robot settings not loaded: \(error.localizedDescription)")
         }
     }
 

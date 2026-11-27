@@ -120,7 +120,11 @@ import UIKit
         let known: Set<String> = [XiaoLanSelf.plain("【第三方测试】185企微群分工"),
                                   XiaoLanSelf.plain("【小蓝测试】181 企微发消息 第二行当成别人的新消息"),
                                   XiaoLanSelf.plain("【小蓝测试】186 个微 0018")]
-        XCTAssertTrue(XiaoLanSelf.readBefore("【第三万测试】185企微群分工", known: known))
+        // 189: 187's example misread 方 as 万, and 万 is a number to Swift (Character.isNumber: a Chinese numeral), so it
+        // was rightly not forgiven (CI 11-27, the first run of these tests since 187); a misread that is no numeral is
+        XCTAssertTrue(XiaoLanSelf.readBefore("【第三方测式】185企微群分工", known: known))
+        // a Chinese numeral is a number too: 「…分一」 and 「…分二」 are two lines, not one misread
+        XCTAssertFalse(XiaoLanSelf.readBefore("【第三方测试】185企微群分二", known: [XiaoLanSelf.plain("【第三方测试】185企微群分一")]))
         XCTAssertTrue(XiaoLanSelf.readBefore("二行当成别人的新消息", known: known))
         XCTAssertFalse(XiaoLanSelf.readBefore("【小蓝测试】186 个微 0019", known: known))
         XCTAssertFalse(XiaoLanSelf.readBefore("你也好", known: known))
