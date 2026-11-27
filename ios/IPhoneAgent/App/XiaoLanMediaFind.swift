@@ -516,6 +516,25 @@ enum XiaoLanMediaFind {
         return new.map(\.text).joined()
     }
 
+    /// 189 (N30, Echo 189, 11-27 12:40 首爾: WeCom's voice note from 蓝海乐 was already turned into words — 「有优惠吗？」 and
+    /// 「转換完成」 under it — so its menu had no 转文字, and it was reported 「没能打开看」): the words under the note (the
+    /// `rank`-th newest of its length) up to that 「…完成」 mark; nil when there is no such mark.
+    static func convertedWords(_ pieces: [Piece], seconds: Int?, rank: Int = 0) -> String? {
+        guard let seconds else { return nil }
+        let notes = pieces.filter { voiceSeconds($0.text) == seconds }.sorted { $0.box.midY > $1.box.midY }
+        guard !notes.isEmpty else { return nil }
+        let bottom = Double(notes[min(rank, notes.count - 1)].box.maxY)
+        let under = pieces.filter { Double($0.box.midY) > bottom && Double($0.box.midY) <= bottom + 0.2 }
+            .sorted { $0.box.midY < $1.box.midY }
+        func done(_ t: String) -> Bool {
+            let p = t.filter { !$0.isWhitespace }
+            return p.count <= 6 && p.contains("完成") && (p.contains("转") || p.contains("轉"))
+        }
+        guard let end = under.firstIndex(where: { done($0.text) }), end > 0 else { return nil }
+        let words = under[..<end].map(\.text).joined()
+        return words.isEmpty ? nil : words
+    }
+
     /// A voice note's length in its line as reported (「[语音] 9"」 → 9).
     static func noteSeconds(_ line: String) -> Int? {
         guard let r = line.range(of: #"(\d{1,2})["″”“'’]"#, options: .regularExpression) else { return nil }

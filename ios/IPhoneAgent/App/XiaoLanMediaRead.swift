@@ -42,6 +42,12 @@ extension AppModel {
                 let key = "\(job.app.rawValue)|\(job.chat)"
                 state.echoes[key, default: []].append(String(seen.dropFirst(said.count)))
                 if (state.echoes[key]?.count ?? 0) > 20 { state.echoes[key]?.removeFirst() }
+                // 189 (N30: 「有优惠吗？」, the words under WeCom's note, went to the server as a line of their own in the
+                // same read, and the note after them: two answers): its words reported as a line already, not again
+                if state.reportedLines[XiaoLanSelf.plain(String(seen.dropFirst(said.count)))] != nil {
+                    DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the voice note's words were reported as a line already; not again")
+                    continue
+                }
             }
             let text = XiaoLanMediaFind.report(job.text, kind: job.kind, seen: got.seen, failed: got.why)
             let message = ReadMessage(chat: job.chat, group: job.group, sender: job.sender, text: text, atMe: job.atMe)
@@ -121,6 +127,10 @@ extension AppModel {
     /// bubble in a few seconds: what is new on the window then (read twice alike, or the last after 10 s).
     private func paneMediaVoice(_ job: MediaJob, _ look: PaneLook) async -> (seen: String?, why: String?) {
         let before = Array(look.rows.joined())
+        // 189 (N30): turned into words already (by the app, or before): those words, nothing clicked
+        if let words = XiaoLanMediaFind.convertedWords(before, seconds: XiaoLanMediaFind.noteSeconds(job.text), rank: job.rank) {
+            return ("语音转文字：\(words)", nil)
+        }
         if job.app == .wechat {
             guard let button = XiaoLanMediaFind.pick(XiaoLanMediaFind.voiceButtons(look.rows), rank: job.rank) else {
                 return (nil, "语音旁边没看到「转文字」（可能已经转过）")

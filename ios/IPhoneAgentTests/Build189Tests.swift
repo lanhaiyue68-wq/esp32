@@ -123,6 +123,17 @@ import UIKit
         XCTAssertNil(XiaoLanMediaFind.noteSeconds("[语音]"))
     }
 
+    /// N30: a note WeCom already turned into words (as read 11-27 12:40: 「•））2''」, 「有优惠吗？」, 「转換完成」).
+    func testANoteAlreadyTurnedIntoWordsIsReadAsItIs() {
+        func p(_ t: String, _ y: Double, x: Double = 0.6) -> CandidatePicker.Piece {
+            CandidatePicker.Piece(text: t, box: CGRect(x: x, y: y - 0.008, width: 0.1, height: 0.016))
+        }
+        let pieces = [p("•））2''", 0.459), p("有优惠吗？", 0.501), p("转換完成", 0.525), p("您好！我是小蓝助手", 0.577, x: 0.75)]
+        XCTAssertEqual(XiaoLanMediaFind.convertedWords(pieces, seconds: 2), "有优惠吗？")
+        XCTAssertNil(XiaoLanMediaFind.convertedWords(Array(pieces.prefix(2)), seconds: 2), "no 完成 mark: not turned yet")
+        XCTAssertNil(XiaoLanMediaFind.convertedWords(pieces, seconds: 5), "another note's length")
+    }
+
     /// N25: a draft's preview with full-width brackets is no line.
     func testADraftWithFullWidthBracketsIsNoLine() {
         XCTAssertEqual(WatchReport.previewBody("［草稿］你好"), "")
