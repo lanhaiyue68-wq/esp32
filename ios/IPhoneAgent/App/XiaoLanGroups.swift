@@ -15,7 +15,7 @@ import UIKit
 /// - ＋ → 选择联系人 / 添加群成员 → as when creating → 完成 / 确定 (neither asks).
 /// - 群管理 → 解散该群聊 (WeChat: 「解散」 in the sheet under it; the chat then says 你已解散此群) / 解散群聊 (WeCom: 「解散」
 ///   in the alert; back on the list with 你已经解散群聊).
-enum XiaoLanGroups {
+@MainActor enum XiaoLanGroups {
     typealias Piece = CandidatePicker.Piece
 
     /// The list's ＋ and a chat's ••• (window fractions, measured on the iPad 11-28).
