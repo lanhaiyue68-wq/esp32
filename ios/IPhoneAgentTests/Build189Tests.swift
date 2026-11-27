@@ -134,6 +134,25 @@ import UIKit
         XCTAssertNil(XiaoLanMediaFind.convertedWords(pieces, seconds: 5), "another note's length")
     }
 
+    /// N36: WeChat's bar with only ~7 px of its grey over the field (12:58); a white bubble over it is still no field.
+    func testTheFieldUnderAThinBarIsFoundAndABubbleIsNot() throws {
+        func window(bar: Bool) -> Data {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            return UIGraphicsImageRenderer(size: CGSize(width: 456, height: 1145), format: format).jpegData(withCompressionQuality: 0.95) { r in
+                let c = r.cgContext
+                c.setFillColor(gray: 237 / 255, alpha: 1); c.fill(CGRect(x: 0, y: 0, width: 456, height: 1145))  // the chat
+                c.setFillColor(gray: 1, alpha: 1); c.fill(CGRect(x: 40, y: 900, width: 360, height: 45))  // a white bubble
+                guard bar else { return }
+                c.setFillColor(gray: 246 / 255, alpha: 1); c.fill(CGRect(x: 0, y: 962, width: 456, height: 183))  // the bar
+                c.setFillColor(gray: 1, alpha: 1); c.fill(CGRect(x: 50, y: 970, width: 370, height: 168))  // its field, 8 px under its top
+            }
+        }
+        let field = try XCTUnwrap(XiaoLanPanes.inputField(try XCTUnwrap(WatchOCR.Pixels(window(bar: true)))))
+        XCTAssertGreaterThan(Double(field.y), 0.84, "the field, not the bubble over it")
+        XCTAssertNil(XiaoLanPanes.inputField(try XCTUnwrap(WatchOCR.Pixels(window(bar: false)))), "a bubble on the chat's grey is no field")
+    }
+
     /// N25: a draft's preview with full-width brackets is no line.
     func testADraftWithFullWidthBracketsIsNoLine() {
         XCTAssertEqual(WatchReport.previewBody("［草稿］你好"), "")

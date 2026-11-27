@@ -370,9 +370,13 @@ import UIKit
         // 187 (B23, Echo 186, 11-26: 「【第三方测试】185引用」, a white bubble on the chat's 237, passed for the field and was
         // clicked twice; measured that day: WeChat's input bar 245–246 and chat 237, WeCom's bar 246 and chat 237): the
         // light bar over the field is 242 or more, so a bubble on the chat's grey is no field.
+        // 189 (N36, Echo 189, 11-27 12:58 首爾: WeChat's bar showed only ~7 px of its 246 over the field, so 0.008 up
+        // (9 px of that window) was the chat's 237: the field was refused and the white bubble over it, 「帮我查一下啊…」,
+        // taken and clicked; no keyboard came, four replies not sent): looked at 0.005 up, past a bubble's soft edge
+        // (1–2 px) and inside the bar's thin top
         func barOver(_ y: Double) -> Bool {
             xs.filter { x in
-                let (r, g, b) = px.rgb(x, max(0, y - 0.008))
+                let (r, g, b) = px.rgb(x, max(0, y - 0.005))
                 return (r * 3 + g * 6 + b) / 10 >= 242
             }.count >= 2
         }
