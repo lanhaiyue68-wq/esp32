@@ -124,6 +124,9 @@ enum WatchOCR {
         // a voice note's length (its speaker read as a stray character or two) is no text.
         if bare.range(of: #"^[^0-9]{0,2}[0-9]{1,2}["”″＂']$"#, options: .regularExpression) != nil { return "" }
         let squeezed = bare.filter { !"¥￥•·・●○◎".contains($0) }
+        // 189 (N24, Echo 189, 11-27 12:29 首爾: WeCom's private chat with 蓝海乐: the quick bar's ¥ of 「¥发起收款」, read on
+        // a line of its own, was reported as a message 「¥」 and answered): a line of the bar's icons alone is no text
+        if squeezed.isEmpty && !bare.isEmpty { return "" }
         var rest = squeezed
         for w in quickBarWords { rest = rest.replacingOccurrences(of: w, with: "") }
         if rest.count < squeezed.count && rest.count <= 1 { return "" }

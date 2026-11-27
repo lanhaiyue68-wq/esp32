@@ -100,6 +100,14 @@ import UIKit
         XCTAssertEqual(XiaoLanSelf.learnedKey, "xiaolanSelvesV2", "names learned before 189 are dropped")
     }
 
+    /// N24: the quick bar's ¥ on a line of its own is no message; a customer's words with ¥ in them still are.
+    func testTheQuickBarsIconAloneIsNoText() {
+        XCTAssertEqual(WatchOCR.withoutUIWords("¥"), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("• ●"), "")
+        XCTAssertEqual(WatchOCR.withoutUIWords("谢谢"), "谢谢")
+        XCTAssertEqual(WatchOCR.withoutUIWords("¥299 一个月吗"), "¥299 一个月吗")
+    }
+
     func testRereadLanguagesStartWithSimplifiedChinese() {
         XCTAssertEqual(CandidatePicker.rereadLanguages.first, "zh-Hans")
     }

@@ -1489,10 +1489,19 @@ extension AppModel {
         }
         if let a = after, let r = sentShown(a) {
             let key = "\(app.rawValue)|\(r.title)"
+            state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
+            // 189 (N23, Echo 189, 11-27 12:29 首爾: 蓝海乐 wrote 「在吗」 then 「多少钱」 while 小藍 typed the answer to the first,
+            // 「再见」 after 「你好」 the same way, 「谢谢」 on WeCom too: this screen became the chat's history as it was, and
+            // those lines — above or under my line, never read — were never answered): the screen is read as a pass reads
+            // it, from the history before the send, so what came in meanwhile is reported now (my line is mine).
+            if case .chat(let t) = a.view, state.history[key] != nil, !state.loaded.contains(key),
+               paneRead(app, a, title: t, fromMark: false, &state) >= 0 {
+                PaneHistory.save(state.history)
+                return (true, "", a)
+            }
             state.history[key] = WatchReport.remember([], screen: r.lines, history: nil)
             state.loaded.remove(key)
             PaneHistory.save(state.history)  // 183
-            state.sent.append(XiaoLanSelf.Sent(app: app, chat: chat, text: text, at: now()))  // 181
             return (true, "", a)
         }
         return (false, ChatToolLink.reasonNotSent, after)
