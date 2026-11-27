@@ -218,8 +218,20 @@ enum XiaoLanMediaFind {
         guard let wanted = fileName(hint) else { return all.last.map { CGPoint(x: $0.box.midX, y: $0.box.midY) } }
         let want = fileKey(wanted)
         func digitless(_ s: String) -> String { s.filter { !$0.isNumber } }
+        // the extensions alike, then the names before them (CI 45996849595: 「感.docx」 was taken for 「6原生家庭创伤治愈.docx」,
+        // its few pairs of letters mostly the extension's)
+        func parts(_ key: String) -> (base: String, ext: String) {
+            guard let dot = key.lastIndex(of: ".") else { return (key, "") }
+            return (String(key[..<dot]), String(key[key.index(after: dot)...]))
+        }
+        let w = parts(want)
+        func alike(_ key: String) -> Bool {
+            let k = parts(key)
+            guard k.ext == w.ext, !k.base.isEmpty, !w.base.isEmpty else { return false }
+            return w.base.hasSuffix(k.base) || k.base.hasSuffix(w.base) || likeness(w.base, k.base) >= 0.8
+        }
         let named = all.compactMap { p in fileName(p.text).map { (piece: p, key: fileKey($0)) } }
-        let pick = named.last { want.hasSuffix($0.key) || $0.key.hasSuffix(want) || likeness(want, $0.key) >= 0.8 }
+        let pick = named.last { alike($0.key) }
             ?? named.last { digitless($0.key) == digitless(want) && $0.key.count == want.count }
         return pick.map { CGPoint(x: $0.piece.box.midX, y: $0.piece.box.midY) }
     }
