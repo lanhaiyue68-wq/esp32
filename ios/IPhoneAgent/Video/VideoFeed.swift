@@ -127,6 +127,8 @@ extension ScreenSource {
     private var ownerID = UUID()
     private var lastCaptureEvent = 0.0
     private var lastCaptureRestart = 0.0
+    /// 193 (N65): when the system's stream last sent anything (a frame or an idle note).
+    var lastEventAt: Double { lastCaptureEvent }
     var isNative: Bool { source == .direct }
     var confirmedAt: Double { isNative ? directState.confirmedAt : updated }
     var captureReadinessText: String {

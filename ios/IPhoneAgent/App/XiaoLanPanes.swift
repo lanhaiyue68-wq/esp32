@@ -161,6 +161,44 @@ import UIKit
         return large.jpegData(compressionQuality: 0.92)
     }
 
+    /// 193 (lead model): several pictures as one, for a model that takes one picture a call (Codex): two columns, left
+    /// to right then down, in order, each as wide as a column; at most four (the first, then spread evenly).
+    static func grid(_ jpegs: [Data], width: CGFloat = 900) -> Data? {
+        var images = jpegs.compactMap { UIImage(data: $0) }
+        guard !images.isEmpty else { return nil }
+        if images.count == 1 { return jpegs.first }
+        if images.count > 4 {
+            let n = images.count
+            images = [0, n / 3, 2 * n / 3, n - 1].map { images[$0] }
+        }
+        let cols = 2, rows = (images.count + 1) / 2
+        let cellW = width / CGFloat(cols)
+        let cellH = images.map { cellW * $0.size.height / max(1, $0.size.width) }.max() ?? cellW
+        let size = CGSize(width: width, height: cellH * CGFloat(rows))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let out = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            for (i, im) in images.enumerated() {
+                let h = cellW * im.size.height / max(1, im.size.width)
+                im.draw(in: CGRect(x: CGFloat(i % cols) * cellW, y: CGFloat(i / cols) * cellH, width: cellW, height: h))
+            }
+        }
+        return out.jpegData(compressionQuality: 0.8)
+    }
+
+    /// 193 (N65): the screen sharing silent long enough to be checked (a pointer nudge every 25 s and every click send a
+    /// frame; a still screen sends idle notes).
+    static func shareQuiet(_ seconds: Double) -> Bool { seconds > 20 }
+
+    /// 193 (N58, Echo 192 18:24: the owner typing, WeChat's title read 「对方正在输入…」 and the Douyin link's job filed
+    /// under that name; the server knew no such chat): a chat title that only says the other side is typing or talking.
+    static func typingTitle(_ title: String) -> Bool {
+        let t = title.filter { !$0.isWhitespace }
+        return ["正在输入", "正在輸入", "正在讲话", "正在講話", "正在说话", "正在說話"].contains { t.contains($0) }
+    }
+
     /// A point in a window (its fractions) on the whole screen.
     static func onScreen(_ p: CGPoint, in r: CGRect) -> CGPoint {
         CGPoint(x: r.minX + p.x * r.width, y: r.minY + p.y * r.height)

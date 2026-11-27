@@ -107,6 +107,11 @@ extension AppModel {
             DebugLog.write("test channel: hot \(body["on"] as? Bool == true ? "on" : "off")")
             return .json(["hot": .bool(cloud.hot())])
 
+        case ("POST", "/lead"):
+            // 193: the lead model set from the computer ({"lead":"codex"|"doubao"}), as the settings page does
+            if let lead = LeadModel(rawValue: text("lead")) { LeadModel.current = lead }
+            return .json(["lead": .str(LeadModel.current.rawValue)])
+
         case ("POST", "/media"):
             // 188: reading voice notes, videos, pictures, files and links, tried by hand: "set" turns kinds (and "quote")
             // on or off; "read" opens one kind on the chat open on `side` and says what was seen; "quote" long-presses
@@ -207,6 +212,7 @@ extension AppModel {
             "foreground": .bool(UIApplication.shared.applicationState == .active),
             "keyboard": .bool(keyboardBridge.onScreen()),
             "takeover": .int(agent.takeover),
+            "lead": .str(LeadModel.current.rawValue),  // 193
         ]
         if feed.updated > 0 { status["frame_age_s"] = .num(((now() - feed.updated) * 10).rounded() / 10) }
         if let last = agent.steps.last { status["last"] = .obj(last) }

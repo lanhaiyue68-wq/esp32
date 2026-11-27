@@ -88,7 +88,12 @@ extension AppModel {
             agent.doneChecker = agent.actor  // and checks the finished answer (build 116: Codex ~12 s, Doubao ~1.3 s)
             try checkStart()
             let plannerModel = try await settings.client("planner")
+            #if XIAOLAN
+            // 193: 小藍's lead model plans first (LeadModel), the other if it fails
+            agent.planner = PlusChat.planner(fallback: plannerModel, lead: LeadModel.current)
+            #else
             agent.planner = PlusChat.planner(fallback: plannerModel)  // phase C: Plus commands, Doubao if it fails
+            #endif
             agent.verifiesDone = true
             PlusRest.shared.onFailure = { [weak self] in self?.say($0) }
             if PlusRest.allDown { say("Codex 目前連不上，這次由豆包規劃；恢復後會自動換回") }

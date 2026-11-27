@@ -264,8 +264,15 @@ import Foundation
         if first.hasPrefix("["), let close = first.firstIndex(of: "]"), first.distance(from: first.startIndex, to: close) <= 6 {
             first = String(first[first.index(after: close)...]).trimmingCharacters(in: .whitespaces)
         }
-        let words = first.filter { $0.isLetter }
-        return words.count >= 2 ? first : ""
+        // 193 (N59, Echo 192 11-27 18:24: 「1」「2」「3」 answered without their quotes; user: every reply quotes its line,
+        // one character too): any letter or digit is words enough; a voice note's length alone (「4"」) is none
+        if XiaoLanMediaFind.voiceSeconds(first) != nil { return "" }
+        return first.contains(where: { $0.isLetter || $0.isNumber }) ? first : ""
+    }
+
+    /// 193 (N64, Echo 192 11-27 18:32: WeCom's failed send told as 「微信里没有发出去」): said for the app it failed in.
+    static func notSentSaid(_ why: String, wework: Bool) -> String {
+        wework && why == reasonNotSent ? "企业微信里没有发出去" : why
     }
 
     static func qaReply(_ data: Data) -> String? {

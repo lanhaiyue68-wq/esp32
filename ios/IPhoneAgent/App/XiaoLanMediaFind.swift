@@ -76,12 +76,47 @@ enum XiaoLanMediaFind {
                                  "md", "rtf", "pages", "numbers", "key", "wps", "et", "dps", "apk", "ipa", "mp3", "wav", "m4a"]
 
     /// A file's name in the words ("6原生家庭创伤治愈.docx", "伤治愈.docx13K", "治愈.docx 12KB未下载").
+    /// 193 (N60, WeCom on the iPad 11-27 18:25: 「账户交易明细（1）.xls」 read 「账户交易明细（1）.xIs」, not known for a
+    /// file: its 「21K」 became a message of its own, took a place among the newest, and the file's job opened another
+    /// card): an extension misread the usual ways (I, 1 or | for l; 0 for o) is still one.
     static func fileName(_ text: String) -> String? {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        let alt = fileExtensions.joined(separator: "|")
-        guard let r = t.range(of: #"[^\s/\\:：]{1,60}\.(\#(alt))(?![A-Za-z])"#, options: [.regularExpression, .caseInsensitive])
-        else { return nil }
-        return String(t[r])
+        let t = Array(text.trimmingCharacters(in: .whitespaces))
+        func extChar(_ c: Character) -> Bool { (c.isASCII && (c.isLetter || c.isNumber)) || c == "|" }
+        for i in t.indices where t[i] == "." && i > 0 {
+            var run: [Character] = []
+            var j = i + 1
+            while j < t.count, run.count < 8, extChar(t[j]) { run.append(t[j]); j += 1 }
+            // the longest start of the run that is an extension, no letter right after it (a size may follow: 「.docx13K」)
+            var length: Int?
+            for n in stride(from: min(run.count, 7), through: 2, by: -1) {
+                let next: Character? = i + 1 + n < t.count ? t[i + 1 + n] : nil
+                if let next, next.isASCII, next.isLetter { continue }
+                if fileExtension(String(run[..<n])) != nil { length = n; break }
+            }
+            guard let n = length else { continue }
+            var s = i
+            while s > 0, i - s < 60, !" \t/\\:：".contains(t[s - 1]) { s -= 1 }
+            guard s < i else { continue }
+            return String(t[s..<(i + 1 + n)])
+        }
+        return nil
+    }
+
+    /// An extension as read, as it is meant ("xIs" → "xls"); nil when it is no file's.
+    static func fileExtension(_ read: String) -> String? {
+        let e = read.lowercased()
+        if fileExtensions.contains(e) { return e }
+        let mapped = String(e.map { c -> Character in
+            switch c { case "i", "1", "|": return "l"; case "0": return "o"; default: return c }
+        })
+        return fileExtensions.contains(mapped) ? mapped : nil
+    }
+
+    /// A file's name as compared: its extension as meant, no spaces, brackets or other signs, lowercased.
+    static func fileKey(_ name: String) -> String {
+        guard let dot = name.lastIndex(of: ".") else { return plain(name.lowercased()) }
+        let ext = fileExtension(String(name[name.index(after: dot)...])) ?? String(name[name.index(after: dot)...]).lowercased()
+        return plain(String(name[..<dot]).lowercased()) + "." + ext
     }
 
     /// A voice note's length as read off its bubble (「4"」, 「•））4"」, 「7″」); nil: not one. The icon reads as a few
@@ -139,10 +174,13 @@ enum XiaoLanMediaFind {
 
     /// 192 (B30): who took a message back, from the chat's grey line (WeChat 「"主人蓝海乐" 撤回了一条消息」, WeCom
     /// 「主人蓝海乐撤回了一条消息」); nil for my own (「你撤回了一条消息 重新编辑」) and any other line.
+    /// 193 (N62, iPad WeChat 11-27 18:27: 「「蓝海乐」已回收一則訊息」 — its own wording, traditional characters): that too.
+    static let recallWords = ["撤回了一条消息", "撤回了一條消息", "撤回了一條訊息", "已回收一則訊息", "已回收一条消息", "已回收一條訊息",
+                              "收回了一条消息", "收回了一則訊息", "已撤回一条消息", "已撤回一則訊息"]
     static func recaller(_ text: String) -> String? {
         let t = text.trimmingCharacters(in: .whitespaces)
-        guard let r = t.range(of: "撤回了一条消息") ?? t.range(of: "撤回了一條消息") ?? t.range(of: "撤回了一條訊息") else { return nil }
-        let who = t[..<r.lowerBound].trimmingCharacters(in: CharacterSet(charactersIn: " \"“”「」'‘’"))
+        guard let r = recallWords.lazy.compactMap({ t.range(of: $0) }).first else { return nil }
+        let who = t[..<r.lowerBound].trimmingCharacters(in: CharacterSet(charactersIn: " \"“”「」『』'‘’"))
         guard !who.isEmpty, who != "你", who != "我", who.count <= 30 else { return nil }
         return who
     }
@@ -170,14 +208,20 @@ enum XiaoLanMediaFind {
     /// The newest file card's name; `hint` (the line or preview) picks the card when several show.
     /// 188 night (Echo 188, 11-27 05:49: WeCom's 「文件没有打开」 twice: the server's reply naming the file, lower down, was
     /// clicked, not the card): a card's own words only.
-    static func fileCard(_ rows: [[Piece]], hint: String) -> CGPoint? {
-        let all = pieces(rows).filter { cardText($0.text) }
-        let want = fileName(hint).map { $0.lowercased() }
-        let pick = all.last { p in
-            guard let want, let name = fileName(p.text)?.lowercased() else { return false }
-            return want.hasSuffix(name) || name.hasSuffix(want)
-        } ?? all.last
-        return pick.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    /// 193 (N60, Echo 192 18:28: the xls's name not known, the newest card — an old 「太上老君…docx」 — was opened): with
+    /// a name to look for, only a card of that name (read loosely); none such, nothing is clicked.
+    /// 193 (measured 11-27 19:55, WeCom after its quote was clicked: the card read 「账户交易明细（7）.xIs」 for (1), and the
+    /// quote's own line 「｜账户交易明细（1）.xIs」 lower down looked like a card too): `exclude` leaves out lines on a quote
+    /// box (onQuote); a name of digits misread is still the name, when nothing matches closer.
+    static func fileCard(_ rows: [[Piece]], hint: String, exclude: ((CGRect) -> Bool)? = nil) -> CGPoint? {
+        let all = pieces(rows).filter { cardText($0.text) && !(exclude?($0.box) ?? false) }
+        guard let wanted = fileName(hint) else { return all.last.map { CGPoint(x: $0.box.midX, y: $0.box.midY) } }
+        let want = fileKey(wanted)
+        func digitless(_ s: String) -> String { s.filter { !$0.isNumber } }
+        let named = all.compactMap { p in fileName(p.text).map { (piece: p, key: fileKey($0)) } }
+        let pick = named.last { want.hasSuffix($0.key) || $0.key.hasSuffix(want) || likeness(want, $0.key) >= 0.8 }
+            ?? named.last { digitless($0.key) == digitless(want) && $0.key.count == want.count }
+        return pick.map { CGPoint(x: $0.piece.box.midX, y: $0.piece.box.midY) }
     }
 
     /// The newest line with a web address, at the address's own line (the click one line lower missed, 11-27).
@@ -196,10 +240,11 @@ enum XiaoLanMediaFind {
     /// input bar's or a quote bar's own text.
     static func quoteSpot(_ rows: [[Piece]], quote: String) -> CGPoint? {
         let want = plain(quote)
-        guard want.count >= 2 else { return nil }
+        guard !want.isEmpty else { return nil }
         let hit = pieces(rows, top: 0.1, bottom: 0.86).last { p in
             let t = plain(p.text)
-            guard t.count >= 2 else { return false }
+            // 193 (N59): 「1」 is quoted too — by a piece that is that one character alone
+            guard t.count >= 2 || want.count == 1 else { return false }
             if t == want { return true }
             return min(t.count, want.count) >= 4 && (want.hasPrefix(t) || t.hasPrefix(want) || want.contains(t))
         }
@@ -210,7 +255,7 @@ enum XiaoLanMediaFind {
     /// (WeCom, over it), in the window's bottom part.
     static func quoteBar(_ rows: [[Piece]], quote: String) -> CGPoint? {
         let want = plain(quote)
-        guard want.count >= 2 else { return nil }
+        guard !want.isEmpty else { return nil }  // 193 (N59): one character too
         let head = String(want.prefix(6))
         return Array(rows.joined()).last { p in
             guard Double(p.box.midY) > 0.5 else { return false }
@@ -249,6 +294,36 @@ enum XiaoLanMediaFind {
             return CGPoint(x: Double(p.box.minX) + Double(p.box.width) * middle, y: Double(p.box.midY))
         }
         return nil
+    }
+
+    /// 193 (N47, Echo 192 18:05: the long press landed on the voice note, but 「转文字」 was taken as the lowest piece of
+    /// that word on the window — the small button beside the bubble — and clicked again, nothing came): a long-press
+    /// menu is up when two of its other words show (引用, 删除, 收藏, 多选, 提醒, 背景播放, 连续朗读…); its band (heights).
+    static let pressMenuWords = ["引用", "删除", "收藏", "多选", "提醒", "背景播放", "连续朗读", "转发", "复制", "拷贝", "听筒模式"]
+    static func menuBand(_ rows: [[Piece]]) -> ClosedRange<Double>? {
+        var ys: [Double] = []
+        var words = Set<String>()
+        for p in rows.joined() {
+            let t = p.text.filter { !$0.isWhitespace }
+            guard t.count <= 24 else { continue }
+            let hit = pressMenuWords.filter { t.contains($0) }
+            guard !hit.isEmpty else { continue }
+            words.formUnion(hit)
+            ys.append(Double(p.box.midY))
+        }
+        guard words.count >= 2, let lo = ys.min(), let hi = ys.max(), hi - lo < 0.2 else { return nil }
+        return (lo - 0.04)...(hi + 0.04)
+    }
+
+    /// A menu's item within its band, never where `avoid` was (a button of the same word read before the press).
+    static func menuItem(_ rows: [[Piece]], _ word: String, in band: ClosedRange<Double>, avoid: CGPoint? = nil) -> CGPoint? {
+        let inBand = rows.map { row in row.filter { band.contains(Double($0.box.midY)) } }
+        guard let at = menuItem(inBand, word) else { return nil }
+        if let avoid, abs(Double(at.x - avoid.x)) < 0.03, abs(Double(at.y - avoid.y)) < 0.015 {
+            let rest = inBand.map { row in row.filter { abs(Double($0.box.midX - avoid.x)) >= 0.03 || abs(Double($0.box.midY - avoid.y)) >= 0.015 } }
+            return menuItem(rest, word)
+        }
+        return at
     }
 
     /// WeChat's page for a link it will not open: 「如需浏览，请长按网址复制后使用浏览器访问」 (measured 11-27, a Douyin link).
@@ -688,9 +763,12 @@ enum XiaoLanMediaFind {
         guard all.contains(where: { leaveWords($0.text) }) else { return nil }
         return button(rows, "取消")
     }
+    /// 193 (N56, WeCom 11-27 18:30: 「即将离开，打开"小红书"」 (取消 / 允许) not known, the video waited out its 180 s): WeCom's
+    /// wording too.
     static func leaveWords(_ text: String) -> Bool {
         let t = text.filter { !$0.isWhitespace }
         return t.contains("离开微信") || t.contains("打开第三方应用") || t.contains("第三方应用")
+            || t.contains("即将离开") || t.contains("即將離開") || t.contains("离开企业微信") || t.contains("離開企業微信")
     }
 
     /// 192 (measured 11-27 15:45: Douyin's video in WeChat ran its 3:01 to 「去抖音重播」; Kuaishou's and Xiaohongshu's end
@@ -865,18 +943,37 @@ enum XiaoLanMediaFind {
     /// 189 (N30, Echo 189, 11-27 12:40 首爾: WeCom's voice note from 蓝海乐 was already turned into words — 「有优惠吗？」 and
     /// 「转換完成」 under it — so its menu had no 转文字, and it was reported 「没能打开看」): the words under the note (the
     /// `rank`-th newest of its length) up to that 「…完成」 mark; nil when there is no such mark.
-    static func convertedWords(_ pieces: [Piece], seconds: Int?, rank: Int = 0) -> String? {
+    static func convertedWords(_ pieces: [Piece], seconds: Int?, rank: Int = 0, px: WatchOCR.Pixels? = nil) -> String? {
         guard let seconds else { return nil }
         let notes = pieces.filter { voiceSeconds($0.text) == seconds }.sorted { $0.box.midY > $1.box.midY }
         guard !notes.isEmpty else { return nil }
-        let bottom = Double(notes[min(rank, notes.count - 1)].box.maxY)
+        let note = notes[min(rank, notes.count - 1)]
+        let bottom = Double(note.box.maxY)
         let under = pieces.filter { Double($0.box.midY) > bottom && Double($0.box.midY) <= bottom + 0.2 }
             .sorted { $0.box.midY < $1.box.midY }
         func done(_ t: String) -> Bool {
             let p = t.filter { !$0.isWhitespace }
             return p.count <= 6 && p.contains("完成") && (p.contains("转") || p.contains("轉"))
         }
-        guard let end = under.firstIndex(where: { done($0.text) }), end > 0 else { return nil }
+        guard let end = under.firstIndex(where: { done($0.text) }), end > 0 else {
+            // 193 (N47, Echo 192 18:05: WeChat's note turned into words before, its words not known, its menu tried again):
+            // WeChat puts them in a box of their own under the note with no mark — the lines right under it, starting at
+            // its left, with no avatar beside them (the next message has one), never a bubble of mine
+            guard let px else { return nil }
+            var words: [String] = []
+            var last = bottom
+            for p in under {
+                if Double(p.box.minY) - last > 0.035 { break }
+                // on a white box (the chat's grey under the note — 「「蓝海乐」已回收一則訊息」, a time — is none)
+                guard abs(Double(p.box.minX) - Double(note.box.minX)) < 0.06, !avatarAt(px, Double(p.box.midY)),
+                      WatchOCR.kind(p.box, px) == .theirs, recaller(p.text) == nil, voiceSeconds(p.text) == nil,
+                      !p.text.contains("转文字") else { break }
+                words.append(p.text)
+                last = Double(p.box.maxY)
+            }
+            let w = words.joined()
+            return w.isEmpty ? nil : w
+        }
         let words = under[..<end].map(\.text).joined()
         return words.isEmpty ? nil : words
     }
@@ -953,10 +1050,17 @@ enum XiaoLanMediaFind {
         for k in stride(from: min(x.count, y.count), through: 2, by: -1) where Array(x.suffix(k)) == Array(y.prefix(k)) {
             return a + String(y.dropFirst(k))
         }
-        let head = Array(y.prefix(4))
-        if head.count == 4 {
-            for start in stride(from: x.count - 4, through: max(0, x.count - 40), by: -1) where start >= 0 && Array(x[start..<(start + 4)]) == head {
-                return String(x[..<start]) + b
+        // 193 (N50b, Echo 192 18:31: one passage read 「九天财库禄库君、九享籍掌算君」 in one part and 「…九亨籍掌算君」 in the
+        // next: no seam found, the passage came twice): the seam with a misread character in it (two in ten or more)
+        for k in stride(from: min(x.count, y.count), through: 5, by: -1) {
+            let differ = zip(x.suffix(k), y.prefix(k)).filter { $0 != $1 }.count
+            if differ <= (k >= 10 ? 2 : 1) { return a + String(y.dropFirst(k)) }
+        }
+        let head = Array(y.prefix(6))
+        if head.count >= 4 {
+            for start in stride(from: x.count - head.count, through: max(0, x.count - 40), by: -1) where start >= 0 {
+                let differ = zip(x[start..<(start + head.count)], head).filter { $0 != $1 }.count
+                if differ <= (head.count >= 6 ? 1 : 0) { return String(x[..<start]) + b }
             }
         }
         return a + b
@@ -998,7 +1102,7 @@ enum XiaoLanMediaFind {
             }
             bottom = Double(p.box.maxY)  // another line of the bubble
         }
-        guard let head else { return nil }
+        guard let head else { return quoteAbove(ps, line: top, isBox: isBox) }
         var text = head.text, last = head
         for p in ps where Double(p.box.minY) > Double(head.box.maxY) - 0.004 {
             if Double(p.box.minY) - Double(last.box.maxY) > 0.012 { break }
@@ -1009,6 +1113,71 @@ enum XiaoLanMediaFind {
         guard let colon = text.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
         let body = String(text[text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
         return body.isEmpty ? nil : (body, CGPoint(x: Double(head.box.midX), y: Double(head.box.midY)))
+    }
+
+    /// 193 (N60, WeCom on the iPad 11-27 18:25: 「这里面是什么东西」 quoting 「账户交易明细(1).xls」 — WeCom puts the quote in
+    /// the question's own bubble, a grey box over its words: 「蓝海乐：」 / 「Ⓧ 账户交易明细（1）.xIs」 / 「这里面是什么东西」): the
+    /// quote over the line, the grey box's lines up to its 「name：」, and where to click it (its line under the name).
+    static func quoteAbove(_ ps: [Piece], line top: Piece, isBox: (CGRect) -> Bool) -> (text: String, at: CGPoint)? {
+        let above = ps.filter { p in
+            Double(p.box.maxY) <= Double(top.box.minY) + 0.004 && Double(top.box.minY) - Double(p.box.minY) < 0.12
+                && Double(p.box.minX) >= Double(top.box.minX) - 0.015 && Double(p.box.minX) - Double(top.box.minX) < 0.09
+        }.sorted { $0.box.midY > $1.box.midY }
+        var box: [Piece] = []
+        var lowest = Double(top.box.minY)
+        for p in above {
+            if lowest - Double(p.box.maxY) > 0.03 { break }
+            guard isBox(p.box) else { break }
+            box.insert(p, at: 0)
+            lowest = Double(p.box.minY)
+            if quoteHead(p.text) { break }
+        }
+        guard let head = box.first, quoteHead(head.text) else { return nil }
+        let text = box.map(\.text).joined()
+        guard let colon = text.firstIndex(where: { $0 == "：" || $0 == ":" }) else { return nil }
+        let body = String(text[text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        let click = box.count > 1 ? box[1] : head
+        return body.isEmpty ? nil : (body, CGPoint(x: Double(click.box.midX), y: Double(click.box.midY)))
+    }
+
+    /// 193 (measured on the iPad 11-27 19:54, normal light: a bubble of theirs is white, 254–255, on WeChat and WeCom
+    /// alike; WeCom's quote box in the question's bubble is 248, WeChat's quote box under it 224 — WatchOCR.kind took
+    /// WeCom's 248 for a bubble, 247 and up, so its quotes were never found): a line sits on a quote's box (or on the
+    /// chat's grey), not on a bubble — what is just left of its first letter is a neutral grey, not 252+ white, and
+    /// no bubble of mine.
+    static func onQuote(_ box: CGRect, _ px: WatchOCR.Pixels) -> Bool {
+        for dx in [0.006, 0.010, 0.004] {
+            let c = px.rgb(Double(box.minX) - dx, Double(box.midY))
+            if WatchOCR.kind(of: c) == .mine { return false }
+            let lo = min(c.0, c.1, c.2), hi = max(c.0, c.1, c.2)
+            guard hi - lo <= 8 else { continue }
+            if lo >= 252 { return false }
+            if lo >= 215 { return true }
+        }
+        return false
+    }
+
+    /// 193 (measured 11-27 19:55): WeCom's quote clicked takes the chat to the message it quotes and shows
+    /// 「回到引用位置」 at its right (read 「♥回到引用位置」); where to click to go back down.
+    static func backToQuote(_ rows: [[Piece]]) -> CGPoint? {
+        rows.joined().first { $0.text.filter { !$0.isWhitespace }.contains("回到引用位置") }
+            .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
+    /// 193 (N54): a line's words on the window — all of it, or a piece of it (or it of a piece) four characters or more.
+    static func shows(_ rows: [[Piece]], _ line: String) -> Bool {
+        let want = plain(line)
+        guard !want.isEmpty else { return true }
+        return rows.joined().contains { p in
+            let t = plain(p.text)
+            guard !t.isEmpty else { return false }
+            return t == want || (min(t.count, want.count) >= 4 && (want.contains(t) || t.contains(want)))
+        }
+    }
+
+    /// The newest line read with words of its own (not a 「[图片]」 made for a message with none), for `shows`.
+    static func newestWords(_ lines: [String]) -> String {
+        lines.last { !$0.hasPrefix("[") && plain($0).count >= 2 } ?? ""
     }
 
     /// A quote's first line: 「name：…」, the name 1–20 long.
@@ -1052,6 +1221,31 @@ enum XiaoLanMediaFind {
         let first = tag(head) == kind ? head : (head.isEmpty ? mark : "\(mark) \(head)")
         if let seen, !seen.isEmpty { return "\(first)\n\(seen)" }
         return "\(first)\n（小蓝没能打开看：\(failed ?? "原因不明")）"
+    }
+
+    /// 193 (N53, Echo 192 18:08: a photo of an ID card reported with its holder's name and visa details, and every word
+    /// read off it sent along; the owner's bank statement .xls tried too): an ID, a bank card, a statement and the like —
+    /// said what it is; the words read off a picture of one are not sent, and runs of digits are masked.
+    static let sensitiveWords = ["身份证", "身份證", "居民身份", "护照", "護照", "签证", "簽證", "居留", "外国人登录", "外國人登錄",
+                                 "驾驶证", "駕駛證", "驾照", "銀行卡", "银行卡", "借记卡", "信用卡", "卡号", "卡號", "对账单", "对帐单",
+                                 "對帳單", "交易明细", "交易明細", "账户", "帳戶", "流水", "余额", "餘額", "社保", "户口", "证件", "證件",
+                                 "passport", "visa", "residence card", "bank", "statement", "id card", "identity card", "iban"]
+    static func sensitive(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return sensitiveWords.contains { t.contains($0) }
+    }
+
+    /// Runs of four digits or more (spaces, dashes, dots, commas, slashes or colons inside them) as 「****」.
+    static func masked(_ text: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"\d[\d \-.,/:]*\d"#) else { return text }
+        let ns = text as NSString
+        var out = text
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let run = ns.substring(with: m.range)
+            guard run.filter(\.isNumber).count >= 4, let r = Range(m.range, in: out) else { continue }
+            out.replaceSubrange(r, with: "****")
+        }
+        return out
     }
 
     /// For the model looking at pictures and video frames: what it is, briefly, in Chinese; no numbers of a person.

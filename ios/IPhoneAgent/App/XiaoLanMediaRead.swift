@@ -18,6 +18,9 @@ struct MediaJob {
     /// the lines with those words, from the bottom.
     var question = ""
     var questionRank = 0
+    /// 193 (N54): the newest line with words of its own on the window when it was read: the window still showing it is
+    /// the chat at its bottom (not jumped to older lines as the keyboard went down).
+    var newest = ""
 }
 
 /// Frames grabbed while a video plays (main actor only).
@@ -32,9 +35,19 @@ extension AppModel {
     /// The media read in paneRead: each opened, looked at, closed and reported (what was seen, or why not, so the line
     /// is never lost), the other window waiting meanwhile.
     func paneMediaRun(_ state: inout PaneWatchState) async {
-        guard !state.media.isEmpty else { return }
-        let jobs = state.media
-        state.media.removeAll()
+        // 193 (N63): after them, what came into their chats meanwhile is read (it may bring media of its own: again,
+        // three rounds at most)
+        var round = 0
+        while !state.media.isEmpty, round < 3, watching, !Task.isCancelled {
+            round += 1
+            let jobs = state.media
+            state.media.removeAll()
+            await paneMediaJobs(jobs, &state)
+            await paneReadAfterMedia(jobs, &state)
+        }
+    }
+
+    private func paneMediaJobs(_ jobs: [MediaJob], _ state: inout PaneWatchState) async {
         for job in jobs {
             let began = now()
             watchStatus = "看\(XiaoLanMediaFind.label(job.kind))：\(job.chat)…"
@@ -79,6 +92,13 @@ extension AppModel {
         guard var look = await paneMediaChat(job) else { return (nil, "「\(job.chat)」已经不在窗口里") }
         // 191 (N29; Echo 191 15:25): 小藍's keyboard down first, the chat looked at again once it settles (every kind)
         if await paneMediaKeyboardDown(job), let again = await paneMediaChat(job, after: now()) { look = again }
+        // 193 (N54, Echo 192 18:12: the keyboard went down, the chat jumped to its 12:40 lines, and the card was clicked
+        // where it had been, on an old message): the window must still show the newest line read; else it is looked at
+        // again, then scrolled to its bottom; not found, nothing is clicked
+        guard let atBottom = await paneMediaAtBottom(job, look) else {
+            return (nil, "聊天跳到了旧内容，没找回这一则，没有点开")
+        }
+        look = atBottom
         if !job.question.isEmpty { return await paneMediaQuoted(job, look) }
         switch job.kind {
         case .voice: return await paneMediaVoice(job, look)
@@ -87,6 +107,30 @@ extension AppModel {
         case .file: return await paneMediaFile(job, look)
         case .link: return await paneMediaLink(job, look)
         }
+    }
+
+    /// 193 (N54): the job's chat showing its newest line read (or nothing to check by); looked at twice more a second
+    /// apart (a keyboard going down moves it), then dragged up twice toward its bottom; nil: not found.
+    private func paneMediaAtBottom(_ job: MediaJob, _ look: PaneLook) async -> PaneLook? {
+        guard !job.newest.isEmpty else { return look }
+        if XiaoLanMediaFind.shows(look.rows, job.newest) { return look }
+        var last = look
+        for attempt in 0..<4 {
+            if attempt >= 2 {
+                let a = XiaoLanPanes.onScreen(CGPoint(x: 0.6, y: 0.7), in: last.rect)
+                let b = XiaoLanPanes.onScreen(CGPoint(x: 0.6, y: 0.3), in: last.rect)
+                do { try await pointer.swipe(Double(a.x), Double(a.y), Double(b.x), Double(b.y), hold: false) } catch { break }
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let l = await paneMediaChat(job, after: now()) else { return nil }
+            if XiaoLanMediaFind.shows(l.rows, job.newest) {
+                DebugLog.write("watch: \(job.app.rawValue): \(job.chat): its newest line found again\(attempt >= 2 ? " after a drag" : "") (N54)")
+                return l
+            }
+            last = l
+        }
+        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 「\(job.newest.prefix(20))」 not on the window (it jumped to older lines?); nothing clicked (N54)")
+        return nil
     }
 
     // MARK: the chat, back to it, a menu closed
@@ -107,10 +151,23 @@ extension AppModel {
     @discardableResult
     private func paneMediaBack(_ job: MediaJob, most: Int = 3) async -> Bool {
         for _ in 0..<most {
-            guard let l = await paneLooks(after: now(), side: job.side).first(where: { $0.side == job.side }) else { return false }
+            // 193 (N57): a window not told (a black player, a page dimmed under a sheet) is read where it was, never left
+            guard let l = await paneLookInPlace(job.side, after: now()) else {
+                DebugLog.write("watch: \(job.app.rawValue): \(job.chat): no window known on this side; not back (N57)")
+                return false
+            }
             if isJobChat(l, job) { return true }
             if l.view == .list { return false }
-            guard await paneBackClick(l, job.app.rawValue) else { return false }
+            // a sheet over the page (WeCom's 「即将离开」, WeChat's 「离开微信」) first: its 取消
+            if let cancel = XiaoLanMediaFind.leaveSheet(l.rows) {
+                DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a leave sheet over the page on the way back; 取消 (N57)")
+                _ = await paneTap(cancel, in: l.rect, wide: 0.04, tall: 0.012)
+                continue
+            }
+            guard await paneBackClick(l, job.app.rawValue) else {
+                DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the back arrow not clicked on its page (N57)")
+                return false
+            }
         }
         let back = await paneMediaChat(job, after: now()) != nil
         if !back { DebugLog.write("watch: \(job.app.rawValue): \(job.chat): not back on the chat after \(most) back(s)") }
@@ -142,25 +199,45 @@ extension AppModel {
             quick = nil
         }
         let strong = await settings.strongerClient()
-        var order = [quick, strong].compactMap { $0 }
-        if images.count >= 3, let strong { order = [strong] + [quick].compactMap { $0 } }
-        if order.count == 2, order[0].model == order[1].model { order.removeLast() }
-        guard !order.isEmpty else {
+        var doubao = [quick, strong].compactMap { $0 }
+        if images.count >= 3, let strong { doubao = [strong] + [quick].compactMap { $0 } }
+        if doubao.count == 2, doubao[0].model == doubao[1].model { doubao.removeLast() }
+        // 193 (lead model; user 11-27: 「Codex 為主或豆包為主，隨時互換」): the lead first, the other when it fails, says
+        // nothing, or cannot see. Codex takes one picture a call: a video's frames go to it as one grid.
+        let codex = PlusChat.looker()
+        typealias Asker = (name: String, ask: () async throws -> String)
+        var askers: [Asker] = []
+        for who in LeadModel.order(LeadModel.current, codex: codex != nil, doubao: !doubao.isEmpty) {
+            if who == .codex, let codex {
+                let one = images.count == 1 ? images[0] : XiaoLanPanes.grid(images)
+                let said = images.count == 1 ? asked : asked + "（这几张截图已拼成一张：从左到右、从上到下按时间先后。）"
+                askers.append((name: "codex", ask: {
+                    try await codex.chat(system: XiaoLanMediaFind.lookSystem, text: said, image: one, maxTokens: 400, temperature: 0.2).text
+                }))
+            } else if who == .doubao {
+                askers += doubao.map { client in
+                    (name: client.model, ask: {
+                        try await client.chat(system: XiaoLanMediaFind.lookSystem, text: asked, images: images, maxTokens: 400).text
+                    })
+                }
+            }
+        }
+        guard !askers.isEmpty else {
             DebugLog.write("watch: media: the model did not look: no model set")
             return nil
         }
         var kept: [String] = []
-        for (i, client) in order.enumerated() {
+        for (i, asker) in askers.enumerated() {
             let started = now()
             do {
-                let r = try await client.chat(system: XiaoLanMediaFind.lookSystem, text: asked, images: images, maxTokens: 400)
-                let t = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                DebugLog.write(String(format: "watch: media: %@ looked at %ld picture(s) in %.1f s", client.model, images.count, now() - started))
+                let t = try await asker.ask().trimmingCharacters(in: .whitespacesAndNewlines)
+                DebugLog.write(String(format: "watch: media: %@ looked at %ld picture(s) in %.1f s (%@ leads)", asker.name, images.count,
+                                      now() - started, LeadModel.current.rawValue))
                 if !t.isEmpty, !XiaoLanMediaFind.unsure(t) { return t }
                 if !t.isEmpty { kept.append(t) }
-                DebugLog.write("watch: media: \(client.model) answered nothing sure\(i + 1 < order.count ? "; the other model asked" : "")")
+                DebugLog.write("watch: media: \(asker.name) answered nothing sure\(i + 1 < askers.count ? "; the next model asked" : "")")
             } catch {
-                DebugLog.write("watch: media: \(client.model) did not look: \(error.localizedDescription)\(i + 1 < order.count ? "; the other model asked" : "")")
+                DebugLog.write("watch: media: \(asker.name) did not look: \(error.localizedDescription)\(i + 1 < askers.count ? "; the next model asked" : "")")
             }
         }
         return kept.max { $0.count < $1.count }
@@ -173,7 +250,9 @@ extension AppModel {
     private func paneMediaVoice(_ job: MediaJob, _ look: PaneLook) async -> (seen: String?, why: String?) {
         let before = Array(look.rows.joined())
         // 189 (N30): turned into words already (by the app, or before): those words, nothing clicked
-        if let words = XiaoLanMediaFind.convertedWords(before, seconds: XiaoLanMediaFind.noteSeconds(job.text), rank: job.rank) {
+        // 193 (N47): WeChat's words in their own box under the note (no 「转换完成」) too, told by the window's pixels
+        if let words = XiaoLanMediaFind.convertedWords(before, seconds: XiaoLanMediaFind.noteSeconds(job.text), rank: job.rank,
+                                                       px: WatchOCR.Pixels(look.crop)) {
             return ("语音转文字：\(words)", nil)
         }
         guard let bubble = XiaoLanMediaFind.pick(XiaoLanMediaFind.voiceSpots(look.rows), rank: job.rank) else {
@@ -182,7 +261,8 @@ extension AppModel {
         // 192 (N47, Echo 191 11-27 16:21: WeChat's 「转文字」 beside the older of two notes was clicked, on target, twice,
         // and nothing came; the newer note had no such button; the note's long-press menu 「转文字」 turned it at once):
         // the button only when it is this note's own (its row), a few seconds; else, or nothing come, the menu.
-        if job.app == .wechat, let button = XiaoLanMediaFind.voiceButton(look.rows, beside: bubble) {
+        let ownButton = job.app == .wechat ? XiaoLanMediaFind.voiceButton(look.rows, beside: bubble) : nil
+        if let button = ownButton {
             if await paneTap(button, in: look.rect, wide: 0.03, tall: 0.008) {
                 let words = await paneMediaVoiceWords(job, before: before, most: 3)
                 if !words.isEmpty { return ("语音转文字：\(words)", nil) }
@@ -196,11 +276,14 @@ extension AppModel {
         let s = XiaoLanPanes.onScreen(spot, in: chat.rect)
         pointer.aimLoosely(0.03 * Double(chat.rect.width), 0.008)
         do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch { return (nil, "长按语音失败") }
-        guard let menu = await paneLook(job.side, after: now(), tries: 4, until: { l in
-            XiaoLanMediaFind.menuItem(l.rows, "转文字") != nil || XiaoLanMediaFind.menuItem(l.rows, "引用") != nil
-        }) else { return (nil, "长按语音后没看到菜单") }
+        // 193 (N47, Echo 192 18:05: the press landed on the note, but the lowest 「转文字」 on the window — the small button
+        // beside the bubble — was taken for the menu's and clicked): the menu is up when its other words show (引用, 删除,
+        // 收藏…); 「转文字」 only within it, never where the small button was
+        guard let menu = await paneLook(job.side, after: now(), tries: 4, until: { XiaoLanMediaFind.menuBand($0.rows) != nil }),
+              let band = XiaoLanMediaFind.menuBand(menu.rows) else { return (nil, "长按语音后没看到菜单（引用／删除／收藏）") }
+        let buttonNow = XiaoLanMediaFind.voiceButton(chat.rows, beside: spot)  // where the small button was before the press
         // 转文字 only where its words are read: a place learned or measured could be 取消转换's (never clicked)
-        guard let item = XiaoLanMediaFind.menuItem(menu.rows, "转文字") else {
+        guard let item = XiaoLanMediaFind.menuItem(menu.rows, "转文字", in: band, avoid: buttonNow) else {
             await paneMediaCloseMenu(menu)
             return (nil, "语音菜单里没有「转文字」（可能已经转过）")
         }
@@ -349,6 +432,12 @@ extension AppModel {
             await paneMediaBack(job)
         }
         guard saw != nil || !text.isEmpty else { return (nil, "图片打开了，但没看出内容（没设模型或调用失败）") }
+        // 193 (N53): an ID, a card, a statement: what it is only — its words not sent, digit runs masked
+        if XiaoLanMediaFind.sensitive((saw ?? "") + text) {
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a picture of an ID, a card or a statement: its words left out, numbers masked (N53)")
+            guard let saw else { return ("图片内容：证件、银行卡或账单类图片（内容不转述）", nil) }
+            return ("图片内容：\(XiaoLanMediaFind.masked(saw))", nil)
+        }
         var parts: [String] = []
         if let saw { parts.append("图片内容：\(saw)") }
         if !text.isEmpty { parts.append("图上文字：\(text)") }
@@ -442,6 +531,11 @@ extension AppModel {
         let name = XiaoLanMediaFind.fileName(job.text) ?? ""
         let named = name.isEmpty ? "" : "文件名：\(name)；"
         guard !words.isEmpty else { return (nil, "\(named)文件打开了，但没读到里面的字") }
+        // 193 (N53): a statement or a card's file: its digit runs masked
+        if XiaoLanMediaFind.sensitive(name + words) {
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a file of a statement, a card or an ID: numbers masked (N53)")
+            return ("\(named)内容（数字已遮掉）：\(XiaoLanMediaFind.masked(words))", nil)
+        }
         return ("\(named)内容：\(words)", nil)
     }
 
@@ -474,10 +568,14 @@ extension AppModel {
         let px = WatchOCR.Pixels(look.crop)
         guard let q = XiaoLanMediaFind.quoteUnder(look.rows, line: job.question, rank: job.questionRank, isBox: { box in
             guard let px else { return false }
-            let k = WatchOCR.kind(box, px)
-            return k != .theirs && k != .mine
+            return XiaoLanMediaFind.onQuote(box, px)  // 193: WeCom's box (248) too
         }) else { return (nil, "没在聊天里找到这句引用的那条") }
         DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 「\(job.question.prefix(20))」 quotes a \(job.kind.rawValue) 「\(q.text.prefix(30))」; its quote clicked")
+        // 193 (measured 11-27 19:55): WeCom's quote takes the chat to the message it quotes, opening nothing
+        if job.app == .wework, job.kind == .file || job.kind == .link, let r = await paneMediaQuotedJump(job, look, quote: q) {
+            await paneMediaEnsureChat(job)
+            return r
+        }
         let r: (seen: String?, why: String?)
         switch job.kind {
         case .link:
@@ -494,6 +592,43 @@ extension AppModel {
             r = await paneMediaPage(job, opened, url: "")
         }
         await paneMediaEnsureChat(job)
+        return r
+    }
+
+    /// 193 (measured on the iPad 11-27 19:55: WeCom's quote of 「账户交易明细(1).xls」 clicked took the chat up to the file's
+    /// own card, 「回到引用位置」 at the right, nothing opened; the card clicked opened its preview, 关闭, then 「回到引用位置」
+    /// back to the question): the quoted message itself opened there as its kind's job would, then back down. nil: the
+    /// chat did not move to it (the caller goes on as for WeChat).
+    private func paneMediaQuotedJump(_ job: MediaJob, _ look: PaneLook, quote q: (text: String, at: CGPoint)) async -> (seen: String?, why: String?)? {
+        guard await paneTap(q.at, in: look.rect, wide: 0.05, tall: 0.008),
+              let jumped = await paneLook(job.side, after: now(), tries: 4, until: { l in
+                  XiaoLanMediaFind.backToQuote(l.rows) != nil || !self.isJobChat(l, job)
+              }) else { return nil }
+        if !isJobChat(jumped, job) {  // it opened over the chat at once (as WeChat's does): read as its page
+            DebugLog.write("watch: wework: \(job.chat): its quote opened a page at once; read there")
+            return await paneMediaPage(job, jumped, url: XiaoLanMediaFind.url(in: q.text) ?? "")
+        }
+        guard XiaoLanMediaFind.backToQuote(jumped.rows) != nil else { return nil }  // nothing moved: as before
+        DebugLog.write("watch: wework: \(job.chat): its quote took the chat to the \(job.kind.rawValue) it quotes; opened there")
+        var quoted = job
+        quoted.text = q.text
+        quoted.rank = 0
+        quoted.newest = ""
+        let r: (seen: String?, why: String?)
+        if job.kind == .file {
+            let px = WatchOCR.Pixels(jumped.crop)
+            if let card = XiaoLanMediaFind.fileCard(jumped.rows, hint: q.text, exclude: { box in px.map { XiaoLanMediaFind.onQuote(box, $0) } ?? false }) {
+                r = await paneMediaFile(quoted, jumped, at: card)
+            } else {
+                r = (nil, "跳到了引用的那条，但没找到「\(q.text.prefix(20))」的文件卡片")
+            }
+        } else {
+            r = await paneMediaLink(quoted, jumped)
+        }
+        // back down to the question
+        if let l = await paneMediaChat(job, after: now()), let back = XiaoLanMediaFind.backToQuote(l.rows) {
+            _ = await paneTap(back, in: l.rect, wide: 0.05, tall: 0.01)
+        }
         return r
     }
 
@@ -669,9 +804,10 @@ extension AppModel {
     /// 192 (N41): WeChat's 「可能离开微信，打开第三方应用」 sheet on the job's window: its 取消 (never 继续: Kuaishou's
     /// went to a page to download the app, 11-27 15:37). True when one was there.
     private func paneMediaCancelLeave(_ job: MediaJob) async -> Bool {
-        guard let l = await paneLooks(after: now(), side: job.side).first(where: { $0.side == job.side }),
+        // 193 (N56/N57): WeCom's 「即将离开，打开"小红书"」 too, on a page dimmed under it (read where the window was)
+        guard let l = await paneLookInPlace(job.side, after: now()),
               let cancel = XiaoLanMediaFind.leaveSheet(l.rows) else { return false }
-        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): 「离开微信，打开第三方应用」; 取消")
+        DebugLog.write("watch: \(job.app.rawValue): \(job.chat): a sheet to leave the app (「\(l.rows.joined().first { XiaoLanMediaFind.leaveWords($0.text) }?.text ?? "")」); 取消")
         _ = await paneTap(cancel, in: l.rect, wide: 0.04, tall: 0.012)
         try? await Task.sleep(nanoseconds: 500_000_000)
         return true
