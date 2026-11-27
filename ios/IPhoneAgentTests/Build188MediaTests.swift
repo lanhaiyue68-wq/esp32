@@ -95,9 +95,12 @@ import UIKit
         XCTAssertNil(F.quoteBar([[piece("这是什么", 0.35, 0.727)]], quote: "这是什么"))
     }
 
-    func testBlankSpotAvoidsWords() {
+    func testBlankSpotAvoidsWords() throws {
         let rows = (0..<12).map { [piece("行\($0)", 0.3, 0.1 + Double($0) * 0.07)] }
-        XCTAssertNil(F.blankSpot(rows))
+        // 195 (N87): no height bare by 0.04: the window's very edge, right of the avatars, at the barest height
+        let edge = try XCTUnwrap(F.blankSpot(rows))
+        XCTAssertEqual(Double(edge.x), 0.985, accuracy: 0.001)
+        XCTAssertNil(F.blankSpot((0..<60).map { [piece("行\($0)", 0.3, 0.2 + Double($0) * 0.01)] }), "words every 0.01: none")
         let spot = F.blankSpot([[piece("引用", 0.5, 0.64)]])
         XCTAssertNotNil(spot)
         XCTAssertGreaterThanOrEqual(abs(Double(spot!.y) - 0.64), 0.04)

@@ -1372,7 +1372,9 @@ import Foundation
             // to the blind estimate (bottom row: 1-4 % off, the key 10 % x 5 %), then held the same spot again.
             let before = screen?.frame, began = now()
             lastClick = nil
-            pos = nil
+            // 196 (speed; Echo 195 11-28: every quoted reply's long press found the pointer again first, ~0.7 s, though
+            // on an iPad every move tracks it and its arrival is looked at, as a tap's (184)): only an iPhone's starts over
+            if !CommandChannel.onPad() { pos = nil }
             try await point(x, y)
             // 126 over the cloud 11-12 (g6): Taobao's 购物车 at (0.300, 0.916) was seen at (0.472, 0.953), "too far to
             // trust", and clicked there six times: on 加入购物车, five more in the cart. Seen off target, the wiggle

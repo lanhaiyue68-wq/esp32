@@ -90,6 +90,12 @@ extension AppModel {
         var waitingLogged = false
         var shareGoneSince: Double?, shareGoneTold = false  // 195 (N79)
         DebugLog.write("watch: 小藍 side by side: WeChat and WeCom both watched, either side, no model")
+        // 195 (N79b): the watch's own notices (the sharing gone, a reply not sent) need iOS's leave; asked once if never
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let allowed = await self.notifier.ensurePermission()
+            DebugLog.write("watch: notifications \(allowed)" + (allowed == "allowed" ? "" : ": the owner will not see the watch's notices"))
+        }
         while watching && !Task.isCancelled {
             if let order = paneNextOrder() {  // 188: in the order the messages came, both apps together
                 await paneOrder(order, &state)
@@ -732,6 +738,22 @@ extension AppModel {
                 }
                 current = (again, XiaoLanPanes.typingTitle(t) ? title : t)
             }
+            // 196 (N88, 测试群 on the iPad 11-28 01:20: 「2」 came onto the window a second after the read, as 小藍's keyboard
+            // rose and pushed the chat up, sat over my answers when read again after the sends, and was never reported;
+            // user: 「回覆前再讀一次」): once the window has settled, read once more before any answer, going on from the
+            // read just made (its last lines are still there)
+            if !missed {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                let name = WatchOCR.titled(current.title).name
+                // speed: a window unchanged since that read is not read by OCR again (the look kept for it, reuse)
+                if let again = await paneLooks(after: now(), side: look.side, reuse: true).first(where: { $0.side == look.side }),
+                   case .chat(let t) = again.view,
+                   WatchChatOpen.sameChat(WatchOCR.titled(t).name, listName: name) || XiaoLanPanes.typingTitle(t) {
+                    let more = paneRead(app, again, title: current.title, fromMark: false, justRead: true, &state)
+                    if more > 0 { DebugLog.write("watch: \(app.rawValue): \(name): \(more) more came in right after the read (N88)") }
+                    if more >= 0 { current.look = again }
+                }
+            }
             paneNoteReplyField(current.look, &state)  // 189 (speed)
             await paneMediaRun(&state)  // 188; 193 (N63): what came in meanwhile is read after it
             state.quietSince[look.side] = now()
@@ -1080,7 +1102,7 @@ extension AppModel {
     /// `lastTry` (188, B45): a window opened by its red mark that still cannot be read reports its preview's line.
     private func paneRead(_ app: XiaoLanOrders.App, _ look: PaneLook, title: String, fromMark: Bool, markSender: String? = nil,
                           markPreview: String? = nil, markCount: Int? = nil, lastTry: Bool = true, missed: Bool = false,
-                          _ state: inout PaneWatchState) -> Int {
+                          justRead: Bool = false, _ state: inout PaneWatchState) -> Int {
         // 187: under a sheet of another chat the title is this chat's, the lines are the other's: not read.
         if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil {
             DebugLog.write("watch: \(app.rawValue): \(title): another chat open over it as a sheet; not read")
@@ -1135,7 +1157,8 @@ extension AppModel {
             // bottom)
             if screenRead != nil {
                 var found = XiaoLanMediaFind.unreadDigits(px, tops: tops, lines: lines, bottom: bottom)
-                let counted: Bool = { if case .mark(let n?) = opened, n > 0 { return true }; return false }()
+                // 196 (N88): read again right after a read, every digit is put in; XiaoLanBatch goes on from that read
+                let counted: Bool = { if case .mark(let n?) = opened, n > 0 { return true }; return justRead }()
                 if !counted { found = XiaoLanMediaFind.belowRead(found, lines: lines, history: before ?? []) }
                 lines = XiaoLanMediaFind.withDigits(lines, found, sender: XiaoLanPanes.listName(name), group: read.group, rows: look.rows)
                 for d in found {
@@ -1152,11 +1175,27 @@ extension AppModel {
         }
         // 195 (N83, 测试群 11-28 00:12: 「2」 reported as 「主人监海乐」's, its name row read with 蓝 as 监): in a group, a name
         // read once that is one character off a name read more often here or before is that name
-        if read.group { lines = XiaoLanMediaFind.steadySenders(lines, known: (before ?? []).map(\.sender)) }
+        // N89: the chats' names read off the lists (the history's keys, either app) and the mark's preview's writer
+        if read.group {
+            var listed = Set(state.history.keys.compactMap { k -> String? in
+                k.split(separator: "|", maxSplits: 1).last.map { XiaoLanPanes.listName(String($0)) }
+            })
+            if let s = markSender, !s.isEmpty { listed.insert(XiaoLanPanes.listName(s)) }
+            lines = XiaoLanMediaFind.steadySenders(lines, known: (before ?? []).map(\.sender), names: listed)
+        }
         let pick = XiaoLanBatch.pick(lines, history: before, opened: opened, firstSinceLaunch: firstSinceLaunch,
                                      seen: state.seen[key] ?? [], isEcho: { XiaoLanMediaFind.isEcho($0.text, of: echoList) },
-                                     avatarTops: avatarTops, previewY: previewY)
+                                     avatarTops: avatarTops, previewY: previewY, justRead: justRead)
         var fresh = pick.lines
+        // 195 (N86, WeCom 11-28 01:09 and 01:16: its mark said 2, only 「2」 came, its lone 「1」 neither read nor read off its
+        // bubble, though both were on the window — the cause not found off the iPad): fewer new than its mark, what was
+        // read is logged (each line's words and place, the avatars) and the window kept in diagnostics
+        if case .mark(let n?) = opened, n > 0, fresh.filter({ !$0.mine }).count < n {
+            let shown = lines.suffix(8).map { "\($0.mine ? "me" : "")「\($0.text.prefix(12))」@" + String(format: "%.3f", $0.y ?? -1) }
+            let tops = (avatarTops ?? []).map { String(format: "%.3f", $0) }
+            DebugLog.write("watch: \(app.rawValue): \(name): fewer new than its mark said (N86): lines \(shown.joined(separator: " ")); avatars \(tops.joined(separator: ","))")
+            WatchChatOpen.keepFrame(look.crop)
+        }
         if fromMark || missed || !pick.anchored || firstSinceLaunch {
             DebugLog.write("watch: \(app.rawValue): \(name): \(fresh.count) new (\(pick.why))")
         }
@@ -1378,7 +1417,11 @@ extension AppModel {
             state.lastShown = (app: order.app, chat: order.chat, look: shown, at: now())
         }
         // 183 (Echo 182 overnight, 11-26: the answer waited 1.5–2.5 s for the keyboard to go down): answered first.
-        if let shown = sent.shown { await paneDismissKeyboard(shown) }
+        // 196 (speed; Echo 195 11-28: 2–4 s between a send and the next reply's first move, part of it a whole-screen
+        // read for a keyboard the send's own 「down」 had put away): another reply waiting for this chat, the keyboard is
+        // left for it (its quote raises it again; a system keyboard is put down by the send anyway)
+        let more = sent.ok && link.pending.contains(where: { $0.app == order.app && $0.chat == order.chat })
+        if let shown = sent.shown, !more { await paneDismissKeyboard(shown) }
     }
 
     /// Open `chat` in its app's window (already open, or a row on its list), type `text` and send it. `shown`: the

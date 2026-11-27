@@ -38,6 +38,22 @@ import UserNotifications
     /// Asked once, on the first Start (with a one-line reason shown by the app first).
     static var asked: Bool { UserDefaults.standard.bool(forKey: askedKey) }
 
+    /// 195 (N79b, Echo 195 11-28 01:26: 「no screen sharing for 20 s; the owner told」 logged, nothing seen on the iPad —
+    /// the permission was only ever asked before a run started from Home, never by the watch): asked when it never was;
+    /// what iOS allows now, for the log ("allowed", "denied", "not asked").
+    func ensurePermission() async -> String {
+        var status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined {
+            await requestPermission()
+            status = await center.notificationSettings().authorizationStatus
+        }
+        switch status {
+        case .authorized, .provisional, .ephemeral: return "allowed"
+        case .denied: return "denied"
+        default: return "not asked"
+        }
+    }
+
     func requestPermission() async {
         UserDefaults.standard.set(true, forKey: Self.askedKey)
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])

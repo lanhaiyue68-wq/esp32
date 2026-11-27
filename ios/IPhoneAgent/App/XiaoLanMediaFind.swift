@@ -283,8 +283,12 @@ enum XiaoLanMediaFind {
     static func blankSpot(_ rows: [[Piece]]) -> CGPoint? {
         let ys = rows.joined().map { Double($0.box.midY) }
         let free = stride(from: 0.25, through: 0.75, by: 0.025).map { y in (y, ys.map { abs($0 - y) }.min() ?? 1) }
-        guard let best = free.max(by: { $0.1 < $1.1 }), best.1 >= 0.04 else { return nil }
-        return CGPoint(x: 0.9, y: best.0)
+        guard let best = free.max(by: { $0.1 < $1.1 }) else { return nil }
+        if best.1 >= 0.04 { return CGPoint(x: 0.9, y: best.0) }
+        // 195 (N87, WeCom 11-28 01:09: a full chat, no height bare by 0.04, 「no bare spot」 and the menu left open): the
+        // window's very edge, right of my avatars (WeChat's to 0.967, WeCom's to 0.976 of the window) and of any menu
+        // (WeCom's to 0.86), at the height farthest from words
+        return best.1 >= 0.01 ? CGPoint(x: 0.985, y: best.0) : nil
     }
 
     /// The words of the apps' long-press menus (WeChat's chat menu, WeChat's web page menu, WeCom's menu).
@@ -299,6 +303,13 @@ enum XiaoLanMediaFind {
         for p in rows.joined() {
             let t = p.text.filter { !$0.isWhitespace }
             guard t.count <= 20, let r = t.range(of: word) else { continue }
+            // 195 (N87, WeCom 11-28 01:09 and 01:16: 「引用」 never read in Echo's own reads of the window — its icon above it,
+            // 「❝」 in a ring, read with it as one piece, likely 「66引用」 — and quoteSlot gave up as something was read in
+            // its place): the word with a few marks that are no Chinese (an icon read as letters) is that item, its middle
+            let rest = t.replacingOccurrences(of: word, with: "")
+            if (1...3).contains(rest.count), !rest.unicodeScalars.contains(where: { (0x3400...0x9FFF).contains($0.value) }) {
+                return CGPoint(x: p.box.midX, y: p.box.midY)
+            }
             let others = menuWords.filter { $0 != word && t.contains($0) }
             guard !others.isEmpty else { continue }
             let start = t.distance(from: t.startIndex, to: r.lowerBound)
@@ -582,12 +593,19 @@ enum XiaoLanMediaFind {
     }
 
     /// 195 (N85): of the digits read off bubbles, those under the last line the history goes on from (XiaoLanBatch.anchor,
-    /// where this read's new lines start) and under every line of mine; one over them is an old message OCR never gave,
-    /// not a new one. (Not by the words read before: 「2」 sent again is new though 「2」 was read before.)
+    /// where this read's new lines start); one over it is an old message OCR never gave, not a new one. (Not by the words
+    /// read before: 「2」 sent again is new though 「2」 was read before.) No line to go on from: under every line of mine.
+    /// N88 (测试群 on the iPad 11-28 01:20: 「2」 came onto the window after the read, as 小藍's keyboard pushed the chat
+    /// up, and was over my two answers when read again after the sends; under every line of mine left it out for good):
+    /// with a line to go on from, my lines say nothing (an answer sent meanwhile is under what came in before it).
     @MainActor static func belowRead(_ found: [(text: String, y: Double)], lines: [WatchReport.Line], history: [WatchReport.Line]) -> [(text: String, y: Double)] {
-        var floor = lines.filter(\.mine).compactMap(\.y).max() ?? 0
+        let floor: Double
         if let start = XiaoLanBatch.anchor(lines, history: history), start.index > 0, start.index <= lines.count,
-           let y = lines[start.index - 1].y { floor = max(floor, y) }
+           let y = lines[start.index - 1].y {
+            floor = y
+        } else {
+            floor = lines.filter(\.mine).compactMap(\.y).max() ?? 0
+        }
         return found.filter { $0.y > floor }
     }
 
@@ -609,10 +627,20 @@ enum XiaoLanMediaFind {
     /// 195 (N83, 测试群 on the iPad 11-28 00:12: 「2」 went to the server as 「主人监海乐」's, its name row read with 蓝 as 监,
     /// the same name read right two rows up): a sender read once that is one character off another read more often (on
     /// the window, or `known`: the history's) is that one; names of four characters or more only (WatchReport.sameName).
-    static func steadySenders(_ lines: [WatchReport.Line], known: [String]) -> [WatchReport.Line] {
+    /// N89 (测试群 on the iPad 11-28 01:20: every name row of 主人蓝海乐 read 「主人监海乐」 — small grey letters, 蓝 as 监 each
+    /// time — so no name was read more often): first a name one character off one of `names` (the chats' names read off
+    /// the lists, large and read right) is that name.
+    static func steadySenders(_ lines: [WatchReport.Line], known: [String], names: Set<String> = []) -> [WatchReport.Line] {
+        let listed = lines.map { l -> WatchReport.Line in
+            guard !l.mine, !l.sender.isEmpty, !names.contains(l.sender),
+                  let right = names.first(where: { WatchReport.sameName($0, l.sender) }) else { return l }
+            var fixed = l
+            fixed.sender = right
+            return fixed
+        }
         var count: [String: Int] = [:]
-        for s in lines.filter({ !$0.mine }).map(\.sender) + known where !s.isEmpty { count[s, default: 0] += 1 }
-        return lines.map { l in
+        for s in listed.filter({ !$0.mine }).map(\.sender) + known where !s.isEmpty { count[s, default: 0] += 1 }
+        return listed.map { l in
             guard !l.mine, count[l.sender] == 1,
                   let steady = count.filter({ $0.key != l.sender && $0.value >= 2 && WatchReport.sameName($0.key, l.sender) })
                     .max(by: { $0.value < $1.value })?.key else { return l }

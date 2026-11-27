@@ -25,7 +25,7 @@ import Foundation
     /// came in after the mark was read is among them).
     static func pick(_ lines: [WatchReport.Line], history: [WatchReport.Line]?, opened: Opened, firstSinceLaunch: Bool = false,
                      seen: Set<String> = [], isEcho: (WatchReport.Line) -> Bool = { _ in false },
-                     avatarTops: [Double]? = nil, previewY: Double? = nil) -> Pick {
+                     avatarTops: [Double]? = nil, previewY: Double? = nil, justRead: Bool = false) -> Pick {
         let mineAt = lines.lastIndex { $0.mine }
         let afterMine = mineAt.map { $0 + 1 } ?? 0
         let start = anchor(lines, history: history ?? [])
@@ -59,6 +59,11 @@ import Foundation
                         why: "no number read on its mark, nothing read before or mine on the window: its newest line")
         case .live, .missed:
             if firstSinceLaunch { return Pick(lines: [], anchored: start != nil, why: "open when watching started, no red mark") }
+            // 196 (N88; user 11-28 chose 「回覆前再讀一次」): read again right after a read, before any answer, the last
+            // lines of that read are surely still on the window: what comes after them, wherever they are, is new
+            if justRead, let end = readEnd(lines, history: history ?? []) {
+                return Pick(lines: Array(lines[end...]), anchored: true, why: "read again right after its read")
+            }
             guard let start else {
                 return Pick(lines: [], anchored: false, why: "nothing on the window goes on from the last line read")
             }
@@ -68,6 +73,17 @@ import Foundation
             let from = start.sure ? start.index : max(start.index, afterMine)
             return Pick(lines: after(from, sure: start.sure), anchored: true, why: "after the last line read")
         }
+    }
+
+    /// 196 (N88): where the last lines of a read just made (up to three, at least two) show, one after another, on the
+    /// window, the lowest such place: the index after them; nil: not shown so.
+    static func readEnd(_ lines: [WatchReport.Line], history: [WatchReport.Line]) -> Int? {
+        func key(_ l: WatchReport.Line) -> String { XiaoLanSelf.plain(l.text) + (l.mine ? "|me" : "") }
+        let k = min(3, history.count)
+        guard k >= 2, lines.count >= k else { return nil }
+        let want = history.suffix(k).map(key), cur = lines.map(key)
+        for i in stride(from: cur.count - k, through: 0, by: -1) where Array(cur[i..<(i + k)]) == want { return i + k }
+        return nil
     }
 
     /// Where the new lines start on the window: after the history's end at its top or anywhere on it (sure); else

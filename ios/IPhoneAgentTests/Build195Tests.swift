@@ -2,7 +2,7 @@ import XCTest
 import UIKit
 @testable import IPhoneAgent
 
-/// 195: what Echo 194 got wrong on the iPad, 11-28 00:10–00:45 (N70b, N76, N77, N78, N79), and 195's review (N80–N85).
+/// 195: what Echo 194 got wrong on the iPad, 11-28 00:10–00:45 (N70b, N76, N77, N78, N79), and 195's review (N80–N89).
 @MainActor final class Build195Tests: XCTestCase {
     typealias F = XiaoLanMediaFind
     typealias Line = WatchReport.Line
@@ -118,6 +118,49 @@ import UIKit
         XCTAssertEqual(F.belowRead(one, lines: [weather, two], history: []).map { $0.text }, ["1"])
         XCTAssertEqual(F.belowRead(one, lines: [two, Line(sender: "我", text: "收到", mine: true, y: 0.6)], history: []).map { $0.text }, [],
                        "over a line of mine")
+    }
+
+    /// N88 (测试群 11-28 01:20): 「2」 came onto the window after the read and sat over my answer when read again; with a
+    /// line the history goes on from, my lines are no floor.
+    func testADigitOverMyAnswerButUnderWhereTheHistoryGoesOnIsNew() {
+        let two: [(text: String, y: Double)] = [(text: "2", y: 0.50)]
+        let much = Line(sender: "蓝海乐", text: "多少钱", mine: false, y: 0.2)
+        let hello = Line(sender: "蓝海乐", text: "你好", mine: false, y: 0.40)
+        let answer = Line(sender: "我", text: "您好！我是小蓝助手，请问有什么需要？", mine: true, y: 0.55)
+        XCTAssertEqual(F.belowRead(two, lines: [much, hello, answer], history: [much, hello]).map { $0.text }, ["2"])
+        XCTAssertEqual(F.belowRead(two, lines: [much, hello, answer], history: []).map { $0.text }, [], "nothing to go on from: under mine only")
+    }
+
+    /// N89 (测试群 11-28 01:20): every name row of 主人蓝海乐 read 「主人监海乐」; the lists' names put it right.
+    func testANameReadWrongEveryTimeIsPutRightByTheListsNames() {
+        func l(_ who: String, _ t: String) -> Line { Line(sender: who, text: t, mine: false) }
+        let lines = [l("主人监海乐", "1"), l("主人监海乐", "2"), l("蓝海乐", "你好"), Line(sender: "我", text: "好的", mine: true)]
+        XCTAssertEqual(F.steadySenders(lines, known: [], names: ["主人蓝海乐", "蓝海乐", "测试群"]).map(\.sender),
+                       ["主人蓝海乐", "主人蓝海乐", "蓝海乐", "我"])
+        XCTAssertEqual(F.steadySenders(lines, known: []).map(\.sender)[0], "主人监海乐", "read twice alike, no list name: left")
+    }
+
+    /// N87 (WeCom 11-28 01:09, 01:16): 「引用」 read with its icon as one piece is still the item; words are not.
+    func testAMenuWordReadWithItsIconIsTheItem() throws {
+        let p = try XCTUnwrap(F.menuItem([m("66引用", 0.377, 0.55, 0.06, 0.04)], "引用"))
+        XCTAssertEqual(Double(p.x), 0.377, accuracy: 0.001)
+        XCTAssertNotNil(F.menuItem([m("❝引用", 0.377, 0.55, 0.06, 0.04)], "引用"))
+        XCTAssertNil(F.menuItem([m("我引用了一下", 0.377, 0.55, 0.2, 0.02)], "引用"), "a sentence is no item")
+    }
+
+    /// N88 (user chose 「回覆前再讀一次」; 测试群 11-28 01:20, its frames 17:20:44.8 and 17:20:46.0): read again right after
+    /// its read, what comes after that read's last lines is new — 「2」 that came a second late — and nothing else.
+    func testReadAgainRightAfterTheReadGoesOnFromIt() {
+        func l(_ who: String, _ t: String) -> Line { Line(sender: who, text: t, mine: false) }
+        let first = [l("蓝海乐", "多少钱"), l("蓝海乐", "你好"), l("主人蓝海乐", "1"), l("主人蓝海乐", "2"), l("蓝海乐", "你好"), l("主人蓝海乐", "1")]
+        let again = first + [l("主人蓝海乐", "2")]
+        let pick = XiaoLanBatch.pick(again, history: first, opened: .live, seen: ["1", "2", "你好"], justRead: true)
+        XCTAssertEqual(pick.lines.map(\.text), ["2"], pick.why)
+        XCTAssertEqual(XiaoLanBatch.pick(first, history: first, opened: .live, justRead: true).lines.map(\.text), [], "nothing came")
+        let early = Array(first.prefix(5))
+        XCTAssertEqual(XiaoLanBatch.pick(early + [l("主人蓝海乐", "1"), l("主人蓝海乐", "2")], history: early, opened: .live,
+                                         justRead: true).lines.map(\.text), ["1", "2"], "both late")
+        XCTAssertNil(XiaoLanBatch.readEnd([l("蓝海乐", "别的")], history: first), "not shown: the usual way")
     }
 
     // MARK: N81/N82 a group's lone digit

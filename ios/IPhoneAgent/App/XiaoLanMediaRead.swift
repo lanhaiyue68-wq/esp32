@@ -434,8 +434,18 @@ extension AppModel {
         }
         let text = XiaoLanMediaFind.pageText(shown.rows, from: 0.06, most: 300)
         let saw = await paneMediaLook([shown.crop], ask: "这是聊天里点开放大的一张图片，说明图片的内容。", app: job.app)
-        // one click on its bare part closes it (where it worked here, else where it was measured); else the back
-        if let at = XiaoLanSpots.point(.imageClose, app: job.app, width: width) {
+        // 195 (user 11-28: 「點開圖片的時候再關閉圖片鼠標不需要移動，只需要在原來的位置再點一下就行了」): closed by one
+        // click where the pointer still rests, on the picture it opened; the chat back, done. Else one click on its bare
+        // part (where it worked here, else where it was measured); else the back
+        var closed = false
+        do {
+            try await pointer.clickInPlace()
+            closed = await paneMediaChat(job, after: now()) != nil
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): picture closed by a click in place: \(closed ? "back on the chat" : "not closed")")
+        } catch {
+            DebugLog.write("watch: \(job.app.rawValue): \(job.chat): the click in place failed: \(error.localizedDescription)")
+        }
+        if !closed, let at = XiaoLanSpots.point(.imageClose, app: job.app, width: width) {
             _ = await paneTap(at, in: shown.rect, wide: 0.05, tall: 0.03)
             if await paneMediaChat(job, after: now()) != nil {
                 XiaoLanSpots.learn(.imageClose, app: job.app, width: width, at: at)
@@ -443,7 +453,7 @@ extension AppModel {
                 XiaoLanSpots.missed(.imageClose, app: job.app, width: width)
                 await paneMediaBack(job)
             }
-        } else {
+        } else if !closed {
             await paneMediaBack(job)
         }
         guard saw != nil || !text.isEmpty else { return (nil, "图片打开了，但没看出内容（没设模型或调用失败）") }
@@ -1053,7 +1063,9 @@ extension AppModel {
             return false
         }
         let s = XiaoLanPanes.onScreen(spot, in: look.rect)
-        pointer.aimLoosely(0.04 * Double(look.rect.width), 0.008)
+        // 196 (speed; Echo 195 11-28: a third of the long presses were corrected, ~0.9 s each, the pointer seen 0.010 off
+        // in height on a bubble ~0.04 tall): within 0.012 of its middle is on the bubble (a line's bubble is ≥ 0.035 tall)
+        pointer.aimLoosely(0.04 * Double(look.rect.width), 0.012)
         do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
             DebugLog.write("watch: \(who): the long press to quote failed: \(error.localizedDescription)")
             return false
@@ -1068,6 +1080,12 @@ extension AppModel {
             read = slot
         }
         guard let menu = pressed, let item = read else {
+            // 195 (N87): what the menu's rows were read as, to see why 「引用」 was not among them
+            if let m = pressed, let band = XiaoLanMediaFind.menuBand(m.rows) {
+                let words = m.rows.joined().filter { band.contains(Double($0.box.midY)) }
+                    .map { "「\($0.text)」@" + String(format: "%.3f,%.3f", Double($0.box.midX), Double($0.box.midY)) }
+                DebugLog.write("watch: \(who): the menu read as \(words.joined(separator: " ")) (N87)")
+            }
             if let l = await paneLooks(side: look.side).first(where: { $0.side == look.side }) { await paneMediaCloseMenu(l) }
             DebugLog.write("watch: \(who): no 引用 after the long press; replied without a quote")
             return false
@@ -1080,6 +1098,13 @@ extension AppModel {
         let app = XiaoLanPanes.chatApp(look.rows)
         if !inferred, let taught = XiaoLanSpots.taught(.menuQuote, found: item, from: spot) {
             XiaoLanSpots.learn(.menuQuote, app: app, width: Double(look.rect.width), at: taught)
+        }
+        // 196 (speed; user 11-28 「其他地方能不能提提速」; Echo 195 11-28 01:09: 1.8 s of each quoted reply went on looking
+        // for its quote bar, though a 「引用」 read and clicked counts as quoted either way, and the send looks at the window
+        // again anyway): only a place found by its neighbours waits for the bar
+        if !inferred {
+            DebugLog.write("watch: \(who): 「\(quote.prefix(20))」 quoted")
+            return true
         }
         let bar = await paneLook(look.side, after: now(), tries: 4, until: { XiaoLanMediaFind.quoteBar($0.rows, quote: quote) != nil })
         let shown = bar.map { XiaoLanMediaFind.quoteBar($0.rows, quote: quote) != nil } ?? false
