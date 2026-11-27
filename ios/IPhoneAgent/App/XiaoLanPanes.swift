@@ -621,7 +621,8 @@ import UIKit
 @MainActor enum XiaoLanSelf {
     struct Sent { var app: XiaoLanOrders.App; var chat: String; var text: String; var at: Double }
 
-    static let learnedKey = "xiaolanSelvesV1"
+    // 189 (N22): V2: names learned before 189 dropped (主人蓝海乐, a tester, was learned from a reply quoting their words)
+    static let learnedKey = "xiaolanSelvesV2"
     // 183 (11-26: a line sent 33 min before came back on a scrolled-up screen and was reported): 4 hours, was 10 min.
     static let sentWindow = 4 * 3600.0  // seconds a sent line is looked for on the other side
 
@@ -656,13 +657,15 @@ import UIKit
     }
 
     /// The line read in `chat` on `app` is one 小藍 sent there from the other app within the window.
-    static func sentByOther(_ text: String, chat: String, app: XiaoLanOrders.App, sent: [Sent], now: Double) -> Bool {
+    /// `whole` (189, N22): only the owner's whole words, six characters or more, count (to learn an account by).
+    static func sentByOther(_ text: String, chat: String, app: XiaoLanOrders.App, sent: [Sent], now: Double, whole: Bool = false) -> Bool {
         let t = plain(text)
-        guard t.count >= 2 else { return false }
+        guard t.count >= (whole ? 6 : 2) else { return false }
         return sent.contains { s in
             guard s.app != app, now - s.at <= sentWindow,
                   WatchChatOpen.sameChat(chat, listName: s.chat) || WatchChatOpen.sameChat(s.chat, listName: chat) else { return false }
             let p = plain(s.text)
+            if whole { return p == t }
             return p == t || (min(p.count, t.count) >= 4 && (p.contains(t) || t.contains(p)))
         }
     }

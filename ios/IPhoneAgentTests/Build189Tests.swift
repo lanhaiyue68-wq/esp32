@@ -89,6 +89,17 @@ import UIKit
         XCTAssertEqual(XiaoLanSelf.unseen(Array(lines.prefix(3)), known: known).map(\.text), [])
     }
 
+    /// N22: a reply quoting the tester's words made the tester the owner's other account.
+    func testAnAccountIsLearnedOnlyFromTheOwnersWholeWords() {
+        let sent = [XiaoLanSelf.Sent(app: .wework, chat: "企微测试群", text: "【模拟服务器】收到：我在等你我回我", at: 100)]
+        XCTAssertTrue(XiaoLanSelf.sentByOther("我在等你我回我", chat: "企微测试群", app: .wechat, sent: sent, now: 110))
+        XCTAssertFalse(XiaoLanSelf.sentByOther("我在等你我回我", chat: "企微测试群", app: .wechat, sent: sent, now: 110, whole: true))
+        XCTAssertTrue(XiaoLanSelf.sentByOther("【模拟服务器】收到：我在等你我回我", chat: "企微测试群", app: .wechat, sent: sent, now: 110, whole: true))
+        XCTAssertFalse(XiaoLanSelf.sentByOther("好的", chat: "企微测试群", app: .wechat,
+                                               sent: [XiaoLanSelf.Sent(app: .wework, chat: "企微测试群", text: "好的", at: 100)], now: 110, whole: true))
+        XCTAssertEqual(XiaoLanSelf.learnedKey, "xiaolanSelvesV2", "names learned before 189 are dropped")
+    }
+
     func testRereadLanguagesStartWithSimplifiedChinese() {
         XCTAssertEqual(CandidatePicker.rereadLanguages.first, "zh-Hans")
     }

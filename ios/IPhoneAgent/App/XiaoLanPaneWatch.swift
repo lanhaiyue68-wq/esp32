@@ -63,6 +63,8 @@ struct PaneWatchState {
     var lastShown: (app: XiaoLanOrders.App, chat: String, look: AppModel.PaneLook, at: Double)?
     /// 189 (N20): the title of the chat each side was last read in with no banner over its top.
     var openChat: [Int: String] = [:]
+    /// 189 (N22): the words of lines reported as someone else's (XiaoLanSelf.plain), and when.
+    var reportedLines: [String: Double] = [:]
 }
 
 @MainActor private var paneHeldTurn = 0
@@ -1043,9 +1045,16 @@ extension AppModel {
             guard !line.mine else { return false }
             if XiaoLanMediaFind.isEcho(line.text, of: echoes) { echoed += 1; return false }  // 188
             let owners = names + XiaoLanSelf.learned
-            if XiaoLanSelf.sentByOther(line.text, chat: name, app: app, sent: state.sent, now: t) {
+            // 189 (N22, Echo 189, 11-27 12:56 首爾; user: 「我正常發完過后，他直接就沒回我呀，沒反應了」): the tester's
+            // 「我在等你我回我」 in 企微测试群, answered from WeCom 「【模拟服务器】收到：我在等你我回我」, was taken on WeChat's
+            // side for the owner's own words (a part of what was sent there), 主人蓝海乐 learned as the owner's other account
+            // and every line of theirs left unanswered after. A line reported as someone else's is no echo of the owner;
+            // a name is learned only from the owner's whole words, six characters or more.
+            if XiaoLanSelf.sentByOther(line.text, chat: name, app: app, sent: state.sent, now: t),
+               state.reportedLines[XiaoLanSelf.plain(line.text)] == nil {
                 if !line.sender.isEmpty && !XiaoLanSelf.isOwner(line.sender, names: owners)
-                    && !XiaoLanSelf.noSender(line.sender, chat: name) {
+                    && !XiaoLanSelf.noSender(line.sender, chat: name)
+                    && XiaoLanSelf.sentByOther(line.text, chat: name, app: app, sent: state.sent, now: t, whole: true) {
                     XiaoLanSelf.learn(XiaoLanPanes.listName(line.sender))
                     DebugLog.write("watch: \(app.rawValue): \(name): \(line.sender) said what the owner said on the other app: the owner's other account, learned")
                 }
@@ -1120,6 +1129,9 @@ extension AppModel {
         ReadLog.append(messages)
         watchRead += messages.count
         (app == .wework ? weworkTool : chatTool).report(messages)
+        // 189 (N22): what someone else said, reported, is never the owner's words seen on the other app (a reply quoting it)
+        for m in messages { state.reportedLines[XiaoLanSelf.plain(m.text)] = t }
+        state.reportedLines = state.reportedLines.filter { t - $0.value < XiaoLanSelf.sentWindow }
         DebugLog.write("watch: \(app.rawValue): \(name): \(messages.count) new message(s) reported")
         return messages.count + jobs.count
     }
