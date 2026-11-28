@@ -1490,7 +1490,15 @@ extension AppModel {
         // not clear starts no more until it goes).
         var lastMarkLook = -Double.infinity, markChecks = 0, lastMarkSig: [UInt8]?
         var frontSince: Double?, lastHopTry = -Double.infinity, hopped = false  // 171, 小藍: Echo in front while watching
+        OrderLedger.evidence = { [weak self] in self?.feed.frame }  // 199: the screen kept with an order that did not go
         while watching && !Task.isCancelled {
+            // 199 (DeviceLock): a hand driving the phone through the test channel goes first; the watch parks meanwhile
+            if DeviceLock.heldByHand {
+                DeviceLock.parked = true
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                continue
+            }
+            DeviceLock.parked = false
             if UIApplication.shared.applicationState != .active { frontSince = nil }
             if agent.running || startingAgent || help != nil {
                 baseline = nil  // a check (or a question to the user) is under way

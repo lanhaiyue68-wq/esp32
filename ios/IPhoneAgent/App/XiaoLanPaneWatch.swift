@@ -33,6 +33,7 @@ struct PaneWatchState {
     var keyboardDown: [Int: Double] = [:]
     /// 198 (B12): when 小藍's own keyboard over a side's chat was last put down (once in 5 s).
     var ourKeyboardDown: [Int: Double] = [:]
+    var loggedOut: [String: Double] = [:]  // 199: an app on its QR code page (app → since)
     /// 183: the chats whose history came from an earlier launch (PaneHistory), not read since.
     var loaded: Set<String> = []
     /// 192 (user 11-27: 「過一段時間我會問你，你也能知道」): what was seen in each chat's media ("app|chat"), by its key.
@@ -100,6 +101,7 @@ extension AppModel {
         var waitingLogged = false
         var shareGoneSince: Double?, shareGoneTold = false  // 195 (N79)
         DebugLog.write("watch: 小藍 side by side: WeChat and WeCom both watched, either side, no model")
+        OrderLedger.evidence = { [weak self] in self?.feed.frame }  // 199: the screen kept with an order that did not go
         // 195 (N79b): the watch's own notices (the sharing gone, a reply not sent) need iOS's leave; asked once if never
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -107,6 +109,16 @@ extension AppModel {
             DebugLog.write("watch: notifications \(allowed)" + (allowed == "allowed" ? "" : ": the owner will not see the watch's notices"))
         }
         while watching && !Task.isCancelled {
+            // 199 (the kernel's 「设备占用 排队等候」「令牌持锁」; Echo 198 11-28 17:58: a tap by hand on the list as the watch
+            // opened the same row — its own click then landed in the opened chat, on a picture): while a hand drives the
+            // iPad through the test channel, the watch and its orders wait (parked here, between steps)
+            if DeviceLock.heldByHand {
+                DeviceLock.parked = true
+                watchStatus = "有人在手动操作，守候先让开…"
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                continue
+            }
+            DeviceLock.parked = false
             if let order = paneNextOrder() {  // 188: in the order the messages came, both apps together
                 await paneOrder(order, &state)
                 continue
@@ -177,8 +189,10 @@ extension AppModel {
             paneNoteWeCom(looks, &state)  // 188
             paneNoteMarks(looks, &state)  // 188
             await paneNoAppsCheck(looks, &state)
+            paneNoteLoggedOut(looks, &state)  // 199
             for look in paneByTurn(looks, state) {
                 guard watching, !Task.isCancelled else { break }
+                if let app = state.apps[look.side], state.loggedOut[app.rawValue] != nil { continue }  // 199: nothing clicked on a QR page
                 // 183 (Echo 182 overnight, 11-26: an order waited 13–25 s for the other window's back to its list): an
                 // order first; the rest of the pass waits.
                 if ordersWaiting || repliesComing { break }  // 187: a reply on its way goes before the other window
@@ -416,7 +430,7 @@ extension AppModel {
     }
 
     /// 183: an order is waiting (it goes before the rest of a pass).
-    var ordersWaiting: Bool { !chatTool.pending.isEmpty || !weworkTool.pending.isEmpty }
+    var ordersWaiting: Bool { chatTool.hasDue || weworkTool.hasDue }  // 199: a risky order waiting its turn (RiskPace) holds nothing up
     /// 187: a QA reply on its way to one of the apps.
     var repliesComing: Bool { chatTool.qaWaiting > 0 || weworkTool.qaWaiting > 0 }
 
@@ -484,25 +498,9 @@ extension AppModel {
     static let fieldTall = 0.010
     func paneTap(_ p: CGPoint, in r: CGRect, wide: Double = 0.3, tall: Double = 0.015) async -> Bool {
         let s = XiaoLanPanes.onScreen(p, in: r)
-        if Double(p.y) < XiaoLanPanes.topBand {
-            // 198 (B6, Echo 197 11-28 06:36: WeChat's 「完成(2)」 at 0.053, the pointer seen at (0.306, 0.113) on its way and
-            // lost by the window's top; nothing clicked, the group never made): as the back arrow's way (189 N12), a
-            // first stop seen within 0.15 of the button is the short hop's start — no stop made for it (user 11-26)
-            pointer.seenOff = nil
-            pointer.hopFromSeen = 0.15
-            let direct = await paneSeenTap(s, half: (wide * Double(r.width), tall))
-            pointer.hopFromSeen = nil
-            if direct { return true }
-            guard let seen = pointer.seenOff else { return false }
-            pointer.seenOff = nil
-            do { try await pointer.clickBy(Double(s.x - seen.x), Double(s.y - seen.y)) } catch {
-                DebugLog.write("watch: tap at (\(String(format: "%.3f, %.3f", s.x, s.y))) by a window's top: the hop failed: \(error.localizedDescription)")
-                return false
-            }
-            DebugLog.write(String(format: "watch: tap by a window's top: seen at (%.3f, %.3f) on its way, the short hop to (%.3f, %.3f)",
-                                  Double(seen.x), Double(seen.y), Double(s.x), Double(s.y)))
-            return true
-        }
+        // 199 (user 11-28: 「全程，不論干什么，都要用貝塞爾曲線」「不要改」): 198's B6 — a stop on the way by a window's top,
+        // then a short hop — taken out; a button by the top is clicked as 197 did, one curve to it
+        if Double(p.y) < XiaoLanPanes.topBand { return await paneSeenTap(s, half: (wide * Double(r.width), tall)) }
         pointer.aimLoosely(wide * Double(r.width), tall)
         do { try await pointer.tap(s.x, s.y, aim: false); return true } catch {
             DebugLog.write("watch: tap at (\(String(format: "%.3f, %.3f", s.x, s.y))) failed: \(error.localizedDescription)")
@@ -1518,9 +1516,34 @@ extension AppModel {
         return messages.count + jobs.count
     }
 
+    /// 199: an app's window on its QR code page (logged out): noted once and the owner told; its window read as a chat
+    /// or a list again, it is back.
+    func paneNoteLoggedOut(_ looks: [PaneLook], _ state: inout PaneWatchState) {
+        for l in looks {
+            guard let app = state.apps[l.side] else { continue }
+            let k = app.rawValue, name = app == .wework ? "企业微信" : "微信"
+            if XiaoLanPanes.loggedOut(l.rows) {
+                guard state.loggedOut[k] == nil else { continue }
+                state.loggedOut[k] = now()
+                DebugLog.write("watch: \(k): logged out (its QR code page); nothing done there until it is back")
+                notifier.post(.failed, title: "\(name)在 iPad 上被登出了",
+                              body: "请用手机扫码重新登录\(name)。登录前小蓝不会在\(name)里做任何事，它的指令会直接回报未执行。", run: "xiaolan-watch")
+            } else if state.loggedOut[k] != nil, l.view != .unknown {
+                state.loggedOut[k] = nil
+                DebugLog.write("watch: \(k): logged in again; its orders go on")
+            }
+        }
+    }
+
     /// A server order. Sending a message is done in its app's window; anything else goes the usual way (runOrder).
     private func paneOrder(_ order: ChatToolLink.Command, _ state: inout PaneWatchState) async {
         let link = order.app == .wework ? weworkTool : chatTool
+        // 199 (Echo 198 11-28 18:36: WeChat logged out on the iPad — its QR code page — and the orders after it kept failing
+        // on that page): an app logged out does none of its orders until it is back; the owner was told
+        if state.loggedOut[order.app.rawValue] != nil {
+            link.finish(order, ok: false, reason: "\(order.app == .wework ? "企业微信" : "微信")在 iPad 上已登出（扫码登录页），没有执行：请先重新登录")
+            return
+        }
         if order.type == ChatToolLink.deleteChat {  // 174
             watchStatus = "删除会话 \(order.chat)…"
             let done = await paneDelete(order.chat, app: order.app, &state)
@@ -1816,6 +1839,19 @@ extension AppModel {
                     keys = XiaoLanPanes.keyboardTop(low)
                 }
             }
+            // 198 (Echo 198 11-28 18:19: the ＋ panel left open over 蓝海乐's keyboard place — by a 218 that failed, or by
+            // hand — the field's taps brought no keyboard and every message after failed): the panel closed first by its
+            // ＋ clicked again (tried 11-28 18:33: the panel went, 小藍's keyboard came back; a bare spot of the chat may be
+            // the panel's own tile, an avatar or a picture), the window looked at again
+            if XiaoLanGroups.plusPanel(low), let bar = WatchOCR.Pixels(look.crop).flatMap({ XiaoLanPanes.inputField($0) }) {
+                DebugLog.write("watch: \(app.rawValue): the ＋ panel open over \(chat); its ＋ clicked again to close it")
+                _ = await paneTap(CGPoint(x: app == .wework ? 0.935 : 0.925, y: bar.y), in: look.rect, wide: 0.012, tall: 0.008)
+                await feed.settled(quiet: 0.3, least: 0.3, most: 1.5)
+                if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                    (look, low) = (again, again.rows)
+                    keys = XiaoLanPanes.keyboardTop(low)
+                }
+            }
             guard let px = WatchOCR.Pixels(look.crop), var field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
                 return (false, "\(appName)里没找到输入框", nil)
             }
@@ -1903,6 +1939,12 @@ extension AppModel {
         }
         // 185 (B7/B8/B11): true only when the field held exactly this text and emptied after the return (小藍's own
         // check); then 小藍 puts itself down (B10). Not sent: the field is emptied here, no draft is left (B21).
+        // 199 (the kernel's 「发送前核对 · 渠道与目标」): the window's latest look titled another chat — nothing sent; no new
+        // look taken for it (a reply's speed), and a title not read holds nothing up
+        if case .chat(let shown) = look.view, !WatchChatOpen.sameChat(WatchOCR.titled(shown).name, listName: chat) {
+            DebugLog.write("watch: \(app.rawValue): about to send to \(chat), but the window shows 「\(shown)」; not sent")
+            return (false, "发送前核对：窗口是「\(shown)」不是「\(chat)」，没有发", nil)
+        }
         state.typed += 1  // 189 (N16): from here a failed order may have typed something; it is not sent again
         let returned = await keyboardBridge.type(text, enter: true, within: 5, dismiss: true)
         guard returned else {

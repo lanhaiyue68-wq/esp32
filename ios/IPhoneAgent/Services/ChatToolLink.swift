@@ -63,6 +63,8 @@ import Foundation
     private struct Tally { var left: Int; var ok: [String] = []; var failed: [String] = []; var reasons: [String] = []
                            var messageId: String; var type: Int; var raw: String; var started: Date }
     private var tallies: [String: Tally] = [:]
+    /// 199 (the kernel's 「同一动作号 防重复提交」): the result sent for each order (messageId), sent again if it is heard again.
+    private var resultsSent: [String: String] = [:]
 
     init(app: XiaoLanOrders.App = .wechat) { self.app = app }
 
@@ -107,8 +109,12 @@ import Foundation
 
     /// The next message the server asked for, or nil. Hand it back with `finish` when it is sent or given up.
     func nextCommand() -> Command? {
-        guard !pending.isEmpty else { return nil }
-        return pending.removeFirst()  // 189: its turn kept until it is finished (retry)
+        // 199 (RiskPace): a risky order not due yet stays queued; the ones after it go on
+        let t = Date().timeIntervalSince1970
+        guard let i = pending.firstIndex(where: { RiskPace.due($0, at: t) }) else { return nil }
+        let c = pending.remove(at: i)  // 189: its turn kept until it is finished (retry)
+        RiskPace.start(c, at: t)
+        return c
     }
 
     /// 189 (N16, Echo 188, 11-27 11:36 首爾: 测试群's QA reply failed before a word was typed — the failure kept only on
@@ -133,13 +139,24 @@ import Foundation
     private var askedLately: [(said: String, at: Date)] = []  // 189 (N19)
     private var asking: Set<Int> = []       // turns whose QA reply is still coming
     /// The earliest turn among the orders waiting here.
-    var firstTurn: Int? { pending.compactMap { turns[$0.key] }.min() }
+    /// 199: an order here that may go now (a risky one waiting its turn does not hold the watch's reading up).
+    var hasDue: Bool {
+        let t = Date().timeIntervalSince1970
+        return pending.contains { RiskPace.due($0, at: t) }
+    }
+    var firstTurn: Int? {
+        let t = Date().timeIntervalSince1970
+        return pending.filter { RiskPace.due($0, at: t) }.compactMap { turns[$0.key] }.min()  // 199: a risky one waits its turn
+    }
     /// The earliest turn whose QA reply is still coming (15 s at most).
     var askingTurn: Int? { asking.min() }
     /// The order of that turn, taken off the queue.
     func take(turn: Int) -> Command? {
-        guard let i = pending.firstIndex(where: { turns[$0.key] == turn }) else { return nil }
-        return pending.remove(at: i)  // 189: its turn kept until it is finished (retry)
+        let t = Date().timeIntervalSince1970
+        guard let i = pending.firstIndex(where: { turns[$0.key] == turn && RiskPace.due($0, at: t) }) else { return nil }
+        let c = pending.remove(at: i)  // 189: its turn kept until it is finished (retry)
+        RiskPace.start(c, at: t)  // 199
+        return c
     }
 
     /// 198: a reported line's own words, without the note in brackets after it (「\n（引用的文件：…）」, 「\n（小蓝没能打开…）」);
@@ -421,9 +438,37 @@ import Foundation
                                          ok: dropped.map(\.chat), failed: [], started: now, now: now) { out.append(r) }
             DebugLog.write("chattool: \(type): cleared \(dropped.count) queued message(s)")
         }
+        let going = Set(tallies.keys)  // 199: orders already queued or under way before this packet
         for order in got.orders {
             switch order {
-            case .send(let c): queue(c, now: now)
+            case .send(let c):
+                // 199 (the kernel's 「同一动作号 防重复提交」): an order heard again — its result went already, or it is
+                // still under way — is not done again; a finished one gets its result once more
+                if let again = resultsSent[c.messageId] {
+                    if !out.contains(again) { out.append(again) }
+                    DebugLog.write("chattool: order \(c.messageId) heard again; its result sent again, nothing done twice")
+                    break
+                }
+                if going.contains(c.key) {
+                    DebugLog.write("chattool: order \(c.messageId) heard again while under way; not queued twice")
+                    break
+                }
+                // 199: the same risky order (another number) done, half done or not known in the last 30 minutes:
+                // answered at once, not done again blind (a second group, a second forward)
+                if let before = OrderLedger.alike(c, now: now.timeIntervalSince1970) {
+                    let label = XiaoLanOrders.label(c.type, app) ?? "\(c.type)"
+                    let mins = max(1, Int((now.timeIntervalSince1970 - before.received) / 60))
+                    let ok = before.outcome == .done
+                    var how = "结果不明"
+                    if before.outcome == nil { how = "还在做" } else if before.outcome == .partial { how = "只做了一部分" }
+                    let notAgain = "同样的「\(label)」\(mins) 分钟前\(how)，为免重复没有再做：请先人工确认"
+                    let why = ok ? "同样的「\(label)」\(mins) 分钟前已经做过，没有再做" : OrderOutcome.unknownMark + notAgain
+                    queue(c, now: now)
+                    pending.removeAll { $0.key == c.key && $0.chat == c.chat }
+                    if let r = finish(c, ok: ok, reason: why, now: now, sending: false) { out.append(r) }
+                    break
+                }
+                queue(c, now: now)
             case .stop(let raw): clear(Self.stopAndGoHome, raw)
             case .clearQueue(let raw): clear(Self.queueClear, raw)
             case .test(let raw):
@@ -454,6 +499,8 @@ import Foundation
     /// returned; until then nil.
     @discardableResult func finish(_ c: Command, ok: Bool, reason: String = "", now: Date = Date(), sending: Bool = true) -> String? {
         turns[c.key] = nil  // 189: kept from take/nextCommand until here (retry)
+        // 199: how this chat's part ended, in the order's line (a picture of the screen when it did not go)
+        OrderLedger.finished(c, outcome: OrderOutcome.of(ok: ok, reason: reason), reason: reason, now: now.timeIntervalSince1970)
         guard var t = tallies[c.key] else { return nil }
         if ok { t.ok.append(c.chat) } else { t.failed.append(c.chat) }
         // 184 (Echo 183, 11-26: a line with @ went out and the answer said nothing of the @ left out; only a failure's
@@ -470,6 +517,10 @@ import Foundation
         // 189 (N16): a failure is in the debug log too (a QA reply's was only on 小藍's page)
         if !t.failed.isEmpty { DebugLog.write("chattool: \(label) to \(t.failed.joined(separator: "、")) failed: \(t.reasons.joined(separator: "；"))") }
         if Self.isLocal(t.messageId) { return nil }  // a tool-box order or a QA reply: its result stays on the iPad
+        if let packet {  // 199: an order heard again gets this again
+            resultsSent[t.messageId] = packet
+            if resultsSent.count > 300 { resultsSent.removeAll() }
+        }
         if sending, let packet { send(packet) }
         return packet
     }
@@ -490,6 +541,7 @@ import Foundation
         if tallies[c.key] == nil { tallies[c.key] = Tally(left: 0, messageId: c.messageId, type: c.type, raw: c.raw, started: now) }
         tallies[c.key]?.left += 1
         pending.append(c)
+        OrderLedger.received(c, label: XiaoLanOrders.label(c.type, app) ?? "\(c.type)", now: now.timeIntervalSince1970)  // 199
     }
 
     /// An order typed in 小藍's tool box: checked and queued like a server's (watch does it), its result and any data

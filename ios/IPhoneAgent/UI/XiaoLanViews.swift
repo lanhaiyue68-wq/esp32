@@ -148,6 +148,14 @@ struct XiaoLanHistory: View {
 
     var body: some View {
         List {
+            // 199 (the kernel's 三本账 / 巡检看板): every order's line, both apps, newest first; redrawn as the records change
+            Section {
+                lines(Array(OrderLedger.lines(50).reversed()))
+            } header: {
+                Text("發送賬（✓ 成功 · ✗ 失敗 · ◐ 部分完成 · ? 結果不明）")
+            } footer: {
+                Text("失敗或不明的指令會存一張當下畫面，在「檔案 › 我的 iPad › Echo › ledger」，檔名寫在那一行最後。同樣的建群、拉人、轉發 30 分鐘內不會重做；這類動作之間會隨機隔 45–120 秒。")
+            }
             Section("個人微信") { lines(chat.history) }
             Section("企業微信") { lines(wework.history) }
         }

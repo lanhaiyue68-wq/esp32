@@ -158,10 +158,18 @@ extension AppModel {
             return .json(["released": .bool(true)])
 
         case ("POST", "/board"):
+            DeviceLock.hand()  // 199: a hand on the board: the watch parks between its steps first
+            for _ in 0..<40 where watching && !DeviceLock.parked { try? await Task.sleep(nanoseconds: 200_000_000) }
             do { return .json(["reply": .str(try await board.commands.send(text("cmd")))]) }
             catch { return .json(["error": .str(error.localizedDescription)], status: 500) }
 
+        case ("GET", "/ledger"):
+            // 199: the 发送账 (OrderLedger), newest first
+            return .json(["lines": .arr(OrderLedger.lines(200).map { JValue.str($0) })])
+
         case ("POST", "/gesture"):
+            DeviceLock.hand()  // 199 (Echo 198 11-28 17:58: a tap by hand raced the watch's own): the watch parks first
+            for _ in 0..<40 where watching && !DeviceLock.parked { try? await Task.sleep(nanoseconds: 200_000_000) }
             let began = now()
             do {
                 var reply: JObject = [:]

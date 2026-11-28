@@ -89,6 +89,16 @@ enum PadCurve {
         }
         return "stroke " + pieces.joined(separator: " ")
     }
+    /// 199 (user 11-28, Echo 198: 「全程，不論干什么，都要用貝塞爾曲線」; the pointer's search nudged and stepped by straight
+    /// `move`s while its place was not known — ±141 sideways, 1434 down — four times in an hour): a move from a place not
+    /// known as a curve all the same, drawn as if from the middle of a screen big enough to hold it (its bow is the
+    /// move's own; only its staying on the screen needed the place).
+    static func strokeAnywhere(by d: (x: Int, y: Int), span: (w: Int, h: Int), scale: Double = 1,
+                               random: (ClosedRange<Double>) -> Double = { Double.random(in: $0) }) -> String? {
+        let big = (w: max(span.w, 2 * abs(d.x) + 2), h: max(span.h, 2 * abs(d.y) + 2))
+        return stroke(from: (big.w / 2, big.h / 2), by: d, span: big, scale: scale, random: random)
+    }
+
     /// 187: of the bow's offset (control points off the line), the share a curved move lands off toward it.
     /// 188: 0.10 measured (was 0.22, which pushed every curve ~as far the other way).
     static let acrossKept = 0.10

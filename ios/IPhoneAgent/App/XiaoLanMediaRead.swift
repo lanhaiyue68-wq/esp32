@@ -1134,12 +1134,23 @@ extension AppModel {
             DebugLog.write("watch: \(who): 小藍's keyboard up before the long press to quote; put down and the line looked for again (N72)")
             _ = await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true)
             _ = await smallKeyboard(up: false, within: 1.0)
+            // 198 (Echo 198 11-28 17:57: looked at again at once, the chat still sliding down after the keyboard: 「not
+            // on the window; replied without a quote」, found when still a minute later): looked at once it stops
+            await feed.settled(quiet: 0.4, least: 0.3, most: 2.0)
             if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                 look = again
                 media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
             }
         }
         var found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)
+        if found == nil {  // 198: a chat just opened may still be moving: once more when it stops
+            await feed.settled(quiet: 0.4, least: 0.3, most: 2.0)
+            if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
+                look = again
+                media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
+                found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)
+            }
+        }
         // 195 (N77): digits OCR gives no words now (a lone 「3」) found by others' bubbles read as digits
         if found == nil, let px = WatchOCR.Pixels(look.crop), let d = XiaoLanMediaFind.digitSpot(px, rows: look.rows, quote: quote) {
             DebugLog.write("watch: \(who): 「\(quote)」 in no words read; its bubble found by its digits' pixels (N77)")

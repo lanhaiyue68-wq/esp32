@@ -594,6 +594,93 @@ import UIKit
         XCTAssertEqual(cards.lines.map(\.text), ["[链接] Gemini4的GoogleSEO水平已经无人能敌"])
         XCTAssertEqual(cards.used.count, 6, "the card's words only, not the message's")
     }
+
+    /// Echo 198 11-28 17:56, the reads off the iPad (screen x / 0.49 for the left window): my wide green bubbles with
+    /// their words at the left, 「198」 read 「138」 and split off 「Echo」 — found by a bubble's words read together, the
+    /// newest, the exact one first.
+    func testMineLineWideBubbles() throws {
+        let size = CGSize(width: 400, height: 800)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor(red: 237 / 255, green: 237 / 255, blue: 237 / 255, alpha: 1).setFill(); ctx.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 149 / 255, green: 236 / 255, blue: 105 / 255, alpha: 1).setFill()
+            for (top, bottom) in [(0.505, 0.555), (0.588, 0.638), (0.668, 0.718)] {
+                ctx.fill(CGRect(x: 0.15 * 400, y: top * 800, width: 0.68 * 400, height: (bottom - top) * 800))
+            }
+        }
+        let px = try XCTUnwrap(WatchOCR.Pixels(try XCTUnwrap(image.pngData())))
+        func s(_ t: String, _ cx: Double, _ cy: Double, _ w: Double) -> [CandidatePicker.Piece] { p(t, cx / 0.49, cy, w: w / 0.49, h: 0.018) }
+        let rows = [s("Echo198测试B1：这句等一", 0.242, 0.519, 0.296), s("下会撤回", 0.143, 0.542, 0.094),
+                    s("Echo", 0.121, 0.601, 0.054) + s("138测试C1：这句等一", 0.268, 0.600, 0.244), s("下会撤回", 0.141, 0.625, 0.090),
+                    s("Echo198测试C2：这句要转", 0.240, 0.681, 0.300), s("发到测试群", 0.150, 0.705, 0.121)]
+        XCTAssertEqual(XiaoLanGroups.mineLine(rows, "Echo198测试C1：这句等一下会撤回", px).map { Double($0.y) } ?? 0, 0.601, accuracy: 0.002)
+        XCTAssertEqual(XiaoLanGroups.mineLine(rows, "Echo198测试C2：这句要转发到测试群", px).map { Double($0.y) } ?? 0, 0.681, accuracy: 0.002)
+        XCTAssertEqual(XiaoLanGroups.mineLine(rows, "Echo198测试B1：这句等一下会撤回", px).map { Double($0.y) } ?? 0, 0.519, accuracy: 0.002,
+                       "the exact one, not the newer one a letter off")
+        XCTAssertNil(XiaoLanGroups.mineLine(rows, "Echo198测试C3：引用回复上面那句", px))
+        XCTAssertTrue(XiaoLanGroups.near("Echo138测试C1这句等一下会撤回", "Echo198测试C1这句等一下会撤回"))
+        XCTAssertFalse(XiaoLanGroups.near("好的", "好吗"), "too short to take a slip")
+        XCTAssertFalse(XiaoLanGroups.near("Echo198测试C2这句要转发到测试群", "Echo198测试C1这句等一下会撤回"))
+    }
+
+    /// Echo 198 11-28 18:11: words on my own photo in the chat (「2」 「9 W e t」 off a keyboard) are no bubble's; words in
+    /// someone's white bubble are; a drawing with no chat grey keeps them.
+    func testWordsOnAPictureAreNoLine() throws {
+        let size = CGSize(width: 400, height: 800)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor(red: 237 / 255, green: 237 / 255, blue: 237 / 255, alpha: 1).setFill(); ctx.fill(CGRect(origin: .zero, size: size))
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 68.4, y: 160, width: 170, height: 80))        // their bubble, 0.20–0.30 down
+            for k in 0..<12 {                                                                       // my photo of keys, 0.45–0.80 across
+                (k % 2 == 0 ? UIColor(white: 0.35, alpha: 1) : UIColor(white: 0.9, alpha: 1)).setFill()
+                ctx.fill(CGRect(x: 180 + CGFloat(k) * 11.7, y: 400, width: 11.7, height: 120))
+            }
+        }
+        let px = try XCTUnwrap(WatchOCR.Pixels(try XCTUnwrap(image.pngData())))
+        XCTAssertTrue(WatchOCR.inBubble(CGRect(x: 0.21, y: 0.24, width: 0.2, height: 0.02), px), "their second line")
+        XCTAssertFalse(WatchOCR.inBubble(CGRect(x: 0.62, y: 0.58, width: 0.05, height: 0.02), px), "a word on my photo")
+        let white = UIGraphicsImageRenderer(size: size, format: format).image { ctx in UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: size)) }
+        XCTAssertTrue(WatchOCR.inBubble(CGRect(x: 0.4, y: 0.5, width: 0.1, height: 0.02), try XCTUnwrap(WatchOCR.Pixels(try XCTUnwrap(white.pngData())))))
+    }
+
+    /// 199 (user 11-28: 「全程，不論干什么，都要用貝塞爾曲線」): the pointer's search, its place not known, moved ±141 across and
+    /// 1434 down as straight lines; every such move is a bowed stroke now, of about the length asked.
+    func testMovesFromAnUnknownPlaceAreCurves() throws {
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }
+        func deltas(_ s: String) -> [(Int, Int)] {
+            let v = s.split(separator: " ").dropFirst().compactMap { Int($0) }
+            return stride(from: 0, to: v.count - 1, by: 2).map { (v[$0], v[$0 + 1]) }
+        }
+        for d in [(141, 0), (-141, 0), (0, 1434), (60, 0)] {
+            let s = try XCTUnwrap(PadCurve.strokeAnywhere(by: (d.0, d.1), span: (5854, 7626), random: mid), "\(d)")
+            XCTAssertTrue(s.hasPrefix("stroke "))
+            let steps = deltas(s)
+            XCTAssertGreaterThanOrEqual(steps.count, 3, "\(d): a stroke of pieces")
+            let across = d.1 == 0 ? steps.map { $0.1 } : steps.map { $0.0 }
+            XCTAssertTrue(across.contains { $0 != 0 }, "\(d): bowed, not a straight line")
+            let along = d.1 == 0 ? steps.map { $0.0 }.reduce(0, +) : steps.map { $0.1 }.reduce(0, +)
+            let want = d.1 == 0 ? d.0 : d.1
+            XCTAssertEqual(Double(along), Double(want), accuracy: Double(abs(want)) * 0.15 + 2, "\(d): about as far as asked")
+        }
+        XCTAssertEqual(CommandChannel.padAnywhere("move 0 610")?.hasPrefix("stroke "), true)
+        XCTAssertNil(CommandChannel.padAnywhere("click"))
+        XCTAssertNil(PadCurve.strokeAnywhere(by: (0, 0), span: (5854, 7626)), "no move, nothing")
+    }
+
+    /// Echo 198 11-28 18:05: WeChat's menu with 「转发」 not read — its place between 复制 and 收藏; one character slipped.
+    func testMenuItemLoose() throws {
+        let menu = [p("复制", 0.133, 0.404, w: 0.08), p("收藏", 0.500, 0.404, w: 0.08), p("删除", 0.682, 0.404, w: 0.08),
+                    p("多选", 0.867, 0.404, w: 0.08), p("引用", 0.133, 0.478, w: 0.08), p("提醒", 0.314, 0.478, w: 0.08)]
+        let band = try XCTUnwrap(XiaoLanMediaFind.menuBand(menu))
+        let slot = try XCTUnwrap(XiaoLanMediaFind.menuItemLoose(menu, "转发", in: band))
+        XCTAssertEqual(Double(slot.x), 0.3165, accuracy: 0.002)
+        XCTAssertEqual(Double(slot.y), 0.404, accuracy: 0.002)
+        let slipped = try XCTUnwrap(XiaoLanMediaFind.menuItemLoose(menu + [p("转友", 0.32, 0.404, w: 0.08)], "转发", in: band))
+        XCTAssertEqual(Double(slipped.x), 0.32, accuracy: 0.002)
+        XCTAssertEqual(XiaoLanMediaFind.menuItemLoose(menu + [p("撤四", 0.5, 0.478, w: 0.08)], "撤回", in: band).map { Double($0.x) } ?? 0, 0.5,
+                       accuracy: 0.002)
+        XCTAssertNil(XiaoLanMediaFind.menuItemLoose(menu, "撤回", in: band), "never guessed where it is not")
+    }
 }
 
 private func assertClose(_ a: [Double], _ b: [Double], accuracy: Double, file: StaticString = #filePath, line: UInt = #line) {

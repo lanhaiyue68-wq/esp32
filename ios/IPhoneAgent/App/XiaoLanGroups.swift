@@ -48,6 +48,12 @@ import UIKit
         ["照片", "拍摄", "位置", "文件", "个人名片", "收藏"].filter { find(rows, [$0], exact: true, band: 0.5...0.97) != nil }.count >= 2
     }
 
+    /// 198 (Echo 198 11-28 18:13, user: 「你點的是『照片』那兩個字，不是那個圖標，應該點上面的圖標才對」: the label opens
+    /// nothing, and 红包's tile is right under it): a ＋ panel item's tile over its label, its middle 0.054 of the window
+    /// higher (WeChat 11-28 h03: label 0.749, tile 0.672–0.729 of the screen, the window 0.873 tall; clicked there, the
+    /// album opened).
+    static func panelTile(_ label: CGPoint) -> CGPoint { CGPoint(x: label.x, y: label.y - 0.054) }
+
     /// 198 (218): iOS's file picker (its tabs 最近项目 and 浏览 at its foot on every page).
     static func filePicker(_ rows: [[Piece]]) -> Bool {
         find(rows, ["最近项目", "最近項目"], exact: true) != nil && find(rows, ["浏览", "瀏覽"], exact: true) != nil
@@ -126,17 +132,46 @@ import UIKit
         return find(rows, ["发送", "發送"], exact: true, band: 0.25...0.95)
     }
 
-    /// 198 (226): my own line reading `want` (plain words), the lowest of them: a piece on the right half whose words
-    /// start it or start with it (a long line wraps over pieces), above any keyboard.
-    static func mineLine(_ rows: [[Piece]], _ want: String) -> CGPoint? {
-        let floor = keyboardFloor(rows)
-        return rows.joined().filter { p in
-            let t = XiaoLanSelf.plain(p.text)
-            guard p.box.midX > 0.5, Double(p.box.midY) > 0.1, Double(p.box.maxY) < floor, t.count >= 2 else { return false }
-            return want.hasPrefix(t) || t.hasPrefix(want) || (want.count >= 6 && t.contains(want.prefix(6)))
+    /// 198 (226): my own message reading `want`, the newest, above any keyboard.
+    /// 198 (Echo 198 11-28 17:56: my 「Echo198测试C1：这句等一下会撤回」 in a wide green bubble, its words left in it —
+    /// every line's middle in the window's left half — read 「Echo」「138测试C1：这句等一」「下会撤回」: never found, 226 and
+    /// 205 failed): my lines told by the bubble they sit on (`px`: WeChat's green, WeCom's light blue; none: a line ending
+    /// right of 0.6), one bubble's lines read together, taken with OCR's slips (near); its first line.
+    static func mineLine(_ rows: [[Piece]], _ want: String, _ px: WatchOCR.Pixels? = nil) -> CGPoint? {
+        let floor = keyboardFloor(rows), target = XiaoLanSelf.plain(want)
+        guard !target.isEmpty else { return nil }
+        func mine(_ p: Piece) -> Bool { px.map { WatchOCR.kind(p.box, $0) == .mine } ?? (Double(p.box.maxX) > 0.6) }
+        let lines = rows.joined().filter { p in Double(p.box.midY) > 0.1 && Double(p.box.maxY) < floor && mine(p) }
+            .sorted { abs(Double($0.box.midY - $1.box.midY)) < 0.008 ? $0.box.minX < $1.box.minX : $0.box.midY < $1.box.midY }
+        var bubbles: [[Piece]] = []
+        for p in lines {
+            if let last = bubbles.last?.last, Double(p.box.minY) - Double(last.box.maxY) < 0.02 {
+                bubbles[bubbles.count - 1].append(p)
+            } else {
+                bubbles.append([p])
+            }
         }
-        .max { $0.box.midY < $1.box.midY }
-        .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+        func read(_ b: [Piece]) -> String { XiaoLanSelf.plain(b.map(\.text).joined()) }
+        // the exact one first: a newer one a slip away is another message
+        guard let b = bubbles.last(where: { read($0) == target }) ?? bubbles.last(where: { near(read($0), target) }) else { return nil }
+        return CGPoint(x: b[0].box.midX, y: b[0].box.midY)
+    }
+
+    /// 198: two plain texts the same but for OCR's slips: equal, or six characters or more with an edit in eight (one at
+    /// least) between them (「Echo138测试C1…」 for 「Echo198测试C1…」).
+    static func near(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        let x = Array(a), y = Array(b), most = max(1, y.count / 8)
+        guard min(x.count, y.count) >= 6, abs(x.count - y.count) <= most else { return false }
+        var prev = Array(0...y.count)
+        for i in 1...x.count {
+            var cur = [i] + Array(repeating: 0, count: y.count)
+            for j in 1...y.count {
+                cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1))
+            }
+            prev = cur
+        }
+        return prev[y.count] <= most
     }
 
     /// 198 (226): the grey 「你撤回了一条消息」 lines on the window (WeChat's, WeCom's, Traditional too), counted.
@@ -806,7 +841,7 @@ extension AppModel {
         // at once, and the order fails for the server to send again
         func undone(_ why: String) async -> (ok: Bool, why: String) {
             let undo = await groupUndoCreate(app, chat, created: created, &state)
-            return (false, "群建好了，但\(why)；" + (undo ? "已把这个新群解散并从列表删掉，请重发" : "这个新群没能解散，请手动处理（列表上显示成员名）"))
+            return (false, (undo ? "" : OrderOutcome.partialMark) + "群建好了，但\(why)；" + (undo ? "已把这个新群解散并从列表删掉，请重发" : "这个新群没能解散，请手动处理（列表上显示成员名）"))
         }
         guard var info = await groupInfo(chat, app) else { return await undone("群信息页没有打开") }
         if !name.isEmpty {
@@ -817,7 +852,7 @@ extension AppModel {
         }
         if !notice.isEmpty {
             let r = await groupAnnounce(info, app, notice)
-            guard let l = r.look else { return (false, "群建好了，但" + r.why) }
+            guard let l = r.look else { return (false, OrderOutcome.partialMark + "群建好了，但" + r.why) }
             chat = l
         }
         return (true, "")
@@ -829,7 +864,7 @@ extension AppModel {
         guard let chat = opened.look else { return (false, opened.why) }
         guard var info = await groupInfo(chat, app) else { return (false, "群信息页没有打开") }
         var done: [String] = []
-        func failed(_ why: String) -> (ok: Bool, why: String) { (false, (done.isEmpty ? "" : "已做完：\(done.joined(separator: "、"))；") + why) }
+        func failed(_ why: String) -> (ok: Bool, why: String) { (false, (done.isEmpty ? "" : OrderOutcome.partialMark + "已做完：\(done.joined(separator: "、"))；") + why) }
         if !f.s("newGroupName").isEmpty {
             let r = await groupRename(info, app, to: f.s("newGroupName"))
             guard let l = r.look else { return failed(r.why) }
@@ -899,7 +934,7 @@ extension AppModel {
         DebugLog.write("watch: group: dissolving 「\(name)」 (\(app.rawValue))")
         guard await groupStep(ask, go, "dissolved", wide: 0.15, until: { l in
             l.view == .list || XiaoLanGroups.find(l.rows, ["已解散", "已经解散", "已經解散"]) != nil
-        }) != nil else { return (false, "点了「解散」，但没有看到已解散") }
+        }) != nil else { return (false, OrderOutcome.unknownMark + "点了「解散」，但没有看到已解散") }
         // 198 (user 11-28: 「你解散的群要給他從聊天列表中刪除掉」): its chat deleted from the list too, as order 290 does
         // (back to the list, the row swiped, its red 删除, confirmed); dissolved all the same when that does not go
         let gone = await paneDelete(listName, app: app, &state)
@@ -924,31 +959,25 @@ extension AppModel {
             _ = await smallKeyboard(up: false, within: 1.0)
             chat = await groupSettled(chat)
         }
+        var found = XiaoLanGroups.mineLine(chat.rows, want, WatchOCR.Pixels(chat.crop))
+        if found == nil {  // 198: the chat may still be moving (just opened, a keyboard going): once more when it stops
+            chat = await groupSettled(chat)
+            found = XiaoLanGroups.mineLine(chat.rows, want, WatchOCR.Pixels(chat.crop))
+        }
         let before = XiaoLanGroups.recalledCount(chat.rows)  // older 「你撤回了」 lines may show already
-        guard let line = XiaoLanGroups.mineLine(chat.rows, want) else {
+        guard let line = found else {
             return (false, "聊天里没看到我发的这条（「\(order.quote.prefix(20))」），没有撤回")
         }
-        let s = XiaoLanPanes.onScreen(line, in: chat.rect)
-        pointer.aimLoosely(0.04 * Double(chat.rect.width), 0.012)
-        do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
-            return (false, "长按没有成功：\(error.localizedDescription)")
-        }
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        guard let menu = await paneLooks(after: now(), side: chat.side).first(where: { $0.side == chat.side }) else {
-            return (false, "长按后没看到窗口")
-        }
-        let item = XiaoLanMediaFind.menuBand(menu.rows).flatMap { XiaoLanMediaFind.menuItem(menu.rows, "撤回", in: $0) }
-        guard let item else {
-            // the menu closed by a click on the chat's title bar (nothing there opens)
-            _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)
-            return (false, "长按菜单里没有「撤回」（超过撤回时间，或不是我发的），没有撤回")
+        let pressed = await groupMenuItem(chat, line, "撤回")
+        guard let menu = pressed.menu, let item = pressed.item else {
+            return (false, pressed.why.isEmpty ? "长按菜单里没有「撤回」（超过撤回时间，或不是我发的），没有撤回" : pressed.why)
         }
         guard let after = await groupStep(menu, item, "撤回", wide: 0.04, tall: 0.01, until: { l in
             XiaoLanGroups.recalledCount(l.rows) > before || XiaoLanGroups.recallConfirm(l.rows) != nil
-        }) else { return (false, "点了「撤回」，没看到已撤回") }
+        }) else { return (false, OrderOutcome.unknownMark + "点了「撤回」，没看到已撤回") }
         if let yes = XiaoLanGroups.recallConfirm(after.rows), XiaoLanGroups.recalledCount(after.rows) <= before {
             guard await groupStep(after, yes, "撤回 confirmed", wide: 0.06, tall: 0.012, until: { XiaoLanGroups.recalledCount($0.rows) > before }) != nil else {
-                return (false, "确认撤回后没看到「你撤回了一条消息」")
+                return (false, OrderOutcome.unknownMark + "确认撤回后没看到「你撤回了一条消息」")
             }
         }
         DebugLog.write("watch: \(app.rawValue): \(order.chat): 「\(order.quote.prefix(20))」 recalled")
@@ -978,22 +1007,20 @@ extension AppModel {
             _ = await smallKeyboard(up: false, within: 1.0)
             chat = await groupSettled(chat)
         }
-        guard let line = XiaoLanMediaFind.quoteSpot(chat.rows, quote: order.quote)
-                ?? XiaoLanGroups.mineLine(chat.rows, XiaoLanSelf.plain(order.quote)) else {
+        func spot(_ l: PaneLook) -> CGPoint? {
+            XiaoLanMediaFind.quoteSpot(l.rows, quote: order.quote) ?? XiaoLanGroups.mineLine(l.rows, order.quote, WatchOCR.Pixels(l.crop))
+        }
+        var found = spot(chat)
+        if found == nil {  // 198: the chat may still be moving (just opened, a keyboard going): once more when it stops
+            chat = await groupSettled(chat)
+            found = spot(chat)
+        }
+        guard let line = found else {
             return (false, "聊天里没看到要转发的这条（「\(order.quote.prefix(20))」）")
         }
-        let s = XiaoLanPanes.onScreen(line, in: chat.rect)
-        pointer.aimLoosely(0.04 * Double(chat.rect.width), 0.012)
-        do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
-            return (false, "长按没有成功：\(error.localizedDescription)")
-        }
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        guard let menu = await paneLooks(after: now(), side: chat.side).first(where: { $0.side == chat.side }) else {
-            return (false, "长按后没看到窗口")
-        }
-        guard let item = XiaoLanMediaFind.menuBand(menu.rows).flatMap({ XiaoLanMediaFind.menuItem(menu.rows, "转发", in: $0) }) else {
-            _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)
-            return (false, "长按菜单里没有「转发」")
+        let pressed = await groupMenuItem(chat, line, "转发")
+        guard let menu = pressed.menu, let item = pressed.item else {
+            return (false, pressed.why.isEmpty ? "长按菜单里没有「转发」" : pressed.why)
         }
         guard var page = await groupStep(menu, item, "转发", wide: 0.04, tall: 0.01, until: { XiaoLanGroups.forwardPage($0.rows) }) else {
             return (false, "点了「转发」，没打开选择聊天")
@@ -1035,11 +1062,44 @@ extension AppModel {
             }
         }
         guard let send = XiaoLanGroups.sendSheet(ask.rows) else { return await forwardClose(ask, "「发送给」确认里没有「发送」") }
+        // 199 (the kernel's 「发送前核对 · 渠道与目标」; WeCom's list holds a 150-member real group): one target, its name on
+        // the 「发送给」 sheet before 发送; not there, cancelled
+        if !many, let only = targets.first, !ask.rows.joined().contains(where: { p in
+            XiaoLanGroups.forwardName(p.text) == XiaoLanGroups.bare(only) || XiaoLanGroups.bare(p.text).contains(XiaoLanGroups.bare(only))
+        }) {
+            return await forwardClose(ask, "「发送给」确认里看不到「\(only)」，没有转发")
+        }
         guard await groupStep(ask, send, "发送 (forward)", wide: 0.05, tall: 0.012, until: { l in
             XiaoLanGroups.sendSheet(l.rows) == nil && !XiaoLanGroups.forwardPage(l.rows)
-        }) != nil else { return (false, "点了「发送」，确认框没有消失") }
+        }) != nil else { return (false, OrderOutcome.unknownMark + "点了「发送」，确认框没有消失") }
         DebugLog.write("watch: \(app.rawValue): \(order.chat): 「\(order.quote.prefix(20))」 forwarded to \(targets.joined(separator: ", "))")
         return (true, "")
+    }
+
+    /// 198 (226/205): the message at `line` (window fractions) long-pressed and `word` found in its menu
+    /// (menuItemLoose), read again 0.6 s later when not (the menu still drawing); not found, the words of the menu's band
+    /// logged and the menu closed by the title bar. `why` says what else went wrong.
+    private func groupMenuItem(_ chat: PaneLook, _ line: CGPoint, _ word: String) async -> (menu: PaneLook?, item: CGPoint?, why: String) {
+        let s = XiaoLanPanes.onScreen(line, in: chat.rect)
+        pointer.aimLoosely(0.04 * Double(chat.rect.width), 0.012)
+        do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
+            return (nil, nil, "长按没有成功：\(error.localizedDescription)")
+        }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        var last: PaneLook?
+        for attempt in 0..<2 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
+            guard let menu = await paneLooks(after: now(), side: chat.side).first(where: { $0.side == chat.side }) else { continue }
+            last = menu
+            if let band = XiaoLanMediaFind.menuBand(menu.rows), let item = XiaoLanMediaFind.menuItemLoose(menu.rows, word, in: band) {
+                return (menu, item, "")
+            }
+        }
+        guard let menu = last else { return (nil, nil, "长按后没看到窗口") }
+        let read = XiaoLanMediaFind.menuBand(menu.rows).map { XiaoLanMediaFind.menuWordsRead(menu.rows, in: $0) } ?? "no menu"
+        DebugLog.write("watch: 「\(word)」 not in the menu; read there: \(read)")
+        _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)  // nothing on the title bar opens
+        return (menu, nil, "")
     }
 
     /// 205: 「选择聊天」 closed by its 关闭 (a 「发送给」 sheet over it cancelled first), nothing sent.
@@ -1075,15 +1135,24 @@ extension AppModel {
         }
         let opened = await groupOpen(app, order.chat, exact: true, &state)
         guard var chat = opened.look else { return (false, opened.why) }
-        // a keyboard over the input bar first (WeChat opens a chat with 简体拼音 up): a system one switched to 小藍,
-        // which puts itself down
-        if XiaoLanPanes.keyboardTop(chat.rows) != nil || keyboardBridge.onScreen() {
-            if !keyboardBridge.onScreen(), !CandidatePicker.ourKeyboardShown(rows: chat.rows) { _ = await showLanAgentKeyboard() }
-            _ = await keyboardBridge.type("", enter: false, within: 2, dismiss: true)
-            _ = await smallKeyboard(up: false, within: 1.5)
-            chat = await groupSettled(chat)
-            guard XiaoLanPanes.keyboardTop(chat.rows) == nil else { return (false, "键盘盖住了输入栏，没能收起来") }
+        // 198 (Echo 198 11-28 18:11: looked at as the chat opened, 小藍's keyboard on its way up — 「没找到输入栏」 1 s in,
+        // the watch's own reply not finding the field either at that moment): the window once it stops, then any keyboard
+        // over the input bar put down (WeChat opens a chat with 简体拼音 up: a system one switched to 小藍, which puts
+        // itself down), the field looked for once more when not found
+        chat = await groupSettled(chat)
+        for attempt in 0..<2 {
+            let keyboard = XiaoLanPanes.keyboardTop(chat.rows) != nil || keyboardBridge.onScreen()
+                || CandidatePicker.ourKeyboardShown(rows: chat.rows)
+            if keyboard {
+                if !keyboardBridge.onScreen(), !CandidatePicker.ourKeyboardShown(rows: chat.rows) { _ = await showLanAgentKeyboard() }
+                _ = await keyboardBridge.type("", enter: false, within: 2, dismiss: true)
+                _ = await smallKeyboard(up: false, within: 1.5)
+                chat = await groupSettled(chat)
+            }
+            if attempt == 1 || WatchOCR.Pixels(chat.crop).flatMap({ XiaoLanPanes.inputField($0) }) != nil { break }
+            if !keyboard { chat = await groupSettled(chat) }
         }
+        guard XiaoLanPanes.keyboardTop(chat.rows) == nil else { return (false, "键盘盖住了输入栏，没能收起来") }
         guard let px = WatchOCR.Pixels(chat.crop), let field = XiaoLanPanes.inputField(px) else { return (false, "没找到输入栏") }
         // ＋ at the bar's right end (measured: WeChat 0.925, WeCom 0.935 of the window); its panel must show, else nothing more
         let plusAt = CGPoint(x: app == .wework ? 0.935 : 0.925, y: field.y)
@@ -1103,13 +1172,13 @@ extension AppModel {
         guard let fileItem = XiaoLanGroups.find(panel.rows, ["文件"], exact: true, band: 0.5...0.97) else { return (false, "＋面板里没找到「文件」") }
         var picker: PaneLook
         if app == .wework {
-            guard let sheet = await groupStep(panel, fileItem, "文件", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.find($0.rows, ["从本地文件选择"]) != nil }),
+            guard let sheet = await groupStep(panel, XiaoLanGroups.panelTile(fileItem), "文件", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.find($0.rows, ["从本地文件选择"]) != nil }),
                   let local = XiaoLanGroups.find(sheet.rows, ["从本地文件选择"]),
                   let p = await groupStep(sheet, local, "从本地文件选择", wide: 0.2, tall: 0.012, until: { XiaoLanGroups.filePicker($0.rows) })
             else { return (false, "企业微信的「文件 › 从本地文件选择」没打开") }
             picker = p
         } else {
-            guard let page = await groupStep(panel, fileItem, "文件", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.find($0.rows, ["手机文件"], exact: true) != nil }),
+            guard let page = await groupStep(panel, XiaoLanGroups.panelTile(fileItem), "文件", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.find($0.rows, ["手机文件"], exact: true) != nil }),
                   let tab = XiaoLanGroups.find(page.rows, ["手机文件"], exact: true),
                   let tabbed = await groupStep(page, tab, "手机文件", wide: 0.05, tall: 0.01, until: { XiaoLanGroups.find($0.rows, ["选取"], exact: true, band: 0.2...0.9) != nil }),
                   let choose = XiaoLanGroups.find(tabbed.rows, ["选取"], exact: true, band: 0.2...0.9),
@@ -1139,13 +1208,13 @@ extension AppModel {
         }
         if XiaoLanGroups.find(sent.rows, ["已选中"]) != nil, let go = XiaoLanGroups.find(sent.rows, ["发送"], exact: true, band: 0.1...0.9) {
             guard let s = await groupStep(sent, go, "发送 (file)", wide: 0.03, tall: 0.01, until: { XiaoLanGroups.find($0.rows, ["已选中"]) == nil }) else {
-                return (false, "点了「发送」，文件还在「已选中」里")
+                return (false, OrderOutcome.unknownMark + "点了「发送」，文件还在「已选中」里")
             }
             sent = s
         }
         let card = await paneLook(sent.side, after: now(), tries: 6) { XiaoLanGroups.find($0.rows, [stem], band: 0.1...0.95) != nil }
         guard let card, XiaoLanGroups.find(card.rows, [stem], band: 0.1...0.95) != nil else {
-            return (false, "选了文件，但聊天里没看到「\(name)」")
+            return (false, OrderOutcome.unknownMark + "选了文件，但聊天里没看到「\(name)」")
         }
         DebugLog.write("watch: \(app.rawValue): \(order.chat): 「\(name)」 sent")
         return (true, "")
@@ -1163,7 +1232,7 @@ extension AppModel {
             p = await groupSettled(p)
         }
         guard let photos = XiaoLanGroups.find(p.rows, ["照片"], exact: true, band: 0.5...0.97),
-              let album = await groupStep(p, photos, "照片", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.photoAlbum($0.rows) })
+              let album = await groupStep(p, XiaoLanGroups.panelTile(photos), "照片", wide: 0.035, tall: 0.012, until: { XiaoLanGroups.photoAlbum($0.rows) })
         else { return (false, "＋面板的「照片」没打开相册") }
         let ring = XiaoLanGroups.newestRing(album.rows)
         guard let chosen = await groupStep(album, ring, "the newest photo's ring", wide: 0.015, tall: 0.008, until: { XiaoLanGroups.photoSend($0.rows) != nil }),
@@ -1174,7 +1243,7 @@ extension AppModel {
             return (false, "相册里没选上最新那张（没看到「发送(1)」），没有发送")
         }
         guard await groupStep(chosen, send, "发送(1)", wide: 0.03, tall: 0.01, until: { !XiaoLanGroups.photoAlbum($0.rows) }) != nil else {
-            return (false, "点了「发送(1)」，相册没有关")
+            return (false, OrderOutcome.unknownMark + "点了「发送(1)」，相册没有关")
         }
         return (true, "")
     }

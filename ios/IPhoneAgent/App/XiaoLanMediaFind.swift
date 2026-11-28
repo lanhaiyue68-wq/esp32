@@ -351,6 +351,38 @@ enum XiaoLanMediaFind {
         return at
     }
 
+    /// 198 (205, Echo 198 11-28 18:05: WeChat's menu up — 复制 转发 收藏 删除 多选 over 引用 提醒 连续朗读 翻译 搜一搜 —
+    /// and 「转发」 not read on its window: the forward given up twice): `word` as menuItem finds it; else a piece of its
+    /// length with half its characters or more right and no other menu word (one character slipped); else, for 转发,
+    /// the middle between 复制 and the item after 转发 on that row (收藏 on WeChat, 引用 on WeCom: 11-28 d-sheet g07 and
+    /// N70b's measures).
+    static func menuItemLoose(_ rows: [[Piece]], _ word: String, in band: ClosedRange<Double>) -> CGPoint? {
+        if let at = menuItem(rows, word, in: band) { return at }
+        func bare(_ p: Piece) -> String { p.text.filter { !$0.isWhitespace } }
+        let items = rows.joined().filter { band.contains(Double($0.box.midY)) }
+        let want = Array(word)
+        if let p = items.first(where: { p in
+            let t = Array(bare(p))
+            guard t.count == want.count, !menuWords.contains(where: { $0 != word && bare(p).contains($0) }) else { return false }
+            return zip(t, want).filter { $0 == $1 }.count * 2 >= want.count
+        }) {
+            return CGPoint(x: p.box.midX, y: p.box.midY)
+        }
+        guard word == "转发", let copy = items.first(where: { ["复制", "拷贝"].contains(bare($0)) }),
+              let next = items.filter({ p in
+                  abs(Double(p.box.midY - copy.box.midY)) < 0.01 && Double(p.box.midX - copy.box.midX) > 0.03
+                      && ["收藏", "引用"].contains(bare(p))
+              }).min(by: { $0.box.midX < $1.box.midX }) else { return nil }
+        return CGPoint(x: (Double(copy.box.midX) + Double(next.box.midX)) / 2, y: Double(copy.box.midY))
+    }
+
+    /// 198: the short words read in a menu's band, for the log when an item is not found there.
+    static func menuWordsRead(_ rows: [[Piece]], in band: ClosedRange<Double>) -> String {
+        rows.joined().filter { band.contains(Double($0.box.midY)) && $0.text.count <= 8 }
+            .sorted { abs(Double($0.box.midY - $1.box.midY)) < 0.01 ? $0.box.minX < $1.box.minX : $0.box.midY < $1.box.midY }
+            .map { String(format: "%@@%.2f,%.2f", $0.text, Double($0.box.midX), Double($0.box.midY)) }.joined(separator: " ")
+    }
+
     /// WeChat's page for a link it will not open: 「如需浏览，请长按网址复制后使用浏览器访问」 (measured 11-27, a Douyin link).
     static func linkBlocked(_ rows: [[Piece]]) -> Bool {
         rows.joined().contains { p in

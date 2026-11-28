@@ -346,7 +346,7 @@ extension HIDDevice {
             return try await padPush(command, push)
         }
         let sent = Self.padCurved(command, from: Self.padPos, span: Self.padSpan, held: padHeld)
-            ?? (padHeld ? nil : Self.padShort(command)) ?? command
+            ?? (padHeld ? nil : Self.padAnywhere(command)) ?? (padHeld ? nil : Self.padShort(command)) ?? command
         do {
             let reply = try await sendWatched(sent)
             Self.padPos = Self.padTrack(command, from: Self.padPos, span: Self.padSpan)  // app units, as asked
@@ -366,12 +366,15 @@ extension HIDDevice {
         do {
             if push.fast.x != 0 || push.fast.y != 0 {
                 let fast = "move \(push.fast.x) \(push.fast.y)"
+                // 199 (user 11-28: every move a Bezier curve): from a place not known, a curve all the same
                 _ = try await sendWatched(Self.padCurved(fast, from: from, span: Self.padSpan, held: false)
-                                          ?? Self.padShort(fast) ?? fast)
+                                          ?? PadCurve.strokeAnywhere(by: push.fast, span: Self.padSpan) ?? fast)
             }
             let r = Self.padSlowRatio
+            let slow = (x: Int((Double(push.slow.x) * r).rounded()), y: Int((Double(push.slow.y) * r).rounded()))
             _ = try await sendWatched("step \(Self.padSlowStep)")
-            _ = try await sendWatched("move \(Int((Double(push.slow.x) * r).rounded())) \(Int((Double(push.slow.y) * r).rounded()))")
+            // 199 (Echo 198 11-28: the search's ±141 and 1434 went as straight lines here): the slow part a curve too
+            _ = try await sendWatched(PadCurve.strokeAnywhere(by: slow, span: Self.padSpan) ?? "move \(slow.x) \(slow.y)")
             _ = try await sendWatched("step \(Self.padStep)")
         } catch {
             Self.padPos = nil
@@ -394,6 +397,7 @@ extension HIDDevice {
             _ = try await sendWatched("step \(Self.padSlowStep)")
             // 197 (N91): a small curve too, its units scaled by the slow ratio (the pace it goes at)
             let curve = from.flatMap { PadCurve.stroke(from: $0, by: (dx, 0), span: Self.padSpan, scale: Self.padSlowRatio) }
+                ?? PadCurve.strokeAnywhere(by: (dx, 0), span: Self.padSpan, scale: Self.padSlowRatio)  // 199: a place not known too
             _ = try await sendWatched(curve ?? "move \(Int((Double(dx) * Self.padSlowRatio).rounded())) 0")
             _ = try await sendWatched("step \(Self.padStep)")
         } catch {
@@ -419,6 +423,14 @@ extension HIDDevice {
         let atShortPace = (step ?? padStep) == padShortStep && (pace ?? padPaceMs) == padShortPace
         let scale = atShortPace ? padShortRatio(hypot(Double(dx), Double(dy))) ?? 1 : 1
         return PadCurve.stroke(from: pos, by: (dx, dy), span: span, scale: scale, random: random)
+    }
+
+    /// 199 (user 11-28: 「全程，不論干什么，都要用貝塞爾曲線」): a `move` padCurved could not bow (its place not known, or no
+    /// bow fitting on the screen by a corner) as a curve all the same (PadCurve.strokeAnywhere); nil for anything else.
+    static func padAnywhere(_ command: String) -> String? {
+        let parts = command.split(separator: " ")
+        guard parts.count == 3, parts[0] == "move", let dx = Int(parts[1]), let dy = Int(parts[2]) else { return nil }
+        return PadCurve.strokeAnywhere(by: (dx, dy), span: padSpan)
     }
 
     static func heldAfter(_ command: String, was held: Bool) -> Bool {

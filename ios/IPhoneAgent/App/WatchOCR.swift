@@ -296,6 +296,11 @@ enum WatchOCR {
                        Double(p.box.minY - l.box.maxY) < 0.8 * Double(max(p.box.height, l.box.height)),
                        kind(p.box, px) == kind(l.box, px) {
                         p.kind = l.kind
+                    } else if !inBubble(p.box, px) {
+                        // 198 (Echo 198 11-28 18:11: 「2」 and 「9 W e t」 off my own photo of a keyboard in the chat taken for
+                        // 蓝海乐's lines and answered twice): no avatar beside it and no bubble's edge left of it: words on a
+                        // picture, no line
+                        p.kind = .other
                     }
                 }
             }
@@ -303,6 +308,25 @@ enum WatchOCR {
             out.append(p)
         }
         return out
+    }
+
+    /// 198: whether words on white sit in a bubble: leftward from them (over glyphs and the bubble's white) to the chat's
+    /// grey, three samples running; just right of that grey, a bubble's white (≥ 246). A picture's words meet the grey
+    /// beside the picture's own colours. No chat grey on the row (a page, a drawing): nothing to tell, kept.
+    static func inBubble(_ box: CGRect, _ px: Pixels) -> Bool {
+        let y = Double(box.midY)
+        var x = Double(box.minX) - 0.004, greys = 0
+        while x > 0.08 {
+            let (r, g, b) = px.rgb(x, y)
+            let grey = min(r, g, b) >= 222 && min(r, g, b) < 246 && max(r, g, b) - min(r, g, b) <= 10
+            greys = grey ? greys + 1 : 0
+            if greys >= 3 {
+                let (r2, g2, b2) = px.rgb(x + 0.015, y)  // past the grey run (0.006) and the bubble's soft edge
+                return min(r2, g2, b2) >= 246
+            }
+            x -= 0.003
+        }
+        return true
     }
 
     /// Which side has an avatar level with the top of this line: a picture in the left strip (0.01–0.14 across) or the

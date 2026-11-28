@@ -274,6 +274,14 @@ import UIKit
 
     /// 198 (B4): a line of Echo's own notices (their titles 「小蓝有一条回复没发出去」 「小蓝的屏幕共享停了」 「小蓝看不到…」
     /// 「小蓝只看到一个 App」; their bodies 「「chat」：why…」).
+    /// 199 (Echo 198 11-28 18:36: 「用手机微信扫码登录」 over WeChat's window): an app's log-in page by its QR code.
+    static func loggedOut(_ rows: [[Piece]]) -> Bool {
+        rows.joined().contains { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return ["扫码登录", "掃碼登錄", "扫码登陆", "扫一扫登录", "掃一掃登錄"].contains { t.contains($0) }
+        }
+    }
+
     static func ownNotice(_ text: String) -> Bool {
         let t = text.filter { !$0.isWhitespace }
         if ["小蓝有", "小蓝的", "小蓝看", "小蓝只", "小藍有", "小藍的", "小藍看", "小藍只"].contains(where: { t.hasPrefix($0) }) { return true }
