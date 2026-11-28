@@ -637,15 +637,24 @@ import UIKit
     /// beginning, still counts as the chat.
     static func gone(_ chat: String, _ rows: [[Piece]]) -> Bool {
         let full = chat.filter { !$0.isWhitespace }
-        return !rows.joined().contains { p in
+        let all = Array(rows.joined())
+        // 198 with B36 (CI 46123219449: testCutNameIsNotGone): a row slid open has its name cut by its buttons, no … there
+        let buttons: Set<String> = ["删除", "刪除", "删除并清空记录", "刪除並清空記錄", "不显示", "不顯示", "标为未读", "標為未讀",
+                                    "标为已读", "標為已讀", "置顶", "置頂", "取消置顶", "取消置頂"]
+        func slidOpen(_ p: Piece) -> Bool {
+            all.contains { q in
+                q != p && abs(Double(q.box.midY) - Double(p.box.midY)) < 0.03 && buttons.contains(q.text.filter { !$0.isWhitespace })
+            }
+        }
+        return !all.contains { p in
             guard (0.1...0.92).contains(p.box.midY) else { return false }
             let n = listName(p.text), raw = p.text.filter { !$0.isWhitespace }
             // 198 (Echo 197 11-28 06:05: 「Echo建群测试2」 deleted from both lists, but 「Echo建群测试」 still on them was taken
             // for it and the order reported failed): a name read with a slip keeps its length, a name cut short ends in …
             if n == full { return true }
             if n.count == full.count, WatchChatOpen.sameChat(chat, listName: n) { return true }
-            let cut = raw.contains("…") || raw.contains("...")
-            return cut && (WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n)))
+            let cut = raw.contains("…") || raw.contains("...") || slidOpen(p)
+            return cut &&(WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n)))
         }
     }
 

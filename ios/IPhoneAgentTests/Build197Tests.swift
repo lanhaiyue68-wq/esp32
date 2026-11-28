@@ -338,6 +338,8 @@ import UIKit
         XCTAssertFalse(XiaoLanPanes.gone("Echo建群测试", left))
         XCTAssertFalse(XiaoLanPanes.gone("Echo建群测试2", [p("Echo建群测试…", 0.3, 0.5, w: 0.2)]))
         XCTAssertFalse(XiaoLanPanes.gone("Echo建群测试2", [p("Echo建群测试 2", 0.3, 0.5, w: 0.2)]))
+        XCTAssertFalse(XiaoLanPanes.gone("Echo建群测试2", [p("Echo建群测试", 0.3, 0.5, w: 0.2), p("删除", 0.9, 0.5, w: 0.1)]),
+                       "its row slid open: the name cut by the buttons, no … (B36)")
     }
 
     /// 198 (218 by fixed steps; the iPad's ＋ panels and file picker 11-28 13:30–13:37): the panel by its words, 文件 only
