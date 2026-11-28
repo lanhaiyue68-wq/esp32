@@ -654,7 +654,7 @@ import UIKit
             if n == full { return true }
             if n.count == full.count, WatchChatOpen.sameChat(chat, listName: n) { return true }
             let cut = raw.contains("…") || raw.contains("...") || slidOpen(p)
-            return cut &&(WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n)))
+            return cut && (WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n)))
         }
     }
 
