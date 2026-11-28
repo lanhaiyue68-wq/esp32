@@ -888,7 +888,7 @@ extension AppModel {
             // and a sheet asking to delete or recall is cancelled by its 取消, never clicked at a 「✕」 spot
             if XiaoLanMediaFind.menuBand(look.rows) != nil {
                 DebugLog.write("watch: \(title): a long-press menu up; closed first, nothing read")
-                _ = await paneCloseMenu(look)
+                _ = await paneClosePressMenu(look)
                 return
             }
             if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil, let cancel = XiaoLanPanes.actionSheetCancel(look.rows) {

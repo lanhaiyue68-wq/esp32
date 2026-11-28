@@ -761,7 +761,7 @@ extension AppModel {
         }
         if XiaoLanMediaFind.menuBand(l.rows) != nil {
             DebugLog.write("watch: \(app.rawValue): a long-press menu up before an order; closed first")
-            return await paneCloseMenu(l)
+            return await paneClosePressMenu(l)
         }
         return false
     }
@@ -770,7 +770,7 @@ extension AppModel {
     /// there — and the watch's next click, to open a picture, landed on its 删除: 「此消息删除后将无法撤回」 came up): a menu
     /// up is closed by the title bar, else by the input field (a click outside a menu only closes it; one on the field
     /// brings a keyboard at most) — never by a spot of the chat, where a picture or a card may be. True: gone.
-    @discardableResult func paneCloseMenu(_ l: PaneLook) async -> Bool {
+    @discardableResult func paneClosePressMenu(_ l: PaneLook) async -> Bool {
         var look = l
         for step in 0..<2 {
             guard XiaoLanMediaFind.menuBand(look.rows) != nil else { return true }
@@ -1248,9 +1248,9 @@ extension AppModel {
         let read = XiaoLanMediaFind.menuBand(menu.rows).map { XiaoLanMediaFind.menuWordsRead(menu.rows, in: $0) } ?? "no menu"
         DebugLog.write("watch: 「\(word)」 not in the menu; read there: \(read)")
         // 202 (Echo 201 11-28 22:13: the title bar's click refused — the pointer not seen up there — the menu left up, the
-        // watch's next click landing on its 删除): a menu seen is closed and looked at till gone (paneCloseMenu)
+        // watch's next click landing on its 删除): a menu seen is closed and looked at till gone (paneClosePressMenu)
         if XiaoLanMediaFind.menuBand(menu.rows) != nil {
-            _ = await paneCloseMenu(menu)
+            _ = await paneClosePressMenu(menu)
         } else {
             _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)  // nothing on the title bar opens
         }
