@@ -111,7 +111,10 @@ enum XiaoLanMediaFind {
         let mapped = String(e.map { c -> Character in
             switch c { case "i", "1", "|": return "l"; case "0": return "o"; default: return c }
         })
-        return fileExtensions.contains(mapped) ? mapped : nil
+        if fileExtensions.contains(mapped) { return mapped }
+        // 202 (Echo 201 11-28 22:53: WeCom's card 「中国经济今明两年深度 / 研判 .pdf」 read 「研判.paf」, not known for a file —
+        // 「没找到文件卡片」, the PDF never opened): a pdf misread whole
+        return ["paf", "pdt", "pof", "bdf", "pdl", "odf"].contains(mapped) ? "pdf" : nil
     }
 
     /// A file's name as compared: its extension as meant, no spaces, brackets or other signs, lowercased.
@@ -252,10 +255,15 @@ enum XiaoLanMediaFind {
 
     /// The line to quote: the lowest piece showing the original's words (its first line, or a line of it), never the
     /// input bar's or a quote bar's own text.
-    static func quoteSpot(_ rows: [[Piece]], quote: String) -> CGPoint? {
+    static func quoteSpot(_ rows: [[Piece]], quote: String, px: WatchOCR.Pixels? = nil) -> CGPoint? {
         let want = plain(quote)
         guard !want.isEmpty else { return nil }
-        let hit = pieces(rows, top: 0.1, bottom: 0.86).last { p in
+        // 202 (Echo 201 11-28 20:48: the newest line, just over WeChat's input bar with no keyboard, at 0.88–0.92 of the
+        // window, was left out by 0.86): down to 0.93 (a quote bar's 「name：…」 never reads as the line itself)
+        let hit = pieces(rows, top: 0.1, bottom: 0.93).last { p in
+            // 202 (Echo 201 11-28 21:14: the line to forward found in the grey quote box under a later reply and pressed
+            // there — 「定位到原文位置」, no menu): words on the chat's grey (a quote box, a time) are no message's
+            if let px, WatchOCR.kind(p.box, px) == .grey { return false }
             let t = plain(p.text)
             // 193 (N59): 「1」 is quoted too — by a piece that is that one character alone
             guard t.count >= 2 || want.count == 1 else { return false }
@@ -333,6 +341,12 @@ enum XiaoLanMediaFind {
             guard t.count <= 24 else { continue }
             let hit = pressMenuWords.filter { t.contains($0) }
             guard !hit.isEmpty else { continue }
+            // 202 (Echo 201 11-28 20:52: the chat's own lines 「…转发和引用用这句」「…引用回复」 counted as the menu's words,
+            // their spread over the window taken for no menu — the menu up over them, 撤回 in it, the recall given up): a
+            // piece of the menu's words and little else (an icon read as a mark or two) only
+            var rest = t
+            for w in pressMenuWords + ["撤回", "翻译", "搜一搜", "转文字", "编辑", "添加至", "添加到表情"] { rest = rest.replacingOccurrences(of: w, with: "") }
+            guard rest.count <= 3 else { continue }
             words.formUnion(hit)
             ys.append(Double(p.box.midY))
         }
@@ -538,13 +552,25 @@ enum XiaoLanMediaFind {
     /// - three or more words of two sizes in a tall bubble (an article's title over its cover's or summary's small print
     ///   and its account, 11-28 d2: three garbled messages before, B13): 「[链接] 标题」, the title its biggest words from
     ///   the top. A bubble with an address, a file, a voice note or a quote is read its own way.
-    static func cardLine(_ items: [(text: String, height: Double)], spanHeight: Double, quoted: Bool) -> String? {
+    static func cardLine(_ items: [(text: String, height: Double)], spanHeight: Double, quoted: Bool, picture: Bool = false) -> String? {
         let words = items.map { (t: $0.text.trimmingCharacters(in: .whitespaces), h: $0.height) }.filter { !$0.t.isEmpty }
         // (a quote is told by its box, not by a colon: a cover's 「10:08」 is none)
         guard words.count >= 2, !quoted else { return nil }
         if let last = words.last, ["个人名片", "個人名片"].contains(last.t.filter { !$0.isWhitespace }) {
+            // 202 (Echo 201 11-28 21:00: WeCom's card read 「•微信 方舱科技」): its 「@微信」 tag is no part of the name
             let name = words.dropLast().map { $0.t }.joined(separator: " ")
+                .replacingOccurrences(of: #"^[•·@＠]?\s*微信\s*"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
             return name.isEmpty || words.count > 4 || name.count > 40 ? nil : "[名片] \(name)"
+        }
+        // 202 (Echo 201 11-28 21:00: a 公众号 link card — title, summary a little smaller, a picture at its right, 易博通eSender
+        // under it — not told by size): a colour picture in the bubble beside the words is a card's; its title the first
+        // line or two of its biggest words
+        if picture, words.count >= 2, spanHeight >= 0.07,
+           !words.contains(where: { url(in: $0.t) != nil || fileName($0.t) != nil || voiceSeconds($0.t) != nil || sizeLabel($0.t) }) {
+            let top = words[0].h
+            let title = words.prefix(2).prefix { $0.h >= 0.85 * top }.map { $0.t }.joined()
+            if title.count >= 2 { return "[链接] \(title.prefix(60))" }
         }
         guard words.count >= 3, spanHeight >= 0.09,
               !words.contains(where: { url(in: $0.t) != nil || fileName($0.t) != nil || voiceSeconds($0.t) != nil || sizeLabel($0.t) }),
@@ -579,13 +605,28 @@ enum XiaoLanMediaFind {
             // d2), so the grey alone is no quote
             let quoted = inside.contains { quoteHead($0.text) && onQuote($0.box, px) }
             guard let line = cardLine(inside.map { (text: $0.text, height: Double($0.box.height)) },
-                                      spanHeight: span.upperBound - span.lowerBound, quoted: quoted),
+                                      spanHeight: span.upperBound - span.lowerBound, quoted: quoted,
+                                      picture: colourPicture(px, in: span, from: left)),
                   let head = inside.first else { continue }
             lines.append(WatchOCR.Piece(text: line, box: CGRect(x: Double(head.box.minX), y: Double(head.box.minY), width: 0.08, height: 0.02),
                                         kind: .theirs))
             used += inside.map(\.box)
         }
         return (lines, used)
+    }
+
+    /// 202: a colour picture in someone's bubble at its right (a link card's thumbnail): of a grid over 0.5–0.85 across in
+    /// the bubble's height, a share of 15 % or more in colour (a channel 30 apart from another).
+    static func colourPicture(_ px: WatchOCR.Pixels, in span: ClosedRange<Double>, from left: Double) -> Bool {
+        var n = 0, colour = 0
+        for y in stride(from: span.lowerBound + 0.01, to: span.upperBound - 0.01, by: 0.004) {
+            for x in stride(from: max(left + 0.3, 0.5), to: 0.85, by: 0.006) {
+                let (r, g, b) = px.rgb(x, y)
+                n += 1
+                if max(r, g, b) - min(r, g, b) > 30 { colour += 1 }
+            }
+        }
+        return n > 0 && Double(colour) / Double(n) >= 0.15
     }
 
     /// 198: the title a card's line names (「[链接] 标题」 with no address), nil for any other line.

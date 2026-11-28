@@ -278,6 +278,15 @@ extension HIDDevice {
     /// `padFreshUnits` (the 25 s keep-alive wiggles add 34 a pair) teaches the gain nothing.
     static var padUnseenUnits = Int.max / 2
     static let padFreshUnits = 1500
+    /// 202: commands sent but pings, counted: a look begun at one count is taken as where the pointer is only while no
+    /// command has been sent since (padAfterNudge).
+    static var padSends = 0
+    /// 202 (user 11-28: 「人手怎么可能每一次都點在每一個位置上呢…不能夠照原路折返…繼續想辦法給我搞定」; Echo 201 11-28
+    /// 20:32–20:41: the idle nudge — out on one random curve, back on another — left the pointer ~6 px off each time, as
+    /// iPadOS speeds two unlike curves up unlike; minutes idle put the reckoned spot 0.055 off, and two blind taps by a
+    /// window's top landed on its controls): after each nudge the pointer is looked for (Pointer.padSeeAfterNudge) and,
+    /// seen, taken as where it is. The nudge itself stays as it was, random.
+    static var padAfterNudge: (() async -> Void)?
     static func padReckoned(_ command: String) {
         let parts = command.split(separator: " ")
         guard let verb = parts.first, verb == "move" || verb == "stroke" else { return }
@@ -335,6 +344,7 @@ extension HIDDevice {
     @discardableResult
     func send(_ command: String) async throws -> String {
         guard Self.onPad() else { return try await sendWatched(command) }
+        if command != "ping" { Self.padSends &+= 1 }  // 202
         if command == "home" { return try await padHomeNow() }
         await padPace()
         var command = command
@@ -616,6 +626,7 @@ extension HIDDevice {
                     try await send("move 8 0")  // 4 can send nothing: the board keeps a remainder (4 units a count)
                     try await Task.sleep(nanoseconds: 120_000_000)
                     try await send("move -8 0")
+                    if Self.onPad() { await Self.padAfterNudge?() }  // 202: where it really stopped, by looking
                 } else {
                     try await send("ping")
                 }

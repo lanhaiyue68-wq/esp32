@@ -105,7 +105,10 @@ extension AppModel {
         let icons = XiaoLanRecall.dockIcons(px)
         guard icons.wechat != nil || icons.wework != nil else { return false }
         DebugLog.write("keyboard: the Dock is up at the screen's bottom; the pointer up out of its way before the globe key")
-        try? await pointer.point(0.5, 0.45, aim: false, rehome: false)
+        // 202 (user 11-28: 「你為什麼每一次點過企業微信過後，就立馬上去到那兩個框中間，就相當於屏幕中間的位置」): (0.5, 0.45)
+        // is the gap between the two windows, their edges (where a window is dragged and sized): the pointer waits
+        // inside WeCom's window instead, over its list, no click
+        try? await pointer.point(0.75, 0.45, aim: false, rehome: false)
         try? await Task.sleep(nanoseconds: 800_000_000)
         guard let again = await freshFrame(), let px2 = WatchOCR.Pixels(again) else { return true }
         let still = XiaoLanRecall.dockIcons(px2)

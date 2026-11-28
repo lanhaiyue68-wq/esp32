@@ -430,7 +430,10 @@ extension AppModel {
         log(String(format: "the Dock's WeCom at (%.3f, %.3f)", wework.x, wework.y))
         guard await paneSeenTap(wework, half: (0.03, 0.025)) else { log("WeCom's icon not clicked"); return false }
         // 189 (N14): the pointer off the Dock (no click), so it does not stay up over the windows' bottoms
-        try? await pointer.point(0.5, 0.45, aim: false, rehome: false)
+        // 202 (user 11-28: 「你為什麼每一次點過企業微信過後，就立馬上去到那兩個框中間，就相當於屏幕中間的位置」): (0.5, 0.45)
+        // is the gap between the two windows, their edges (where a window is dragged and sized): the pointer waits
+        // inside WeCom's window instead, over its list, no click
+        try? await pointer.point(0.75, 0.45, aim: false, rehome: false)
         try? await Task.sleep(nanoseconds: 1_200_000_000)
         let told = Set(await paneLooks(after: now()).compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
         let back = told.contains(.wechat) && told.contains(.wework)
@@ -509,7 +512,14 @@ extension AppModel {
         let s = XiaoLanPanes.onScreen(p, in: r)
         // 199 (user 11-28: 「全程，不論干什么，都要用貝塞爾曲線」「不要改」): 198's B6 — a stop on the way by a window's top,
         // then a short hop — taken out; a button by the top is clicked as 197 did, one curve to it
-        if Double(p.y) < XiaoLanPanes.topBand { return await paneSeenTap(s, half: (wide * Double(r.width), tall)) }
+        if Double(p.y) < XiaoLanPanes.topBand {
+            // 202 (Echo 201 11-28: iPadOS's window buttons sit at a window's top left, just over its back arrow and an
+            // album's ✕): a button there clicked a little lower and only within 0.005 up or down, never toward the dots
+            if Double(p.x) < 0.15 {
+                return await paneSeenTap(CGPoint(x: s.x, y: s.y + 0.004), half: (min(wide * Double(r.width), 0.012), min(tall, 0.005)))
+            }
+            return await paneSeenTap(s, half: (wide * Double(r.width), tall))
+        }
         pointer.aimLoosely(wide * Double(r.width), tall)
         do { try await pointer.tap(s.x, s.y, aim: false); return true } catch {
             DebugLog.write("watch: tap at (\(String(format: "%.3f, %.3f", s.x, s.y))) failed: \(error.localizedDescription)")
@@ -653,7 +663,11 @@ extension AppModel {
             // 189 (N12): a first stop seen near the arrow (within 0.1) is the short hop's start, as the stop below it is
             pointer.seenOff = nil
             pointer.hopFromSeen = 0.1
-            let direct = await paneSeenTap(arrow, half: (0.02, 0.012))
+            // 202 (Echo 201 11-28 21:03: the arrow clicked at (0.015, 0.041) — within 187's ±0.02 / ±0.012 — and WeChat's
+            // window came out narrower: iPadOS's window buttons, three dots at a window's top left (~0.02 down), are just
+            // over the arrow): aimed a little lower and right, clicked only 0.050–0.060 down, never up toward the dots
+            let aimAt = CGPoint(x: arrow.x + 0.003, y: arrow.y + 0.004)
+            let direct = await paneSeenTap(aimAt, half: (0.012, 0.005))
             pointer.hopFromSeen = nil
             if direct {
                 DebugLog.write("watch: \(who): back: " + String(format: "straight to the arrow (%.3f, %.3f), seen on it", Double(arrow.x), Double(arrow.y)))
@@ -870,6 +884,18 @@ extension AppModel {
         case .chat(let title):
             // 187 (user 11-27: a sheet over the chat — "點那個叉…都可以把這個聊天框給它關掉"): another chat open over this one
             // as a sheet (a banner clicked) is closed by its ✕ first; nothing under it or in it is read.
+            // 202 (Echo 201 11-28 22:13): a long-press menu left up is closed first — a click under it lands on its 删除 —
+            // and a sheet asking to delete or recall is cancelled by its 取消, never clicked at a 「✕」 spot
+            if XiaoLanMediaFind.menuBand(look.rows) != nil {
+                DebugLog.write("watch: \(title): a long-press menu up; closed first, nothing read")
+                _ = await paneCloseMenu(look)
+                return
+            }
+            if let px = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(px) != nil, let cancel = XiaoLanPanes.actionSheetCancel(look.rows) {
+                DebugLog.write("watch: \(title): a sheet asking to delete or recall over it; its 取消 clicked, nothing read")
+                _ = await paneTap(cancel, in: look.rect, wide: 0.1, tall: 0.012)
+                return
+            }
             if let px = WatchOCR.Pixels(look.crop), let close = XiaoLanPanes.sheetClose(px) {
                 DebugLog.write("watch: \(title): another chat open over it as a sheet (a banner clicked?); closed by its ✕, nothing read")
                 _ = await paneSeenTap(XiaoLanPanes.onScreen(close, in: look.rect), half: (0.015, 0.012))
@@ -1069,7 +1095,8 @@ extension AppModel {
     private func paneNoteReplyField(_ look: PaneLook, _ state: inout PaneWatchState) {
         guard repliesComing, let px = WatchOCR.Pixels(look.crop) else { return }
         let keys = XiaoLanPanes.keyboardTop(look.rows)
-        guard let field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1),
+        guard XiaoLanGroups.plusPanelTop(look.rows) == nil,  // 202: a ＋ panel's tiles are no field
+              let field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1),
               keys != nil || Double(field.y) >= 0.8 else { return }
         state.replyField = (side: look.side, at: XiaoLanPanes.onScreen(field, in: look.rect))
     }
@@ -1477,7 +1504,9 @@ extension AppModel {
             // 189 (N32, Echo 189, 11-27 12:58–12:59 首爾: https://www.baidu.com, opened and read, came again as
             // 「…baiau.com」 then 「…bardu.com」 — read differently each time — and was opened again and answered twice): a
             // link of this chat read in the last 30 minutes, give or take two letters, is not opened again
-            if kind == .link, let key = XiaoLanMediaFind.linkKey(m.text) {
+            // 202 (Echo 201 11-28 21:15: a 公众号 card read again 13 minutes on, reported twice): a card by its title too
+            if kind == .link, let key = XiaoLanMediaFind.linkKey(m.text)
+                ?? XiaoLanMediaFind.cardTitle(m.text).map({ "card" + XiaoLanGroups.bare($0) }) {
                 let chatKey = "\(app.rawValue)|\(name)"
                 let recent = (state.linksSeen[chatKey] ?? []).filter { t - $0.at < 1800 }
                 if recent.contains(where: { XiaoLanMediaFind.sameLink($0.key, key) }) {
@@ -1558,6 +1587,7 @@ extension AppModel {
             link.finish(order, ok: false, reason: "\(order.app == .wework ? "企业微信" : "微信")在 iPad 上已登出（扫码登录页），没有执行：请先重新登录")
             return
         }
+        await paneDismissNotice(order.app, &state)  // 202
         if order.type == ChatToolLink.deleteChat {  // 174
             watchStatus = "删除会话 \(order.chat)…"
             let done = await paneDelete(order.chat, app: order.app, &state)
@@ -1783,6 +1813,11 @@ extension AppModel {
         }
         // 187 (Echo 186, 11-27 00:33 首爾: three replies for 测试群 typed into 企微测试群's sheet over it, sent from WeChat):
         // a sheet of another chat over this one: its field is the other chat's. Closed by its ✕; nothing typed.
+        if let spx = WatchOCR.Pixels(look.crop), XiaoLanPanes.sheetClose(spx) != nil, let cancel = XiaoLanPanes.actionSheetCancel(low) {
+            DebugLog.write("watch: \(app.rawValue): a sheet asking to delete or recall over \(chat); its 取消 clicked, not sent")
+            _ = await paneTap(cancel, in: look.rect, wide: 0.1, tall: 0.012)
+            return (false, "\(appName)的「\(chat)」上有删除／撤回的确认框（已点取消），这次没有发", nil)
+        }
         if let spx = WatchOCR.Pixels(look.crop), let close = XiaoLanPanes.sheetClose(spx) {
             DebugLog.write("watch: \(app.rawValue): another chat open over \(chat) as a sheet; closed by its ✕, not sent")
             _ = await paneSeenTap(XiaoLanPanes.onScreen(close, in: look.rect), half: (0.015, 0.012))
@@ -1832,7 +1867,16 @@ extension AppModel {
             // it; "the field above the keyboard" was a message bubble, clicked twice; a voice note, a picture or a link
             // there would have played or opened): a system keyboard over this window is put down first (switched to
             // 小藍, which puts itself down), then the field at the bottom is clicked as ever. Not down: nothing clicked.
-            if keys != nil, !CandidatePicker.ourKeyboardShown(rows: low) {
+            // 202 (Echo 201 11-28 21:12: iOS's 拼音 keyboard — candidates over QWERTY — not told by keyboardTop: 「no keyboard」, a
+            // white bubble mid-chat taken for the field, nothing sent): a keyboard on the whole screen, not 小藍's, is
+            // taken for a system one here and put down as one
+            var systemUp = keys != nil
+            if !systemUp, !CandidatePicker.ourKeyboardShown(rows: low), !keyboardBridge.onScreen(),
+               let frame = feed.frame, await CandidatePicker.keyboardUpOffMain(in: frame) {
+                DebugLog.write("watch: \(app.rawValue): a keyboard on the screen not told on \(chat)'s window; taken for a system one")
+                systemUp = true
+            }
+            if systemUp, !CandidatePicker.ourKeyboardShown(rows: low) {
                 DebugLog.write("watch: \(app.rawValue): a system keyboard over \(chat); switched to 小藍 and put down first")
                 if await showLanAgentKeyboard(), await keyboardBridge.type("", enter: false, within: 2, dismiss: true),
                    await smallKeyboard(up: false, within: 1.5),
@@ -1857,13 +1901,24 @@ extension AppModel {
             // hand — the field's taps brought no keyboard and every message after failed): the panel closed first by its
             // ＋ clicked again (tried 11-28 18:33: the panel went, 小藍's keyboard came back; a bare spot of the chat may be
             // the panel's own tile, an avatar or a picture), the window looked at again
-            if XiaoLanGroups.plusPanel(low), let bar = WatchOCR.Pixels(look.crop).flatMap({ XiaoLanPanes.inputField($0) }) {
-                DebugLog.write("watch: \(app.rawValue): the ＋ panel open over \(chat); its ＋ clicked again to close it")
+            // 202 (Echo 201 11-28 21:27: the panel's lower row of white tiles taken for the bar — 收藏, then 礼物, then
+            // 永恒玫瑰 in the gift list pressed, a 微信小店 page opened): the bar looked for above the panel only; not
+            // found, or the panel still there after its ＋, nothing more is clicked
+            if let top = XiaoLanGroups.plusPanelTop(low) {
+                guard let bar = WatchOCR.Pixels(look.crop).flatMap({ XiaoLanGroups.barOverPanel($0, top: top) }) else {
+                    DebugLog.write("watch: \(app.rawValue): the ＋ panel open over \(chat), no bar found over it; nothing clicked")
+                    return (false, "\(appName)的＋面板开着，没找到它上面的输入栏（没有点）", nil)
+                }
+                DebugLog.write("watch: \(app.rawValue): the ＋ panel open over \(chat); its ＋ (bar at \(String(format: "%.3f", Double(bar.y)))) clicked again to close it")
                 _ = await paneTap(CGPoint(x: app == .wework ? 0.935 : 0.925, y: bar.y), in: look.rect, wide: 0.012, tall: 0.008)
                 await feed.settled(quiet: 0.3, least: 0.3, most: 1.5)
                 if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                     (look, low) = (again, again.rows)
                     keys = XiaoLanPanes.keyboardTop(low)
+                }
+                if XiaoLanGroups.plusPanel(low) {
+                    DebugLog.write("watch: \(app.rawValue): the ＋ panel still open over \(chat) after its ＋; nothing more clicked")
+                    return (false, "\(appName)的＋面板没关上，没有点输入框", nil)
                 }
             }
             guard let px = WatchOCR.Pixels(look.crop), var field = XiaoLanPanes.inputField(px, above: keys.map { $0 - 0.005 } ?? 1) else {
@@ -1883,6 +1938,11 @@ extension AppModel {
                 if keys2 != nil, !CandidatePicker.ourKeyboardShown(rows: again.rows) {
                     DebugLog.write("watch: \(app.rawValue): a system keyboard over \(chat) again before the field's click; not clicked")
                     return (false, "\(appName)的系统键盘又盖住了输入框，没有点", nil)
+                }
+                // 202: a ＋ panel come up meanwhile: its tiles are no field
+                if XiaoLanGroups.plusPanel(again.rows) {
+                    DebugLog.write("watch: \(app.rawValue): the ＋ panel over \(chat) before the field's click; not clicked")
+                    return (false, "\(appName)的＋面板开着（输入框下面是面板的图标），没有点", nil)
                 }
                 guard let f2 = XiaoLanPanes.inputField(px2, above: keys2.map { $0 - 0.005 } ?? 1) else { break }
                 if abs(Double(f2.y - field.y)) <= 0.01 { still = true; break }
@@ -2108,8 +2168,11 @@ extension AppModel {
         // 182: the pointer is seen on the row before the drag; not seen, it is found first and tried once more.
         for attempt in 0..<2 {
             do {
+                // 202 (Echo 201 11-28 22:18 and 22:33: WeCom's row did not slide for 14 sideways scrolls either way, nor for
+                // ones three times as big; tried by hand 22:45, the press and its quick arc left at once — WeChat's way
+                // since 186 — brought out 标为未读 / 不显示 / 删除): both apps by the drag
                 try await pointer.revealRowActions(Double(start.x), Double(start.y), room: Double(start.x - look.rect.minX) - 0.03,
-                                                   scroll: app == .wework)
+                                                   scroll: false)
                 break
             } catch {
                 if attempt == 0 {
@@ -2162,10 +2225,13 @@ extension AppModel {
     private func paneRetract(_ side: Int) async {
         guard let l = await paneLooks(side: side).first(where: { $0.side == side }) else { return }
         let rowButtons = ["标为未读", "標為未讀", "标记未读", "不显示", "不顯示", "删除", "刪除", "置顶", "置頂"]
-        guard l.rows.joined().contains(where: { p in p.box.midX > 0.5 && rowButtons.contains { p.text.contains($0) } }) else { return }
+        guard let shown = l.rows.joined().first(where: { p in p.box.midX > 0.5 && rowButtons.contains { p.text.contains($0) } }) else { return }
         let below = (XiaoLanPanes.entries(l.rows).map { Double($0.box.maxY) }.max() ?? 0.2) + 0.08
         guard below < 0.82 else {
-            DebugLog.write("watch: row buttons left out; no bare list under the rows to click")
+            // 202 (Echo 201 11-28 22:46, WeCom's list full to its foot: no bare list to click): the slid row's own left
+            // part clicked — with its buttons out a click on the row only puts them back (tried by hand, the chat not opened)
+            DebugLog.write("watch: row buttons left out; the slid row's left part clicked to put them back")
+            _ = await paneTap(CGPoint(x: 0.2, y: shown.box.midY), in: l.rect, wide: 0.05)
             return
         }
         DebugLog.write("watch: row buttons left out; a click under the rows puts them back")

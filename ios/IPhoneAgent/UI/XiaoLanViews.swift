@@ -156,6 +156,8 @@ struct XiaoLanHistory: View {
             } footer: {
                 Text("失敗或不明的指令會存一張當下畫面，在「檔案 › 我的 iPad › Echo › ledger」，檔名寫在那一行最後。同樣的建群、拉人、轉發 30 分鐘內不會重做；這類動作之間會隨機隔 45–120 秒。")
             }
+            // 202 (user 11-28: 「你要能記住你爬的東西」): what 爬樓 and 跟圈 read, kept
+            Section("爬樓／跟圈記下的（最新 40 則）") { lines(Array(ReadStore.lines(40).reversed())) }
             Section("個人微信") { lines(chat.history) }
             Section("企業微信") { lines(wework.history) }
         }

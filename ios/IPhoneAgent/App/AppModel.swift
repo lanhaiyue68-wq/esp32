@@ -157,6 +157,7 @@ import UIKit
                            screen: feed)
         pointer = made
         CommandChannel.padLocateY = { [weak made] in await made?.padFindY() }  // 162: iPad home, position unknown
+        CommandChannel.padAfterNudge = { [weak made] in await made?.padSeeAfterNudge() }  // 202: idle drift seen, not reckoned
         CommandChannel.padHomeVisual = { [weak made] in  // 174: iPad home, by looking; 175: why it failed
             guard let made else { return "Echo 的游标模块还没准备好" }
             return await made.padHome(toMiddle: Pointer.padHomeToMiddle)

@@ -163,6 +163,10 @@ extension AppModel {
             do { return .json(["reply": .str(try await board.commands.send(text("cmd")))]) }
             catch { return .json(["error": .str(error.localizedDescription)], status: 500) }
 
+        case ("GET", "/reads"):
+            // 202: what 爬樓 and 跟圈 read and kept (ReadStore), newest first
+            return .json(["lines": .arr(ReadStore.lines(300).map { JValue.str($0) })])
+
         case ("GET", "/ledger"):
             // 199: the 发送账 (OrderLedger), newest first
             return .json(["lines": .arr(OrderLedger.lines(200).map { JValue.str($0) })])

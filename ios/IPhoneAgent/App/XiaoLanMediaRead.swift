@@ -1129,7 +1129,7 @@ extension AppModel {
         // keyboard came up and long-pressed there — on the keyboard's paste key, the copied Douyin link went into the
         // field and the file was never opened): 小藍's keyboard on the screen now, it is put down and the line looked for
         // again, found before or not
-        if keyboardBridge.onScreen() || (media == nil && XiaoLanMediaFind.quoteSpot(look.rows, quote: quote) == nil
+        if keyboardBridge.onScreen() || (media == nil && XiaoLanMediaFind.quoteSpot(look.rows, quote: quote, px: WatchOCR.Pixels(look.crop)) == nil
             && CandidatePicker.ourKeyboardShown(rows: look.rows)) {
             DebugLog.write("watch: \(who): 小藍's keyboard up before the long press to quote; put down and the line looked for again (N72)")
             _ = await keyboardBridge.type("", enter: false, within: 1.5, dismiss: true)
@@ -1142,13 +1142,13 @@ extension AppModel {
                 media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
             }
         }
-        var found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)
+        var found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote, px: WatchOCR.Pixels(look.crop))
         if found == nil {  // 198: a chat just opened may still be moving: once more when it stops
             await feed.settled(quiet: 0.4, least: 0.3, most: 2.0)
             if let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) {
                 look = again
                 media = XiaoLanMediaFind.mediaQuoteSpot(look.rows, WatchOCR.Pixels(look.crop), quote: quote, fromEnd: fromEnd)
-                found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote)
+                found = media ?? XiaoLanMediaFind.quoteSpot(look.rows, quote: quote, px: WatchOCR.Pixels(look.crop))
             }
         }
         // 195 (N77): digits OCR gives no words now (a lone 「3」) found by others' bubbles read as digits

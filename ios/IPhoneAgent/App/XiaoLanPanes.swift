@@ -697,6 +697,20 @@ import UIKit
         return nil
     }
 
+    /// 202 (Echo 201 11-28 22:13: WeCom's 「此消息删除后将无法撤回 / 删除消息 / 撤回消息 / 取消」 — a long-press menu's 删除 hit by
+    /// the next click — taken for another chat's sheet and its 「✕」 spot clicked a dozen times, on the line over 删除消息):
+    /// a sheet of choices asking to delete, recall, clear, quit or dissolve: its 取消 (the lowest), nil for any other.
+    static func actionSheetCancel(_ rows: [[Piece]]) -> CGPoint? {
+        let ps = rows.joined()
+        guard let cancel = ps.filter({ ["取消", "Cancel"].contains($0.text.trimmingCharacters(in: .whitespaces)) && Double($0.box.midY) > 0.45 })
+            .max(by: { $0.box.midY < $1.box.midY }) else { return nil }
+        let asks = ["删除", "撤回", "清空", "退出", "解散", "举报", "投诉", "移除"]
+        guard ps.contains(where: { p in
+            Double(p.box.midY) > 0.4 && p.box.midY < cancel.box.midY && asks.contains { p.text.contains($0) }
+        }) else { return nil }
+        return CGPoint(x: cancel.box.midX, y: cancel.box.midY)
+    }
+
     /// Searching: the 取消 by the search field at the top (no chat has it there).
     static func cancelButton(_ rows: [[Piece]]) -> CGPoint? {
         let top = rows.joined().filter { $0.box.midY < 0.13 }

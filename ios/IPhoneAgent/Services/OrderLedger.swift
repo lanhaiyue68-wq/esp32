@@ -62,8 +62,12 @@ struct LedgerEntry: Codable, Equatable {
 
     /// An order's JSON with its keys sorted: the same order sent twice reads the same, whatever order its fields came in.
     nonisolated static func canonical(_ raw: String) -> String {
-        guard let obj = try? JSONSerialization.jsonObject(with: Data(raw.utf8)),
-              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
+        // 202 (Echo 201 11-28 22:31: the server puts each order's messageId inside it — 「{"type":218,…,"messageId":"b747…"}」
+        // in the ledger — so the same order under another number never had the same key, and 「the same risky order in 30
+        // minutes not done again」 never held): the number is no part of what the order is
+        guard var obj = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) else { return raw }
+        if var d = obj as? [String: Any] { d.removeValue(forKey: "messageId"); obj = d }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return raw }
         return text
     }

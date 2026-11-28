@@ -48,11 +48,57 @@ import UIKit
         ["照片", "拍摄", "位置", "文件", "个人名片", "收藏"].filter { find(rows, [$0], exact: true, band: 0.5...0.97) != nil }.count >= 2
     }
 
+    /// 202 (Echo 201 11-28 21:27, user: 「這個界面…點左上角那個返回啊，你這從哪進的？」: the ＋ panel left open over 蓝海乐,
+    /// its lower row of white tiles taken for the input field — 「its ＋ clicked again」 pressed 收藏, the field's tap 礼物,
+    /// its second tap 永恒玫瑰 in the gift list, a 微信小店 page opened in a narrower window of its own): the top of an
+    /// open ＋ panel (window fraction) — its highest label less its tile and a gap (h03: label 0.749, tile 0.672–0.729
+    /// of the screen, the window 0.873 tall: 0.088 of the window) — the input field looked for only above it; nil with
+    /// no panel open.
+    static func plusPanelTop(_ rows: [[Piece]]) -> Double? {
+        guard plusPanel(rows) else { return nil }
+        let labels = ["照片", "拍摄", "视频通话", "位置", "红包", "礼物", "转账", "收藏", "文件", "个人名片", "语音输入", "音乐", "卡券"]
+        return labels.compactMap { find(rows, [$0], exact: true, band: 0.5...0.97).map { Double($0.y) } }.min().map { $0 - 0.11 }
+    }
+
+    /// 202: the input bar over an open ＋ panel — found above the panel's top, and white across the window's middle (the
+    /// field is; a row of the panel's tiles is grey there, between its second and third tile), nil otherwise.
+    static func barOverPanel(_ px: WatchOCR.Pixels, top: Double) -> CGPoint? {
+        guard let bar = XiaoLanPanes.inputField(px, above: top) else { return nil }
+        let (r, g, b) = px.rgb(0.5, Double(bar.y))
+        return r >= 250 && g >= 250 && b >= 250 ? bar : nil
+    }
+
     /// 198 (Echo 198 11-28 18:13, user: 「你點的是『照片』那兩個字，不是那個圖標，應該點上面的圖標才對」: the label opens
     /// nothing, and 红包's tile is right under it): a ＋ panel item's tile over its label, its middle 0.054 of the window
     /// higher (WeChat 11-28 h03: label 0.749, tile 0.672–0.729 of the screen, the window 0.873 tall; clicked there, the
     /// album opened).
     static func panelTile(_ label: CGPoint) -> CGPoint { CGPoint(x: label.x, y: label.y - 0.054) }
+
+    /// 202 (Echo 201 11-28: a sideways drag on the ＋ panel turned nothing and narrowed WeChat's window, twice): the
+    /// panel's page dots, left to right (window fractions) — small grey dots on its light grey (246) at the window's foot
+    /// (measured 11-28 h03c: 0.477 and 0.520 across, 0.985 down); a page is turned by clicking its dot, never by a drag.
+    static func pageDots(_ px: WatchOCR.Pixels) -> [CGPoint] {
+        var xs: [Double] = [], ys: [Double] = []
+        for y in stride(from: 0.94, through: 0.995, by: 0.002) {
+            for x in stride(from: 0.35, through: 0.65, by: 0.003) {
+                let (r, g, b) = px.rgb(x, y)
+                let v = (r + g + b) / 3
+                if v < 225, v > 60, max(r, g, b) - min(r, g, b) <= 12 { xs.append(x); ys.append(y) }
+            }
+        }
+        guard !xs.isEmpty else { return [] }
+        // clusters along x, a gap over 0.012 apart; a dot is 0.01–0.035 wide
+        let pts = zip(xs, ys).sorted { $0.0 < $1.0 }
+        var groups: [[(Double, Double)]] = []
+        for p in pts {
+            if let last = groups.last?.last, p.0 - last.0 <= 0.012 { groups[groups.count - 1].append(p) } else { groups.append([p]) }
+        }
+        return groups.compactMap { g -> CGPoint? in
+            guard let lo = g.map({ $0.0 }).min(), let hi = g.map({ $0.0 }).max(), hi - lo <= 0.035, g.count >= 3 else { return nil }
+            let cx = g.map { $0.0 }.reduce(0, +) / Double(g.count), cy = g.map { $0.1 }.reduce(0, +) / Double(g.count)
+            return CGPoint(x: cx, y: cy)
+        }
+    }
 
     /// 198 (218): iOS's file picker (its tabs 最近项目 and 浏览 at its foot on every page).
     static func filePicker(_ rows: [[Piece]]) -> Bool {
@@ -153,7 +199,11 @@ import UIKit
         }
         func read(_ b: [Piece]) -> String { XiaoLanSelf.plain(b.map(\.text).joined()) }
         // the exact one first: a newer one a slip away is another message
-        guard let b = bubbles.last(where: { read($0) == target }) ?? bubbles.last(where: { near(read($0), target) }) else { return nil }
+        // 202 (Echo 201 11-28 20:48: 「…X2：这句要转」 read, its second line 「发到测试群」 not): last, a bubble read short — its
+        // words the target's start, 8 characters and half of it at least
+        func cut(_ r: String) -> Bool { r.count >= max(8, target.count / 2) && target.hasPrefix(r) }
+        guard let b = bubbles.last(where: { read($0) == target }) ?? bubbles.last(where: { near(read($0), target) })
+            ?? bubbles.last(where: { cut(read($0)) }) else { return nil }
         return CGPoint(x: b[0].box.midX, y: b[0].box.midY)
     }
 
@@ -190,6 +240,15 @@ import UIKit
             .map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
     }
 
+    /// 202 (Echo 201 11-28 20:55: WeCom's 「和微信联系人聊天，你可以撤回2分钟内发送的消息 / 我知道了」 left up after a 撤回, the six
+    /// WeCom orders after it all failed under it; user: 「你要點知道了嘛。要會點啦」): a notice's 「我知道了」/「知道了」 button —
+    /// alone in its piece, across the window's middle (a chat's 「知道了」 bubble is at a side) — nil when none shows.
+    static func gotIt(_ rows: [[Piece]]) -> CGPoint? {
+        rows.joined().first { p in
+            ["我知道了", "知道了"].contains(bare(p.text)) && (0.15...0.92).contains(Double(p.box.midY)) && (0.3...0.7).contains(Double(p.box.midX))
+        }.map { CGPoint(x: $0.box.midX, y: $0.box.midY) }
+    }
+
     static func keyboardFloor(_ rows: [[Piece]]) -> Double {
         let bar = rows.joined().filter { p in ["已填入", "输入法", "輸入法"].contains { p.text.contains($0) } }.map { Double($0.box.minY) }.min()
         return min(bar ?? 1, XiaoLanPanes.keyboardTop(rows) ?? 1, 1)
@@ -213,6 +272,17 @@ import UIKit
     }
 
     /// One name as a picker shows it: spaces, 「@微信」 and 「外部」 dropped (XiaoLanPanes.listName).
+    /// 202 (follow): a private chat's 聊天详情 — the friend's name under the avatar (0.1–0.3 down): the same name, or one
+    /// read with a mark more or less (「蓝海乐」 as 「蓝海乐.」, 「蓝海」); nil when not there.
+    static func memberName(_ rows: [[Piece]], _ friend: String) -> Piece? {
+        let ps = rows.joined().filter { (0.1...0.3).contains(Double($0.box.midY)) }
+        let b = bare(friend)
+        return ps.first { sameMember($0.text, friend) } ?? ps.first { p in
+            let a = XiaoLanPanes.listName(p.text)
+            return a.count >= 2 && abs(a.count - b.count) <= 1 && (a.contains(b) || b.contains(a))
+        }
+    }
+
     static func sameMember(_ shown: String, _ name: String) -> Bool {
         let a = XiaoLanPanes.listName(shown), b = bare(name)
         return !a.isEmpty && WatchReport.sameName(a, b)
@@ -675,6 +745,51 @@ extension AppModel {
         return (open, "")
     }
 
+    /// 202 (Echo 201 11-28 20:55: a notice left up on WeCom's window failed every WeCom order after it; 22:13: a menu
+    /// left up, then a sheet asking to delete): before an order, the app's window cleared of a notice (its 「我知道了」),
+    /// a sheet asking to delete or recall (its 取消) and a long-press menu. True when anything was.
+    @discardableResult func paneDismissNotice(_ app: XiaoLanOrders.App, _ state: inout PaneWatchState) async -> Bool {
+        guard let l = await paneFind(app, &state) else { return false }
+        if let ok = XiaoLanGroups.gotIt(l.rows) {
+            DebugLog.write("watch: \(app.rawValue): a notice (「我知道了」) up on its window before an order; clicked away first")
+            return await groupStep(l, ok, "我知道了", wide: 0.05, tall: 0.01, until: { XiaoLanGroups.gotIt($0.rows) == nil }) != nil
+        }
+        if let px = WatchOCR.Pixels(l.crop), XiaoLanPanes.sheetClose(px) != nil, let cancel = XiaoLanPanes.actionSheetCancel(l.rows) {
+            DebugLog.write("watch: \(app.rawValue): a sheet asking to delete or recall up before an order; its 取消 clicked")
+            return await groupStep(l, cancel, "取消 (a sheet asking to delete)", wide: 0.1, tall: 0.012,
+                                   until: { XiaoLanPanes.actionSheetCancel($0.rows) == nil }) != nil
+        }
+        if XiaoLanMediaFind.menuBand(l.rows) != nil {
+            DebugLog.write("watch: \(app.rawValue): a long-press menu up before an order; closed first")
+            return await paneCloseMenu(l)
+        }
+        return false
+    }
+
+    /// 202 (Echo 201 11-28 22:13: a long-press menu left up — its close by the title bar refused, the pointer not seen up
+    /// there — and the watch's next click, to open a picture, landed on its 删除: 「此消息删除后将无法撤回」 came up): a menu
+    /// up is closed by the title bar, else by the input field (a click outside a menu only closes it; one on the field
+    /// brings a keyboard at most) — never by a spot of the chat, where a picture or a card may be. True: gone.
+    @discardableResult func paneCloseMenu(_ l: PaneLook) async -> Bool {
+        var look = l
+        for step in 0..<2 {
+            guard XiaoLanMediaFind.menuBand(look.rows) != nil else { return true }
+            if step == 0 {
+                _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: look.rect, wide: 0.1, tall: 0.01)
+            } else {
+                guard let px = WatchOCR.Pixels(look.crop), let field = XiaoLanPanes.inputField(px), Double(field.y) >= 0.8 else { break }
+                DebugLog.write("watch: a long-press menu still up; closed by a click on the input field")
+                _ = await paneTap(field, in: look.rect, wide: 0.05, tall: 0.008)
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let again = await paneLooks(after: now(), side: look.side).first(where: { $0.side == look.side }) else { break }
+            look = again
+        }
+        let gone = XiaoLanMediaFind.menuBand(look.rows) == nil
+        if !gone { DebugLog.write("watch: a long-press menu still up after two closes") }
+        return gone
+    }
+
     /// From a group's chat to its page (•••).
     private func groupInfo(_ chat: PaneLook, _ app: XiaoLanOrders.App) async -> PaneLook? {
         // 197 (N93, Echo 197 11-28: WeChat's ＋ clicked 0.012 off its middle, beside the icon): these icons ±0.0095 across
@@ -968,17 +1083,37 @@ extension AppModel {
         guard let line = found else {
             return (false, "聊天里没看到我发的这条（「\(order.quote.prefix(20))」），没有撤回")
         }
-        let pressed = await groupMenuItem(chat, line, "撤回")
-        guard let menu = pressed.menu, let item = pressed.item else {
-            return (false, pressed.why.isEmpty ? "长按菜单里没有「撤回」（超过撤回时间，或不是我发的），没有撤回" : pressed.why)
-        }
-        guard let after = await groupStep(menu, item, "撤回", wide: 0.04, tall: 0.01, until: { l in
-            XiaoLanGroups.recalledCount(l.rows) > before || XiaoLanGroups.recallConfirm(l.rows) != nil
-        }) else { return (false, OrderOutcome.unknownMark + "点了「撤回」，没看到已撤回") }
-        if let yes = XiaoLanGroups.recallConfirm(after.rows), XiaoLanGroups.recalledCount(after.rows) <= before {
-            guard await groupStep(after, yes, "撤回 confirmed", wide: 0.06, tall: 0.012, until: { XiaoLanGroups.recalledCount($0.rows) > before }) != nil else {
-                return (false, OrderOutcome.unknownMark + "确认撤回后没看到「你撤回了一条消息」")
+        // 202 (Echo 201 11-28 20:55, WeCom, the line sent at 20:54: 撤回 answered by 「和微信联系人聊天，你可以撤回2分钟内发送的
+        // 消息 / 我知道了」, left up; user: 「你要點知道了嘛」): 我知道了 clicked; not recalled under it, 撤回 once more; the notice
+        // again: over the 2 minutes, not recalled
+        var (onChat, at) = (chat, line)
+        for round in 0..<2 {
+            let pressed = await groupMenuItem(onChat, at, "撤回", refind: { XiaoLanGroups.mineLine($0.rows, want, WatchOCR.Pixels($0.crop)) })
+            guard let menu = pressed.menu, let item = pressed.item else {
+                if round == 1 { return (false, "关掉「我知道了」提示后长按菜单里没有「撤回」了（超过撤回时间），没有撤回") }
+                return (false, pressed.why.isEmpty ? "长按菜单里没有「撤回」（超过撤回时间，或不是我发的），没有撤回" : pressed.why)
             }
+            guard let after = await groupStep(menu, item, "撤回", wide: 0.04, tall: 0.01, until: { l in
+                XiaoLanGroups.recalledCount(l.rows) > before || XiaoLanGroups.recallConfirm(l.rows) != nil || XiaoLanGroups.gotIt(l.rows) != nil
+            }) else { return (false, OrderOutcome.unknownMark + "点了「撤回」，没看到已撤回") }
+            if let ok = XiaoLanGroups.gotIt(after.rows), XiaoLanGroups.recalledCount(after.rows) <= before {
+                DebugLog.write("watch: \(app.rawValue): \(order.chat): 撤回 answered by a notice (「我知道了」); clicked away")
+                guard let shut = await groupStep(after, ok, "我知道了", wide: 0.05, tall: 0.01, until: { XiaoLanGroups.gotIt($0.rows) == nil }) else {
+                    return (false, "撤回后弹出「我知道了」提示框，没能关掉")
+                }
+                if XiaoLanGroups.recalledCount(shut.rows) > before { break }
+                guard round == 0, let again = XiaoLanGroups.mineLine(shut.rows, want, WatchOCR.Pixels(shut.crop)) else {
+                    return (false, "超过撤回时间：和微信联系人只能撤回2分钟内发的消息，没有撤回（已点「我知道了」）")
+                }
+                (onChat, at) = (shut, again)
+                continue
+            }
+            if let yes = XiaoLanGroups.recallConfirm(after.rows), XiaoLanGroups.recalledCount(after.rows) <= before {
+                guard await groupStep(after, yes, "撤回 confirmed", wide: 0.06, tall: 0.012, until: { XiaoLanGroups.recalledCount($0.rows) > before }) != nil else {
+                    return (false, OrderOutcome.unknownMark + "确认撤回后没看到「你撤回了一条消息」")
+                }
+            }
+            break
         }
         DebugLog.write("watch: \(app.rawValue): \(order.chat): 「\(order.quote.prefix(20))」 recalled")
         return (true, "")
@@ -1008,7 +1143,9 @@ extension AppModel {
             chat = await groupSettled(chat)
         }
         func spot(_ l: PaneLook) -> CGPoint? {
-            XiaoLanMediaFind.quoteSpot(l.rows, quote: order.quote) ?? XiaoLanGroups.mineLine(l.rows, order.quote, WatchOCR.Pixels(l.crop))
+            // 202: my own message by its bubble first, then by its words off the grey (never a quote box's)
+            XiaoLanGroups.mineLine(l.rows, order.quote, WatchOCR.Pixels(l.crop))
+                ?? XiaoLanMediaFind.quoteSpot(l.rows, quote: order.quote, px: WatchOCR.Pixels(l.crop))
         }
         var found = spot(chat)
         if found == nil {  // 198: the chat may still be moving (just opened, a keyboard going): once more when it stops
@@ -1018,7 +1155,7 @@ extension AppModel {
         guard let line = found else {
             return (false, "聊天里没看到要转发的这条（「\(order.quote.prefix(20))」）")
         }
-        let pressed = await groupMenuItem(chat, line, "转发")
+        let pressed = await groupMenuItem(chat, line, "转发", refind: spot)
         guard let menu = pressed.menu, let item = pressed.item else {
             return (false, pressed.why.isEmpty ? "长按菜单里没有「转发」" : pressed.why)
         }
@@ -1079,26 +1216,44 @@ extension AppModel {
     /// 198 (226/205): the message at `line` (window fractions) long-pressed and `word` found in its menu
     /// (menuItemLoose), read again 0.6 s later when not (the menu still drawing); not found, the words of the menu's band
     /// logged and the menu closed by the title bar. `why` says what else went wrong.
-    private func groupMenuItem(_ chat: PaneLook, _ line: CGPoint, _ word: String) async -> (menu: PaneLook?, item: CGPoint?, why: String) {
-        let s = XiaoLanPanes.onScreen(line, in: chat.rect)
-        pointer.aimLoosely(0.04 * Double(chat.rect.width), 0.012)
-        do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
-            return (nil, nil, "长按没有成功：\(error.localizedDescription)")
-        }
-        try? await Task.sleep(nanoseconds: 500_000_000)
+    private func groupMenuItem(_ chat: PaneLook, _ line: CGPoint, _ word: String,
+                               refind: ((PaneLook) -> CGPoint?)? = nil) async -> (menu: PaneLook?, item: CGPoint?, why: String) {
+        var (window, spot) = (chat, line)
         var last: PaneLook?
-        for attempt in 0..<2 {
-            if attempt > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
-            guard let menu = await paneLooks(after: now(), side: chat.side).first(where: { $0.side == chat.side }) else { continue }
-            last = menu
-            if let band = XiaoLanMediaFind.menuBand(menu.rows), let item = XiaoLanMediaFind.menuItemLoose(menu.rows, word, in: band) {
-                return (menu, item, "")
+        for press in 0..<2 {
+            let s = XiaoLanPanes.onScreen(spot, in: window.rect)
+            pointer.aimLoosely(0.04 * Double(window.rect.width), 0.012)
+            do { try await pointer.longPress(Double(s.x), Double(s.y), seconds: 0.8) } catch {
+                return (nil, nil, "长按没有成功：\(error.localizedDescription)")
             }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            var menuSeen = false
+            for attempt in 0..<2 {
+                if attempt > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
+                guard let menu = await paneLooks(after: now(), side: window.side).first(where: { $0.side == window.side }) else { continue }
+                last = menu
+                guard let band = XiaoLanMediaFind.menuBand(menu.rows) else { continue }
+                menuSeen = true
+                if let item = XiaoLanMediaFind.menuItemLoose(menu.rows, word, in: band) { return (menu, item, "") }
+            }
+            // 202 (Echo 201 11-28 20:47: the line pressed where it was read as the chat still moved — no menu at all): the
+            // window once it stops, the line found again there and pressed once more
+            guard !menuSeen, press == 0, let refind else { break }
+            let settled = await groupSettled(window)
+            guard let again = refind(settled) else { break }
+            DebugLog.write("watch: no menu after the long press; the line found again and pressed once more")
+            (window, spot) = (settled, again)
         }
         guard let menu = last else { return (nil, nil, "长按后没看到窗口") }
         let read = XiaoLanMediaFind.menuBand(menu.rows).map { XiaoLanMediaFind.menuWordsRead(menu.rows, in: $0) } ?? "no menu"
         DebugLog.write("watch: 「\(word)」 not in the menu; read there: \(read)")
-        _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)  // nothing on the title bar opens
+        // 202 (Echo 201 11-28 22:13: the title bar's click refused — the pointer not seen up there — the menu left up, the
+        // watch's next click landing on its 删除): a menu seen is closed and looked at till gone (paneCloseMenu)
+        if XiaoLanMediaFind.menuBand(menu.rows) != nil {
+            _ = await paneCloseMenu(menu)
+        } else {
+            _ = await paneTap(CGPoint(x: 0.5, y: 0.055), in: menu.rect, wide: 0.1, tall: 0.01)  // nothing on the title bar opens
+        }
         return (menu, nil, "")
     }
 
@@ -1153,10 +1308,22 @@ extension AppModel {
             if !keyboard { chat = await groupSettled(chat) }
         }
         guard XiaoLanPanes.keyboardTop(chat.rows) == nil else { return (false, "键盘盖住了输入栏，没能收起来") }
-        guard let px = WatchOCR.Pixels(chat.crop), let field = XiaoLanPanes.inputField(px) else { return (false, "没找到输入栏") }
+        // 202: with the ＋ panel already open (a send before left it), the bar above it, and the panel used as it is — its
+        // ＋ clicked would close it, and the panel's white tiles are no field
+        let panelTop = XiaoLanGroups.plusPanelTop(chat.rows)
+        guard let px = WatchOCR.Pixels(chat.crop),
+              let field = panelTop.flatMap({ XiaoLanGroups.barOverPanel(px, top: $0) }) ?? (panelTop == nil ? XiaoLanPanes.inputField(px) : nil) else {
+            return (false, "没找到输入栏")
+        }
         // ＋ at the bar's right end (measured: WeChat 0.925, WeCom 0.935 of the window); its panel must show, else nothing more
         let plusAt = CGPoint(x: app == .wework ? 0.935 : 0.925, y: field.y)
-        guard var panel = await groupStep(chat, plusAt, "＋ (input bar)", wide: 0.025, tall: 0.012, until: { XiaoLanGroups.plusPanel($0.rows) }) else {
+        var shown: PaneLook? = chat
+        if panelTop == nil {
+            shown = await groupStep(chat, plusAt, "＋ (input bar)", wide: 0.025, tall: 0.012, until: { XiaoLanGroups.plusPanel($0.rows) })
+        } else {
+            DebugLog.write("watch: \(app.rawValue): \(order.chat): the ＋ panel already open; used as it is")
+        }
+        guard var panel = shown else {
             return (false, "输入栏的＋没点开")
         }
         if kind == .photos {  // a picture or a video: 照片, page 1
@@ -1165,8 +1332,13 @@ extension AppModel {
             return r
         }
         if XiaoLanGroups.find(panel.rows, ["文件"], exact: true, band: 0.5...0.97) == nil,
-           let row = XiaoLanGroups.find(panel.rows, ["照片", "拍摄"], exact: true, band: 0.5...0.97) {
-            await groupDrag(panel, from: CGPoint(x: 0.8, y: row.y), to: CGPoint(x: 0.25, y: row.y))
+           XiaoLanGroups.find(panel.rows, ["照片", "拍摄"], exact: true, band: 0.5...0.97) != nil {
+            // 202 (Echo 201 11-28 21:03 and 21:15: the panel dragged sideways in one quick stroke never turned, and WeChat's
+            // window came out narrower both times, the pointer left on 红包): no drag — its page dot clicked
+            guard let next = WatchOCR.Pixels(panel.crop).map({ XiaoLanGroups.pageDots($0) })?.last else {
+                return (false, "＋面板的翻页点没找到，没有拖动（免得拉动窗口），没有发")
+            }
+            _ = await paneTap(next, in: panel.rect, wide: 0.008, tall: 0.006)
             panel = await groupSettled(panel)
         }
         guard let fileItem = XiaoLanGroups.find(panel.rows, ["文件"], exact: true, band: 0.5...0.97) else { return (false, "＋面板里没找到「文件」") }
@@ -1227,8 +1399,12 @@ extension AppModel {
     private func sendNewestPhoto(_ panel: PaneLook, _ app: XiaoLanOrders.App) async -> (ok: Bool, why: String) {
         var p = panel
         if XiaoLanGroups.find(p.rows, ["照片"], exact: true, band: 0.5...0.97) == nil,
-           let row = XiaoLanGroups.find(p.rows, ["文件", "个人名片"], exact: true, band: 0.5...0.97) {
-            await groupDrag(p, from: CGPoint(x: 0.25, y: row.y), to: CGPoint(x: 0.8, y: row.y))
+           XiaoLanGroups.find(p.rows, ["文件", "个人名片"], exact: true, band: 0.5...0.97) != nil {
+            // 202: back to page 1 by its dot, no drag (as page 2 above)
+            guard let first = WatchOCR.Pixels(p.crop).map({ XiaoLanGroups.pageDots($0) })?.first else {
+                return (false, "＋面板的翻页点没找到，没有拖动（免得拉动窗口），没有发")
+            }
+            _ = await paneTap(first, in: p.rect, wide: 0.008, tall: 0.006)
             p = await groupSettled(p)
         }
         guard let photos = XiaoLanGroups.find(p.rows, ["照片"], exact: true, band: 0.5...0.97),
@@ -1291,11 +1467,22 @@ extension AppModel {
                             _ state: inout PaneWatchState) async -> (entries: [[String: Any]]?, why: String) {
         let opened = await groupOpen(.wechat, friend, exact: false, &state)
         guard let chat = opened.look else { return (nil, opened.why) }
-        guard let details = await groupStep(chat, XiaoLanGroups.more(.wechat), "聊天详情 (•••)", wide: 0.02, tall: 0.008,
+        guard var details = await groupStep(chat, XiaoLanGroups.more(.wechat), "聊天详情 (•••)", wide: 0.02, tall: 0.008,
                                             until: { XiaoLanGroups.find($0.rows, ["聊天详情", "聊天詳情"], band: 0...0.09) != nil }) else {
             return (nil, "「\(friend)」的聊天详情没有打开")
         }
-        guard let name = details.rows.joined().first(where: { (0.1...0.3).contains(Double($0.box.midY)) && XiaoLanGroups.sameMember($0.text, friend) }) else {
+        // 202 (Echo 201 11-28 21:53 and 22:05: 「聊天详情里找不到「蓝海乐」的头像」 twice, the page showing it under its avatar,
+        // read whole on the screen at 0.160): the name once more when the page has stopped (its members come after its
+        // title), a mark more or less read still the name; not found, what was read there is written down
+        var name = XiaoLanGroups.memberName(details.rows, friend)
+        if name == nil {
+            details = await groupSettled(details)
+            name = XiaoLanGroups.memberName(details.rows, friend)
+        }
+        guard let name else {
+            let read = details.rows.joined().filter { (0.08...0.32).contains(Double($0.box.midY)) }
+                .map { String(format: "%@@%.3f", $0.text, Double($0.box.midY)) }
+            DebugLog.write("watch: follow: 「\(friend)」 not on 聊天详情; read there: \(read.joined(separator: " | "))")
             return (nil, "聊天详情里找不到「\(friend)」的头像")
         }
         guard let profile = await groupStep(details, CGPoint(x: name.box.midX, y: name.box.midY - 0.048), "「\(friend)」's profile",
@@ -1373,6 +1560,13 @@ extension AppModel {
             album = next
         }
         if !newest.isEmpty { PaneMarks.setFollow(friend, newest) }
+        // 202 (user 11-28: 「你要能記住你爬的東西」): each post kept on the iPad too, once
+        ReadStore.add(entries.compactMap { e -> ReadItem? in
+            guard let fp = e["fp"] as? String else { return nil }
+            let words = e["text"] as? String ?? "", said = words.isEmpty ? (e["summary"] as? String ?? "") : words
+            return ReadItem(kind: "跟圈", app: "wechat", place: friend, key: fp, readAt: Date().timeIntervalSince1970,
+                            time: e["time"] as? String ?? "", sender: friend, text: said)
+        })
         DebugLog.write("watch: 跟圈: \(entries.count) post(s) of \(friend); \(why)")
         return (entries, why)
     }
@@ -1435,6 +1629,14 @@ extension AppModel {
             var lines = WatchOCR.screen(look.crop, title: title, rows: look.rows)?.lines ?? []
             func when(_ l: WatchReport.Line) -> Date? { l.y.flatMap { y in labels.last(where: { $0.1 < y })?.0 } }
             if i == 0 { newest = lines.suffix(3).map { $0.sender + "\u{2}" + $0.text } }
+            // 202 (Echo 201 11-28 21:07: 「息」 and 「什么需要？」 — bubbles cut by the window's top or by the input bar — kept as
+            // lines of their own): with a screen above still to come, a line at the very top is left for it (read whole
+            // there); after the first screen, a line low by the input bar was read whole on the screen before
+            let more = i < screens - 1
+            lines = lines.filter { l in
+                guard let y = l.y else { return true }
+                return !(more && y < 0.12) && !(i > 0 && y > 0.86)
+            }
             var stop = false
             if let since {
                 let kept = lines.filter { l in (when(l).map { $0 >= since }) ?? true }
@@ -1470,7 +1672,13 @@ extension AppModel {
                                         "time": times[l.sender + "\u{2}" + l.text] ?? ""]
                                    }]
         (app == .wework ? weworkTool : chatTool).deliver(bean, for: order)
-        DebugLog.write("watch: 爬楼 \(chat) (\(app.rawValue)): \(lines.count) line(s), \(pages.count) screen(s); \(why)")
+        // 202 (user 11-28: 「你要能記住你爬的東西」): kept on the iPad too, each line once
+        let kept = ReadStore.add(lines.map { l in
+            let who = l.mine ? "我" : l.sender, time = times[l.sender + "\u{2}" + l.text] ?? ""
+            return ReadItem(kind: "爬楼", app: app.rawValue, place: chat, key: who + "\u{2}" + XiaoLanGroups.bare(l.text) + "\u{2}" + time,
+                            readAt: Date().timeIntervalSince1970, time: time, sender: who, text: l.text)
+        })
+        DebugLog.write("watch: 爬楼 \(chat) (\(app.rawValue)): \(lines.count) line(s), \(pages.count) screen(s); \(why); \(kept) new kept")
         _ = await groupList(app, &state)
         return (true, "")
     }

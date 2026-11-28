@@ -47,7 +47,7 @@ import UIKit
     /// 5–8 % bow comes no shorter), so it lands where the move asked; still a visible bow.
     func testPadCurveAimsAgainstItsBow() throws {
         let span = (w: 5854, h: 7626)
-        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }  // side +1, bow 6.5 %
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }  // side +1, bow 13 % (202)
         let by = (-492, 2135), from = (1200, 2000)
         let s = try XCTUnwrap(PadCurve.stroke(from: from, by: by, span: span, random: mid))
         let v = s.split(separator: " ").dropFirst().compactMap { Int($0) }
@@ -59,8 +59,8 @@ import UIKit
         }
         let across = Double(end.0 - by.0) * n.x + Double(end.1 - by.1) * n.y
         let along = (Double(end.0 - by.0) * Double(by.0) + Double(end.1 - by.1) * Double(by.1)) / len
-        XCTAssertGreaterThan(bow, len * 0.035, "a bow that shows")
-        XCTAssertEqual(across, -0.10 * 0.065 * len, accuracy: 3, "back against the bow by 0.10 of it")
+        XCTAssertGreaterThan(bow, len * 0.07, "a bow that shows")
+        XCTAssertEqual(across, -0.10 * 0.13 * len, accuracy: 3, "back against the bow by 0.10 of it")
         XCTAssertEqual(along, 0, accuracy: 3, "no further: a small bow comes no shorter")
     }
 

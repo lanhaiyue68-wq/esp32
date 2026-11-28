@@ -162,6 +162,23 @@ import Foundation
         return Self.arrowBefore(before, after, near: CGPoint(x: 0.5, y: 0.5), nudge: nudge, window: 0.5)
     }
 
+    /// 202 (CommandChannel.padAfterNudge): after an idle nudge, the red pointer looked for near where it is reckoned and,
+    /// seen, taken as where it is — only while no command has been sent since the look began. Not seen: as before.
+    func padSeeAfterNudge() async {
+        guard CommandChannel.onPad(), let screen, screen.live, let pos = CommandChannel.padPos else { return }
+        let sends = CommandChannel.padSends
+        await screen.settled(quiet: 0.15, least: 0.2, most: 0.8)
+        let s = CommandChannel.padSpan
+        let near = CGPoint(x: Double(pos.x) / Double(max(1, s.w)), y: Double(pos.y) / Double(max(1, s.h)))
+        guard let frame = screen.frame, let seen = Vision.seenPointer(frame, near: near, window: 0.2),
+              CommandChannel.padSends == sends else { return }
+        if hypot(Double(seen.x - near.x), Double(seen.y - near.y)) > 0.004 {
+            log(String(format: "idle nudge: pointer seen at (%.3f, %.3f), reckoned at (%.3f, %.3f); taken as seen",
+                       seen.x, seen.y, near.x, near.y))
+        }
+        Self.syncPad(seen)
+    }
+
     func padFindY() async -> Double? {
         func wiggle() async -> Double? {
             guard let screen, screen.live else { return nil }
@@ -1679,6 +1696,7 @@ import Foundation
             // walk of straight moves, kept for 134's iPhone Weather strip that one jump never moved)
             if points.count == 2, hold || quick, upDown || quick || CommandChannel.onPad(), strokeCommand != false, let from = pos {
                 var to = (dx(Double(points[1].x)), dy(Double(points[1].y)))
+                let asked = to
                 var deltas = Self.strokeDeltas(from: from, to: to, step: Self.swipeStrokeStep)
                 // 174: on an iPad a swipe goes as a thumb's, bending toward its own side (PadCurve.thumbEnd).
                 if CommandChannel.onPad(), let s = span,
@@ -1690,13 +1708,25 @@ import Foundation
                                Double(points[0].x), Double(points[0].y), Double(points[1].x), Double(points[1].y), e.x, e.y))
                     (to, thumbEnd) = (bent, CGPoint(x: e.x, y: e.y))
                 }
-                do {
-                    try await device.send("stroke " + deltas.map { "\($0.0) \($0.1)" }.joined(separator: " "))
-                    (pos, strokeCommand, stroked) = (to, true, true)
+                if CommandChannel.onPad(), hold, !quick, !upDown, thumbEnd != nil {
+                    // 202 (Echo 201 11-28 20:44: the ＋ panel's sideways drag went as one stroke in 0.29 s and the panel never
+                    // turned to its page 2; the old walk, 20 units a move at ~0.12 s each, turned it): a sideways drag walks
+                    // along its thumb's curve at the walk's pace — the path a Bezier curve, the pace a hand's
+                    for d in PadCurve.thumbPieces(from: from, toward: asked, end: to, step: Self.swipeStep) {
+                        try await device.send("move \(d.0) \(d.1)")
+                    }
+                    (pos, stroked) = (to, true)
                     strokedLine = true
                     moves += 1
-                } catch let e as DeviceError where e.message.contains("unknown command") {
-                    strokeCommand = false
+                } else {
+                    do {
+                        try await device.send("stroke " + deltas.map { "\($0.0) \($0.1)" }.joined(separator: " "))
+                        (pos, strokeCommand, stroked) = (to, true, true)
+                        strokedLine = true
+                        moves += 1
+                    } catch let e as DeviceError where e.message.contains("unknown command") {
+                        strokeCommand = false
+                    }
                 }
             }
             if stroked {

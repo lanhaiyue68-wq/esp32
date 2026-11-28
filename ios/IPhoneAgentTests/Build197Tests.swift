@@ -29,11 +29,11 @@ import UIKit
         let k = try XCTUnwrap(CommandChannel.padShortRatio(len))
         XCTAssertGreaterThan(k, 1)
         let end = try XCTUnwrap(pts.last)
-        // where padShort would send it, back against the bow by 0.10 of it (bow 12 % at mid)
-        XCTAssertEqual(hypot(Double(end.0) + 472 * k, Double(end.1) - 428 * k), 0.10 * 0.12 * len * k, accuracy: 3)
+        // where padShort would send it, back against the bow by 0.10 of it (bow 19 % at mid, 202)
+        XCTAssertEqual(hypot(Double(end.0) + 472 * k, Double(end.1) - 428 * k), 0.10 * 0.19 * len * k, accuracy: 3)
         let n = (x: -428 / len, y: -472 / len)  // perpendicular to (-472, 428)
         let bow = pts.map { abs(Double($0.0) * n.x + Double($0.1) * n.y) }.max() ?? 0
-        XCTAssertGreaterThan(bow, 0.07 * len * k, "a bow that shows")
+        XCTAssertGreaterThan(bow, 0.12 * len * k, "a bow that shows")
         XCTAssertGreaterThanOrEqual(pts.count, 8)
     }
 

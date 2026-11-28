@@ -79,7 +79,14 @@ enum WatchOCR {
 
     /// "测试群(6)" → ("测试群", group); a private chat has no head count.
     static func titled(_ title: String) -> (name: String, group: Bool) {
-        let t = withoutIconTail(title.trimmingCharacters(in: .whitespaces))
+        var t = withoutIconTail(title.trimmingCharacters(in: .whitespaces))
+        // 202 (Echo 201 11-28 22:16: a new WeCom group's title read 「Echo201测试群企微（3）◎…」 — its logo and a 「…」 after the
+        // head count — so 207 and 219 found it 「not the group」): up to three marks after the head count, none Chinese,
+        // are no part of the name
+        if let r = t.range(of: #"[（(]\d+[)）][^()（）\p{Han}]{1,3}$"#, options: .regularExpression),
+           let close = t[r].firstIndex(where: { $0 == ")" || $0 == "）" }) {
+            t = String(t[...close])
+        }
         guard let open = t.lastIndex(where: { $0 == "(" || $0 == "（" }), t.hasSuffix(")") || t.hasSuffix("）") else { return (t, false) }
         let inside = t[t.index(after: open)..<t.index(before: t.endIndex)]
         guard !inside.isEmpty, inside.allSatisfy(\.isNumber) else { return (t, false) }
@@ -281,6 +288,14 @@ enum WatchOCR {
     /// reported five times as someone else's): a green (WeChat) or blue (WeCom) bubble is always mine, whatever the
     /// strips beside it show (a wide bubble's own edge reaches into the left avatar strip). Only a white line is told by
     /// the side of its avatar.
+    /// 202 (Echo 201 11-28 23:45 and 11-29 00:01: every video in either app — 「0:03」 on its thumbnail's corner, read —
+    /// never a line in the watch, its 「[视频] 0:03」 taken by 198's rule for 「words on a picture」 and dropped; with a red
+    /// mark the list's preview 「[视频]」 saved it, one that came in while the chat was open was lost): the lines
+    /// withMedia makes for messages with no words (a video, a picture, a voice note) are lines, on a picture or not.
+    static func mediaLine(_ text: String) -> Bool {
+        ["[视频]", "[图片]", "[语音]"].contains { text.hasPrefix($0) }
+    }
+
     static func bySide(_ pieces: [Piece], _ px: Pixels) -> [Piece] {
         let sorted = pieces.sorted { $0.box.midY < $1.box.midY }
         var out: [Piece] = []
@@ -296,7 +311,7 @@ enum WatchOCR {
                        Double(p.box.minY - l.box.maxY) < 0.8 * Double(max(p.box.height, l.box.height)),
                        kind(p.box, px) == kind(l.box, px) {
                         p.kind = l.kind
-                    } else if !inBubble(p.box, px) {
+                    } else if !inBubble(p.box, px), !mediaLine(p.text) {
                         // 198 (Echo 198 11-28 18:11: 「2」 and 「9 W e t」 off my own photo of a keyboard in the chat taken for
                         // 蓝海乐's lines and answered twice): no avatar beside it and no bubble's edge left of it: words on a
                         // picture, no line

@@ -45,11 +45,14 @@ enum PadCurve {
         guard onScreen(p0), onScreen(p3) else { return nil }  // a push past an edge: padPushParts
         let ux = Double(d.x) / len, uy = Double(d.y) / len
         let a = random(0.25...0.38), z = 1 - a  // the same either end: the bow goes out and comes back alike
-        var bow = len * (len < shortest ? random(0.08...0.16) : random(0.05...0.08))  // 188: was 0.06–0.12
+        // 202 (user 11-28 on Echo 201: 「光標移動好像還是直線啊…曲率太低了…讓他曲率稍微高一點嘛，就是弧度更大一些」 — a 5–8 %
+        // bow is ~4–6 % of the move off its line at most, 20–30 px over half the screen): 10–16 % (short 14–24 %), at
+        // least 70–110 units; landing off by more is put right by the look on arrival (188: was 0.05–0.08 / 0.08–0.16)
+        var bow = len * (len < shortest ? random(0.14...0.24) : random(0.10...0.16))
         // 199 (user 11-28 on Echo 199: 「一開始不是貝塞爾曲綫」 — the share check's ±60 and the pointer search's nudges bowed
-        // 3–5 units, 2–3 px, a straight line to the eye): every bow at least 40–70 units as sent (~20–40 px), random,
-        // however short the move, up to 0.9 of it
-        bow = max(bow, min(random(40...70) / max(1, scale), 0.9 * len))
+        // 3–5 units, 2–3 px, a straight line to the eye): every bow at least 70–110 units as sent (202; was 40–70),
+        // random, however short the move, up to 0.9 of it
+        bow = max(bow, min(random(70...110) / max(1, scale), 0.9 * len))
         let first: Double = random(0...1) < 0.5 ? -1 : 1
         var found: (c1: (x: Double, y: Double), c2: (x: Double, y: Double), off: (x: Double, y: Double))?
         // near an edge: the other side, then a smaller bow; never straight (both ends are on the screen, so a small
@@ -114,7 +117,7 @@ enum PadCurve {
     // goes as a thumb's does. It sets off the way it was asked (so a list locks onto that direction, and a row is
     // never pushed sideways into its 删除 buttons) and bends toward the hand, as a thumb turns about its base: on the
     // left half to the left, on the right half to the right (a sideways swipe bends down). Up and down a swipe goes
-    // exactly as far as asked; only its end moves sideways, 6–12 % of its length, and stays inside the screen and on
+    // exactly as far as asked; only its end moves sideways, 10–18 % of its length (202; was 6–12 %), and stays inside the screen and on
     // its own half (one pane of a split screen).
 
     /// Where a thumb's swipe from `a` toward `b` (screen fractions) ends; nil when too short to show a bend.
@@ -126,13 +129,15 @@ enum PadCurve {
         // 201 (user 11-28: 「一定要每一步都要用貝塞爾曲綫！！！」; a swipe under 640 units went as a straight line): every
         // swipe bends, at least 40–70 units (as every move bows: PadCurve.stroke)
         guard len > 0, w > 0, h > 0 else { return nil }
-        let bend = max(len * random(0.06...0.12), random(40...70))
+        let bend = max(len * random(0.10...0.18), random(70...110))  // 202: was 0.06–0.12, 40–70 (user: 「弧度更大一些」)
         if abs(uy) >= abs(ux) {
             let right = (a.x + b.x) / 2 >= 0.5
             let x = right ? min(b.x + bend / w, 0.97) : max(b.x - bend / w, 0.03)
             return (right ? max(x, b.x) : min(x, b.x), b.y)
         }
-        return (b.x, max(b.y, min(b.y + bend / h, 0.9)))  // sideways: down, toward the hand, never into the home bar
+        // sideways: down, toward the hand, never into the home bar; 202 (Echo 201 11-28 20:44: the ＋ panel's drag bent
+        // 0.021 down, to the height of the row under it, 红包's): only 40–70 units, the row it is on kept
+        return (b.x, max(b.y, min(b.y + random(40...70) / h, 0.9)))
     }
 
     /// The stroke's pieces (units) from `a` to the bent end `e`: it leaves toward `b` and turns as it goes.
