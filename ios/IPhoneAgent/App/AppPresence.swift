@@ -15,7 +15,7 @@ extension AppModel {
         // 197 (N95, Echo 197 11-28 20:23: a 跟圈 run's home flicks on the iPad brought Echo's own window up beside the two
         // apps, and its swipe "toward the first page" slid a row of WeCom's list open to its 删除; the run never began):
         // on the iPad the two apps come to the front by their URLs, as the watch brings them back; never a flick
-        for link in ["wxwork://", "weixin://"] {
+        for link in ["wxwork://", "weixin://"] where !(link == "weixin://" && WatchSettings.wechatOff) {  // 200: WeChat left alone
             if inBackground { return true }
             if let url = URL(string: link) { _ = await UIApplication.shared.open(url) }
             if await waitForBackground(1.5) { DebugLog.write("leave app: in background after opening \(link)"); return true }

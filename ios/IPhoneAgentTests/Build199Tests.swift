@@ -85,10 +85,39 @@ import UIKit
         XCTAssertTrue(OrderLedger.lines(5).first?.hasPrefix("?") ?? false, "the ledger's line marks it")
     }
 
+    /// User 11-28 on 199: 「一開始不是貝塞爾曲綫」 — the share check's nudge (move 8 0, sent as 80) and the search's 141 bowed
+    /// 3–5 units; now a bow that shows, 25 units and more off the line, landing where it did.
+    func testTinyMovesBowVisibly() throws {
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }
+        func path(_ s: String) -> [(Int, Int)] {
+            let v = s.split(separator: " ").dropFirst().compactMap { Int($0) }
+            var p = (0, 0), out: [(Int, Int)] = []
+            for i in stride(from: 0, to: v.count - 1, by: 2) { p = (p.0 + v[i], p.1 + v[i + 1]); out.append(p) }
+            return out
+        }
+        let nudge = path(try XCTUnwrap(CommandChannel.padCurved("move 8 0", from: (3000, 3000), span: (5854, 7626), held: false,
+                                                                step: 60, pace: 30, random: mid)))
+        XCTAssertGreaterThan(nudge.map { abs($0.1) }.max() ?? 0, 25, "the share check's nudge bows visibly")
+        XCTAssertEqual(Double(nudge.last!.0), 80, accuracy: 2, "and goes as far as before")
+        let search = path(try XCTUnwrap(PadCurve.strokeAnywhere(by: (141, 0), span: (5854, 7626), random: mid)))
+        XCTAssertGreaterThan(search.map { abs($0.1) }.max() ?? 0, 25, "the search's nudge bows visibly")
+        XCTAssertEqual(Double(search.last!.0), 141, accuracy: 2)
+    }
+
     func testTheSameOrderReadsTheSame() {
         XCTAssertEqual(OrderLedger.canonical(#"{"type":206,"groupName":"G","selectList":["a","b"]}"#),
                        OrderLedger.canonical(#"{"selectList":["a","b"],"groupName":"G","type":206}"#))
         XCTAssertNotEqual(OrderLedger.canonical(#"{"type":206,"groupName":"G"}"#), OrderLedger.canonical(#"{"type":206,"groupName":"H"}"#))
+    }
+
+    /// 200 (user 11-28: 「你怎麽還是亂動個微啊」): WeChat's watch can be paused; off by default, both watched as before.
+    func testWeChatWatchPausedBySwitch() {
+        let d = UserDefaults.standard, kept = d.object(forKey: WatchSettings.wechatOffKey)
+        defer { if let kept { d.set(kept, forKey: WatchSettings.wechatOffKey) } else { d.removeObject(forKey: WatchSettings.wechatOffKey) } }
+        d.removeObject(forKey: WatchSettings.wechatOffKey)
+        XCTAssertFalse(WatchSettings.wechatOff, "both watched unless the owner pauses WeChat")
+        d.set(true, forKey: WatchSettings.wechatOffKey)
+        XCTAssertTrue(WatchSettings.wechatOff)
     }
 
     func testAHandFirst() {

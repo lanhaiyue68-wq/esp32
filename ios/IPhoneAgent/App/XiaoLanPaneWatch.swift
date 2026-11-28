@@ -193,6 +193,7 @@ extension AppModel {
             for look in paneByTurn(looks, state) {
                 guard watching, !Task.isCancelled else { break }
                 if let app = state.apps[look.side], state.loggedOut[app.rawValue] != nil { continue }  // 199: nothing clicked on a QR page
+                if state.apps[look.side] == .wechat, WatchSettings.wechatOff { continue }  // 200: WeChat's window left alone
                 // 183 (Echo 182 overnight, 11-26: an order waited 13–25 s for the other window's back to its list): an
                 // order first; the rest of the pass waits.
                 if ordersWaiting || repliesComing { break }  // 187: a reply on its way goes before the other window
@@ -243,7 +244,8 @@ extension AppModel {
         guard let since = state.frontSince, t - since >= (state.hopped ? 8 : 1), t - state.lastHop >= 5 else { return false }
         state.lastHop = t
         var opened: [String] = []
-        for (app, link) in [(XiaoLanOrders.App.wework, "wxwork://"), (.wechat, "weixin://")] where !told.contains(app) {
+        for (app, link) in [(XiaoLanOrders.App.wework, "wxwork://"), (.wechat, "weixin://")]
+        where !told.contains(app) && !(app == .wechat && WatchSettings.wechatOff) {  // 200: WeChat left alone
             guard let url = URL(string: link) else { continue }
             let ok = await UIApplication.shared.open(url)
             opened.append("\(link) \(ok ? "yes" : "no")")
@@ -267,7 +269,9 @@ extension AppModel {
         // WeCom came back, and with one app in view the watch went on for good — WeCom's player then stuck over it and
         // every reply failed): both watched, one window and one app alone in view for 10 s is brought back as none is
         let told = Set(looks.compactMap { XiaoLanPanes.toldApp($0.rows, crop: $0.crop) })
-        if WatchSettings.weworkOn, looks.count == 1, told.count == 1, UIApplication.shared.applicationState != .inactive {
+        // 200: WeChat's watch off, WeCom alone in view is as it should be
+        if WatchSettings.weworkOn, !WatchSettings.wechatOff, looks.count == 1, told.count == 1,
+           UIApplication.shared.applicationState != .inactive {
             let t = now()
             if state.oneAppSince == nil { state.oneAppSince = t }
             guard let since = state.oneAppSince, t - since > 10 else { return }
@@ -392,6 +396,11 @@ extension AppModel {
     /// view, then the Dock's WeCom, then WeChat; every click only on the pointer seen there (paneSeenTap). True when both
     /// apps' windows are in view after.
     func paneRecall(attempt n: Int) async -> Bool {
+        // 200: WeChat's watch off — its Dock icon never clicked; not brought back (the owner is told as when it fails)
+        if WatchSettings.wechatOff {
+            DebugLog.write("watch: WeChat's watch is off; the apps not brought back by the Dock (\(n))")
+            return false
+        }
         func dock() async -> (wechat: CGPoint?, wework: CGPoint?) {
             await feed.settled(quiet: 0.3, least: 0.2, most: 2)
             guard let frame = feed.frame, let px = WatchOCR.Pixels(frame) else { return (nil, nil) }
@@ -715,7 +724,7 @@ extension AppModel {
     private func paneShareBackOpen(_ state: inout PaneWatchState) async {
         guard UIApplication.shared.applicationState != .background else { return }
         var opened: [String] = []
-        for link in ["wxwork://", "weixin://"] {
+        for link in ["wxwork://", "weixin://"] where !(link == "weixin://" && WatchSettings.wechatOff) {  // 200
             guard let url = URL(string: link) else { continue }
             let ok = await UIApplication.shared.open(url)
             opened.append("\(link) \(ok ? "yes" : "no")")
@@ -1540,6 +1549,11 @@ extension AppModel {
         let link = order.app == .wework ? weworkTool : chatTool
         // 199 (Echo 198 11-28 18:36: WeChat logged out on the iPad — its QR code page — and the orders after it kept failing
         // on that page): an app logged out does none of its orders until it is back; the owner was told
+        // 200: WeChat's watch off: its orders answered at once, nothing done in its window
+        if order.app == .wechat, WatchSettings.wechatOff {
+            link.finish(order, ok: false, reason: "小蓝暂停了守候个人微信（设定里关掉「暂停守候个人微信」才会执行），没有执行")
+            return
+        }
         if state.loggedOut[order.app.rawValue] != nil {
             link.finish(order, ok: false, reason: "\(order.app == .wework ? "企业微信" : "微信")在 iPad 上已登出（扫码登录页），没有执行：请先重新登录")
             return

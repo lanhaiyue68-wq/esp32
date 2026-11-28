@@ -1481,7 +1481,7 @@ extension AppModel {
     /// request accepted (the oldest), then goes back to its chats; the next one later, after a random gap.
     func paneAutoAccept(_ looks: [PaneLook], _ state: inout PaneWatchState) async {
         for side in looks.map(\.side) {
-            guard let app = state.apps[side], AutoAccept.on(app) else { continue }
+            guard let app = state.apps[side], AutoAccept.on(app), !(app == .wechat && WatchSettings.wechatOff) else { continue }  // 200
             let t = now()
             guard t >= AutoAccept.idleUntil[app, default: 0],
                   AutoAccept.due(AutoAccept.accepted[app, default: []], next: AutoAccept.nextAt[app, default: 0], at: t, perMinute: AutoAccept.perMinute)

@@ -98,6 +98,11 @@ enum WatchSettings {
     static var serverURL: String { text(serverURLKey, "") }
     static var robotId: String { text(robotKey, defaultRobot) }
     static var weworkOn: Bool { d.bool(forKey: weworkOnKey) }
+    /// 200 (user 11-28 on 199: 「你怎麽還是亂動個微啊」 — a new WeChat account with real groups of 115 and 500, the watch
+    /// opening their marks while WeCom was tested): WeChat's window neither read nor clicked, never brought back by its
+    /// URL, its orders answered at once; off by default (both watched as before).
+    static let wechatOffKey = "watchWechatOffV1"
+    static var wechatOff: Bool { d.bool(forKey: wechatOffKey) }
     static var weworkURL: String { text(weworkURLKey, "") }
     static var weworkCode: String { text(weworkCodeKey, "") }
     /// 小藍 (164+): no model anywhere on the iPad; reading, opening and sending by fixed steps on the device

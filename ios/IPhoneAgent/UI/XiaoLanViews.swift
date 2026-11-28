@@ -276,6 +276,7 @@ struct XiaoLanSettingsTab: View {
     @AppStorage(WatchSettings.serverURLKey) private var serverURL = ""
     @AppStorage(WatchSettings.robotKey) private var robot = WatchSettings.defaultRobot
     @AppStorage(WatchSettings.weworkOnKey) private var weworkOn = false
+    @AppStorage(WatchSettings.wechatOffKey) private var wechatOff = false  // 200
     @AppStorage(WatchSettings.weworkURLKey) private var weworkURL = ""
     @AppStorage(WatchSettings.weworkCodeKey) private var weworkCode = ""
     @AppStorage(LeadModel.key) private var lead = LeadModel.codex.rawValue  // 193
@@ -301,6 +302,8 @@ struct XiaoLanSettingsTab: View {
                     Text("改了位址要重新開始守候才會用新的。")
                 }
                 Section {
+                    // 200 (user 11-28: 「你怎麽還是亂動個微啊」)
+                    Toggle("暫停守候個人微信（不看、不點、不叫回）", isOn: $wechatOff)
                     Toggle("接企業微信的指令", isOn: $weworkOn)
                     if weworkOn {
                         TextField("伺服器位址，例如 http://192.168.31.85:18970/qiwei", text: $weworkURL)

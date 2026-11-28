@@ -46,6 +46,10 @@ enum PadCurve {
         let ux = Double(d.x) / len, uy = Double(d.y) / len
         let a = random(0.25...0.38), z = 1 - a  // the same either end: the bow goes out and comes back alike
         var bow = len * (len < shortest ? random(0.08...0.16) : random(0.05...0.08))  // 188: was 0.06–0.12
+        // 199 (user 11-28 on Echo 199: 「一開始不是貝塞爾曲綫」 — the share check's ±60 and the pointer search's nudges bowed
+        // 3–5 units, 2–3 px, a straight line to the eye): every bow at least 40–70 units as sent (~20–40 px), random,
+        // however short the move, up to 0.9 of it
+        bow = max(bow, min(random(40...70) / max(1, scale), 0.9 * len))
         let first: Double = random(0...1) < 0.5 ? -1 : 1
         var found: (c1: (x: Double, y: Double), c2: (x: Double, y: Double), off: (x: Double, y: Double))?
         // near an edge: the other side, then a smaller bow; never straight (both ends are on the screen, so a small
