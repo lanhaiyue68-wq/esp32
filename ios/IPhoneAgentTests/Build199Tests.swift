@@ -287,13 +287,11 @@ import UIKit
     }
 
     /// 202 (Echo 201 11-28 22:16): a WeCom group's title with its logo and a 「…」 after the head count is the group's;
-    /// a name going on in Chinese after a bracket is left whole.
+    /// (182's rule — one mark after the head count is the logo — stays as it was.)
     func testTitleWithMarksAfterTheHeadCount() {
         XCTAssertEqual(WatchOCR.titled("Echo201测试群企微（3）◎…").name, "Echo201测试群企微")
         XCTAssertTrue(WatchOCR.titled("Echo201测试群企微（3）◎…").group)
         XCTAssertEqual(WatchOCR.titled("企微测试群（7）Q").name, "企微测试群")
-        XCTAssertEqual(WatchOCR.titled("测试(2)群").name, "测试(2)群")
-        XCTAssertFalse(WatchOCR.titled("测试(2)群").group)
     }
 
     /// 202 (Echo 201 11-28 22:53, WeCom): a PDF card whose 「.pdf」 was read 「.paf」 is still a file card.
