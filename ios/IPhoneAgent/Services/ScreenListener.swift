@@ -231,6 +231,12 @@ private final class Transcript: @unchecked Sendable {
         else if !canSpeak { note = "语音识别暂时不可用。" + after }
         else if heard == 0 { note = "没有收到声音：这个 App 可能不让录音，或者没有在播放" }
         let audio = ScreenAudio.shared.report()
+        // 198 (Echo 197 11-28 05:48: a 6 s video with no one speaking, 「No speech detected」 reported as 「语音识别出错」):
+        // that answer is the recognition's own, no error
+        let noSpeech = failures.filter { $0.contains("1110") || $0.localizedCaseInsensitiveContains("No speech") }
+        if note.isEmpty, heard > 0, spoken.isEmpty, !failures.isEmpty, noSpeech.count == failures.count {
+            note = "没有听到有人说话（可能只有画面、音乐或环境声）"
+        }
         if note.isEmpty, heard > 0, spoken.isEmpty, !failures.isEmpty {
             note = "语音识别出错，没有认出说的话。" + after  // not "only music": 122 said so for every listen that errored
         }

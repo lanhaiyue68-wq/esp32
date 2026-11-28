@@ -90,7 +90,9 @@ enum XiaoLanMediaFind {
             var length: Int?
             for n in stride(from: min(run.count, 7), through: 2, by: -1) {
                 let next: Character? = i + 1 + n < t.count ? t[i + 1 + n] : nil
-                if let next, next.isASCII, next.isLetter { continue }
+                // 198 (Echo 197 11-28 05:52: WeChat's card read 「账户交易明细（1）.xIsO1VD土下キ」 — its icon and size as capitals
+                // and marks glued on — and not known for a file): a capital right after is the card's noise, not a word
+                if let next, next.isASCII, next.isLetter, !next.isUppercase { continue }
                 if fileExtension(String(run[..<n])) != nil { length = n; break }
             }
             guard let n = length else { continue }
@@ -439,7 +441,12 @@ enum XiaoLanMediaFind {
             out.append(WatchOCR.Piece(text: label, box: CGRect(x: Double(b.minX), y: Double(b.minY), width: 0.08, height: 0.02), kind: .theirs))
         }
         let covered = blocks  // a video's thumbnail is one of them; words on one not found are .other, never lines anyway
+        // 198 (B13/B17): a shared card or a contact's card is one line; the words on it are none of their own
+        let cards = cardLines(pieces.filter { p in !covered.contains { $0.contains(CGPoint(x: p.box.midX, y: p.box.midY)) } },
+                              px, top: top, bottom: bottom)
+        out += cards.lines
         for p in pieces {
+            if cards.used.contains(p.box) { continue }
             if voiceSeconds(p.text) != nil { continue }
             let t = p.text.filter { !$0.isWhitespace }
             if t.contains("转文字"), !t.contains("取消"), t.count <= 6 { continue }
@@ -451,6 +458,123 @@ enum XiaoLanMediaFind {
             out.append(p)
         }
         return out
+    }
+
+    // MARK: 198 cards (user 11-28: 名片回報「[名片] 名字」就好；公眾號文章、分享卡片要點開讀)
+
+    /// 198: where someone's bubble starts on the row `y`: from `x0` (white, just left of its words) leftward over its
+    /// white padding to its edge, the chat's grey (237; WeCom's 236 237 241) beyond it (WeChat's edge 0.171 of the
+    /// window, 11-28 d2; the avatar never looked at). Nil when `x0` is not white or no grey is beyond (a picture).
+    static func bubbleLeft(_ px: WatchOCR.Pixels, y: Double, from x0: Double) -> Double? {
+        func white(_ x: Double) -> Bool { let (r, g, b) = px.rgb(x, y); return min(r, g, b) >= 246 }
+        guard white(x0) else { return nil }
+        var at = x0, v = x0, miss = 0
+        while miss < 2, v > 0.1 {
+            v -= 0.003
+            if white(v) { (at, miss) = (v, 0) } else { miss += 1 }
+        }
+        let (r, g, b) = px.rgb(at - 0.008, y)
+        guard min(r, g, b) >= 222, min(r, g, b) < 246, max(r, g, b) - min(r, g, b) <= 10 else { return nil }
+        return at
+    }
+
+    /// 198: a bubble's white up and down from `y` along the column `x` (inside its left padding) until the chat's grey
+    /// between messages; two samples off white let by (JPEG). Nil when `x, y` is not white.
+    static func whiteSpan(_ px: WatchOCR.Pixels, x: Double, y: Double, top: Double, bottom: Double) -> ClosedRange<Double>? {
+        func white(_ v: Double) -> Bool { let (r, g, b) = px.rgb(x, v); return min(r, g, b) >= 246 }
+        guard white(y) else { return nil }
+        func reach(_ step: Double) -> Double {
+            var at = y, v = y, miss = 0
+            while miss <= 2 {
+                v += step
+                guard v > top, v < bottom else { break }
+                if white(v) { (at, miss) = (v, 0) } else { miss += 1 }
+            }
+            return at
+        }
+        let (up, down) = (reach(-0.002), reach(0.002))
+        return min(up, y)...max(down, y)
+    }
+
+    /// 198: a file's size on its card (「21K」, 「12KB」, 「1.2 MB」).
+    static func sizeLabel(_ text: String) -> Bool {
+        text.filter { !$0.isWhitespace }.range(of: #"^\d+(\.\d+)?[KMG]B?$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// 198: one bubble's words, top first, with their heights, as one line, or nil when it is a plain message:
+    /// - its last words 「个人名片」: 「[名片] 名字」 (Echo 197 11-28, B17; its page only offers 添加到通讯录: never opened);
+    /// - three or more words of two sizes in a tall bubble (an article's title over its cover's or summary's small print
+    ///   and its account, 11-28 d2: three garbled messages before, B13): 「[链接] 标题」, the title its biggest words from
+    ///   the top. A bubble with an address, a file, a voice note or a quote is read its own way.
+    static func cardLine(_ items: [(text: String, height: Double)], spanHeight: Double, quoted: Bool) -> String? {
+        let words = items.map { (t: $0.text.trimmingCharacters(in: .whitespaces), h: $0.height) }.filter { !$0.t.isEmpty }
+        // (a quote is told by its box, not by a colon: a cover's 「10:08」 is none)
+        guard words.count >= 2, !quoted else { return nil }
+        if let last = words.last, ["个人名片", "個人名片"].contains(last.t.filter { !$0.isWhitespace }) {
+            let name = words.dropLast().map { $0.t }.joined(separator: " ")
+            return name.isEmpty || words.count > 4 || name.count > 40 ? nil : "[名片] \(name)"
+        }
+        guard words.count >= 3, spanHeight >= 0.09,
+              !words.contains(where: { url(in: $0.t) != nil || fileName($0.t) != nil || voiceSeconds($0.t) != nil || sizeLabel($0.t) }),
+              let tall = words.map({ $0.h }).max(), tall > 0,
+              // small print, not a stray mark OCR boxed small (a lone 「，」 in a long message): six characters or more
+              words.filter({ $0.h < 0.62 * tall }).map({ $0.t.count }).reduce(0, +) >= 6,
+              let first = words.firstIndex(where: { $0.h >= 0.8 * tall }) else { return nil }
+        var title = ""
+        for w in words[first...] {
+            guard w.h >= 0.8 * tall, title.count < 60 else { break }
+            title += w.t
+        }
+        return title.count >= 2 ? "[链接] \(title.prefix(60))" : nil
+    }
+
+    /// 198: the shared cards and contact cards among someone's words on the window, as lines (at each card's first
+    /// words), and the boxes of the words they took.
+    static func cardLines(_ pieces: [WatchOCR.Piece], _ px: WatchOCR.Pixels, top: Double, bottom: Double)
+        -> (lines: [WatchOCR.Piece], used: [CGRect]) {
+        var lines: [WatchOCR.Piece] = [], used: [CGRect] = [], seen: [ClosedRange<Double>] = []
+        // words on a white bubble read .theirs; a name beside a card's own picture (名片's) reads by the picture's colour
+        // (.other or .grey): taken by where it is, in the bubble's white span
+        let theirs = pieces.filter { $0.kind != .mine && (0.12...0.62).contains(Double($0.box.minX)) }
+            .sorted { $0.box.minY < $1.box.minY }
+        for p in theirs where p.kind == .theirs && !seen.contains(where: { $0.contains(Double(p.box.midY)) }) {
+            guard let left = bubbleLeft(px, y: Double(p.box.midY), from: Double(p.box.minX) - 0.004),
+                  // 0.02 in: past the bubble's tail toward the avatar by its first line (d2: the edge 0.162 there, 0.175 under)
+                  let span = whiteSpan(px, x: left + 0.02, y: Double(p.box.midY), top: top, bottom: bottom) else { continue }
+            seen.append(span)
+            let inside = theirs.filter { span.contains(Double($0.box.midY)) && Double($0.box.minX) > left - 0.005 }
+            // WeCom's quote box in a bubble (N73): 「名字：…」 on its 248 grey; a card's cover is off-white too (249–252,
+            // d2), so the grey alone is no quote
+            let quoted = inside.contains { quoteHead($0.text) && onQuote($0.box, px) }
+            guard let line = cardLine(inside.map { (text: $0.text, height: Double($0.box.height)) },
+                                      spanHeight: span.upperBound - span.lowerBound, quoted: quoted),
+                  let head = inside.first else { continue }
+            lines.append(WatchOCR.Piece(text: line, box: CGRect(x: Double(head.box.minX), y: Double(head.box.minY), width: 0.08, height: 0.02),
+                                        kind: .theirs))
+            used += inside.map(\.box)
+        }
+        return (lines, used)
+    }
+
+    /// 198: the title a card's line names (「[链接] 标题」 with no address), nil for any other line.
+    static func cardTitle(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("[链接]"), url(in: t) == nil else { return nil }
+        let title = t.dropFirst("[链接]".count).trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? nil : title
+    }
+
+    /// 198: where to click a card on the window: its first title words (the start of `title`), the `rank`-th from the
+    /// newest; window fractions.
+    static func cardSpot(_ rows: [[Piece]], title: String, rank: Int) -> CGPoint? {
+        let want = title.filter { !$0.isWhitespace }
+        let hits = rows.joined().filter { p in
+            let t = p.text.filter { !$0.isWhitespace }
+            return t.count >= 3 && want.hasPrefix(t) && (0.12...0.62).contains(Double(p.box.minX))
+                && (0.08...0.93).contains(Double(p.box.midY))
+        }.sorted { $0.box.midY > $1.box.midY }
+        guard let p = rank < hits.count ? hits[rank...].first : hits.first else { return nil }
+        return CGPoint(x: p.box.midX, y: p.box.midY)
     }
 
     /// A message beside someone's avatar (the window's left strip) that is a block of picture rather than a bubble of
@@ -535,6 +659,31 @@ enum XiaoLanMediaFind {
     /// the avatars of others' messages (the window's left strip, avatarAt), lowest first, between `top` and `bottom`;
     /// each message of theirs has its own (measured on the iPad: WeChat 10–20 and WeCom 13–17, quote, voice, link, 1, 2
     /// all one each; a voice note's words under it none).
+    /// 198 (B13): others' lines under one avatar (from its top down to the next avatar's) joined into one message, in
+    /// their order; mine, and lines over the first avatar seen (theirs scrolled off), as they are.
+    static func oneLinePerAvatar(_ lines: [WatchReport.Line], tops: [Double]) -> [WatchReport.Line] {
+        let sorted = tops.sorted()
+        guard !sorted.isEmpty else { return lines }
+        var out: [WatchReport.Line] = []
+        var lastAvatar: Int?
+        for l in lines {
+            guard !l.mine, let y = l.y, let a = sorted.lastIndex(where: { $0 <= y + 0.012 }) else {
+                out.append(l)
+                lastAvatar = nil
+                continue
+            }
+            if let last = out.last, !last.mine, lastAvatar == a, last.sender == l.sender {
+                var joined = last
+                joined.text += " " + l.text
+                out[out.count - 1] = joined
+            } else {
+                out.append(l)
+            }
+            lastAvatar = a
+        }
+        return out
+    }
+
     static func avatarTops(_ px: WatchOCR.Pixels, top: Double = 0.09, bottom: Double) -> [Double] {
         var tops: [Double] = []
         let step = 1.0 / Double(px.h)
@@ -718,7 +867,11 @@ enum XiaoLanMediaFind {
             let y = Double(n.box.midY), x = Double(n.box.midX) - step
             guard x > 0.02 else { continue }
             let row = items.filter { abs(Double($0.box.midY) - y) < 0.01 }
-            guard !row.contains(where: { abs(Double($0.box.midX) - x) < 0.4 * step }) else { continue }
+            // 198 (Echo 197 11-28 06:16: WeCom's 「引用」 read 「51用」 right at its place, so the place was given up and the
+            // reply went unquoted): a piece there holding 引 or 用 is 引用 misread, clicked; any other word there is not
+            guard !row.contains(where: { p in
+                abs(Double(p.box.midX) - x) < 0.4 * step && !word(p).contains("引") && !word(p).contains("用")
+            }) else { continue }
             let forward = row.contains { word($0).contains("转发") && abs(Double($0.box.midX) - (x - step)) < 0.25 * step }
             let column = items.contains { abs(Double($0.box.midY) - y) >= 0.03 && abs(Double($0.box.midX) - x) < 0.25 * step }
             if forward || column { return CGPoint(x: x, y: y) }
@@ -1301,6 +1454,17 @@ enum XiaoLanMediaFind {
     }
 
     /// A page's words top to bottom (a file's preview, a link's page), without its bars, at most `most` characters.
+    /// 198 (Echo 197 11-28 05:50: Douyin's page in Safari read 「正在加载」 in its address bar, blank under it): still
+    /// loading by its own word there (nothing is looked at by the model then)
+    static func pageLoading(_ rows: [[Piece]]) -> Bool {
+        let bar = pageText(rows, from: 0.03, to: 0.12, most: 200)
+        return ["正在加载", "正在載入", "加载中", "載入中"].contains { bar.contains($0) }
+    }
+    /// 198: hardly a word under Safari's bars yet (waited for a little; a video's page may stay so, and is looked at)
+    static func pageNearlyWordless(_ rows: [[Piece]]) -> Bool {
+        pageText(rows, from: 0.12, most: 400).filter { !$0.isWhitespace }.count < 12
+    }
+
     static func pageText(_ rows: [[Piece]], from top: Double = 0.08, to bottom: Double = 0.95, most: Int = 800) -> String {
         let lines = rows.compactMap { row -> String? in
             let inside = row.filter { (top...bottom).contains(Double($0.box.midY)) }.sorted { $0.box.minX < $1.box.minX }
@@ -1423,6 +1587,11 @@ enum XiaoLanMediaFind {
     /// What a quote quotes: a kind of message read by opening it; a file's name read loosely (「研判，pdf」, 「研判 .pdf」).
     static func quotedKind(_ text: String) -> Kind? {
         if let k = kind(of: text) { return k }
+        // 198 (Echo 197 11-28 05:30: WeChat's quote of a picture reads its writer only, 「蓝海乐:」 — the thumbnail beside
+        // it has no words — so 「这是什么」 and 「这又是什么」 went without the pictures they asked about): a writer and
+        // nothing after is a picture's quote (clicked, it opens in the viewer)
+        if quoteHead(text), let i = text.firstIndex(where: { $0 == "：" || $0 == ":" }),
+           text[text.index(after: i)...].allSatisfy({ $0.isWhitespace }) { return .image }
         let t = text.lowercased().filter { !$0.isWhitespace }
         for ext in fileExtensions where t.count > ext.count + 1 && t.hasSuffix(ext) {
             if let c = t.dropLast(ext.count).last, ".，,。".contains(c) { return .file }

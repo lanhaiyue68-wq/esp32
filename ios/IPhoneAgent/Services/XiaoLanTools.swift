@@ -2,7 +2,7 @@ import Foundation
 
 /// 小藍's tool box (162): every order of both engines, typed in by hand on the iPad like Android 小藍's 工具箱
 /// (worktool-lan-watch LanWatchActivity: 常用操作, 按用途瀏覽). A form fills the order's fields; ChatToolLink.enqueueLocal
-/// queues it and watch does it like a server's order. 跟圈 (260–265) is left out: it needs its backend's run.
+/// queues it and watch does it like a server's order. 跟圈's posting (261–265) is left out: it needs its backend's run; reading one friend's 朋友圈 (260) is here (197).
 enum XiaoLanTools {
     struct Field: Hashable, Identifiable {
         enum Kind: Hashable { case text, list, long, toggle, lines }
@@ -58,8 +58,10 @@ enum XiaoLanTools {
         ]),
         Group(title: "朋友圈", tools: [
             Tool(type: 241, hint: "發文字或圖片朋友圈（微信）"), Tool(type: 242, hint: "刪除自己的一條朋友圈（微信）"),
+            Tool(type: 260, hint: "看某個好友的朋友圈：每則點開讀文字、圖片、影片、連結（微信）；可指定近幾天，沒指定就讀到上次讀過的地方"),
         ]),
         Group(title: "查詢", tools: [
+            Tool(type: 515, hint: "爬樓：進群一路往上滑，邊滑邊讀群友發的內容；可指定今天或最近幾分鐘，沒指定就讀到上次讀過的地方"),
             Tool(type: 501, hint: "群資訊"), Tool(type: 512, hint: "群成員"), Tool(type: 502, hint: "好友資料"),
             Tool(type: 503, hint: "本機帳號資料"), Tool(type: 504, hint: "群二維碼（截圖）"), Tool(type: 505, hint: "最近會話"),
             Tool(type: 507, hint: "全部好友"), Tool(type: 508, hint: "全部群"), Tool(type: 506, hint: "可切換的企業（企業微信）"),
@@ -106,6 +108,12 @@ enum XiaoLanTools {
         case 218: return [titles, Field(key: "fileUrl", label: "檔案網址（http 或 https）"), Field(key: "objectName", label: "檔名（選填）"),
                           Field(key: "fileType", label: "類型 image／video／file（選填）"), Field(key: "extraText", label: "再發一句話（選填）")]
         case 219, 501, 504, 512: return [Field(key: "groupName", label: "群名")]
+        // 197 (user 11-28): 跟圈 and 爬樓 by hand; with no time given each reads to where the last read began
+        case 260: return [Field(key: "friend.name", label: "好友名字"), Field(key: "days", label: "近幾天（選填，例如一個月填 30）"),
+                          Field(key: "maxScreens", label: "最多看幾屏（選填）")]
+        case 515: return [Field(key: "titleList", label: "群名或會話", kind: .list), Field(key: "minutes", label: "最近幾分鐘（選填，兩小時填 120）"),
+                          Field(key: "today", label: "只看今天", kind: .toggle), Field(key: "untilText", label: "讀到這句就停（選填）"),
+                          Field(key: "maxScreens", label: "最多往上滑幾屏（選填）")]
         case 220: return [Field(key: "groupName", label: "群名"), Field(key: "friend.name", label: "群成員名字"),
                           Field(key: "friend.leavingMsg", label: "申請留言（選填）"), Field(key: "friend.markName", label: "備註名（選填）")]
         case 221 where app == .wechat:

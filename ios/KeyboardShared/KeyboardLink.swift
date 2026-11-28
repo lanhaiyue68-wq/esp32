@@ -79,6 +79,10 @@ enum KeyboardLink {
         // iOS may hand only the end of a long field (its last sentence): that end being this text's end is enough.
         if text.hasSuffix(b) { return b.count >= min(text.count, 8) }
         guard b.hasSuffix(text) else { return false }
-        return b.dropLast(text.count).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let rest = b.dropLast(text.count).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{2005}")))
+        if rest.isEmpty { return true }
+        // 198 (B10, Echo 197 11-28 15:42: WeCom's group quote left 「@蓝海乐 」 before the reply, the field was not taken
+        // for this text and nothing went): a lone mention of one name before it is the quote's own, sent with it
+        return rest.range(of: #"^[@＠][^@＠\s]{1,30}$"#, options: .regularExpression) != nil
     }
 }

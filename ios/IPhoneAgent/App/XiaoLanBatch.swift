@@ -36,6 +36,16 @@ import Foundation
         switch opened {
         case .mark(let n?) where n > 0:
             let others = lines[min(afterMine, lines.count)...].filter { !$0.mine && !isEcho($0) }
+            // 198 (Echo 197 11-28 05:29: two pictures, the mark read 1 with only the first in; the list's 「[图片]」 then
+            // taken for the second, and the first counted old — the reply went to one picture, three times): sure of
+            // where the last read ended, more after it than the mark said — the rest came after the mark was read
+            if let start, start.sure {
+                let since = after(max(start.index, afterMine), sure: true).filter { !$0.mine && !isEcho($0) }
+                if since.count > n {
+                    return Pick(lines: since, anchored: true,
+                                why: "its red mark said \(n); \(since.count) after the last line read (the rest came after the mark)")
+                }
+            }
             // 193 (Echo 193 11-27 21:14): counted by avatars when n of them show above the ones that came after the preview
             if let tops = avatarTops {
                 let later = previewY.map { py in tops.filter { $0 > py + 0.005 }.count } ?? 0
@@ -65,6 +75,18 @@ import Foundation
                 return Pick(lines: Array(lines[end...]), anchored: true, why: "read again right after its read")
             }
             guard let start else {
+                // 198 (B16/B17, Echo 197 11-28 15:41–15:43: 「你工号多少 我要表扬你」 and a 个人名片 came in while 蓝海乐 was
+                // open — no mark — the last line read not found on the window, and both were lost): theirs under my newest
+                // line came after my reply; those never read here before (not a quote box's 「name：…」) are new
+                if let mineAt {
+                    let fresh = lines[(mineAt + 1)...].filter { l in
+                        !l.mine && !isEcho(l) && !XiaoLanSelf.readBefore(l.text, known: seen) && !XiaoLanMediaFind.quoteHead(l.text)
+                    }
+                    if !fresh.isEmpty {
+                        return Pick(lines: Array(fresh), anchored: false,
+                                    why: "the last line read not on the window: theirs after my newest line, never read before (B16)")
+                    }
+                }
                 return Pick(lines: [], anchored: false, why: "nothing on the window goes on from the last line read")
             }
             // 193 (N71, Echo 193 11-27 21:29: 蓝海乐 read with no mark, the last line read found only by an older line of

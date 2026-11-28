@@ -262,11 +262,32 @@ import UIKit
             .filter { !$0.isEmpty }
             .filter { row in
                 let t = row.map(\.text).joined().filter { !$0.isWhitespace }
+                // 198 (B4, Echo 197 11-28 05:24: Echo's own notice 「「蓝海乐」：微信里没找到输入框。请看一下这个聊天…」 over
+                // WeChat's top was read as a chat's title and given a history): Echo's notices are no title
+                if XiaoLanPanes.ownNotice(t) { return false }
                 return !(t.contains("群主") || t.hasPrefix("外部群") || t.hasPrefix("内部群") || t.hasPrefix("內部群"))
             }
             .sorted { ($0.map(\.box.midY).min() ?? 1) < ($1.map(\.box.midY).min() ?? 1) }
         return (lines.first ?? []).sorted { $0.box.minX < $1.box.minX }.map(\.text).joined()
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 198 (B4): a line of Echo's own notices (their titles 「小蓝有一条回复没发出去」 「小蓝的屏幕共享停了」 「小蓝看不到…」
+    /// 「小蓝只看到一个 App」; their bodies 「「chat」：why…」).
+    static func ownNotice(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        if ["小蓝有", "小蓝的", "小蓝看", "小蓝只", "小藍有", "小藍的", "小藍看", "小藍只"].contains(where: { t.hasPrefix($0) }) { return true }
+        return t.hasPrefix("「") && (t.contains("」：") || t.contains("」:"))
+    }
+
+    /// 198 (user 11-28: 「下次遇到這個場景要麽能進去，要麽拉下來」): the unread count a list's title shows (「微信 (1)」),
+    /// nil for none or for a chat's title (「测试群(6)」 is its head count).
+    static func titleUnread(_ rows: [[Piece]]) -> Int? {
+        let title = titleLine(rows)
+        let told = WatchOCR.titled(title)
+        guard told.group, listTitles.contains(told.name),
+              let open = title.lastIndex(where: { $0 == "(" || $0 == "（" }) else { return nil }
+        return Int(title[title.index(after: open)...].filter(\.isNumber))
     }
 
     /// 181: what a window's bottom band reads (its tab bar on a list), for the log when its app is not told.
@@ -412,11 +433,16 @@ import UIKit
     /// (236, 237, 241), measured 11-25; the Settings app's grouped background (242, 242, 247) or white is neither.
     static func chatBackground(_ px: WatchOCR.Pixels) -> Bool {
         let ys = Array(stride(from: 0.3, through: 0.7, by: 0.05))
-        let hits = ys.filter { y in
-            let (r, g, b) = px.rgb(0.015, y)
-            return (230...240).contains(r) && (230...240).contains(g) && (230...244).contains(b) && b - r <= 6
-        }.count
-        return hits * 2 > ys.count
+        // 198 (B18, Echo 197 11-28 16:18: WeCom's window from 0.500 of the screen, its 0.015 strip on the split's shadow
+        // (202, 203, 207) — its chat's grey (236, 237, 241) further in — and 企微测试群 told no chat, left alone): three
+        // strips, the left edge, a little in, and the right edge; any one of them the chat's grey is enough
+        return [0.015, 0.03, 0.985].contains { x in
+            let hits = ys.filter { y in
+                let (r, g, b) = px.rgb(x, y)
+                return (230...240).contains(r) && (230...240).contains(g) && (230...244).contains(b) && b - r <= 6
+            }.count
+            return hits * 2 > ys.count
+        }
     }
 
     /// The chat lists' own titles (WeChat's carries the unread count: 微信(3)).
@@ -480,7 +506,9 @@ import UIKit
     /// 184: a list's lines of text (titles and previews), each joined across its pieces.
     static func listBody(_ rows: [[Piece]]) -> [(text: String, box: CGRect)] {
         rows.compactMap { row -> (text: String, box: CGRect)? in
-            let pieces = row.filter { (0.12...0.62).contains($0.box.minX) && (0.12...0.92).contains($0.box.midY) }
+            // 198 (Echo 197 11-28 05:17: WeChat's list scrolled past its search bar, 测试群's title at 0.104 and its mark
+            // never seen; the title bar's 「微信 (1)」 sits at ~0.053): from 0.085 down
+            let pieces = row.filter { (0.12...0.62).contains($0.box.minX) && (0.085...0.92).contains($0.box.midY) }
             guard !pieces.isEmpty else { return nil }
             return (pieces.map(\.text).joined(), pieces.reduce(CGRect.null) { $0.union($1.box) })
         }
@@ -611,8 +639,13 @@ import UIKit
         let full = chat.filter { !$0.isWhitespace }
         return !rows.joined().contains { p in
             guard (0.1...0.92).contains(p.box.midY) else { return false }
-            let n = listName(p.text)
-            return WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n))
+            let n = listName(p.text), raw = p.text.filter { !$0.isWhitespace }
+            // 198 (Echo 197 11-28 06:05: 「Echo建群测试2」 deleted from both lists, but 「Echo建群测试」 still on them was taken
+            // for it and the order reported failed): a name read with a slip keeps its length, a name cut short ends in …
+            if n == full { return true }
+            if n.count == full.count, WatchChatOpen.sameChat(chat, listName: n) { return true }
+            let cut = raw.contains("…") || raw.contains("...")
+            return cut && (WatchChatOpen.sameChat(chat, listName: n) || (n.count >= 3 && n.count < full.count && full.hasPrefix(n)))
         }
     }
 

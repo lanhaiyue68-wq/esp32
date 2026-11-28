@@ -142,6 +142,13 @@ import Foundation
         return pending.remove(at: i)  // 189: its turn kept until it is finished (retry)
     }
 
+    /// 198: a reported line's own words, without the note in brackets after it (「\n（引用的文件：…）」, 「\n（小蓝没能打开…）」);
+    /// a picture's or a video's account stays (「[图片]\n图片内容：…」: two pictures are two lines).
+    static func askedLine(_ text: String) -> String {
+        guard let r = text.range(of: "\n（") ?? text.range(of: "\n(") else { return text }
+        return String(text[..<r.lowerBound])
+    }
+
     /// What was read: one packet per message over the socket (ChatTool's dedupe then drops a message read twice), and
     /// what the robot settings say goes to the QA callback, whose reply is queued to be sent (163, as the engines do).
     func report(_ messages: [ReadMessage]) {
@@ -157,7 +164,10 @@ import Foundation
                 // 189 (N19, Echo 189, 11-27 12:51 首爾: 企微测试群's 「你好啊」「我敢」 reported at :28 and again at :45, when
                 // the chat was opened again for the next line): the same line of the same sender in the same chat is
                 // asked of the QA callback once in 90 s (two replies to it would go out)
-                let said = "\(m.chat)|\(m.sender)|\(XiaoLanSelf.plain(m.text))", t = Date()
+                // 198 (Echo 197 11-28 05:15: WeCom's 「这里面是什么」 asked three times in 50 s — read plain once, then with
+                // 「（引用的文件：…）」 and 「（小蓝没能打开…）」 after it — and answered three times): the line itself, its first
+                // line, without what was added about its quote or media
+                let said = "\(m.chat)|\(m.sender)|\(XiaoLanSelf.plain(Self.askedLine(m.text)))", t = Date()
                 askedLately = askedLately.filter { t.timeIntervalSince($0.at) < 90 }
                 if askedLately.contains(where: { $0.said == said }) {
                     DebugLog.write("chattool: 「\(m.text.prefix(20))」 in \(m.chat) was asked of the QA callback moments ago; not asked again")

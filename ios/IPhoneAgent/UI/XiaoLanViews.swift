@@ -272,6 +272,9 @@ struct XiaoLanSettingsTab: View {
     @AppStorage(WatchSettings.weworkCodeKey) private var weworkCode = ""
     @AppStorage(LeadModel.key) private var lead = LeadModel.codex.rawValue  // 193
     @AppStorage(LeadModel.plannerKey) private var plannerLead = LeadModel.codex.rawValue  // 197
+    @AppStorage(AutoAccept.wechatKey) private var acceptWeChat = false  // 198
+    @AppStorage(AutoAccept.weworkKey) private var acceptWeCom = false
+    @AppStorage(AutoAccept.perMinuteKey) private var acceptPerMinute = AutoAccept.defaultPerMinute
     @State private var advanced = false
 
     var body: some View {
@@ -312,6 +315,16 @@ struct XiaoLanSettingsTab: View {
                     Text("主模型")
                 } footer: {
                     Text("主模型先做；失敗、沒回答、看不清或額度用完才換副模型。每一步找點擊位置固定用豆包（要快）；守候、讀訊息、發訊息都是固定步驟，不用模型。")
+                }
+                // 198 (user 11-28: 「自動通過好友…加一個頻率和開關…企微和個微各一個」)
+                Section {
+                    Toggle("微信：自動通過好友", isOn: $acceptWeChat)
+                    Toggle("企業微信：自動通過客戶", isOn: $acceptWeCom)
+                    Stepper("每分鐘最多通過 \(acceptPerMinute) 個", value: $acceptPerMinute, in: 1...30)
+                } header: {
+                    Text("自動通過好友申請")
+                } footer: {
+                    Text("守候時看到「通訊錄」的紅點就去通過：從最早申請的（最下面）開始往上，每一個之間的間隔是隨機的。關掉的那一邊不會去動。")
                 }
                 Section("開發板、畫面與模型") {
                     Button { advanced = true } label: {

@@ -195,13 +195,18 @@ struct WatchView: View {
                 Text("Reply only when triggered").tag(false)
                 Text("Interject").tag(true)
             }
+            .disabled(serverReplies)
+            // 198 (user 11-28: 「我在微信裡的名字…是灰的填不了」): the server replies, but whether a line @s this account is
+            // still told by these names (its atMe), so they stay editable
             TextField("My name in WeChat, as people @ me (one per line)", text: $myNames, axis: .vertical)
                 .lineLimit(1...4)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             TextField("Whitelist: who may trigger a reply, one per line (empty: anyone)", text: $senders, axis: .vertical)
                 .lineLimit(2...6)
+                .disabled(serverReplies)
             TextField("Passphrases, one per line (“@我” means when you @ this account)", text: $passphrases, axis: .vertical)
                 .lineLimit(1...4)
+                .disabled(serverReplies)
         } header: {
             Text("When to Reply")
         } footer: {
@@ -209,7 +214,6 @@ struct WatchView: View {
                  ? "A whitelisted person who @mentions you or says a passphrase gets a reply. Besides that, small talk may get one short, light remark; never on money, promises, privacy or work."
                  : "Only a whitelisted person who @mentions you or says a passphrase gets a reply. Everything else is only read and kept, so the agent learns the chat.")
         }
-        .disabled(serverReplies)
     }
 
     private var knowledgeSection: some View {

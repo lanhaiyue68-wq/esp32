@@ -202,6 +202,9 @@ enum WatchOCR {
         let sorted = pieces.sorted { abs($0.box.midY - $1.box.midY) < min($0.box.height, $1.box.height) / 2
             ? $0.box.minX < $1.box.minX : $0.box.midY < $1.box.midY }
         for p in sorted {
+            // 198 (Echo 197 11-28 05:16: WeCom's floating 「↓ 1条新消息」 chip, read 「¥1条新消息」, reported as the owner's line
+            // and answered): the chip is no message
+            if newMessagesChip(p.text) { continue }
             let top = Double(p.box.minY), bottom = Double(p.box.maxY), height = Double(p.box.height)
             switch p.kind {
             case .mine, .theirs:
@@ -236,6 +239,13 @@ enum WatchOCR {
         }
         close()
         return WatchReport.Screen(title: name, group: group, lines: lines)
+    }
+
+    /// 198: the chip a chat floats when new lines came in below the view (「↓ 1条新消息」, 「3條新消息」, its arrow read as
+    /// a mark or two: 「¥1条新消息」); a line that only mentions new messages in a sentence is longer.
+    static func newMessagesChip(_ text: String) -> Bool {
+        let t = text.filter { !$0.isWhitespace }
+        return t.range(of: #"^[^\p{Han}0-9]{0,3}[0-9]{1,3}\+?[条條則则]新(消息|訊息)$"#, options: .regularExpression) != nil
     }
 
     /// 165: where to tap to type in a chat, with no model: in the white field just under the input bar's top (iPad

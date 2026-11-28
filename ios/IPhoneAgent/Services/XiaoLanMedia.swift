@@ -53,12 +53,12 @@ enum XiaoLanMedia {
             throw Failure(reason: "小藍没有存入相册的权限（设置 › 小藍 › 照片 › 仅添加照片）")
         }
         let video = mime.hasPrefix("video") || ["mp4", "mov", "m4v"].contains(file.pathExtension.lowercased())
+        // 198 (218 by fixed steps: the picker's first cell is the one sent): dated now, whatever date its own data
+        // carries, so it is the newest in every album's order (an older photo of the owner's is never taken for it)
         try await PHPhotoLibrary.shared().performChanges {
-            if video {
-                _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
-            } else {
-                _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: file)
-            }
+            let request = video ? PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
+                : PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: file)
+            request?.creationDate = Date()
         }
     }
 

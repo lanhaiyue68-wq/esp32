@@ -11,6 +11,18 @@ extension AppModel {
     /// any more: an iPhone ignores it from a keyboard (tested on iOS 26), so it only cost two seconds.
     /// The model is never asked to do this.
     func leaveApp() async -> Bool {
+        #if XIAOLAN
+        // 197 (N95, Echo 197 11-28 20:23: a 跟圈 run's home flicks on the iPad brought Echo's own window up beside the two
+        // apps, and its swipe "toward the first page" slid a row of WeCom's list open to its 删除; the run never began):
+        // on the iPad the two apps come to the front by their URLs, as the watch brings them back; never a flick
+        for link in ["wxwork://", "weixin://"] {
+            if inBackground { return true }
+            if let url = URL(string: link) { _ = await UIApplication.shared.open(url) }
+            if await waitForBackground(1.5) { DebugLog.write("leave app: in background after opening \(link)"); return true }
+        }
+        DebugLog.write("leave app: still in front after opening WeCom and WeChat by URL (no flick on the iPad)")
+        return inBackground
+        #else
         for method in ["home swipe", "home swipe again"] {  // one flick sometimes does not take (logs(11))
             if Task.isCancelled || runStartGate.cancelled || !startingAgent && !agent.running { return false }
             if inBackground { return true }
@@ -34,6 +46,7 @@ extension AppModel {
             DebugLog.write("leave app: still in front after \(method)")
         }
         return false
+        #endif
     }
 
     /// Neither way worked: ask the user to swipe up, and wait for it (bounded).

@@ -97,7 +97,7 @@ enum XiaoLanOrders {
         220: "从群里加好友", 221: "修改好友备注", 226: "撤回消息", 231: "语音通话", 232: "视频通话", 241: "发朋友圈",
         290: "删除会话", 242: "删除朋友圈", 243: "扫码进群", 260: "跟圈：读好友朋友圈", 261: "跟圈：发图文", 263: "跟圈：发视频", 265: "跟圈：发链接",
         304: "清空排队", 501: "读取群信息", 502: "读取好友信息", 503: "读取本人资料", 504: "读取群二维码", 505: "读取最近会话",
-        507: "读取全部好友", 508: "读取全部群", 509: "读取本机文件", 512: "读取群成员",
+        507: "读取全部好友", 508: "读取全部群", 509: "读取本机文件", 512: "读取群成员", 515: "爬楼读群聊",
     ]
     static let wework: [Int: String] = [
         201: "停止并回首页", 202: "读取新消息", 203: "发消息", 204: "引用回复", 205: "转发消息", 206: "创建群", 207: "修改群",
@@ -108,13 +108,18 @@ enum XiaoLanOrders {
         234: "删除联系人", 235: "点推荐项", 236: "删除单向联系人", 237: "清理缓存", 290: "删除会话", 303: "连接测试",
         304: "清空排队", 305: "移除排队指令", 501: "读取群信息", 502: "读取好友信息", 503: "读取本人资料", 504: "读取群二维码",
         505: "读取最近会话", 506: "读取企业列表", 507: "读取全部好友", 508: "读取全部群", 509: "读取本机文件", 510: "上传日志", 511: "读取会议",
-        512: "读取群成员", 513: "读取设备资源", 514: "读取日志片段",
+        512: "读取群成员", 513: "读取设备资源", 514: "读取日志片段", 515: "爬楼读群聊",
     ]
 
     static func label(_ type: Int, _ app: App) -> String? { (app == .wechat ? personal : wework)[type] }
 
     /// One task per chat of titleList (each counted in the order's successList / failList).
     static let perChat: Set<Int> = [203, 204, 208, 209, 210, 211, 218, 224, 226, 229, 230, 231, 232]
+
+    /// 260's friend: 跟圈's meta.params.friendName, or the tool box's friend.name, or titleList.
+    static func followFriend(_ f: Fields) -> String {
+        [f.meta.params.s("friendName"), f.friend.s("name"), f.list("titleList").first ?? ""].first { !$0.isEmpty } ?? ""
+    }
 
     /// The chat or group an order is about, for the status line and the result lists.
     static func target(_ type: Int, _ f: Fields) -> String {
@@ -153,7 +158,10 @@ enum XiaoLanOrders {
         case 234, 236: return need(!(f.friend.s("name") + f.list("titleList").joined()).isEmpty, "联系人名字（friend.name 或 titleList）")
         case 241: return need(!(f.s("originalContent") + f.s("fileUrl")).isEmpty, "朋友圈内容（originalContent）或图片（fileUrl）")
         case 242: return need(!f.s("originalContent").isEmpty, "那条朋友圈的内容（originalContent）")
-        case 260, 261, 263, 265:
+        // 197 (user 11-28: 「讓他看某個人的朋友圈」, by the tool box too): reading needs only the friend
+        case 260: return need(!followFriend(f).isEmpty, "好友名字（friendName）")
+        case 515: return need(titles, "会话名称（titleList）")
+        case 261, 263, 265:
             let m = f.meta
             return need(!m.s("runId").isEmpty && !m.s("resultUrl").isEmpty, "跟圈任务信息（meta）") ?? need(!m.params.s("friendName").isEmpty, "好友名字（friendName）")
         case 502: return need(titles || !f.friend.s("name").isEmpty, "好友名字（titleList）")
@@ -385,6 +393,9 @@ enum XiaoLanOrders {
         case 512:
             return read("在\(a)里打开群“\(f.s("groupName"))”，进入群聊信息，点“查看更多群成员”，从上往下翻到底，读出全部成员名字。",
                         json: #"{"groupName":"","nameList":["成员名"]}"#, steps: 60)
+        case 515:  // 197: on the iPad by fixed steps (paneClimbOrder); elsewhere the model reads up the chat
+            return read("在\(a)里打开会话“\(chat)”，一直往上翻聊天记录，边翻边读出每条消息的发送人、内容和它上方的时间。",
+                        json: #"{"titleList":[""],"messageList":[{"sender":"","text":"","time":""}]}"#, steps: 60)
         case 513: return Job(label: name, local: .resources)
         case 514: return Job(label: name, local: .logRange(f.s("startDate"), f.s("endDate")))
         default: return nil

@@ -261,9 +261,15 @@ import UIKit
         // 添加至 not read: nothing clicked blind
         let rows = weComMenu(quote: false, icon: true).filter { $0.first?.text != "添加至" }
         XCTAssertNil(F.quoteSlot(rows, in: try XCTUnwrap(F.menuBand(rows))))
-        // something read at its place (a misread word): nothing clicked
-        let other = weComMenu(quote: false, icon: true) + [m("引m", 0.3749, 0.547, 0.0565, 0.014)]
+        // another word read at its place: nothing clicked
+        let other = weComMenu(quote: false, icon: true) + [m("翻m", 0.3749, 0.547, 0.0565, 0.014)]
         XCTAssertNil(F.quoteSlot(other, in: try XCTUnwrap(F.menuBand(other))))
+        // 198 (Echo 197 11-28 06:16): 引用 misread at its place (「51用」, 「引m」) is clicked there
+        for misread in ["51用", "引m"] {
+            let rows = weComMenu(quote: false, icon: true) + [m(misread, 0.3749, 0.547, 0.0565, 0.014)]
+            let slot = try XCTUnwrap(F.quoteSlot(rows, in: try XCTUnwrap(F.menuBand(rows))), misread)
+            XCTAssertEqual(Double(slot.x), Double(item.x), accuracy: 0.01, misread)
+        }
     }
 
     /// WeChat's menu over a 5" note (11-27 19:57, its OCR; the window 0.476 of the screen): 收藏 背景播放 转文字 删除 多选,

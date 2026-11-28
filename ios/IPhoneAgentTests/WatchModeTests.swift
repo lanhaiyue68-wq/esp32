@@ -235,9 +235,9 @@ import UIKit
     /// 161: every order of Android 小藍's two engines is taken; each becomes a task, a read or a local answer.
     func testXiaoLanTakesEveryOrderOfBothEngines() throws {
         let personal: Set<Int> = [201, 202, 203, 204, 205, 206, 207, 210, 212, 213, 214, 218, 219, 220, 221, 226, 231, 232, 241, 242, 243,
-                                  260, 261, 263, 265, 290, 304, 501, 502, 503, 504, 505, 507, 508, 509, 512]  // 290: 小藍's own (174)
+                                  260, 261, 263, 265, 290, 304, 501, 502, 503, 504, 505, 507, 508, 509, 512, 515]  // 290, 515: 小藍's own (174, 197)
         XCTAssertEqual(Set(XiaoLanOrders.personal.keys), personal)
-        XCTAssertEqual(Set(XiaoLanOrders.wework.keys), Set(201...237).union([290, 303, 304, 305]).union(501...514))
+        XCTAssertEqual(Set(XiaoLanOrders.wework.keys), Set(201...237).union([290, 303, 304, 305]).union(501...515))
         let link: Set<Int> = [201, 202, 303, 304, 305]
         let full = XiaoLanOrders.Fields([
             "titleList": ["测试群"], "receivedContent": "你好", "originalContent": "原话", "receivedName": "老板", "nameList": ["客户群"],
