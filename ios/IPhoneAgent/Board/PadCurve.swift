@@ -123,8 +123,10 @@ enum PadCurve {
         let w = Double(span.w), h = Double(span.h)
         let ux = (b.x - a.x) * w, uy = (b.y - a.y) * h
         let len = hypot(ux, uy)
-        guard len >= shortest, w > 0, h > 0 else { return nil }
-        let bend = len * random(0.06...0.12)
+        // 201 (user 11-28: 「一定要每一步都要用貝塞爾曲綫！！！」; a swipe under 640 units went as a straight line): every
+        // swipe bends, at least 40–70 units (as every move bows: PadCurve.stroke)
+        guard len > 0, w > 0, h > 0 else { return nil }
+        let bend = max(len * random(0.06...0.12), random(40...70))
         if abs(uy) >= abs(ux) {
             let right = (a.x + b.x) / 2 >= 0.5
             let x = right ? min(b.x + bend / w, 0.97) : max(b.x - bend / w, 0.03)

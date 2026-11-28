@@ -707,11 +707,12 @@ import UIKit
         // near the edge it stops inside the screen, never crossing back
         XCTAssertEqual(PadCurve.thumbEnd(from: (0.96, 0.8), to: (0.96, 0.2), span: span, random: mid)!.x, 0.97, accuracy: 1e-9)
         XCTAssertEqual(PadCurve.thumbEnd(from: (0.02, 0.8), to: (0.02, 0.2), span: span, random: mid)!.x, 0.02, accuracy: 1e-9)
-        // sideways bends down, never into the home bar; too short shows no bend
+        // sideways bends down, never into the home bar; 201 (user 11-28: every step a curve): a short one bends too
         let s = PadCurve.thumbEnd(from: (0.8, 0.5), to: (0.2, 0.5), span: span, random: mid)!
         XCTAssertGreaterThan(s.y, 0.5)
         XCTAssertEqual(PadCurve.thumbEnd(from: (0.8, 0.95), to: (0.2, 0.95), span: span, random: mid)!.y, 0.95, accuracy: 1e-9)
-        XCTAssertNil(PadCurve.thumbEnd(from: (0.5, 0.5), to: (0.5, 0.48), span: span, random: mid))
+        let short = PadCurve.thumbEnd(from: (0.5, 0.5), to: (0.5, 0.48), span: span, random: mid)!
+        XCTAssertGreaterThanOrEqual((short.x - 0.5) * Double(span.w), 40, "a short swipe bends 40 units and more")
         // the pieces: exact end, at most 40, the first part straight along the asked line, then turning toward the side
         let a = (900, 3600), b = (900, 1600), e = (700, 1600)
         let d = PadCurve.thumbPieces(from: a, toward: b, end: e, step: 100)

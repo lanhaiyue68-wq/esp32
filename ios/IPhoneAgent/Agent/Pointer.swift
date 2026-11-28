@@ -1675,7 +1675,9 @@ import Foundation
             var stroked = false
             // Up and down only: 134's sideways jump never moved Weather's hourly strip, so sideways keeps the walk.
             let upDown = abs(Double(points[1].y - points[0].y)) >= abs(Double(points[1].x - points[0].x))
-            if points.count == 2, hold || quick, upDown || quick, strokeCommand != false, let from = pos {
+            // 201 (user 11-28: every step a Bezier curve): on the iPad a sideways drag goes as a thumb's curve too (it was a
+            // walk of straight moves, kept for 134's iPhone Weather strip that one jump never moved)
+            if points.count == 2, hold || quick, upDown || quick || CommandChannel.onPad(), strokeCommand != false, let from = pos {
                 var to = (dx(Double(points[1].x)), dy(Double(points[1].y)))
                 var deltas = Self.strokeDeltas(from: from, to: to, step: Self.swipeStrokeStep)
                 // 174: on an iPad a swipe goes as a thumb's, bending toward its own side (PadCurve.thumbEnd).

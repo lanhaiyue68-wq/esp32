@@ -104,6 +104,17 @@ import UIKit
         XCTAssertEqual(Double(search.last!.0), 141, accuracy: 2)
     }
 
+    /// 201 (user 11-28: 「一定要每一步都要用貝塞爾曲綫！！！」): a short swipe or drag bends too (under 640 units it went
+    /// straight), up and down toward its side, sideways down toward the hand.
+    func testShortSwipesBend() throws {
+        let span = (w: 3700, h: 5200)
+        let mid: (ClosedRange<Double>) -> Double = { ($0.lowerBound + $0.upperBound) / 2 }
+        let side = try XCTUnwrap(PadCurve.thumbEnd(from: (0.8, 0.5), to: (0.7, 0.5), span: span, random: mid))
+        XCTAssertGreaterThanOrEqual((side.y - 0.5) * Double(span.h), 40, "a short sideways drag bends down")
+        let up = try XCTUnwrap(PadCurve.thumbEnd(from: (0.3, 0.55), to: (0.3, 0.45), span: span, random: mid))
+        XCTAssertGreaterThanOrEqual((0.3 - up.x) * Double(span.w), 40, "a short one on the left bends left")
+    }
+
     func testTheSameOrderReadsTheSame() {
         XCTAssertEqual(OrderLedger.canonical(#"{"type":206,"groupName":"G","selectList":["a","b"]}"#),
                        OrderLedger.canonical(#"{"selectList":["a","b"],"groupName":"G","type":206}"#))
